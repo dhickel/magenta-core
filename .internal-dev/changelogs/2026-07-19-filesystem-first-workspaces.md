@@ -86,23 +86,14 @@ Updated architecture.md (ARCH-20260719-01) and services.md (SVC-20260719-01) to 
 
 # Risks
 
-- Delegated desktop/mobile Playwright validation for the Phase 07 Files tab remains unavailable; final integration cannot pass until that required campaign and visual critique complete.
-- Phase 07, Phase 08, and final-integration repairs remain uncommitted at current HEAD `a056eee94639c38e2b5aebb5c0ee65bd655845fe`.
-- Stale references in archived knowledge files and the explicitly historical Phase 01 consumer inventory are retained as superseded history.
+- The validation environment returned `404` for `/webjars/htmx.org/dist/htmx.min.js`. This is a pre-existing serving issue outside the workspace refactor; the server-rendered HTMX contract and controller behavior pass, but live client-side swaps still depend on resolving that environment issue.
+- Stale references in archived knowledge files and the explicitly historical Phase 01 consumer inventory remain as superseded history.
 
 # Follow-up Items
 
-- Run the required delegated Playwright campaign for the live agent Files tab on desktop and mobile, including CRUD, navigation, preview/image, labels/tags, controlled errors, OOB updates, responsive layout, screenshots, and visual critique.
-- Obtain Phase 07 and Phase 08 validator PASS evidence, then commit those phases and final-integration repairs according to the plan gate.
-- Repeat orchestration-level Final Integration after every phase is committed at PASS.
-- Archive the active plan only after Final Integration passes.
+- Track the HTMX WebJar serving issue separately and verify live swaps after the environment serves the versionless asset.
+- Archive the active plan after orchestration closeout.
 
 # Git Commit
 
-```
-a056eee94639c38e2b5aebb5c0ee65bd655845fe
-```
-
-## Git Commit
-
-a056eee94639c38e2b5aebb5c0ee65bd655845fe
+`93f7728b7259861e1b21e71fe4302daead0c871b` is the committed Phase 07/08 implementation baseline used for final revalidation.

@@ -35,15 +35,16 @@ Implements the active Agent Files Tab and reusable workspace-selector contracts 
 - `mvn test`: 637 tests, 0 failures, 0 errors, 0 skipped.
 - Bounded Spring startup: application reached `Started Magenta2Application`; timeout then stopped the process as intended.
 - Focused transient render check: stable IDs were unique, selector fallback omitted both workspace fields, no chat option rendered, and `outputs/` mutation controls were absent. The transient test file was removed afterward and is not part of the 637-test suite.
+- Final desktop/mobile evidence is stored under `artifacts/playwright/final-integration/`. It confirms the neutral stable IDs, responsive list/inspector stacking, usable controls, ten HTMX-attributed interactive elements, no Avatar fragment references, and successful file creation through the POST endpoint.
 
 ## Risks
 
-- This validator performed code-level and startup validation only; it did not run the broader Phase 07 delegated Playwright campaign because the validator task requested Maven, startup, and contract inspection checks.
+- `/webjars/htmx.org/dist/htmx.min.js` returned `404` in the validation environment. This pre-existing serving issue is outside the workspace refactor; live client-side swaps remain dependent on resolving it.
 
 ## Follow-up Items
 
-- Phase 08 owns repository-wide documentation and record reconciliation.
+- Track the HTMX WebJar serving issue separately from the Files-tab refactor.
 
 ## Git Commit
 
-Current HEAD (pre-change): `a056eee`
+Committed Phase 07/08 baseline: `93f7728b7259861e1b21e71fe4302daead0c871b`.

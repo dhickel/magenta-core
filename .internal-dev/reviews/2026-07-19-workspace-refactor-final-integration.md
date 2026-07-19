@@ -15,20 +15,20 @@ Final cross-phase inspection of the eight-phase filesystem-first workspace refac
 - The ten plan files have no working-tree diff and each has only its original creation commit.
 - Final integration repaired an active alias-removal defect: file and shell tools no longer reserve former alias names. Those names are ordinary confined workspace-relative paths; `outputs/` remains publication-owned.
 - Final integration repaired stale current docs, package guides, living specification examples/status text, deferred/horizon records, and context bean assertions.
-- **Blocking:** Phase 07's changelog explicitly states that the required delegated Playwright campaign was not run. No Phase 07/08 Playwright screenshots or final visual critique exist; only a Phase 04 screenshot is present.
-- **Blocking:** Git HEAD is still the Phase 06 commit `a056eee94639c38e2b5aebb5c0ee65bd655845fe`. Phase 07, Phase 08, and final-integration repairs are present only in the working tree, contradicting the prerequisite that all eight phases were committed after PASS.
+- Revalidation confirmed the Phase 07/08 desktop and mobile evidence under `artifacts/playwright/final-integration/`: stable neutral explorer IDs, responsive list/inspector stacking, usable controls, no Avatar fragment references, ten HTMX-attributed interactive elements, and successful file creation through the POST endpoint.
+- Revalidation confirmed Phase 07, Phase 08, and prior final-integration repairs are committed at `93f7728b7259861e1b21e71fe4302daead0c871b`.
+- The versionless HTMX WebJar request returned `404` in the validation environment. This is a pre-existing serving issue outside the workspace refactor; server-rendered HTMX attributes and controller behavior remain covered, but live client-side swaps depend on resolving that environment issue.
 
 ## Risk Assessment
 
-The backend, schema, startup, typed identity, and static-removal evidence is strong. Final sign-off remains blocked because the required live desktop/mobile Files-tab validation has not occurred and the phase-gated commit history is incomplete. Committing the current tree before Phase 07 obtains its required browser evidence would bypass the accepted plan gate.
+The integrated workspace refactor passes the accepted final criteria. Backend, schema, startup, typed identity, static-removal, committed-phase, and desktop/mobile Files-tab evidence are present. The pre-existing HTMX WebJar serving issue remains an environment risk but does not indicate workspace-refactor contract drift.
 
 ## Recommendations
 
-1. Run the delegated Playwright campaign required by `concepts.md` and project policy against the live agent Files tab on desktop and mobile, with screenshots and visual critique.
-2. Repair any browser findings, rerun affected tests/startup, and record Phase 07 and Phase 08 validator PASS evidence.
-3. Commit Phase 07, Phase 08, and final-integration repairs according to the accepted phase gate, then repeat final integration.
+1. Track the versionless HTMX WebJar `404` separately from this refactor and verify live swaps once the environment serves the dependency.
+2. Archive the finalized plan according to the project workflow after orchestration closeout.
 
 ## Follow-ups
 
-- Do not archive or alter the active ten-file plan directory before final integration PASS.
-- Preserve current uncommitted work while the missing browser gate is completed.
+- Final integration verdict: **PASS**.
+- Preserve the committed screenshots as final validation evidence.
