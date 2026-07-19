@@ -5,7 +5,9 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -21,6 +23,7 @@ import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
+import org.springframework.web.servlet.mvc.method.annotation.RequestMappingHandlerMapping;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.containsString;
@@ -60,6 +63,9 @@ class PublicApiRouteBindingTest {
     @Autowired
     private AiConfig aiConfig;
 
+    @Autowired
+    private RequestMappingHandlerMapping requestMappingHandlerMapping;
+
     @DynamicPropertySource
     static void sqliteProperties(DynamicPropertyRegistry registry) {
         registry.add("magenta.root.path", () -> MAGENTA_ROOT.toString());
@@ -81,6 +87,34 @@ class PublicApiRouteBindingTest {
                 .andExpect(status().isNotFound())
                 .andExpect(header().doesNotExist("Location"));
         }
+    }
+
+    @Test
+    void typedWorkspaceRoutesAreMappedAndObsoleteFamiliesAreAbsent() {
+        Set<String> patterns = requestMappingHandlerMapping.getHandlerMethods().keySet().stream()
+            .flatMap(info -> info.getPatternValues().stream())
+            .collect(Collectors.toSet());
+
+        assertThat(patterns).contains(
+            "/api/workspace/user",
+            "/api/workspace/{type}/{id}/files",
+            "/api/workspace/{type}/{id}/files/inspect",
+            "/api/workspace/{type}/{id}/files/preview",
+            "/api/workspace/{type}/{id}/files/view",
+            "/api/workspace/{type}/{id}/files/download",
+            "/api/workspace/{type}/{id}/files/text",
+            "/api/workspace/{type}/{id}/directories",
+            "/api/workspace/{type}/{id}/files/markdown",
+            "/api/workspace/{type}/{id}/files/rename",
+            "/api/workspace/{type}/{id}/files/move",
+            "/api/workspace/{type}/{id}/files/copy",
+            "/api/workspace/{type}/{id}/files/delete/preflight",
+            "/api/workspace/{type}/{id}/files/delete",
+            "/api/workspace/{type}/{id}/files/labels",
+            "/api/workspace/{type}/{id}/tags",
+            "/api/workspace/{type}/{id}/files/actions/recent"
+        );
+        assertThat(patterns).noneMatch(path -> path.startsWith("/api/work-areas") || path.startsWith("/api/workspaces"));
     }
 
     @Test
@@ -266,10 +300,13 @@ class PublicApiRouteBindingTest {
             .andExpect(content().string(containsString(agentId)))
             .andExpect(content().string(containsString("ACTIVE")));
 
-        mockMvc.perform(get("/api/agents/" + agentId + "/workspace"))
+        mockMvc.perform(get("/api/workspace/agent/" + agentId + "/files")
+                .param("path", "."))
             .andExpect(status().isOk())
-            .andExpect(jsonPath("$.ownerType").value("AGENT"))
-            .andExpect(jsonPath("$.ownerId").value(agentId));
+            .andExpect(jsonPath("$.path").exists());
+
+        mockMvc.perform(get("/api/workspace/user"))
+            .andExpect(status().isOk());
 
         mockMvc.perform(get("/api/outputs"))
             .andExpect(status().isOk())

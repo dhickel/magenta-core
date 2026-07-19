@@ -58,16 +58,19 @@ import io.mindspice.magenta2.ai.orchestration.workspaces.OutputArtifactService;
 import io.mindspice.magenta2.ai.orchestration.workspaces.RootRelativePathService;
 import io.mindspice.magenta2.ai.orchestration.workspaces.AgentWorkspaceStatus;
 import io.mindspice.magenta2.ai.orchestration.workspaces.AgentWorkspaceStatusService;
-import io.mindspice.magenta2.ai.orchestration.workspaces.WorkAreaExplorerService;
 import io.mindspice.magenta2.ai.orchestration.workspaces.WorkAreaRepository;
 import io.mindspice.magenta2.ai.orchestration.workspaces.WorkAreaService;
+import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceDirectoryService;
+import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceExplorerService;
+import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceFileActionLogRepository;
+import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceFileMetadataRepository;
+import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceFileMetadataService;
 import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceLease;
 import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceLink;
 import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceLinkType;
 import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceOwnerType;
 import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceRepository;
 import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceService;
-import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceDirectoryService;
 import io.mindspice.magenta2.api.web.selector.EntityLookupService;
 import io.mindspice.magenta2.api.web.selector.EntitySelectorComponents;
 import org.junit.jupiter.api.Test;
@@ -229,8 +232,8 @@ class OrchestrationControllerTest {
 
     private static OrchestrationController controllerWithProjectFiles(
         ProjectService projectService,
-        WorkAreaService workAreaService,
-        WorkAreaExplorerService workAreaExplorerService
+        WorkspaceDirectoryService directoryService,
+        WorkspaceExplorerService explorerService
     ) {
         return new OrchestrationController(
             new StubChatService(),
@@ -243,8 +246,9 @@ class OrchestrationControllerTest {
             new StubRuntimeSettingsService(),
             workspaceService(),
             emptyProvider(),
-            providerOf(workAreaService),
-            providerOf(workAreaExplorerService),
+            emptyProvider(),
+            providerOf(directoryService),
+            providerOf(explorerService),
             new StubPlanService(),
             new StubAssignmentService(),
             new StubScheduleService(),
@@ -969,18 +973,16 @@ class OrchestrationControllerTest {
             config,
             new RootRelativePathService(directoryService)
         );
-        WorkAreaService workAreaService = new WorkAreaService(
-            new WorkAreaRepository(jdbc),
-            workspaceService,
-            directoryService
-        );
-        WorkAreaExplorerService explorerService = new WorkAreaExplorerService(workAreaService);
-        Path projectRoot = workAreaService.ownerRoot(WorkspaceOwnerType.PROJECT, "proj-xyz");
+        WorkspaceFileActionLogRepository actionLogRepo = new WorkspaceFileActionLogRepository(jdbc);
+        WorkspaceFileMetadataRepository metadataRepo = new WorkspaceFileMetadataRepository(jdbc);
+        WorkspaceFileMetadataService metadataService = new WorkspaceFileMetadataService(metadataRepo, actionLogRepo);
+        WorkspaceExplorerService explorerService = new WorkspaceExplorerService(metadataService, actionLogRepo);
+        Path projectRoot = directoryService.projectWorkspace("proj-xyz");
         Files.writeString(projectRoot.resolve("root-note.txt"), "before", StandardCharsets.UTF_8);
 
         OrchestrationController ctrl = controllerWithProjectFiles(
             new StubProjectService(),
-            workAreaService,
+            directoryService,
             explorerService
         );
 

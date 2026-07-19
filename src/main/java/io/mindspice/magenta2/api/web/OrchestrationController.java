@@ -75,8 +75,9 @@ import io.mindspice.magenta2.ai.orchestration.workspaces.RunOutputArtifact;
 import io.mindspice.magenta2.ai.orchestration.workspaces.AgentWorkspaceStatus;
 import io.mindspice.magenta2.ai.orchestration.workspaces.AgentWorkspaceStatusService;
 import io.mindspice.magenta2.ai.orchestration.workspaces.WorkArea;
-import io.mindspice.magenta2.ai.orchestration.workspaces.WorkAreaExplorerService;
 import io.mindspice.magenta2.ai.orchestration.workspaces.WorkAreaService;
+import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceDirectoryService;
+import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceExplorerService;
 import io.mindspice.magenta2.ai.orchestration.workspaces.Workspace;
 import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceLease;
 import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceLink;
@@ -146,7 +147,8 @@ public class OrchestrationController {
     private final WorkspaceService workspaceService;
     private final ObjectProvider<AgentWorkspaceStatusService> workspaceStatusServiceRef;
     private final ObjectProvider<WorkAreaService> workAreaServiceRef;
-    private final ObjectProvider<WorkAreaExplorerService> workAreaExplorerServiceRef;
+    private final ObjectProvider<WorkspaceDirectoryService> workspaceDirectoryServiceRef;
+    private final ObjectProvider<WorkspaceExplorerService> workspaceExplorerServiceRef;
     private final EntityLookupService entityLookupService;
     private final EntitySelectorComponents entitySelectorComponents;
 
@@ -199,6 +201,7 @@ public class OrchestrationController {
             workspaceStatusServiceRef,
             emptyObjectProvider(),
             emptyObjectProvider(),
+            emptyObjectProvider(),
             planService,
             assignmentService,
             scheduleService,
@@ -224,7 +227,8 @@ public class OrchestrationController {
                                    WorkspaceService workspaceService,
                                    ObjectProvider<AgentWorkspaceStatusService> workspaceStatusServiceRef,
                                    ObjectProvider<WorkAreaService> workAreaServiceRef,
-                                   ObjectProvider<WorkAreaExplorerService> workAreaExplorerServiceRef,
+                                   ObjectProvider<WorkspaceDirectoryService> workspaceDirectoryServiceRef,
+                                   ObjectProvider<WorkspaceExplorerService> workspaceExplorerServiceRef,
                                    PlanService planService,
                                    AssignmentService assignmentService,
                                    ScheduleService scheduleService,
@@ -246,7 +250,8 @@ public class OrchestrationController {
         this.workspaceService = workspaceService;
         this.workspaceStatusServiceRef = workspaceStatusServiceRef;
         this.workAreaServiceRef = workAreaServiceRef;
-        this.workAreaExplorerServiceRef = workAreaExplorerServiceRef;
+        this.workspaceDirectoryServiceRef = workspaceDirectoryServiceRef;
+        this.workspaceExplorerServiceRef = workspaceExplorerServiceRef;
         this.planService = planService;
         this.assignmentService = assignmentService;
         this.scheduleService = scheduleService;
@@ -4656,11 +4661,13 @@ public class OrchestrationController {
         @RequestParam(defaultValue = ".") String path
     ) {
         try {
-            WorkAreaExplorerService explorer = requireWorkAreaExplorerService();
-            String displayName = projectDirectoryDisplayName(projectId);
+            WorkspaceExplorerService explorer = requireWorkspaceExplorerService();
+            java.nio.file.Path projectRoot = requireWorkspaceDirectoryService().projectWorkspace(projectId);
+            WorkspaceExplorerService.ProjectBridge bridge = explorer.new ProjectBridge(projectRoot);
+            WorkspaceExplorerService.DirectoryListing listing = bridge.list(explorer.normalizeRelativePath(path));
             return projectFilesPanel(
                 projectId,
-                explorer.listOwnerRoot(WorkspaceOwnerType.PROJECT, projectId, displayName, path),
+                listing,
                 null,
                 null
             ).render();
@@ -4678,13 +4685,10 @@ public class OrchestrationController {
         @RequestParam String path
     ) {
         try {
-            WorkAreaExplorerService explorer = requireWorkAreaExplorerService();
-            WorkAreaExplorerService.FilePreview preview = explorer.previewOwnerRoot(
-                WorkspaceOwnerType.PROJECT,
-                projectId,
-                projectDirectoryDisplayName(projectId),
-                path
-            );
+            WorkspaceExplorerService explorer = requireWorkspaceExplorerService();
+            java.nio.file.Path projectRoot = requireWorkspaceDirectoryService().projectWorkspace(projectId);
+            WorkspaceExplorerService.ProjectBridge bridge = explorer.new ProjectBridge(projectRoot);
+            WorkspaceExplorerService.FilePreview preview = bridge.preview(explorer.normalizeRelativePath(path));
             return projectFileEditor(projectId, preview).render();
         } catch (Exception e) {
             return new Div().withId("project-file-editor")
@@ -4701,13 +4705,15 @@ public class OrchestrationController {
         @RequestParam(defaultValue = "") String content
     ) {
         try {
-            WorkAreaExplorerService explorer = requireWorkAreaExplorerService();
-            String displayName = projectDirectoryDisplayName(projectId);
-            explorer.saveTextOwnerRoot(WorkspaceOwnerType.PROJECT, projectId, displayName, path, content);
+            WorkspaceExplorerService explorer = requireWorkspaceExplorerService();
+            java.nio.file.Path projectRoot = requireWorkspaceDirectoryService().projectWorkspace(projectId);
+            WorkspaceExplorerService.ProjectBridge bridge = explorer.new ProjectBridge(projectRoot);
+            bridge.saveText(explorer.normalizeRelativePath(path), content);
             String listPath = parentPath(path);
+            WorkspaceExplorerService.DirectoryListing listing = bridge.list(explorer.normalizeRelativePath(listPath));
             return projectFilesPanel(
                 projectId,
-                explorer.listOwnerRoot(WorkspaceOwnerType.PROJECT, projectId, displayName, listPath),
+                listing,
                 "Saved " + path + ".",
                 null
             ).render();
@@ -4726,18 +4732,14 @@ public class OrchestrationController {
         @RequestParam String fileName
     ) {
         try {
-            WorkAreaExplorerService explorer = requireWorkAreaExplorerService();
-            String displayName = projectDirectoryDisplayName(projectId);
-            WorkAreaExplorerService.Entry created = explorer.createTextFileOwnerRoot(
-                WorkspaceOwnerType.PROJECT,
-                projectId,
-                displayName,
-                path,
-                fileName
-            );
+            WorkspaceExplorerService explorer = requireWorkspaceExplorerService();
+            java.nio.file.Path projectRoot = requireWorkspaceDirectoryService().projectWorkspace(projectId);
+            WorkspaceExplorerService.ProjectBridge bridge = explorer.new ProjectBridge(projectRoot);
+            WorkspaceExplorerService.Entry created = bridge.createTextFile(explorer.normalizeRelativePath(path), fileName);
+            WorkspaceExplorerService.DirectoryListing listing = bridge.list(explorer.normalizeRelativePath(path));
             return projectFilesPanel(
                 projectId,
-                explorer.listOwnerRoot(WorkspaceOwnerType.PROJECT, projectId, displayName, path),
+                listing,
                 "Created " + created.path() + ".",
                 null
             ).render();
@@ -4756,18 +4758,15 @@ public class OrchestrationController {
         @RequestParam String directoryName
     ) {
         try {
-            WorkAreaExplorerService explorer = requireWorkAreaExplorerService();
-            String displayName = projectDirectoryDisplayName(projectId);
+            WorkspaceExplorerService explorer = requireWorkspaceExplorerService();
+            java.nio.file.Path projectRoot = requireWorkspaceDirectoryService().projectWorkspace(projectId);
             String childPath = ".".equals(projectPath(path)) ? directoryName : projectPath(path) + "/" + directoryName;
-            WorkAreaExplorerService.Entry created = explorer.createDirectoryOwnerRoot(
-                WorkspaceOwnerType.PROJECT,
-                projectId,
-                displayName,
-                childPath
-            );
+            WorkspaceExplorerService.ProjectBridge bridge = explorer.new ProjectBridge(projectRoot);
+            WorkspaceExplorerService.Entry created = bridge.createDirectory(explorer.normalizeRelativePath(childPath));
+            WorkspaceExplorerService.DirectoryListing listing = bridge.list(explorer.normalizeRelativePath(path));
             return projectFilesPanel(
                 projectId,
-                explorer.listOwnerRoot(WorkspaceOwnerType.PROJECT, projectId, displayName, path),
+                listing,
                 "Created " + created.path() + ".",
                 null
             ).render();
@@ -4778,22 +4777,25 @@ public class OrchestrationController {
         }
     }
 
-    private String projectDirectoryDisplayName(String projectId) {
-        Project project = projectService.getProject(projectId);
-        return StringUtils.hasText(project.name()) ? project.name() + " Directory" : "Project Directory";
+    private WorkspaceDirectoryService requireWorkspaceDirectoryService() {
+        WorkspaceDirectoryService service = workspaceDirectoryServiceRef == null ? null : workspaceDirectoryServiceRef.getIfAvailable();
+        if (service == null) {
+            throw new IllegalStateException("Workspace directory service is unavailable");
+        }
+        return service;
     }
 
-    private WorkAreaExplorerService requireWorkAreaExplorerService() {
-        WorkAreaExplorerService service = workAreaExplorerServiceRef == null ? null : workAreaExplorerServiceRef.getIfAvailable();
+    private WorkspaceExplorerService requireWorkspaceExplorerService() {
+        WorkspaceExplorerService service = workspaceExplorerServiceRef == null ? null : workspaceExplorerServiceRef.getIfAvailable();
         if (service == null) {
-            throw new IllegalStateException("Work Area explorer service is unavailable");
+            throw new IllegalStateException("Workspace explorer service is unavailable");
         }
         return service;
     }
 
     private Component projectFilesPanel(
         String projectId,
-        WorkAreaExplorerService.DirectoryListing listing,
+        WorkspaceExplorerService.DirectoryListing listing,
         String status,
         Component editor
     ) {
@@ -4847,7 +4849,7 @@ public class OrchestrationController {
         if (!".".equals(currentPath)) {
             rows.withChild(projectDirectoryRow(projectId, "..", parentPath(currentPath)));
         }
-        for (WorkAreaExplorerService.Entry entry : listing.entries()) {
+        for (WorkspaceExplorerService.Entry entry : listing.entries()) {
             rows.withChild(projectFileRow(projectId, currentPath, entry));
         }
         if (listing.entries().isEmpty() && ".".equals(currentPath)) {
@@ -4873,7 +4875,7 @@ public class OrchestrationController {
                 .withAttribute("hx-swap", "outerHTML"));
     }
 
-    private Component projectFileRow(String projectId, String currentPath, WorkAreaExplorerService.Entry entry) {
+    private Component projectFileRow(String projectId, String currentPath, WorkspaceExplorerService.Entry entry) {
         if (entry.directory()) {
             return projectDirectoryRow(projectId, entry.name(), entry.path());
         }
@@ -4893,7 +4895,7 @@ public class OrchestrationController {
             .withChild(actions);
     }
 
-    private Component projectFileEditor(String projectId, WorkAreaExplorerService.FilePreview preview) {
+    private Component projectFileEditor(String projectId, WorkspaceExplorerService.FilePreview preview) {
         Div editor = new Div().withId("project-file-editor").withClass("project-file-editor");
         editor.withChild(new Div().withClass("project-file-editor-header")
             .withChild(Header.H3("Editing " + preview.path()))

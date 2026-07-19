@@ -508,37 +508,30 @@ create table if not exists workspace_file_labels (
     updated_at text not null
 );
 
-create table if not exists workspace_file_label_assignments (
+-- Canonical workspace annotations. Obsolete warm-database tables are not
+-- declared, altered, queried, or dropped by active explorer persistence.
+create table if not exists workspace_file_annotations (
     id text primary key,
-    workspace_id text not null,
-    owner_type text not null,
-    owner_id text not null,
-    root_relative_path text not null,
+    workspace_identity text not null,
     file_relative_path text not null,
     label_id text not null,
     metadata_json text not null default '{}',
     created_at text not null,
     updated_at text not null,
-    unique(workspace_id, file_relative_path, label_id),
-    foreign key(workspace_id) references workspaces(id),
+    unique(workspace_identity, file_relative_path, label_id),
     foreign key(label_id) references workspace_file_labels(id)
 );
 
-create index if not exists idx_workspace_file_label_assignments_path
-    on workspace_file_label_assignments(workspace_id, file_relative_path);
+create index if not exists idx_workspace_file_annotations_path
+    on workspace_file_annotations(workspace_identity, file_relative_path);
 
-create index if not exists idx_workspace_file_label_assignments_label
-    on workspace_file_label_assignments(label_id);
+create index if not exists idx_workspace_file_annotations_label
+    on workspace_file_annotations(label_id);
 
-create index if not exists idx_workspace_file_label_assignments_owner
-    on workspace_file_label_assignments(owner_type, owner_id);
-
-create table if not exists workspace_file_actions (
+-- Canonical workspace action log.
+create table if not exists workspace_file_action_log (
     id text primary key,
-    workspace_id text not null,
-    owner_type text not null,
-    owner_id text not null,
-    work_area_id text,
+    workspace_identity text not null,
     actor_type text,
     actor_id text,
     action_type text not null,
@@ -546,21 +539,14 @@ create table if not exists workspace_file_actions (
     target_relative_path text,
     result text not null,
     payload_json text not null default '{}',
-    created_at text not null,
-    foreign key(workspace_id) references workspaces(id)
+    created_at text not null
 );
 
-create index if not exists idx_workspace_file_actions_workspace
-    on workspace_file_actions(workspace_id, created_at desc);
+create index if not exists idx_workspace_file_action_log_identity
+    on workspace_file_action_log(workspace_identity, created_at desc);
 
-create index if not exists idx_workspace_file_actions_owner
-    on workspace_file_actions(owner_type, owner_id, created_at desc);
-
-create index if not exists idx_workspace_file_actions_work_area
-    on workspace_file_actions(work_area_id, created_at desc);
-
-create index if not exists idx_workspace_file_actions_type
-    on workspace_file_actions(action_type, created_at desc);
+create index if not exists idx_workspace_file_action_log_type
+    on workspace_file_action_log(action_type, created_at desc);
 
 -- Exclusive writable leases on job/project workspaces. Only one active
 -- writable lease per workspace at a time. Extension must verify holder

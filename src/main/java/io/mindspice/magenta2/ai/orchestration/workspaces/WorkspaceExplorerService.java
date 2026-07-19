@@ -2,10 +2,10 @@ package io.mindspice.magenta2.ai.orchestration.workspaces;
 
 import java.io.IOException;
 import java.nio.charset.CharacterCodingException;
-import java.nio.charset.CharsetDecoder;
 import java.nio.charset.CodingErrorAction;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.nio.file.InvalidPathException;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
@@ -16,7 +16,9 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
 
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
 /** Descriptor-first owner of confined workspace file exploration and mutation. */
@@ -26,6 +28,18 @@ public class WorkspaceExplorerService {
     static final long NORMAL_MARKDOWN_BYTES = 5L * 1024 * 1024;
     static final long HARD_EDIT_BYTES = 25L * 1024 * 1024;
     private static final int ROW_UTF8_PROBE_BYTES = 64 * 1024;
+
+    private final WorkspaceFileMetadataService metadataService;
+    private final WorkspaceFileActionLogRepository actionLogRepository;
+
+    @Autowired
+    public WorkspaceExplorerService(
+        WorkspaceFileMetadataService metadataService,
+        WorkspaceFileActionLogRepository actionLogRepository
+    ) {
+        this.metadataService = metadataService;
+        this.actionLogRepository = actionLogRepository;
+    }
 
     /** A normalized workspace-relative path kept distinct from workspace identity. */
     public record RelativePath(String value) {
@@ -43,46 +57,252 @@ public class WorkspaceExplorerService {
 
     public RelativePath normalizeRelativePath(String value) {
         String text = StringUtils.hasText(value) ? value.trim().replace('\\', '/') : ".";
-        if (text.matches("^[A-Za-z]:/.*")) {
-            throw new IllegalArgumentException("absolute paths are not allowed");
+        if (text.indexOf('\0') >= 0 || text.matches("^[A-Za-z]:/.*") || text.startsWith("/")) {
+            throw new WorkspaceFileException(WorkspaceFileException.Reason.INVALID, "absolute paths are not allowed");
         }
-        Path path = Path.of(text).normalize();
-        if (path.isAbsolute()) {
-            throw new IllegalArgumentException("absolute paths are not allowed");
-        }
-        for (Path segment : path) {
-            if ("..".equals(segment.toString())) {
-                throw new IllegalArgumentException("path escapes workspace");
+        for (String segment : text.split("/", -1)) {
+            if ("..".equals(segment)) {
+                throw new WorkspaceFileException(WorkspaceFileException.Reason.INVALID, "path escapes workspace");
             }
         }
-        String normalized = path.toString().replace('\\', '/');
-        return new RelativePath(normalized.isBlank() ? "." : normalized);
+        try {
+            Path path = Path.of(text).normalize();
+            if (path.isAbsolute()) {
+                throw new WorkspaceFileException(WorkspaceFileException.Reason.INVALID, "absolute paths are not allowed");
+            }
+            String normalized = path.toString().replace('\\', '/');
+            return new RelativePath(normalized.isBlank() ? "." : normalized);
+        } catch (InvalidPathException exception) {
+            throw new WorkspaceFileException(WorkspaceFileException.Reason.INVALID, "path is invalid", exception);
+        }
     }
 
-    public DirectoryListing list(WorkspaceDescriptor workspace, RelativePath path) {
-        if (!Files.exists(workspace.root(), LinkOption.NOFOLLOW_LINKS)) {
+    /* ── Descriptor-first public API ── */
+
+    public DirectoryListing list(WorkspaceDescriptor descriptor, RelativePath path) {
+        if (!Files.exists(descriptor.root(), LinkOption.NOFOLLOW_LINKS)) {
             if (".".equals(path.value())) {
                 return new DirectoryListing(".", List.of());
             }
-            throw new IllegalArgumentException("path does not exist: " + path.value());
+            throw new WorkspaceFileException(WorkspaceFileException.Reason.NOT_FOUND, "path does not exist: " + path.value());
         }
-        return list(workspace.root(), path);
+        return list(descriptor, descriptor.root(), path);
     }
 
-    public FilePreview preview(WorkspaceDescriptor workspace, RelativePath path) {
-        return preview(workspace.root(), path);
+    public FilePreview preview(WorkspaceDescriptor descriptor, RelativePath path) {
+        return preview(descriptor.root(), path);
     }
 
-    public DownloadContent download(WorkspaceDescriptor workspace, RelativePath path) {
-        return downloadContent(workspace.root(), path);
+    public DownloadContent download(WorkspaceDescriptor descriptor, RelativePath path) {
+        return downloadContent(descriptor, descriptor.root(), path);
     }
 
-    DownloadContent downloadContent(Path root, RelativePath path) {
-        Path file = download(root, path);
+    public FilePreview saveText(WorkspaceDescriptor descriptor, RelativePath path, String content) {
+        FilePreview saved = saveText(descriptor, descriptor.root(), path, content);
+        logAction(descriptor, "markdown".equals(saved.kind()) ? WorkspaceFileActionType.SAVE_MARKDOWN : WorkspaceFileActionType.SAVE_TEXT,
+            path.value(), null, "SUCCEEDED", "{\"bytes\":" + saved.size() + "}");
+        return saved;
+    }
+
+    public Entry createDirectory(WorkspaceDescriptor descriptor, RelativePath path) {
+        requireNonReserved(path);
+        requireCreatableParent(descriptor, path);
+        ensureDescriptorRootForCreate(descriptor);
+        Entry created = createDirectoryRoot(descriptor.root(), path);
+        logAction(descriptor, WorkspaceFileActionType.CREATE_FOLDER, created.path(), null, "SUCCEEDED", "{}");
+        return decorate(descriptor, created);
+    }
+
+    public Entry createTextFile(WorkspaceDescriptor descriptor, RelativePath parent, String fileName) {
+        requireNonReserved(parent);
+        requireFileName(fileName, ".txt", "text");
+        requireCreatableParent(descriptor, new RelativePath(childValue(parent, fileName.trim())));
+        ensureDescriptorRootForCreate(descriptor);
+        Entry created = createTextFileRoot(descriptor.root(), parent, fileName);
+        logAction(descriptor, WorkspaceFileActionType.CREATE_TEXT_FILE, created.path(), null, "SUCCEEDED", "{}");
+        return decorate(descriptor, created);
+    }
+
+    public Entry createMarkdownFile(WorkspaceDescriptor descriptor, RelativePath parent, String fileName) {
+        requireNonReserved(parent);
+        requireFileName(fileName, ".md", "markdown");
+        requireCreatableParent(descriptor, new RelativePath(childValue(parent, fileName.trim())));
+        ensureDescriptorRootForCreate(descriptor);
+        Entry created = createMarkdownFileRoot(descriptor.root(), parent, fileName);
+        logAction(descriptor, WorkspaceFileActionType.CREATE_MARKDOWN_FILE, created.path(), null, "SUCCEEDED", "{}");
+        return decorate(descriptor, created);
+    }
+
+    @Transactional
+    public Entry rename(WorkspaceDescriptor descriptor, RelativePath source, String newName) {
+        Entry renamed = renameRoot(descriptor.root(), source, newName);
+        metadataService.onMove(descriptor, source.value(), renamed.path());
+        logAction(descriptor, WorkspaceFileActionType.RENAME, source.value(), renamed.path(), "SUCCEEDED", "{}");
+        return decorate(descriptor, renamed);
+    }
+
+    @Transactional
+    public Entry move(WorkspaceDescriptor descriptor, RelativePath source, RelativePath destination, String newName) {
+        Entry moved = moveRoot(descriptor.root(), source, destination, newName);
+        metadataService.onMove(descriptor, source.value(), moved.path());
+        logAction(descriptor, WorkspaceFileActionType.MOVE, source.value(), moved.path(), "SUCCEEDED", "{}");
+        return decorate(descriptor, moved);
+    }
+
+    @Transactional
+    public Entry copy(WorkspaceDescriptor descriptor, RelativePath source, RelativePath destination, String newName) {
+        if (".".equals(source.value())) {
+            throw new WorkspaceFileException(WorkspaceFileException.Reason.INVALID, "workspace root cannot be copied");
+        }
+        Entry copied = copyRoot(descriptor.root(), source, destination, newName);
+        metadataService.onCopy(descriptor, source.value(), copied.path());
+        logAction(descriptor, WorkspaceFileActionType.COPY, source.value(), copied.path(), "SUCCEEDED", "{}");
+        return decorate(descriptor, copied);
+    }
+
+    public DeletePreflight deletePreflight(WorkspaceDescriptor descriptor, RelativePath path, DeleteStep step) {
+        return deletePreflightRoot(descriptor.root(), path, step);
+    }
+
+    @Transactional
+    public DeleteResult delete(WorkspaceDescriptor descriptor, RelativePath path, DeleteStep step) {
+        DeletePreflight preflight = deletePreflightRoot(descriptor.root(), path, step);
+        if (!preflight.executable()) {
+            throw new WorkspaceFileException(WorkspaceFileException.Reason.INVALID,
+                "delete confirmation step is required: " + preflight.requiredStep());
+        }
+        DeleteResult result = deleteRoot(descriptor.root(), path, step);
+        metadataService.onDelete(descriptor, path.value());
+        WorkspaceFileActionType actionType = step == DeleteStep.DIRECTORY_RECURSIVE_CONFIRM
+            ? WorkspaceFileActionType.DELETE_DIRECTORY : WorkspaceFileActionType.DELETE_FILE;
+        logAction(descriptor, actionType, path.value(), null, "SUCCEEDED",
+            "{\"deletedCount\":" + result.deletedCount() + "}");
+        return result;
+    }
+
+    public Entry inspect(WorkspaceDescriptor descriptor, RelativePath path) {
+        if (!Files.exists(descriptor.root(), LinkOption.NOFOLLOW_LINKS) && ".".equals(path.value())) {
+            return virtualRootEntry();
+        }
+        return decorate(descriptor, inspectRoot(descriptor.root(), path));
+    }
+
+    /* ── Labels and tags ── */
+
+    public WorkspaceFileLabelAssignment addLabel(WorkspaceDescriptor descriptor, String fileRelativePath, String labelSlug) {
+        RelativePath path = normalizeRelativePath(fileRelativePath);
+        inspect(descriptor, path);
+        return metadataService.addLabel(descriptor, path.value(), labelSlug);
+    }
+
+    public WorkspaceFileLabel ensureTag(String labelSlug, String displayName) {
+        return metadataService.ensureTag(labelSlug, displayName);
+    }
+
+    public int removeLabel(WorkspaceDescriptor descriptor, String fileRelativePath, String labelSlug) {
+        RelativePath path = normalizeRelativePath(fileRelativePath);
+        inspect(descriptor, path);
+        return metadataService.removeLabel(descriptor, path.value(), labelSlug);
+    }
+
+    public List<WorkspaceFileLabelAssignment> labels(WorkspaceDescriptor descriptor, String fileRelativePath) {
+        RelativePath path = normalizeRelativePath(fileRelativePath);
+        inspect(descriptor, path);
+        return metadataService.labelsForPath(descriptor, path.value());
+    }
+
+    public List<WorkspaceFileActionRecord> recentActions(WorkspaceDescriptor descriptor, int limit) {
+        return actionLogRepository.recentForWorkspace(descriptor.identity(), Math.max(1, limit));
+    }
+
+    /* ── Package-private root bridges (transitional; not public API) ── */
+
+    DirectoryListing list(Path root, RelativePath relativePath) {
+        return listRoot(root, relativePath);
+    }
+
+    FilePreview preview(Path root, RelativePath relativePath) {
+        return previewRoot(root, relativePath);
+    }
+
+    FilePreview saveText(Path root, RelativePath relativePath, String content) {
+        return saveTextRoot(root, relativePath, content);
+    }
+
+    Entry createTextFile(Path root, RelativePath parent, String fileName) {
+        return createTextFileRoot(root, parent, fileName);
+    }
+
+    Entry createDirectory(Path root, RelativePath relativePath) {
+        return createDirectoryRoot(root, relativePath);
+    }
+
+    /**
+     * Transitional handle for project file operations. All methods are
+     * delegated to the owning service's package-private root bridges.
+     * Scheduled for removal in Phase 06. Only the project file browser in
+     * {@code OrchestrationController} should construct this bridge.
+     *
+     * @deprecated Use descriptor-based explorer methods for agent, chat, and
+     * user workspaces. This bridge exists only because project workspaces
+     * lack a {@link WorkspaceKind} and are scheduled for removal.
+     */
+    @Deprecated
+    public final class ProjectBridge {
+        private final Path root;
+
+        public ProjectBridge(Path projectRoot) {
+            this.root = projectRoot;
+        }
+
+        public DirectoryListing list(RelativePath relativePath) {
+            return WorkspaceExplorerService.this.list(root, relativePath);
+        }
+
+        public FilePreview preview(RelativePath relativePath) {
+            return WorkspaceExplorerService.this.preview(root, relativePath);
+        }
+
+        public FilePreview saveText(RelativePath relativePath, String content) {
+            return WorkspaceExplorerService.this.saveText(root, relativePath, content);
+        }
+
+        public Entry createTextFile(RelativePath parent, String fileName) {
+            return WorkspaceExplorerService.this.createTextFile(root, parent, fileName);
+        }
+
+        public Entry createDirectory(RelativePath relativePath) {
+            return WorkspaceExplorerService.this.createDirectory(root, relativePath);
+        }
+    }
+
+    /* ── Internal descriptor-based bridges ── */
+
+    DirectoryListing list(WorkspaceDescriptor descriptor, Path root, RelativePath relativePath) {
+        Path dir = resolveExisting(root, relativePath);
+        if (!Files.isDirectory(dir, LinkOption.NOFOLLOW_LINKS)) {
+            throw new WorkspaceFileException(WorkspaceFileException.Reason.INVALID, "path is not a directory");
+        }
+        try (var stream = Files.list(dir)) {
+            List<Entry> entries = stream.map(path -> decorate(descriptor, entry(root, path)))
+                .sorted(Comparator.comparing(Entry::directory).reversed().thenComparing(Entry::name))
+                .toList();
+            return new DirectoryListing(relative(root, dir), entries);
+        } catch (IOException exception) {
+            throw new IllegalStateException("failed to list directory", exception);
+        }
+    }
+
+    DownloadContent downloadContent(WorkspaceDescriptor descriptor, Path root, RelativePath path) {
+        return downloadContentRoot(root, path);
+    }
+
+    private DownloadContent downloadContentRoot(Path root, RelativePath path) {
+        Path file = downloadRoot(root, path);
         try {
             long size = Files.size(file);
             if (size > NORMAL_TEXT_BYTES) {
-                throw new IllegalArgumentException("file is too large to download");
+                throw new WorkspaceFileException(WorkspaceFileException.Reason.INVALID, "file is too large to download");
             }
             return new DownloadContent(file.getFileName().toString(), Files.readAllBytes(file));
         } catch (IOException exception) {
@@ -90,58 +310,16 @@ public class WorkspaceExplorerService {
         }
     }
 
-    public FilePreview saveText(WorkspaceDescriptor workspace, RelativePath path, String content) {
-        return saveText(workspace.root(), path, content);
+    FilePreview saveText(WorkspaceDescriptor descriptor, Path root, RelativePath relativePath, String content) {
+        return saveTextRoot(root, relativePath, content);
     }
 
-    public Entry createDirectory(WorkspaceDescriptor workspace, RelativePath path) {
-        requireNonReserved(path);
-        ensureDescriptorRootForCreate(workspace);
-        return createDirectory(workspace.root(), path);
-    }
+    /* ── Internal filesystem operations ── */
 
-    public Entry createTextFile(WorkspaceDescriptor workspace, RelativePath parent, String fileName) {
-        requireNonReserved(parent);
-        ensureDescriptorRootForCreate(workspace);
-        return createTextFile(workspace.root(), parent, fileName);
-    }
-
-    public Entry createMarkdownFile(WorkspaceDescriptor workspace, RelativePath parent, String fileName) {
-        requireNonReserved(parent);
-        ensureDescriptorRootForCreate(workspace);
-        return createMarkdownFile(workspace.root(), parent, fileName);
-    }
-
-    public Entry rename(WorkspaceDescriptor workspace, RelativePath source, String newName) {
-        return rename(workspace.root(), source, newName);
-    }
-
-    public Entry move(WorkspaceDescriptor workspace, RelativePath source, RelativePath destination, String newName) {
-        return move(workspace.root(), source, destination, newName);
-    }
-
-    public Entry copy(WorkspaceDescriptor workspace, RelativePath source, RelativePath destination, String newName) {
-        return copy(workspace.root(), source, destination, newName);
-    }
-
-    public DeletePreflight deletePreflight(WorkspaceDescriptor workspace, RelativePath path, DeleteStep step) {
-        return deletePreflight(workspace.root(), path, step);
-    }
-
-    public DeleteResult delete(WorkspaceDescriptor workspace, RelativePath path, DeleteStep step) {
-        return delete(workspace.root(), path, step);
-    }
-
-    public Entry inspect(WorkspaceDescriptor workspace, RelativePath path) {
-        return inspect(workspace.root(), path);
-    }
-
-    /* Package-private root bridge used only by the temporary Work Area adapter. */
-
-    DirectoryListing list(Path root, RelativePath relativePath) {
+    private DirectoryListing listRoot(Path root, RelativePath relativePath) {
         Path dir = resolveExisting(root, relativePath);
         if (!Files.isDirectory(dir, LinkOption.NOFOLLOW_LINKS)) {
-            throw new IllegalArgumentException("path is not a directory");
+            throw new WorkspaceFileException(WorkspaceFileException.Reason.INVALID, "path is not a directory");
         }
         try (var stream = Files.list(dir)) {
             List<Entry> entries = stream.map(path -> entry(root, path))
@@ -153,7 +331,7 @@ public class WorkspaceExplorerService {
         }
     }
 
-    FilePreview preview(Path root, RelativePath relativePath) {
+    private FilePreview previewRoot(Path root, RelativePath relativePath) {
         Path file = resolveExisting(root, relativePath);
         requireRegularFile(file);
         try {
@@ -182,26 +360,26 @@ public class WorkspaceExplorerService {
         }
     }
 
-    Path download(Path root, RelativePath relativePath) {
+    private Path downloadRoot(Path root, RelativePath relativePath) {
         Path file = resolveExisting(root, relativePath);
         requireRegularFile(file);
         return file;
     }
 
-    FilePreview saveText(Path root, RelativePath relativePath, String content) {
+    private FilePreview saveTextRoot(Path root, RelativePath relativePath, String content) {
         Path file = resolveExisting(root, relativePath);
         ensureMutable(root, file);
         if (!isSafeTextPath(file)) {
-            throw new IllegalArgumentException("file type is not safe for text editing");
+            throw new WorkspaceFileException(WorkspaceFileException.Reason.INVALID, "file type is not safe for text editing");
         }
         String normalizedContent = stripBom(content == null ? "" : content);
         if (normalizedContent.getBytes(StandardCharsets.UTF_8).length > HARD_EDIT_BYTES) {
-            throw new IllegalArgumentException("text file is too large");
+            throw new WorkspaceFileException(WorkspaceFileException.Reason.INVALID, "text file is too large");
         }
         try {
             requireRegularFile(file);
             if (readUtf8(file) == null) {
-                throw new IllegalArgumentException("file is not valid UTF-8");
+                throw new WorkspaceFileException(WorkspaceFileException.Reason.INVALID, "file is not valid UTF-8");
             }
             String lineEnding = dominantLineEnding(file);
             Files.write(file, applyLineEnding(normalizedContent, lineEnding).getBytes(StandardCharsets.UTF_8));
@@ -211,13 +389,13 @@ public class WorkspaceExplorerService {
         }
     }
 
-    Entry createDirectory(Path root, RelativePath relativePath) {
+    private Entry createDirectoryRoot(Path root, RelativePath relativePath) {
         requireNonReserved(relativePath);
         Path dir = resolveForWrite(root, relativePath);
         ensureMutable(root, dir);
         try {
             if (Files.exists(dir, LinkOption.NOFOLLOW_LINKS)) {
-                throw new IllegalArgumentException("target already exists");
+                throw new WorkspaceFileException(WorkspaceFileException.Reason.CONFLICT, "target already exists");
             }
             return entry(root, Files.createDirectory(dir).toRealPath(LinkOption.NOFOLLOW_LINKS));
         } catch (IOException exception) {
@@ -225,25 +403,17 @@ public class WorkspaceExplorerService {
         }
     }
 
-    Entry createTextFile(Path root, RelativePath parent, String fileName) {
-        requirePlainName(fileName);
-        String name = fileName.trim();
-        if (!name.toLowerCase(Locale.ROOT).endsWith(".txt")) {
-            throw new IllegalArgumentException("text file name must end with .txt");
-        }
-        return createEmptyFile(root, parent, name);
+    private Entry createTextFileRoot(Path root, RelativePath parent, String fileName) {
+        requireFileName(fileName, ".txt", "text");
+        return createEmptyFile(root, parent, fileName.trim());
     }
 
-    Entry createMarkdownFile(Path root, RelativePath parent, String fileName) {
-        requirePlainName(fileName);
-        String name = fileName.trim();
-        if (!name.toLowerCase(Locale.ROOT).endsWith(".md")) {
-            throw new IllegalArgumentException("markdown file name must end with .md");
-        }
-        return createEmptyFile(root, parent, name);
+    private Entry createMarkdownFileRoot(Path root, RelativePath parent, String fileName) {
+        requireFileName(fileName, ".md", "markdown");
+        return createEmptyFile(root, parent, fileName.trim());
     }
 
-    Entry rename(Path root, RelativePath relativePath, String newName) {
+    private Entry renameRoot(Path root, RelativePath relativePath, String newName) {
         Path source = resolveExisting(root, relativePath);
         ensureMutable(root, source);
         requirePlainName(newName);
@@ -260,12 +430,12 @@ public class WorkspaceExplorerService {
         }
     }
 
-    Entry move(Path root, RelativePath sourcePath, RelativePath destinationPath, String newName) {
+    private Entry moveRoot(Path root, RelativePath sourcePath, RelativePath destinationPath, String newName) {
         Path source = resolveExisting(root, sourcePath);
         ensureMutable(root, source);
         Path destination = resolveExisting(root, destinationPath);
         if (!Files.isDirectory(destination, LinkOption.NOFOLLOW_LINKS)) {
-            throw new IllegalArgumentException("destination is not a directory");
+            throw new WorkspaceFileException(WorkspaceFileException.Reason.INVALID, "destination is not a directory");
         }
         String targetName = StringUtils.hasText(newName) ? newName.trim() : source.getFileName().toString();
         requirePlainName(targetName);
@@ -274,7 +444,7 @@ public class WorkspaceExplorerService {
         ensureMutable(root, target);
         rejectCollision(target);
         if (Files.isDirectory(source, LinkOption.NOFOLLOW_LINKS) && target.startsWith(source)) {
-            throw new IllegalArgumentException("directory cannot be moved into itself or a descendant");
+            throw new WorkspaceFileException(WorkspaceFileException.Reason.INVALID, "directory cannot be moved into itself or a descendant");
         }
         try {
             rejectSymbolicTree(root, source);
@@ -285,11 +455,11 @@ public class WorkspaceExplorerService {
         }
     }
 
-    Entry copy(Path root, RelativePath sourcePath, RelativePath destinationPath, String newName) {
+    private Entry copyRoot(Path root, RelativePath sourcePath, RelativePath destinationPath, String newName) {
         Path source = resolveExisting(root, sourcePath);
         Path destination = resolveExisting(root, destinationPath);
         if (!Files.isDirectory(destination, LinkOption.NOFOLLOW_LINKS)) {
-            throw new IllegalArgumentException("destination is not a directory");
+            throw new WorkspaceFileException(WorkspaceFileException.Reason.INVALID, "destination is not a directory");
         }
         String targetName = StringUtils.hasText(newName) ? newName.trim() : source.getFileName().toString();
         requirePlainName(targetName);
@@ -298,7 +468,7 @@ public class WorkspaceExplorerService {
         ensureMutable(root, target);
         rejectCollision(target);
         if (Files.isDirectory(source, LinkOption.NOFOLLOW_LINKS) && target.startsWith(source)) {
-            throw new IllegalArgumentException("directory cannot be copied into itself or a descendant");
+            throw new WorkspaceFileException(WorkspaceFileException.Reason.INVALID, "directory cannot be copied into itself or a descendant");
         }
         try {
             rejectSymbolicTree(root, source);
@@ -309,7 +479,7 @@ public class WorkspaceExplorerService {
         }
     }
 
-    DeletePreflight deletePreflight(Path root, RelativePath relativePath, DeleteStep step) {
+    private DeletePreflight deletePreflightRoot(Path root, RelativePath relativePath, DeleteStep step) {
         Path target = resolveExisting(root, relativePath);
         ensureMutable(root, target);
         try {
@@ -322,36 +492,92 @@ public class WorkspaceExplorerService {
         }
     }
 
-    DeleteResult delete(Path root, RelativePath relativePath, DeleteStep step) {
-        DeletePreflight preflight = deletePreflight(root, relativePath, step);
-        if (!preflight.executable()) {
-            throw new IllegalArgumentException("delete confirmation step is required: " + preflight.requiredStep());
-        }
+    private DeleteResult deleteRoot(Path root, RelativePath relativePath, DeleteStep step) {
         Path target = resolveExisting(root, relativePath);
         try {
             List<Path> paths = validatedDeletePaths(root, target);
             for (Path path : paths) {
                 Files.delete(path);
             }
-            return new DeleteResult(preflight.path(), paths.size());
+            return new DeleteResult(relative(root, target), paths.size());
         } catch (IOException exception) {
             throw new IllegalStateException("failed to delete path", exception);
         }
     }
 
-    Entry inspect(Path root, RelativePath relativePath) {
+    private Entry inspectRoot(Path root, RelativePath relativePath) {
         return entry(root, resolveExisting(root, relativePath));
     }
 
-    private void ensureDescriptorRootForCreate(WorkspaceDescriptor workspace) {
-        if (Files.exists(workspace.root(), LinkOption.NOFOLLOW_LINKS)) {
+    /* ── Private helpers ── */
+
+    private Entry decorate(WorkspaceDescriptor descriptor, Entry entry) {
+        if (metadataService == null) return entry;
+        List<WorkspaceFileLabel> tags = metadataService.labelsForPath(descriptor, entry.path()).stream()
+            .map(WorkspaceFileLabelAssignment::label).toList();
+        return new Entry(entry.name(), entry.path(), entry.directory(), entry.regularFile(), entry.size(),
+            entry.createdAt(), entry.modifiedAt(), entry.fileType(), entry.sizeLabel(), entry.viewerKind(),
+            tags, entry.canView(), entry.canRename(), entry.canDelete(), entry.canCopy(), entry.canMove(), entry.canTag());
+    }
+
+    private void logAction(WorkspaceDescriptor descriptor, WorkspaceFileActionType type,
+                           String source, String target, String result, String payload) {
+        if (actionLogRepository != null) {
+            actionLogRepository.record(descriptor, type, source, target, result, payload);
+        }
+    }
+
+    private Entry virtualRootEntry() {
+        return new Entry(".", ".", true, false, 0, null, null, "Folder", "-", ViewerKind.UNSUPPORTED,
+            List.of(), false, false, false, false, false, true);
+    }
+
+    private void requireCreatableParent(WorkspaceDescriptor descriptor, RelativePath target) {
+        if (".".equals(target.value())) {
+            throw new WorkspaceFileException(WorkspaceFileException.Reason.INVALID, "workspace root cannot be created");
+        }
+        Path parent = descriptor.root().resolve(target.value()).normalize().getParent();
+        if (parent == null || !parent.startsWith(descriptor.root())) {
+            throw new WorkspaceFileException(WorkspaceFileException.Reason.INVALID, "path escapes workspace");
+        }
+        if (!Files.exists(descriptor.root(), LinkOption.NOFOLLOW_LINKS)) {
+            if (!parent.equals(descriptor.root())) {
+                throw new WorkspaceFileException(WorkspaceFileException.Reason.NOT_FOUND, "parent directory does not exist");
+            }
             return;
         }
-        if (workspace.kind() == WorkspaceKind.USER) {
-            throw new IllegalArgumentException("user workspace does not exist");
+        try {
+            rejectSymbolicPath(descriptor.root(), parent);
+            if (!Files.isDirectory(parent, LinkOption.NOFOLLOW_LINKS)) {
+                throw new WorkspaceFileException(WorkspaceFileException.Reason.NOT_FOUND, "parent directory does not exist");
+            }
+            ensureConfined(descriptor.root(), parent.toRealPath(LinkOption.NOFOLLOW_LINKS));
+        } catch (IOException exception) {
+            throw new WorkspaceFileException(WorkspaceFileException.Reason.NOT_FOUND, "parent directory does not exist", exception);
+        }
+    }
+
+    private String childValue(RelativePath parent, String name) {
+        return ".".equals(parent.value()) ? name : parent.value() + "/" + name;
+    }
+
+    private void requireFileName(String fileName, String extension, String kind) {
+        requirePlainName(fileName);
+        if (!fileName.trim().toLowerCase(Locale.ROOT).endsWith(extension)) {
+            throw new WorkspaceFileException(WorkspaceFileException.Reason.INVALID,
+                kind + " file name must end with " + extension);
+        }
+    }
+
+    private void ensureDescriptorRootForCreate(WorkspaceDescriptor descriptor) {
+        if (Files.exists(descriptor.root(), LinkOption.NOFOLLOW_LINKS)) {
+            return;
+        }
+        if (descriptor.kind() == WorkspaceKind.USER) {
+            throw new WorkspaceFileException(WorkspaceFileException.Reason.NOT_FOUND, "user workspace does not exist");
         }
         try {
-            Files.createDirectories(workspace.root());
+            Files.createDirectories(descriptor.root());
         } catch (IOException exception) {
             throw new IllegalStateException("failed to create workspace root", exception);
         }
@@ -360,7 +586,7 @@ public class WorkspaceExplorerService {
     private Entry createEmptyFile(Path root, RelativePath parentPath, String fileName) {
         Path parent = resolveExisting(root, parentPath);
         if (!Files.isDirectory(parent, LinkOption.NOFOLLOW_LINKS)) {
-            throw new IllegalArgumentException("parent path is not a directory");
+            throw new WorkspaceFileException(WorkspaceFileException.Reason.INVALID, "parent path is not a directory");
         }
         Path file = parent.resolve(fileName).normalize();
         ensureConfined(root, file);
@@ -401,7 +627,8 @@ public class WorkspaceExplorerService {
             ensureConfined(root, real);
             return real;
         } catch (IOException exception) {
-            throw new IllegalArgumentException("path does not exist: " + relativePath.value(), exception);
+            throw new WorkspaceFileException(WorkspaceFileException.Reason.NOT_FOUND,
+                "path does not exist: " + relativePath.value(), exception);
         }
     }
 
@@ -412,11 +639,12 @@ public class WorkspaceExplorerService {
             ensureWritableParent(root, parent);
             ensureConfined(root, parent.toRealPath(LinkOption.NOFOLLOW_LINKS));
             if (Files.exists(resolved, LinkOption.NOFOLLOW_LINKS) && Files.isSymbolicLink(resolved)) {
-                throw new IllegalArgumentException("symbolic links are not editable");
+                throw new WorkspaceFileException(WorkspaceFileException.Reason.INVALID, "symbolic links are not editable");
             }
             return resolved;
         } catch (IOException exception) {
-            throw new IllegalArgumentException("path cannot be created: " + relativePath.value(), exception);
+            throw new WorkspaceFileException(WorkspaceFileException.Reason.INVALID,
+                "path cannot be created: " + relativePath.value(), exception);
         }
     }
 
@@ -430,13 +658,13 @@ public class WorkspaceExplorerService {
         ensureConfined(root, target);
         String relative = relative(root, target);
         if (!isMutableRelative(relative)) {
-            throw new IllegalArgumentException("workspace root and outputs are protected");
+            throw new WorkspaceFileException(WorkspaceFileException.Reason.INVALID, "workspace root and outputs are protected");
         }
     }
 
     private void requireNonReserved(RelativePath path) {
         if ("outputs".equals(path.value()) || path.value().startsWith("outputs/")) {
-            throw new IllegalArgumentException("outputs are protected");
+            throw new WorkspaceFileException(WorkspaceFileException.Reason.INVALID, "outputs are protected");
         }
     }
 
@@ -446,27 +674,21 @@ public class WorkspaceExplorerService {
 
     private void ensureConfined(Path root, Path path) {
         if (!path.normalize().startsWith(root.normalize())) {
-            throw new IllegalArgumentException("path escapes workspace");
+            throw new WorkspaceFileException(WorkspaceFileException.Reason.INVALID, "path escapes workspace");
         }
     }
 
     private void rejectCollision(Path path) {
         if (Files.exists(path, LinkOption.NOFOLLOW_LINKS)) {
-            throw new IllegalArgumentException("target already exists");
+            throw new WorkspaceFileException(WorkspaceFileException.Reason.CONFLICT, "target already exists");
         }
     }
 
     private void ensureWritableParent(Path root, Path parent) throws IOException {
         ensureConfined(root, parent);
-        Path current = root;
-        for (Path segment : root.relativize(parent.normalize())) {
-            current = current.resolve(segment);
-            if (Files.exists(current, LinkOption.NOFOLLOW_LINKS)) {
-                if (Files.isSymbolicLink(current)) throw new IllegalArgumentException("symbolic links are not allowed");
-                if (!Files.isDirectory(current, LinkOption.NOFOLLOW_LINKS)) throw new IllegalArgumentException("parent path is not a directory");
-            } else {
-                Files.createDirectory(current);
-            }
+        rejectSymbolicPath(root, parent);
+        if (!Files.isDirectory(parent, LinkOption.NOFOLLOW_LINKS)) {
+            throw new WorkspaceFileException(WorkspaceFileException.Reason.NOT_FOUND, "parent directory does not exist");
         }
     }
 
@@ -497,7 +719,7 @@ public class WorkspaceExplorerService {
             List<Path> paths = walk.sorted(Comparator.reverseOrder()).toList();
             for (Path path : paths) {
                 ensureConfined(root, path.toRealPath(LinkOption.NOFOLLOW_LINKS));
-                if (Files.isSymbolicLink(path)) throw new IllegalArgumentException("symbolic links are not deleted");
+                if (Files.isSymbolicLink(path)) throw new WorkspaceFileException(WorkspaceFileException.Reason.INVALID, "symbolic links are not deleted");
             }
             return paths;
         }
@@ -507,7 +729,7 @@ public class WorkspaceExplorerService {
         try (var walk = Files.walk(source)) {
             for (Path path : walk.toList()) {
                 ensureConfined(root, path.toRealPath(LinkOption.NOFOLLOW_LINKS));
-                if (Files.isSymbolicLink(path)) throw new IllegalArgumentException("symbolic links are not allowed");
+                if (Files.isSymbolicLink(path)) throw new WorkspaceFileException(WorkspaceFileException.Reason.INVALID, "symbolic links are not allowed");
             }
         }
     }
@@ -518,7 +740,7 @@ public class WorkspaceExplorerService {
         for (Path segment : root.relativize(path.normalize())) {
             current = current.resolve(segment);
             if (Files.exists(current, LinkOption.NOFOLLOW_LINKS) && Files.isSymbolicLink(current)) {
-                throw new IllegalArgumentException("symbolic links are not allowed");
+                throw new WorkspaceFileException(WorkspaceFileException.Reason.INVALID, "symbolic links are not allowed");
             }
         }
     }
@@ -542,16 +764,17 @@ public class WorkspaceExplorerService {
 
     private void requirePlainName(String value) {
         if (!StringUtils.hasText(value) || value.contains("/") || value.contains("\\") || value.equals(".") || value.equals("..")) {
-            throw new IllegalArgumentException("newName must be a plain path segment");
+            throw new WorkspaceFileException(WorkspaceFileException.Reason.INVALID, "newName must be a plain path segment");
         }
     }
 
     private void requireRegularFile(Path file) {
-        if (!Files.isRegularFile(file, LinkOption.NOFOLLOW_LINKS)) throw new IllegalArgumentException("path is not a regular file");
+        if (!Files.isRegularFile(file, LinkOption.NOFOLLOW_LINKS))
+            throw new WorkspaceFileException(WorkspaceFileException.Reason.INVALID, "path is not a regular file");
     }
 
     private String readUtf8(Path file) throws IOException {
-        CharsetDecoder decoder = StandardCharsets.UTF_8.newDecoder().onMalformedInput(CodingErrorAction.REPORT).onUnmappableCharacter(CodingErrorAction.REPORT);
+        java.nio.charset.CharsetDecoder decoder = StandardCharsets.UTF_8.newDecoder().onMalformedInput(CodingErrorAction.REPORT).onUnmappableCharacter(CodingErrorAction.REPORT);
         try {
             return decoder.decode(java.nio.ByteBuffer.wrap(Files.readAllBytes(file))).toString();
         } catch (CharacterCodingException exception) {
@@ -581,7 +804,7 @@ public class WorkspaceExplorerService {
 
     private String dominantLineEnding(Path file) throws IOException {
         String text = readUtf8(file);
-        if (text == null) throw new IllegalArgumentException("file is not valid UTF-8");
+        if (text == null) throw new WorkspaceFileException(WorkspaceFileException.Reason.INVALID, "file is not valid UTF-8");
         int crlf = text.split("\\r\\n", -1).length - 1;
         int lf = text.split("(?<!\\r)\\n", -1).length - 1;
         return crlf > lf ? "\r\n" : "\n";
@@ -629,7 +852,7 @@ public class WorkspaceExplorerService {
         return time == null || time.toMillis() <= 0 ? null : time.toInstant();
     }
 
-    private String relative(Path root, Path path) {
+    String relative(Path root, Path path) {
         String value = root.relativize(path.normalize()).toString().replace('\\', '/');
         return value.isBlank() ? "." : value;
     }

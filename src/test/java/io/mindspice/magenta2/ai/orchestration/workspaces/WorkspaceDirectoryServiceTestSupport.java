@@ -112,4 +112,9 @@ public final class WorkspaceDirectoryServiceTestSupport {
         return new WorkspaceDirectoryService(
                 aiConfig(dataRoot), agentProfileRepo, chatExistenceRepo);
     }
+
+    /** Create a descriptor for tests that need one without directory resolution. */
+    public static WorkspaceDescriptor descriptor(WorkspaceKind kind, String key, Path root) {
+        return new WorkspaceDescriptor(kind, key, root.toAbsolutePath().normalize());
+    }
 }
