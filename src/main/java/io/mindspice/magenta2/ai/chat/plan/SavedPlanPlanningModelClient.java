@@ -83,9 +83,7 @@ public class SavedPlanPlanningModelClient implements SavedPlanModelClient {
     private ToolCallingChatOptions toolOptions(String model, List<ToolCallback> tools) {
         ToolCallingChatOptions options = StringUtils.hasText(model)
             ? chatModelRouter.toolCallingOptions(model)
-            : new DefaultToolCallingChatOptions();
-        options.setInternalToolExecutionEnabled(false);
-        options.setToolCallbacks(tools);
-        return options;
+            : DefaultToolCallingChatOptions.builder().build();
+        return options.mutate().toolCallbacks(tools).build();
     }
 }

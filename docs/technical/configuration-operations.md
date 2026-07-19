@@ -11,7 +11,7 @@ The app is a Spring Boot service with:
 - SQLite datasource default `jdbc:sqlite:${magenta.root.path}/magenta.sqlite?foreign_keys=true`, which places the default database at `<magenta.root.path>/magenta.sqlite`.
 - Avatar personal data uses a second SQLite database at `<magenta.root.path>/avatar.sqlite`, exposed as named beans `avatarDataSource` and `avatarJdbcTemplate`.
 - SQL init always enabled against `classpath:schema.sql`.
-- Spring AI OpenAI auto-config disabled; model clients are assembled from user AI config.
+- Spring AI provider auto-config is disabled where applicable; model clients are assembled from user AI config.
 - Ollama base URL and default chat option present in Spring config, but application model routing primarily uses configured model definitions.
 
 Startup smoke for backend wiring should use a bounded Spring Boot run, for example:
@@ -25,6 +25,8 @@ Use task-specific validation when a plan provides a stricter runtime path.
 ## AI Config File
 
 `app.ai.config-path` defaults to `./config/ai-config.example.json`.
+
+The local startup file is intentionally ignored because it contains provider credentials. The standard DeepSeek-only setup uses `deepseek-v4-pro` as the default/planning model and `deepseek-v4-flash` for summaries and context compaction. Replace `REPLACE_WITH_DEEPSEEK_API_KEY` in both model entries with the same DeepSeek API key before making model-backed requests.
 
 `AiConfig.dataRoot` is resolved after the file is loaded:
 
@@ -47,6 +49,14 @@ The file-backed config records:
 Source records include `AiConfig`, `ModelConfig`, `EndpointType`, `AgentConfig`, and `WebSearchConfig`.
 
 Model endpoint definitions are read from file config. Durable agent profiles and runtime settings are stored in SQLite.
+
+`EndpointType` selects a provider-specific Spring AI 2.0 client:
+
+- `OLLAMA` uses the Ollama integration.
+- `OPENAI_COMPATIBLE` uses the OpenAI integration and may apply configured OpenAI reasoning effort.
+- `DEEPSEEK` uses the dedicated DeepSeek integration. Choose reasoning behavior through the configured remote DeepSeek model; no local patched Spring AI artifact is required.
+
+Keep DeepSeek endpoints classified as `DEEPSEEK`, even when their HTTP API resembles OpenAI. The dedicated provider retains DeepSeek `reasoning_content` when Magenta replays assistant tool-call messages.
 
 Conversation title generation uses the effective summary model, not the model selected for the chat turn. Context compaction uses the effective compaction model, falling back to the effective summary model when no compaction model is configured.
 

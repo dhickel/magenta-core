@@ -74,6 +74,7 @@ import org.springframework.ai.chat.client.ChatClientResponse;
 import org.springframework.ai.chat.memory.ChatMemory;
 import io.mindspice.magenta2.ai.chat.repository.ChatMemoryRepository;
 import org.springframework.ai.chat.messages.AssistantMessage;
+import org.springframework.ai.deepseek.DeepSeekAssistantMessage;
 import org.springframework.ai.chat.messages.Message;
 import org.springframework.ai.chat.messages.SystemMessage;
 import org.springframework.ai.chat.messages.ToolResponseMessage;
@@ -2068,19 +2069,15 @@ public class ChatService {
     private ToolCallingChatOptions toolOptions(String model, List<ToolCallback> approvedTools) {
         ToolCallingChatOptions options = StringUtils.hasText(model)
             ? chatModelRouter.toolCallingOptions(model)
-            : new DefaultToolCallingChatOptions();
-        options.setInternalToolExecutionEnabled(false);
-        options.setToolCallbacks(approvedTools);
-        return options;
+            : DefaultToolCallingChatOptions.builder().build();
+        return options.mutate().toolCallbacks(approvedTools).build();
     }
 
     private ToolCallingChatOptions toolFinalOptions(String model) {
         ToolCallingChatOptions options = StringUtils.hasText(model)
             ? chatModelRouter.toolCallingOptions(model)
-            : new DefaultToolCallingChatOptions();
-        options.setInternalToolExecutionEnabled(false);
-        options.setToolCallbacks(List.of());
-        return options;
+            : DefaultToolCallingChatOptions.builder().build();
+        return options.mutate().toolCallbacks(List.of()).build();
     }
 
     private SystemMessage toolUseAbortControlMessage(ToolUseAbort abort) {
@@ -2307,7 +2304,7 @@ public class ChatService {
         prompt = prompt.user(request.message());
 
         if (StringUtils.hasText(request.model())) {
-            prompt = prompt.options(chatModelRouter.chatOptions(request.model()));
+            prompt = prompt.options(chatModelRouter.chatOptions(request.model()).mutate());
         }
         return prompt;
     }
@@ -2426,6 +2423,12 @@ public class ChatService {
         }
         // OpenAI/DeepSeek: AssistantMessage properties under "reasoningContent"
         org.springframework.ai.chat.messages.AssistantMessage output = generation.getOutput();
+        if (output instanceof DeepSeekAssistantMessage deepSeekMessage) {
+            String reasoning = deepSeekMessage.getReasoningContent();
+            if (StringUtils.hasText(reasoning)) {
+                return reasoning;
+            }
+        }
         if (output != null && output.getMetadata() != null) {
             String reasoning = stringValue(output.getMetadata().get("reasoningContent"));
             return reasoning;

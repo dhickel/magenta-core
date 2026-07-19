@@ -1,24 +1,24 @@
 # Topic
-Spring AI thinking/reasoning metadata locations across providers
+Spring AI thinking/reasoning representations across providers
 
 # Source References
-- `org.springframework.ai.ollama.OllamaChatModel` (spring-ai-ollama 1.1.4) — stores thinking via `ChatGenerationMetadata.Builder.metadata("thinking", message.thinking())`
-- `org.springframework.ai.openai.OpenAiChatModel` (spring-ai-openai 1.1.4-magenta1) — stores `reasoningContent` via `AssistantMessage.Builder.properties(Map.of("reasoningContent", message.reasoningContent(), ...))`
-- `org.springframework.ai.chat.model.Generation` — `getMetadata()` returns `ChatGenerationMetadata`; `getOutput()` returns `AssistantMessage` with its own `getMetadata()` (properties map)
-- `org.springframework.ai.openai.api.OpenAiApi.ChatCompletionMessage` — has `reasoningContent()` accessor, Jackson-mapped from `reasoning_content` JSON field
+- Spring AI 2.0.0 `DeepSeekChatModel` and `DeepSeekAssistantMessage`
+- Spring AI 2.0.0 `OllamaChatModel` generation metadata
+- Spring AI DeepSeek reference: <https://docs.spring.io/spring-ai/reference/api/chat/deepseek-chat.html>
+- `ChatService.thinkingText()` — Magenta's provider-normalization point
 
 # Key Takeaways
-- There is no standard location for thinking/reasoning in Spring AI 1.1.4. Ollama and OpenAI providers put it in different metadata maps on the `Generation` object
-- To extract thinking provider-agnostically, check both: `generation.getMetadata().get("thinking")` (Ollama) and `generation.getOutput().getMetadata().get("reasoningContent")` (OpenAI/DeepSeek)
-- This is arguably a Spring AI bug — both should use the same metadata key and location. The inconsistency likely stems from different contributors building each provider integration
-- Anthropic would add a third location if/when Spring AI adds an Anthropic module — the single-extraction-point pattern makes adding it a one-line change
-- `ContextManagementAdvisor` needs to use the same extraction logic since it processes `Generation` objects in the ChatClient advisor chain
+- Spring AI 2.0.0 has a dedicated DeepSeek provider. Non-streaming DeepSeek responses use `DeepSeekAssistantMessage`, whose `getReasoningContent()` value is replayed as `reasoning_content` when that assistant message is included in a later request.
+- Use the dedicated DeepSeek model for `EndpointType.DEEPSEEK`. The generic OpenAI-compatible model does not provide the same typed reasoning-message round trip and must not be substituted for DeepSeek tool loops.
+- Reasoning still has no single provider-neutral representation. Magenta checks `DeepSeekAssistantMessage.getReasoningContent()`, Ollama generation metadata `thinking`, and legacy/generic assistant properties `reasoningContent`.
+- Magenta persists normalized thinking under the `magenta.thinking` assistant-message property. `ChatService.thinkingText()` remains the canonical extraction point.
+- Spring AI 2.0 raw `ChatModel.call()` and `stream()` no longer execute tools internally. Magenta's explicit, bounded tool loop remains responsible for execution and preserves DeepSeek assistant message subtypes between turns.
 
 # Engine Relevance
-- Magenta2 `ChatService.thinkingText()` is the canonical extraction point — add new provider locations there
-- The `"magenta.thinking"` key in `AssistantMessage.properties` is Magenta's internal normalization — always store extracted thinking under this key for persistence
-- Spring AI 2.0 may fix this with the `spring-ai-deepseek` module (PR #5595)
+- Keep DeepSeek assistant messages intact when appending a model response to the next tool-call prompt. Rebuilding them as plain `AssistantMessage` objects loses the typed reasoning field.
+- Add any future provider-specific reasoning location only at the normalization boundary and cover it with a focused extraction test.
+- The former local `spring-ai-openai:1.1.4-magenta1` patch is obsolete and must not be restored.
 
 # Open Questions
-- Will Spring AI 2.0 standardize thinking/reasoning metadata locations?
-- Does Anthropic's API thinking (separate content block type) map to this same metadata pattern?
+- Spring AI PR #5908 remains relevant to broader streaming and prompt-mutation preservation cases; reassess if Magenta changes from its synchronous explicit tool loop.
+- Does a future provider-neutral reasoning content type supersede the current provider-specific extraction paths?

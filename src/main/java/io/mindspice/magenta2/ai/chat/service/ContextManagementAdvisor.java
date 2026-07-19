@@ -507,7 +507,7 @@ public class ContextManagementAdvisor implements CallAdvisor, StreamAdvisor {
                 .prompt()
                 .system(SUMMARY_SYSTEM_PROMPT)
                 .user(renderedConversation)
-                .options(chatModelRouter.chatOptions(compactionModelRef))
+                .options(chatModelRouter.chatOptions(compactionModelRef).mutate())
                 .call()
                 .content();
         } catch (RuntimeException exception) {
@@ -785,7 +785,7 @@ public class ContextManagementAdvisor implements CallAdvisor, StreamAdvisor {
         if (conversationId instanceof String value && StringUtils.hasText(value)) {
             return value;
         }
-        return ChatMemory.DEFAULT_CONVERSATION_ID;
+        return "default";
     }
 
     private record PreparedRequest(ChatClientRequest request, String conversationId, String model) {

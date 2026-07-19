@@ -1,31 +1,24 @@
-# Knowledge: Spring AI Options Routing Pattern
+# Topic
+Endpoint-polymorphic model and options routing in Spring AI 2.0
 
-## Topic
-Endpoint-polymorphic model options routing in Spring AI
-
-## Source References
+# Source References
 - `ChatModelRouter.java` — the single routing point for model construction and options
-- Spring AI type hierarchy: `OllamaChatOptions` and `OpenAiChatOptions` both implement `ToolCallingChatOptions`
-- Bug fixed: three call sites hardcoded `ollamaOptions()` which throws for non-Ollama models
+- Spring AI 2.0.0 `OllamaChatOptions`, `OpenAiChatOptions`, and `DeepSeekChatOptions`
+- Spring AI DeepSeek reference: <https://docs.spring.io/spring-ai/reference/api/chat/deepseek-chat.html>
 
-## Key Takeaways
-1. **`ToolCallingChatOptions` is the polymorphic base** — both `OllamaChatOptions` and `OpenAiChatOptions` implement it. Despite the "ToolCalling" name, it works for plain (non-tool) chat too. Spring AI's `ChatClient.prompt().options()` and `Prompt` constructors accept `ToolCallingChatOptions` (or just `ChatOptions`).
+# Key Takeaways
+1. `ToolCallingChatOptions` is the caller-facing polymorphic type used by all three configured providers. Callers should not import provider-specific option classes.
+2. `EndpointType.DEEPSEEK` must build the dedicated `DeepSeekChatModel` and `DeepSeekChatOptions`. This preserves typed reasoning content across tool-call turns.
+3. DeepSeek reasoning is selected by the remote model, such as a reasoning-capable DeepSeek model; do not map Magenta's OpenAI `reasoningEffort` setting into `DeepSeekChatOptions`.
+4. `EndpointType.OPENAI_COMPATIBLE` uses `OpenAiChatModel`, while `OLLAMA` uses `OllamaChatModel`. Base URL, API key, timeout, and remote model name are resolved only at the router boundary.
+5. Model map keys are Magenta aliases. `remoteModelName` is the provider model sent over the wire, so UI and API callers should prefer aliases while compatibility lookup may still accept remote names.
+6. Spring AI 2.0 tool callbacks are supplied with immutable options mutation. Raw model calls do not internally execute tools; Magenta owns the bounded tool execution loop.
 
-2. **Never expose concrete option types to callers** — the pattern is: the router has one public endpoint-polymorphic method (`chatOptions()`/`toolCallingOptions()`) that returns the interface type, and endpoint-specific methods (`ollamaOptions()`) are kept but documented as unsafe for general use. Callers outside the router should never need concrete option types.
+# Engine Relevance
+- Add each new endpoint variant to model construction and option construction in `ChatModelRouter`.
+- Keep provider SDK types out of chat, planning, and advisor callers.
+- When upgrading Spring AI, regression-test provider routing, DeepSeek reasoning extraction, tool callback options, scalar-to-list tool argument coercion, and application startup.
 
-3. **The router must be the sole code path** — model construction, option building, and endpoint resolution should all flow through `ChatModelRouter`. Any call site that imports or constructs Spring AI Ollama/OpenAI types directly is a code smell. In this codebase, the only file importing those types (in production code) is `ChatModelRouter.java` — that's the correct pattern.
-
-4. **Config-driven endpoint dispatch**: the `EndpointType` enum (`OLLAMA`, `OPENAI_COMPATIBLE`, `DEEPSEEK`) is stored per-model in `ModelConfig`. The router switches on it at every decision point (model building, options building). This is safer than duck-typing or relying on conventions.
-
-5. **External model keys are local aliases**: entries under `models` use the map key as Magenta's selectable model alias, while `remoteModelName` is the provider/Ollama model name sent to the endpoint. UI selectors should submit alias keys and display aliases as the primary label; remote names are routing/provider details. Adding another model with an existing endpoint only requires a new model entry when no runtime behavior changes.
-
-## Engine Relevance
-When adding a new endpoint type or modifying how models are called:
-- Add the new `EndpointType` variant
-- Add the switch case in `ChatModelRouter.buildModel()`, `toolCallingOptions()`, and `chatOptions()`
-- Do not add new public methods that return the concrete type unless callers genuinely need it
-- Audit all call sites of `ollamaOptions()` / `ollamaOptionsBuilder()` to ensure they still respect endpoint polymorphism
-
-## Open Questions
-- Should we add a third `EndpointType` (e.g., `ANTHROPIC`) when needed?
-- Should `ollamaOptions()` and `ollamaOptionsBuilder()` be made package-private to enforce router-only access?
+# Open Questions
+- Should provider-specific router helpers be package-private to enforce the boundary?
+- Should a future Anthropic endpoint use its dedicated Spring AI provider once a concrete user workflow requires it?

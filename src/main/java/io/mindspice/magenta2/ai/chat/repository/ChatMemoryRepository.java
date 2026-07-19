@@ -101,7 +101,10 @@ public class ChatMemoryRepository implements org.springframework.ai.chat.memory.
     }
 
     private Message toMessage(String messageTypeValue, String messageText, String metadataJson) {
-        MessageType messageType = MessageType.fromValue(messageTypeValue);
+        MessageType messageType = java.util.Arrays.stream(MessageType.values())
+            .filter(candidate -> candidate.getValue().equalsIgnoreCase(messageTypeValue))
+            .findFirst()
+            .orElseThrow(() -> new IllegalArgumentException("Unknown message type: " + messageTypeValue));
         Map<String, Object> metadata = metadata(metadataJson);
         return switch (messageType) {
             case USER -> new UserMessage(messageText);

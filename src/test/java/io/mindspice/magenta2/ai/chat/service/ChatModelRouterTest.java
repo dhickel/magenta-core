@@ -1,5 +1,6 @@
 package io.mindspice.magenta2.ai.chat.service;
 
+import java.lang.reflect.Method;
 import java.util.List;
 import java.util.Map;
 
@@ -9,6 +10,11 @@ import io.mindspice.magenta2.ai.config.user.AiConfig;
 import io.mindspice.magenta2.ai.config.user.EndpointType;
 import io.mindspice.magenta2.ai.config.user.ModelConfig;
 import org.junit.jupiter.api.Test;
+import org.springframework.ai.chat.messages.AssistantMessage;
+import org.springframework.ai.chat.prompt.Prompt;
+import org.springframework.ai.deepseek.DeepSeekAssistantMessage;
+import org.springframework.ai.deepseek.DeepSeekChatModel;
+import org.springframework.ai.deepseek.api.DeepSeekApi;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -61,7 +67,37 @@ class ChatModelRouterTest {
         ChatModelRouter router = new ChatModelRouter(config, null, ObservationRegistry.NOOP);
 
         assertThat(router.remoteModelName("ds")).isEqualTo("deepseek-v4-pro");
-        assertThat(router.chatModel("ds")).isNotNull();
+        assertThat(router.chatModel("ds")).isInstanceOf(DeepSeekChatModel.class);
+    }
+
+    @Test
+    void officialDeepSeekModelReplaysReasoningContent() throws Exception {
+        AiConfig config = new AiConfig(
+            "magenta",
+            "magenta",
+            10,
+            null,
+            Map.of("ds", new ModelConfig("deepseek-reasoner", "https://api.deepseek.com", EndpointType.DEEPSEEK, 128000, 4, "sk-test")),
+            Map.of("magenta", new AgentConfig("ds", "Prompt.", List.of()))
+        );
+        ChatModelRouter router = new ChatModelRouter(config, null, ObservationRegistry.NOOP);
+        DeepSeekChatModel model = (DeepSeekChatModel) router.chatModel("ds");
+        DeepSeekAssistantMessage assistant = DeepSeekAssistantMessage.builder()
+            .content("")
+            .reasoningContent("reasoning that DeepSeek requires on the next turn")
+            .toolCalls(List.of(new AssistantMessage.ToolCall("call-1", "function", "lookup", "{}")))
+            .build();
+        Prompt prompt = new Prompt(List.of(assistant), router.chatOptions("ds"));
+
+        Method createRequest = DeepSeekChatModel.class.getDeclaredMethod("createRequest", Prompt.class, boolean.class);
+        createRequest.setAccessible(true);
+        DeepSeekApi.ChatCompletionRequest request =
+            (DeepSeekApi.ChatCompletionRequest) createRequest.invoke(model, prompt, false);
+
+        assertThat(request.messages()).singleElement().satisfies(message -> {
+            assertThat(message.reasoningContent()).isEqualTo("reasoning that DeepSeek requires on the next turn");
+            assertThat(message.toolCalls()).hasSize(1);
+        });
     }
 
     @Test
@@ -109,7 +145,7 @@ class ChatModelRouterTest {
     }
 
     @Test
-    void mapsDeepSeekLevelsToReasoningEffort() {
+    void usesDedicatedDeepSeekOptions() {
         AiConfig config = new AiConfig(
             "magenta",
             "magenta",
@@ -119,9 +155,9 @@ class ChatModelRouterTest {
             Map.of("magenta", new AgentConfig("ds", "Prompt.", List.of()))
         );
         ChatModelRouter router = new ChatModelRouter(config, null, ObservationRegistry.NOOP);
-        var options = (org.springframework.ai.openai.OpenAiChatOptions) router.toolCallingOptions("ds");
+        var options = (org.springframework.ai.deepseek.DeepSeekChatOptions) router.toolCallingOptions("ds");
 
-        assertThat(options.getReasoningEffort()).isEqualTo("max");
+        assertThat(options.getModel()).isEqualTo("deepseek-v4-pro");
     }
 
     @Test
@@ -157,7 +193,7 @@ class ChatModelRouterTest {
     }
 
     @Test
-    void deepSeekLevel0OmitsReasoningEffort() {
+    void deepSeekThinkingIsSelectedByModelRatherThanReasoningEffort() {
         AiConfig config = new AiConfig(
             "magenta",
             "magenta",
@@ -167,22 +203,22 @@ class ChatModelRouterTest {
             Map.of("magenta", new AgentConfig("ds", "Prompt.", List.of()))
         );
         ChatModelRouter router = new ChatModelRouter(config, null, ObservationRegistry.NOOP);
-        var options = (org.springframework.ai.openai.OpenAiChatOptions) router.toolCallingOptions("ds");
+        var options = (org.springframework.ai.deepseek.DeepSeekChatOptions) router.toolCallingOptions("ds");
 
-        assertThat(options.getReasoningEffort()).isNull();
+        assertThat(options.getModel()).isEqualTo("deepseek-v4-pro");
     }
 
     @Test
     void overflowThinkLevelClampsToMax() {
-        // DeepSeek overflow (100 → max)
+        // DeepSeek uses model selection rather than reasoning-effort levels.
         AiConfig dsConfig = new AiConfig(
             "magenta", "magenta", 10, null,
             Map.of("ds", new ModelConfig("deepseek-v4-pro", "https://api.deepseek.com", EndpointType.DEEPSEEK, 128000, 100, "sk-test")),
             Map.of("magenta", new AgentConfig("ds", "Prompt.", List.of()))
         );
         ChatModelRouter dsRouter = new ChatModelRouter(dsConfig, null, ObservationRegistry.NOOP);
-        var dsOptions = (org.springframework.ai.openai.OpenAiChatOptions) dsRouter.toolCallingOptions("ds");
-        assertThat(dsOptions.getReasoningEffort()).isEqualTo("max");
+        var dsOptions = (org.springframework.ai.deepseek.DeepSeekChatOptions) dsRouter.toolCallingOptions("ds");
+        assertThat(dsOptions.getModel()).isEqualTo("deepseek-v4-pro");
 
         // OpenAI overflow (100 → high)
         AiConfig oaiConfig = new AiConfig(

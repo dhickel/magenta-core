@@ -2,6 +2,8 @@
 
 Magenta is a Spring Boot application with SQLite persistence, Spring AI backed chat/model routing, filesystem-backed workspaces, and SimplyPages/HTMX web surfaces. The current code is organized around thin HTTP controllers, use-case services, repository-owned persistence details, and record-based domain payloads.
 
+The application baseline is Spring Boot 4 with Spring AI 2. Model clients are constructed explicitly by `ChatModelRouter`: Ollama and OpenAI-compatible endpoints use their corresponding providers, while `DEEPSEEK` uses Spring AI's dedicated DeepSeek provider so typed reasoning content survives explicit tool-call turns. Magenta does not depend on locally patched Spring AI artifacts.
+
 Source anchors:
 
 - Web/API entry points: [`api/web`](../../src/main/java/io/mindspice/magenta2/api/web)

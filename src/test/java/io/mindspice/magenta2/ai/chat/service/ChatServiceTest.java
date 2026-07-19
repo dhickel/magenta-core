@@ -66,6 +66,17 @@ import static org.mockito.Mockito.when;
 
 class ChatServiceTest {
 
+    @Test
+    void extractsReasoningFromDedicatedDeepSeekMessage() {
+        var message = org.springframework.ai.deepseek.DeepSeekAssistantMessage.builder()
+            .content("final answer")
+            .reasoningContent("reasoning trace")
+            .build();
+        var generation = new org.springframework.ai.chat.model.Generation(message);
+
+        assertThat(ChatService.thinkingText(generation)).isEqualTo("reasoning trace");
+    }
+
     @TempDir
     Path tempDir;
 
