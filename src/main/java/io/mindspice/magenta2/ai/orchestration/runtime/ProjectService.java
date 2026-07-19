@@ -1,6 +1,5 @@
 package io.mindspice.magenta2.ai.orchestration.runtime;
 
-import java.nio.file.Path;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
@@ -92,19 +91,6 @@ public class ProjectService {
 
         if (StringUtils.hasText(legacyOwnerAgentId)) {
             addAgent(saved.id(), legacyOwnerAgentId, "owner", now);
-        }
-
-        // Ensure project workspace directory exists
-        try {
-            if (workspaceDirectoryService != null) {
-                Path ws = workspaceDirectoryService.projectWorkspace(id);
-                log.info("Created project workspace: {}", ws);
-            }
-            if (workspaceService != null) {
-                workspaceService.projectWorkspace(id, name.trim());
-            }
-        } catch (Exception e) {
-            log.error("Failed to create project workspace for project={}: {}", id, e.getMessage());
         }
 
         log.info("Created project {} with legacy owner agent {}", id, legacyOwnerAgentId);
@@ -235,12 +221,6 @@ public class ProjectService {
     public ProjectWorkspaceSummary workspaceSummary(String projectId) {
         Project project = getProject(projectId);
         String displayPath = "projects/" + projectId + "/workspace";
-        if (workspaceDirectoryService != null) {
-            Path path = workspaceDirectoryService.projectWorkspace(projectId);
-            displayPath = workspaceDirectoryService.dataRoot()
-                .relativize(path)
-                .toString();
-        }
         var workspace = workspaceService == null ? null : workspaceService.projectWorkspace(projectId, project.name());
         WorkspaceLease activeLease = workspace == null || workspaceLeaseService == null
             ? null : workspaceLeaseService.activeWritableLease(workspace.id()).orElse(null);

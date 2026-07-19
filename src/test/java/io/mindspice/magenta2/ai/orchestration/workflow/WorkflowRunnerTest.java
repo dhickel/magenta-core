@@ -6,7 +6,6 @@ import io.mindspice.magenta2.ai.chat.rendering.ChatMarkdownRenderer;
 import io.mindspice.magenta2.ai.chat.repository.ChatMemoryRepository;
 import io.mindspice.magenta2.ai.orchestration.runtime.OrchestrationTaskContext;
 import io.mindspice.magenta2.ai.orchestration.runtime.OrchestrationTaskContextHolder;
-import io.mindspice.magenta2.ai.orchestration.workspaces.EffectiveWorkspaceResolver;
 import io.mindspice.magenta2.ai.orchestration.workspaces.OutputArtifactRepository;
 import io.mindspice.magenta2.ai.orchestration.workspaces.OutputArtifactService;
 import io.mindspice.magenta2.ai.orchestration.workspaces.RunOutputArtifact;
@@ -336,7 +335,7 @@ class WorkflowRunnerTest {
         ));
 
         AtomicInteger counter = new AtomicInteger();
-        workflowRunner.setTaskNodeExecutor((planId, planRunId, inputs, workspacePath) -> {
+        workflowRunner.setTaskNodeExecutor((planId, planRunId, inputs) -> {
             try { Thread.sleep(200); } catch (InterruptedException ignored) { }
             if (planId.equals(source.id())) {
                 return completedPlanRun(planRunId, planId, Map.of(), Map.of("result", "seed"));
@@ -458,7 +457,7 @@ class WorkflowRunnerTest {
         ));
 
         AtomicReference<OrchestrationTaskContext> contextSeenByTaskNode = new AtomicReference<>();
-        workflowRunner.setTaskNodeExecutor((planId, planRunId, inputs, workspacePath) -> {
+        workflowRunner.setTaskNodeExecutor((planId, planRunId, inputs) -> {
             contextSeenByTaskNode.set(OrchestrationTaskContextHolder.current());
             return completedPlanRun(planRunId, planId, inputs, Map.of("status", "ok"));
         });
@@ -501,7 +500,8 @@ class WorkflowRunnerTest {
             tempDir.resolve("caller-workspace").toString(),
             tempDir.resolve("caller-outputs").toString(),
             tempDir.resolve("caller-workspace").toString(),
-            tempDir.resolve("caller-workspace").toString()
+            tempDir.resolve("caller-workspace").toString(),
+            null
         ));
         try {
             WorkflowRun run = workflowService.startRun(def.id());
@@ -585,7 +585,7 @@ class WorkflowRunnerTest {
             Map.of(), null, null
         ));
 
-        workflowRunner.setTaskNodeExecutor((planId, planRunId, inputs, workspacePath) ->
+        workflowRunner.setTaskNodeExecutor((planId, planRunId, inputs) ->
             completedPlanRun(planRunId, planId, inputs, Map.of("status", "ok")));
 
         WorkflowRun run = workflowService.startRun(def.id());
@@ -625,7 +625,7 @@ class WorkflowRunnerTest {
             Map.of(), null, null
         ));
 
-        workflowRunner.setTaskNodeExecutor((planId, planRunId, inputs, workspacePath) ->
+        workflowRunner.setTaskNodeExecutor((planId, planRunId, inputs) ->
             completedPlanRun(planRunId, planId, inputs, Map.of("status", "rejected-path")));
 
         WorkflowRun run = workflowService.startRun(def.id());

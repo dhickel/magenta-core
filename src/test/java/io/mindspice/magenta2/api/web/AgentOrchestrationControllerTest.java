@@ -422,7 +422,7 @@ class AgentOrchestrationControllerTest {
                 throw new IllegalArgumentException("assignmentType is required");
             }
             return new WorkAssignment("assign-1", request.agentId(), null, null, request.assignmentType(),
-                0, OrchestrationStatus.QUEUED, null, null, 0,
+                0, OrchestrationStatus.QUEUED, null, null, null, null, 0,
                 java.util.Map.of(), java.util.Map.of(), java.util.Map.of(), java.util.Map.of(),
                 null, null, null, null, null, null, null);
         }
@@ -467,7 +467,7 @@ class AgentOrchestrationControllerTest {
 
         private WorkAssignment assignment(String assignmentId, String agentId, OrchestrationStatus status) {
             return new WorkAssignment(assignmentId, agentId, null, null, AssignmentType.REPORT,
-                0, status, null, null, 0,
+                0, status, null, null, null, null, 0,
                 java.util.Map.of(), java.util.Map.of(), java.util.Map.of(), java.util.Map.of(),
                 null, null, null, null, null, null, null);
         }
@@ -493,7 +493,7 @@ class AgentOrchestrationControllerTest {
         public WorkAssignment create(AssignmentRequest request) {
             receivedAgentId = request.agentId();
             return new WorkAssignment("assign-1", request.agentId(), null, null, request.assignmentType(),
-                0, OrchestrationStatus.QUEUED, null, null, 0,
+                0, OrchestrationStatus.QUEUED, null, null, null, null, 0,
                 java.util.Map.of(), java.util.Map.of(), java.util.Map.of(), java.util.Map.of(),
                 null, null, null, null, null, null, null);
         }

@@ -23,8 +23,7 @@ class TaskStreamSupportTest {
     void orchestrationRunEventsEmitsStartedAndCompleted() {
         OrchestrationRunResult result = new OrchestrationRunResult(
             new WorkAssignment("assign-1", "agent-1", "job-1", null,
-                AssignmentType.TASK_RUN, 0, OrchestrationStatus.COMPLETED, null,
-                null, 0, Map.of(), Map.of(), Map.of(), Map.of(),
+                AssignmentType.TASK_RUN, 0, OrchestrationStatus.COMPLETED, null, null, null, null, 0, Map.of(), Map.of(), Map.of(), Map.of(),
                 null, null, null, null, null, null, null),
             "run-1", Map.of("output", "value")
         );
@@ -41,8 +40,7 @@ class TaskStreamSupportTest {
     void orchestrationRunEventsEmitsFailedOnNonCompletedStatus() {
         OrchestrationRunResult result = new OrchestrationRunResult(
             new WorkAssignment("assign-2", "agent-1", "job-1", null,
-                AssignmentType.TASK_RUN, 0, OrchestrationStatus.FAILED, null,
-                null, 0, Map.of(), Map.of(), Map.of(), Map.of(),
+                AssignmentType.TASK_RUN, 0, OrchestrationStatus.FAILED, null, null, null, null, 0, Map.of(), Map.of(), Map.of(), Map.of(),
                 "error occurred", null, null, null, null, null, null),
             "run-2", Map.of()
         );

@@ -43,40 +43,47 @@ public class OutputArtifactService {
     private final WorkspaceDirectoryService directoryService;
     private final RootRelativePathService rootRelativePathService;
     private final ObjectMapper objectMapper;
-    private final boolean looseArtifactDiscoveryEnabled;
 
     @Autowired
     public OutputArtifactService(OutputArtifactRepository repository,
                                  WorkspaceDirectoryService directoryService,
                                  RootRelativePathService rootRelativePathService,
                                  ObjectMapper objectMapper) {
-        this(repository, directoryService, rootRelativePathService, objectMapper, true);
+        this.repository = repository;
+        this.directoryService = directoryService;
+        this.rootRelativePathService = rootRelativePathService;
+        this.objectMapper = objectMapper;
     }
 
     public OutputArtifactService(OutputArtifactRepository repository,
                                  WorkspaceDirectoryService directoryService,
                                  ObjectMapper objectMapper) {
-        this(repository, directoryService, new RootRelativePathService(directoryService), objectMapper, true);
+        this(repository, directoryService, new RootRelativePathService(directoryService), objectMapper);
     }
 
-    public OutputArtifactService(OutputArtifactRepository repository,
-                                 WorkspaceDirectoryService directoryService,
-                                 ObjectMapper objectMapper,
-                                 boolean looseArtifactDiscoveryEnabled) {
-        this(repository, directoryService, new RootRelativePathService(directoryService), objectMapper,
-            looseArtifactDiscoveryEnabled);
-    }
-
+    /**
+     * @deprecated Retained for source compatibility. The looseArtifactDiscoveryEnabled
+     *             parameter is no longer used; discoverLooseArtifacts has been removed.
+     */
+    @Deprecated
     public OutputArtifactService(OutputArtifactRepository repository,
                                  WorkspaceDirectoryService directoryService,
                                  RootRelativePathService rootRelativePathService,
                                  ObjectMapper objectMapper,
                                  boolean looseArtifactDiscoveryEnabled) {
-        this.repository = repository;
-        this.directoryService = directoryService;
-        this.rootRelativePathService = rootRelativePathService;
-        this.objectMapper = objectMapper;
-        this.looseArtifactDiscoveryEnabled = looseArtifactDiscoveryEnabled;
+        this(repository, directoryService, rootRelativePathService, objectMapper);
+    }
+
+    /**
+     * @deprecated Retained for source compatibility. The looseArtifactDiscoveryEnabled
+     *             parameter is no longer used; discoverLooseArtifacts has been removed.
+     */
+    @Deprecated
+    public OutputArtifactService(OutputArtifactRepository repository,
+                                 WorkspaceDirectoryService directoryService,
+                                 ObjectMapper objectMapper,
+                                 boolean looseArtifactDiscoveryEnabled) {
+        this(repository, directoryService, objectMapper);
     }
 
     /**
@@ -247,49 +254,6 @@ public class OutputArtifactService {
     }
 
     /**
-     * Scan the output directory for files not already registered as artifacts
-     * for this run and register them as discovered artifacts.
-     * Non-recursive: only scans files directly in the output directory.
-     *
-     * @return number of newly registered artifacts
-     */
-    public int discoverLooseArtifacts(String runId, String planId, Path outputDir,
-                                       OutputArtifactContext context) throws IOException {
-        if (!looseArtifactDiscoveryEnabled || !Files.isDirectory(outputDir)) {
-            return 0;
-        }
-        Path realDataRoot = directoryService.dataRoot().toRealPath();
-        Path realOutputDir = outputDir.toRealPath();
-        if (!realOutputDir.startsWith(realDataRoot)) {
-            throw new IllegalArgumentException("Output directory escapes data root: " + outputDir);
-        }
-        java.util.Set<String> registered = repository.findArtifactsByRunId(runId).stream()
-            .map(RunOutputArtifact::fileName)
-            .collect(java.util.stream.Collectors.toSet());
-
-        int count = 0;
-        try (var stream = Files.list(outputDir)) {
-            for (Path file : stream.filter(Files::isRegularFile).toList()) {
-                Path realFile = file.toRealPath();
-                if (!realFile.startsWith(realDataRoot) || !realFile.startsWith(realOutputDir)) {
-                    continue;
-                }
-                String fileName = file.getFileName().toString();
-                if (registered.contains(fileName)) {
-                    continue;
-                }
-                // Register the file directly as a discovered artifact
-                String artifactType = inferArtifactType(fileName);
-                saveArtifact(runId, planId, "discovered_" + sanitizeOutputName(fileName),
-                    artifactType, fileName, file, null, context);
-                count++;
-                registered.add(fileName);
-            }
-        }
-        return count;
-    }
-
-    /**
      * Explicitly publish an existing file as a run output artifact. The source
      * file must resolve under the configured data root. If it is not already in
      * the run output directory, it is copied there before metadata is persisted.
@@ -330,187 +294,6 @@ public class OutputArtifactService {
             : inferArtifactType(destination.getFileName().toString());
         return saveArtifact(runId, planId, outputName, resolvedType,
             destination.getFileName().toString(), destination, null, context);
-    }
-
-    /**
-     * Copies confined directory contents into {@code outputDir/copied-temp/}
-     * and registers each copied regular file as a run output artifact.
-     * Symbolic links are skipped and never followed.
-     */
-    public synchronized List<RunOutputArtifact> publishDirectoryContents(
-        String runId,
-        String planId,
-        Path sourceDir,
-        Path outputDir,
-        OutputArtifactContext context
-    ) throws IOException {
-        requireId(runId, "runId");
-        requireId(planId, "planId");
-        if (sourceDir == null) {
-            throw new IllegalArgumentException("sourceDir is required");
-        }
-        Path realDataRoot = directoryService.dataRoot().toRealPath();
-        Path realSourceRoot = requireConfinedSourceDirectory(sourceDir, realDataRoot);
-        Path realOutputDir = requireConfinedOutputDirectory(outputDir);
-        Path copiedTempDir = realOutputDir.resolve("copied-temp").normalize();
-        if (!copiedTempDir.startsWith(realOutputDir)) {
-            throw new IllegalArgumentException("Copied temp directory escapes output directory: " + outputDir);
-        }
-        if (Files.isSymbolicLink(copiedTempDir)) {
-            throw new IllegalArgumentException("Copied temp directory must not be a symlink: " + copiedTempDir);
-        }
-        Path realCopiedTempDir = Files.createDirectories(copiedTempDir).toRealPath();
-        if (!realCopiedTempDir.startsWith(realOutputDir)) {
-            throw new IllegalArgumentException("Copied temp directory escapes output directory: " + copiedTempDir);
-        }
-
-        List<RunOutputArtifact> artifacts = new ArrayList<>();
-        Files.walkFileTree(realSourceRoot, new SimpleFileVisitor<>() {
-            @Override
-            public FileVisitResult preVisitDirectory(Path dir, BasicFileAttributes attrs) throws IOException {
-                if (!realSourceRoot.equals(dir) && Files.isSymbolicLink(dir)) {
-                    return FileVisitResult.SKIP_SUBTREE;
-                }
-                Path realDir = dir.toRealPath();
-                if (!realDir.startsWith(realDataRoot) || !realDir.startsWith(realSourceRoot)) {
-                    throw new IllegalArgumentException("Source directory escapes source root: " + dir);
-                }
-                if (!realSourceRoot.equals(realDir) && (realDir.equals(realOutputDir) || realDir.startsWith(realOutputDir))) {
-                    return FileVisitResult.SKIP_SUBTREE;
-                }
-                return FileVisitResult.CONTINUE;
-            }
-
-            @Override
-            public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) throws IOException {
-                if (Files.isSymbolicLink(file)) {
-                    return FileVisitResult.CONTINUE;
-                }
-                Path realFile = file.toRealPath();
-                if (!realFile.startsWith(realDataRoot) || !realFile.startsWith(realSourceRoot)) {
-                    throw new IllegalArgumentException("Source file escapes source root: " + file);
-                }
-                Path relative = realSourceRoot.relativize(file);
-                Path destination = realCopiedTempDir.resolve(relative).normalize();
-                if (!destination.startsWith(realCopiedTempDir) || !destination.startsWith(realOutputDir)) {
-                    throw new IllegalArgumentException("Copied temp destination escapes output directory: " + relative);
-                }
-                if (Files.isSymbolicLink(destination)) {
-                    throw new IllegalArgumentException("Copied temp destination must not be a symlink: " + relative);
-                }
-                Path parent = Files.createDirectories(destination.getParent()).toRealPath();
-                if (!parent.startsWith(realCopiedTempDir) || !parent.startsWith(realOutputDir)) {
-                    throw new IllegalArgumentException("Copied temp destination parent escapes output directory: " + relative);
-                }
-                Files.copy(realFile, destination, StandardCopyOption.REPLACE_EXISTING);
-                Path realDestination = destination.toRealPath();
-                if (!realDestination.startsWith(realCopiedTempDir) || !realDestination.startsWith(realOutputDir)) {
-                    throw new IllegalArgumentException("Copied temp destination escapes output directory: " + relative);
-                }
-                String relativeName = relativePathWithSlashes(relative);
-                String artifactType = inferArtifactType(realDestination.getFileName().toString());
-                artifacts.add(saveArtifact(
-                    runId,
-                    planId,
-                    "copied_temp/" + relativeName,
-                    artifactType,
-                    realDestination.getFileName().toString(),
-                    realDestination,
-                    null,
-                    context
-                ));
-                return FileVisitResult.CONTINUE;
-            }
-        });
-        return artifacts;
-    }
-
-    /**
-     * Promotes run-local staged outputs into a backend-owned final output
-     * directory and registers the promoted copies as artifacts.
-     */
-    public synchronized List<RunOutputArtifact> promoteDirectoryContents(
-        String runId,
-        String planId,
-        Path sourceDir,
-        Path outputDir,
-        OutputArtifactContext context
-    ) throws IOException {
-        requireId(runId, "runId");
-        requireId(planId, "planId");
-        if (sourceDir == null) {
-            throw new IllegalArgumentException("sourceDir is required");
-        }
-        Path realDataRoot = directoryService.dataRoot().toRealPath();
-        Path realSourceRoot = requireConfinedSourceDirectory(sourceDir, realDataRoot);
-        Path realOutputDir = requireConfinedOutputDirectory(outputDir);
-        if (realOutputDir.equals(realSourceRoot) || realOutputDir.startsWith(realSourceRoot)) {
-            return List.of();
-        }
-
-        java.util.Set<String> registeredFilePaths = repository.findArtifactsByRunId(runId).stream()
-            .map(RunOutputArtifact::filePath)
-            .collect(java.util.stream.Collectors.toSet());
-        List<RunOutputArtifact> artifacts = new ArrayList<>();
-        Files.walkFileTree(realSourceRoot, new SimpleFileVisitor<>() {
-            @Override
-            public FileVisitResult preVisitDirectory(Path dir, BasicFileAttributes attrs) throws IOException {
-                if (!realSourceRoot.equals(dir) && Files.isSymbolicLink(dir)) {
-                    return FileVisitResult.SKIP_SUBTREE;
-                }
-                Path realDir = dir.toRealPath();
-                if (!realDir.startsWith(realDataRoot) || !realDir.startsWith(realSourceRoot)) {
-                    throw new IllegalArgumentException("Source directory escapes source root: " + dir);
-                }
-                return FileVisitResult.CONTINUE;
-            }
-
-            @Override
-            public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) throws IOException {
-                if (Files.isSymbolicLink(file)) {
-                    return FileVisitResult.CONTINUE;
-                }
-                Path realFile = file.toRealPath();
-                if (!realFile.startsWith(realDataRoot) || !realFile.startsWith(realSourceRoot)) {
-                    throw new IllegalArgumentException("Source file escapes source root: " + file);
-                }
-                Path relative = realSourceRoot.relativize(file);
-                Path destination = realOutputDir.resolve(relative).normalize();
-                if (!destination.startsWith(realOutputDir)) {
-                    throw new IllegalArgumentException("Promoted destination escapes output directory: " + relative);
-                }
-                if (Files.isSymbolicLink(destination)) {
-                    throw new IllegalArgumentException("Promoted destination must not be a symlink: " + relative);
-                }
-                Path parent = Files.createDirectories(destination.getParent()).toRealPath();
-                if (!parent.startsWith(realOutputDir)) {
-                    throw new IllegalArgumentException("Promoted destination parent escapes output directory: " + relative);
-                }
-                Files.copy(realFile, destination, StandardCopyOption.REPLACE_EXISTING);
-                Path realDestination = destination.toRealPath();
-                if (!realDestination.startsWith(realOutputDir)) {
-                    throw new IllegalArgumentException("Promoted destination escapes output directory: " + relative);
-                }
-                String storedDestination = rootRelativePathService.store(realDestination);
-                if (registeredFilePaths.contains(storedDestination)) {
-                    return FileVisitResult.CONTINUE;
-                }
-                String relativeName = relativePathWithSlashes(relative);
-                artifacts.add(saveArtifact(
-                    runId,
-                    planId,
-                    "promoted/" + relativeName,
-                    inferArtifactType(realDestination.getFileName().toString()),
-                    realDestination.getFileName().toString(),
-                    realDestination,
-                    null,
-                    context
-                ));
-                registeredFilePaths.add(storedDestination);
-                return FileVisitResult.CONTINUE;
-            }
-        });
-        return artifacts;
     }
 
     private String inferArtifactType(String fileName) {

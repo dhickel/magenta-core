@@ -2,6 +2,11 @@ package io.mindspice.magenta2.ai.orchestration.workspaces;
 
 import org.springframework.util.StringUtils;
 
+/**
+ * Simplified target descriptor for output publication. Work Area routing,
+ * workspace IDs, and direct-output fields have been retired; output
+ * materialization now uses the workspace context from the active run.
+ */
 public record OutputPublicationTarget(
     OutputDirectoryKind kind,
     String workUnitId,
@@ -10,12 +15,7 @@ public record OutputPublicationTarget(
     String projectId,
     String jobId,
     String jobAssignmentId,
-    String jobRunId,
-    String workspaceId,
-    String selectedWorkAreaId,
-    String outputRouteType,
-    String outputWorkAreaId,
-    String outputDirectRelativePath
+    String jobRunId
 ) {
     public OutputPublicationTarget {
         if (kind == null) {
@@ -28,67 +28,26 @@ public record OutputPublicationTarget(
         jobId = normalize(jobId);
         jobAssignmentId = normalize(jobAssignmentId);
         jobRunId = normalize(jobRunId);
-        workspaceId = normalize(workspaceId);
-        selectedWorkAreaId = normalize(selectedWorkAreaId);
-        outputRouteType = normalize(outputRouteType);
-        outputWorkAreaId = normalize(outputWorkAreaId);
-        outputDirectRelativePath = normalize(outputDirectRelativePath);
     }
 
     public static OutputPublicationTarget task(
         String taskId,
         String runId,
         String agentId,
-        String projectId,
-        String workspaceId
+        String projectId
     ) {
         return new OutputPublicationTarget(
-            OutputDirectoryKind.TASK, taskId, runId, agentId, projectId, null, null, null, workspaceId,
-            null, null, null, null);
-    }
-
-    public static OutputPublicationTarget task(
-        String taskId,
-        String runId,
-        String agentId,
-        String projectId,
-        String workspaceId,
-        String selectedWorkAreaId,
-        String outputRouteType,
-        String outputWorkAreaId,
-        String outputDirectRelativePath
-    ) {
-        return new OutputPublicationTarget(
-            OutputDirectoryKind.TASK, taskId, runId, agentId, projectId, null, null, null, workspaceId,
-            selectedWorkAreaId, outputRouteType, outputWorkAreaId, outputDirectRelativePath);
+            OutputDirectoryKind.TASK, taskId, runId, agentId, projectId, null, null, null);
     }
 
     public static OutputPublicationTarget workflow(
         String workflowId,
         String runId,
         String agentId,
-        String projectId,
-        String workspaceId
+        String projectId
     ) {
         return new OutputPublicationTarget(
-            OutputDirectoryKind.WORKFLOW, workflowId, runId, agentId, projectId, null, null, null, workspaceId,
-            null, null, null, null);
-    }
-
-    public static OutputPublicationTarget workflow(
-        String workflowId,
-        String runId,
-        String agentId,
-        String projectId,
-        String workspaceId,
-        String selectedWorkAreaId,
-        String outputRouteType,
-        String outputWorkAreaId,
-        String outputDirectRelativePath
-    ) {
-        return new OutputPublicationTarget(
-            OutputDirectoryKind.WORKFLOW, workflowId, runId, agentId, projectId, null, null, null, workspaceId,
-            selectedWorkAreaId, outputRouteType, outputWorkAreaId, outputDirectRelativePath);
+            OutputDirectoryKind.WORKFLOW, workflowId, runId, agentId, projectId, null, null, null);
     }
 
     public static OutputPublicationTarget job(
@@ -96,29 +55,10 @@ public record OutputPublicationTarget(
         String jobAssignmentId,
         String jobRunId,
         String agentId,
-        String projectId,
-        String workspaceId
+        String projectId
     ) {
         return new OutputPublicationTarget(
-            OutputDirectoryKind.JOB, null, null, agentId, projectId, jobId, jobAssignmentId, jobRunId, workspaceId,
-            null, null, null, null);
-    }
-
-    public static OutputPublicationTarget job(
-        String jobId,
-        String jobAssignmentId,
-        String jobRunId,
-        String agentId,
-        String projectId,
-        String workspaceId,
-        String selectedWorkAreaId,
-        String outputRouteType,
-        String outputWorkAreaId,
-        String outputDirectRelativePath
-    ) {
-        return new OutputPublicationTarget(
-            OutputDirectoryKind.JOB, null, null, agentId, projectId, jobId, jobAssignmentId, jobRunId, workspaceId,
-            selectedWorkAreaId, outputRouteType, outputWorkAreaId, outputDirectRelativePath);
+            OutputDirectoryKind.JOB, null, null, agentId, projectId, jobId, jobAssignmentId, jobRunId);
     }
 
     private static String normalize(String value) {

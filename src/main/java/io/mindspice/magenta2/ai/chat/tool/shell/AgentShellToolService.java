@@ -173,7 +173,7 @@ public class AgentShellToolService {
         rejectUnsafeRelativePath(normalized, "Working directory escapes active durable workspace: " + workingDirectory);
 
         if (WorkspacePathLayout.OUTPUTS.equals(normalized) || normalized.startsWith(WorkspacePathLayout.OUTPUTS + "/")) {
-            Path outputRoot = activeScopeRoot(ctx.hostOutputPath(), "active assignment output directory");
+            Path outputRoot = activeScopeRoot(contextWorkspacePath(ctx), "active assignment output directory");
             String remainder = WorkspacePathLayout.OUTPUTS.equals(normalized) ? "" : normalized.substring((WorkspacePathLayout.OUTPUTS + "/").length());
             Path resolved = resolveScopedDirectory(outputRoot, remainder, workingDirectory);
             return new ResolvedWorkingDirectory(resolved, displayScoped(WorkspacePathLayout.OUTPUTS, outputRoot, resolved));
@@ -230,16 +230,14 @@ public class AgentShellToolService {
 
     private ResolvedWorkingDirectory resolveProjectWorkingDirectory(OrchestrationTaskContext ctx, String normalized,
                                                                     String workingDirectory) throws IOException {
-        if (workspaceDirectoryService == null || !StringUtils.hasText(ctx.projectId())) {
+        if (!StringUtils.hasText(ctx.projectId())) {
             throw new IllegalArgumentException("Project workspace is not available for this assignment");
         }
         String projectPrefix = WorkspacePathLayout.PROJECTS + "/" + ctx.projectId();
         if (!normalized.equals(projectPrefix) && !normalized.startsWith(projectPrefix + "/")) {
             throw new IllegalArgumentException("Project working directory is not linked to this assignment: " + workingDirectory);
         }
-        Path projectRoot = StringUtils.hasText(ctx.hostDurableWorkspacePath())
-            ? workspaceDirectoryService.requireAssignmentProjectLinkTarget(ctx.hostDurableWorkspacePath(), ctx.projectId())
-            : workspaceDirectoryService.projectWorkspace(ctx.projectId()).toRealPath();
+        Path projectRoot = activeScopeRoot(contextWorkspacePath(ctx), "project workspace");
         String remainder = normalized.equals(projectPrefix) ? "" : normalized.substring((projectPrefix + "/").length());
         Path resolved = resolveScopedDirectory(projectRoot, remainder, workingDirectory);
         return new ResolvedWorkingDirectory(resolved, displayScoped(projectPrefix, projectRoot, resolved));
@@ -484,15 +482,11 @@ public class AgentShellToolService {
     }
 
     private String contextRunPath(OrchestrationTaskContext ctx) {
-        return StringUtils.hasText(ctx.hostRunPath())
-            ? ctx.hostRunPath()
-            : ctx.hostDurableWorkspacePath();
+        return ctx.hostDurableWorkspacePath();
     }
 
     private String contextRootPath(OrchestrationTaskContext ctx) {
-        return StringUtils.hasText(ctx.hostRootPath())
-            ? ctx.hostRootPath()
-            : contextWorkspacePath(ctx);
+        return ctx.hostDurableWorkspacePath();
     }
 
     private Path activeScopeRoot(String path, String label) throws IOException {

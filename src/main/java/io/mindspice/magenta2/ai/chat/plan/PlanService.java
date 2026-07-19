@@ -21,13 +21,8 @@ import io.mindspice.magenta2.ai.chat.repository.ChatSessionMetadataRepository;
 import io.mindspice.magenta2.ai.orchestration.runtime.OrchestrationTaskContext;
 import io.mindspice.magenta2.ai.orchestration.runtime.OrchestrationTaskContextHolder;
 import io.mindspice.magenta2.ai.orchestration.settings.RuntimeSettingsService;
-import io.mindspice.magenta2.ai.orchestration.workspaces.EffectiveWorkspace;
-import io.mindspice.magenta2.ai.orchestration.workspaces.EffectiveWorkspaceResolver;
 import io.mindspice.magenta2.ai.orchestration.workspaces.OutputArtifactContext;
 import io.mindspice.magenta2.ai.orchestration.workspaces.OutputArtifactService;
-import io.mindspice.magenta2.ai.orchestration.workspaces.OutputDirectoryService;
-import io.mindspice.magenta2.ai.orchestration.workspaces.OutputPublicationTarget;
-import io.mindspice.magenta2.ai.orchestration.workspaces.ResolvedOutputDirectory;
 import io.mindspice.magenta2.ai.orchestration.workspaces.RootRelativePathService;
 import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspacePathLayout;
 import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceDirectoryService;
@@ -60,15 +55,13 @@ public class PlanService {
     private final ChatSessionMetadataRepository chatSessionMetadataRepository;
     private final ChatMarkdownRenderer markdownRenderer;
     private final WorkspaceDirectoryService workspaceDirectoryService;
-    private final EffectiveWorkspaceResolver effectiveWorkspaceResolver;
-    private final OutputDirectoryService outputDirectoryService;
     private final OutputArtifactService outputArtifactService;
     private final RootRelativePathService rootRelativePathService;
     private final RuntimeSettingsService runtimeSettingsService;
     private final Map<String, String> executionRunsByConversationId = new ConcurrentHashMap<>();
 
     public PlanService(PlanRepository planRepository, ChatMemoryRepository chatMemoryRepository) {
-        this(planRepository, chatMemoryRepository, null, new ChatMarkdownRenderer(), null, null, null, null, null, null);
+        this(planRepository, chatMemoryRepository, null, new ChatMarkdownRenderer(), null, null, null, null);
     }
 
     // Used by tests that need session metadata and markdown rendering
@@ -78,7 +71,7 @@ public class PlanService {
         ChatSessionMetadataRepository chatSessionMetadataRepository,
         ChatMarkdownRenderer markdownRenderer
     ) {
-        this(planRepository, chatMemoryRepository, chatSessionMetadataRepository, markdownRenderer, null, null, null, null, null, null);
+        this(planRepository, chatMemoryRepository, chatSessionMetadataRepository, markdownRenderer, null, null, null, null);
     }
 
     public PlanService(
@@ -90,20 +83,7 @@ public class PlanService {
         OutputArtifactService outputArtifactService
     ) {
         this(planRepository, chatMemoryRepository, chatSessionMetadataRepository, markdownRenderer,
-            workspaceDirectoryService, outputArtifactService, null, null, null, null);
-    }
-
-    public PlanService(
-        PlanRepository planRepository,
-        ChatMemoryRepository chatMemoryRepository,
-        ChatSessionMetadataRepository chatSessionMetadataRepository,
-        ChatMarkdownRenderer markdownRenderer,
-        WorkspaceDirectoryService workspaceDirectoryService,
-        OutputArtifactService outputArtifactService,
-        EffectiveWorkspaceResolver effectiveWorkspaceResolver
-    ) {
-        this(planRepository, chatMemoryRepository, chatSessionMetadataRepository, markdownRenderer,
-            workspaceDirectoryService, outputArtifactService, effectiveWorkspaceResolver, null, null, null);
+            workspaceDirectoryService, outputArtifactService, null, null);
     }
 
     @Autowired
@@ -114,8 +94,6 @@ public class PlanService {
         ChatMarkdownRenderer markdownRenderer,
         @Autowired(required = false) WorkspaceDirectoryService workspaceDirectoryService,
         @Autowired(required = false) OutputArtifactService outputArtifactService,
-        @Autowired(required = false) EffectiveWorkspaceResolver effectiveWorkspaceResolver,
-        @Autowired(required = false) OutputDirectoryService outputDirectoryService,
         @Autowired(required = false) RootRelativePathService rootRelativePathService,
         @Autowired(required = false) RuntimeSettingsService runtimeSettingsService
     ) {
@@ -124,8 +102,6 @@ public class PlanService {
         this.chatSessionMetadataRepository = chatSessionMetadataRepository;
         this.markdownRenderer = markdownRenderer;
         this.workspaceDirectoryService = workspaceDirectoryService;
-        this.effectiveWorkspaceResolver = effectiveWorkspaceResolver;
-        this.outputDirectoryService = outputDirectoryService;
         this.outputArtifactService = outputArtifactService;
         this.rootRelativePathService = rootRelativePathService != null
             ? rootRelativePathService

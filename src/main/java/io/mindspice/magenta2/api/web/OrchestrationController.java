@@ -5554,7 +5554,10 @@ public class OrchestrationController {
             return status.health().name();
         }
         try {
-            workspaceService.agentWorkspace(agent.id(), null);
+            var wds = workspaceDirectoryServiceRef.getIfAvailable();
+            if (wds != null) {
+                wds.agentWorkspace(agent.id());
+            }
             return "READY";
         } catch (Exception e) {
             return "PENDING";
@@ -6647,7 +6650,7 @@ public class OrchestrationController {
                 return new Div().withClass("orch-error").withInnerText("Shell execution service is unavailable.").render();
             }
             OrchestrationTaskContextHolder.set(new OrchestrationTaskContext(
-                agentId, agent.name(), null, null, null, null, null, null, null, null));
+                agentId, agent.name(), null, null, null, null, null, null, null));
             try {
                 var result = shellService.exec(
                     required(params.get("command"), "command is required"),

@@ -79,7 +79,7 @@ public class WorkflowRunner {
 
     @FunctionalInterface
     public interface TaskNodeExecutor {
-        PlanRun execute(String planId, String planRunId, Map<String, Object> inputs, String workspacePath);
+        PlanRun execute(String planId, String planRunId, Map<String, Object> inputs);
     }
 
     public void setTaskNodeExecutor(TaskNodeExecutor executor) {
@@ -444,7 +444,7 @@ public class WorkflowRunner {
         }
 
         String planRunId = UUID.randomUUID().toString();
-        PlanRun planRun = taskNodeExecutor.execute(node.planId(), planRunId, inputs, descriptorRoot(run).toString());
+        PlanRun planRun = taskNodeExecutor.execute(node.planId(), planRunId, inputs);
         if (planRun.status() == PlanRunStatus.FAILED || planRun.status() == PlanRunStatus.NEEDS_REVIEW) {
             throw new IllegalStateException("Task node '" + node.key() + "' failed with status " + planRun.status().name());
         }
@@ -752,7 +752,7 @@ public class WorkflowRunner {
             run.jobId(), run.jobAssignmentId(), run.jobRunId(), run.projectId(),
             descriptor.kind().token(), descriptor.key(), descriptor.identity(),
             StringUtils.hasText(run.runType()) ? run.runType() : "WORKFLOW_RUN",
-            run.runDisplayName(), descriptor.root().toString(), null, null, descriptor.root().toString()
+            run.runDisplayName(), descriptor.root().toString(), null
         );
     }
 

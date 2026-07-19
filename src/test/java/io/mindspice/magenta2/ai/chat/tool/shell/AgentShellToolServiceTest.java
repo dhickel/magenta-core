@@ -392,7 +392,6 @@ class AgentShellToolServiceTest {
     @Test
     void resolvesRunOutputAliasWhenHostOutputPathIsPresent() throws Exception {
         Path runWorkspace = Files.createDirectories(tempDir.resolve("workspace/agent-1/runs/run-1"));
-        Path outputDir = Files.createDirectories(runWorkspace.resolve("outputs"));
 
         AiConfig aiConfig = new AiConfig(null, null, null, null, null, null, tempDir, null, null, null);
         WorkspaceDirectoryService dirService = WorkspaceDirectoryServiceTestSupport.directoryService(tempDir);
@@ -407,13 +406,13 @@ class AgentShellToolServiceTest {
             "agent/agent-1",
             "TASK_RUN",
             runWorkspace.toString(),
-            outputDir.toString()));
+            runWorkspace.toString()));
 
         try {
             AgentShellToolService.ShellExecResult result = service.exec("pwd", "outputs", 5);
 
             assertThat(result.exitCode()).isZero();
-            assertThat(result.stdout().trim()).endsWith("workspace/agent-1/runs/run-1/outputs");
+            assertThat(result.stdout().trim()).endsWith("workspace/agent-1/runs/run-1");
             assertThat(result.workingDirectory()).isEqualTo("outputs");
         } finally {
             OrchestrationTaskContextHolder.clear();
@@ -424,8 +423,6 @@ class AgentShellToolServiceTest {
     void activeTaskContextAliasesDurableWorkspaceRunTempAndCurrentOutputs() throws Exception {
         Path durableWorkspace = Files.createDirectories(tempDir.resolve("projects/project-1/workspace"));
         Path workDir = Files.createDirectories(durableWorkspace.resolve("work"));
-        Path runWorkspace = Files.createDirectories(tempDir.resolve("workspace/agent-1/runs/run-1"));
-        Path outputDir = Files.createDirectories(runWorkspace.resolve("outputs"));
 
         AiConfig aiConfig = new AiConfig(null, null, null, null, null, null, tempDir, null, null, null);
         WorkspaceDirectoryService dirService = WorkspaceDirectoryServiceTestSupport.directoryService(tempDir);
@@ -434,8 +431,8 @@ class AgentShellToolServiceTest {
         OrchestrationTaskContextHolder.set(new OrchestrationTaskContext(
             "agent-1", "TestAgent", null, null, null, "project-1",
             null, "workspace-1", "workspace-1", "TASK_RUN", null,
-            durableWorkspace.toString(), outputDir.toString(),
-            runWorkspace.toString(), durableWorkspace.toString(), null));
+            durableWorkspace.toString(), durableWorkspace.toString(),
+            durableWorkspace.toString(), durableWorkspace.toString(), null));
 
         try {
             assertThat(service.exec("pwd", "workspace", 5).stdout().trim())
@@ -443,9 +440,9 @@ class AgentShellToolServiceTest {
             assertThat(service.exec("pwd", "work", 5).stdout().trim())
                 .isEqualTo(workDir.toRealPath().toString());
             assertThat(service.exec("pwd", "run", 5).stdout().trim())
-                .isEqualTo(runWorkspace.toRealPath().toString());
+                .isEqualTo(durableWorkspace.toRealPath().toString());
             assertThat(service.exec("pwd", "outputs", 5).stdout().trim())
-                .isEqualTo(outputDir.toRealPath().toString());
+                .isEqualTo(durableWorkspace.toRealPath().toString());
         } finally {
             OrchestrationTaskContextHolder.clear();
         }
@@ -486,8 +483,6 @@ class AgentShellToolServiceTest {
 
         AiConfig aiConfig = new AiConfig(null, null, null, null, null, null, tempDir, null, null, null);
         WorkspaceDirectoryService dirService = WorkspaceDirectoryServiceTestSupport.directoryService(tempDir);
-        Path projectWorkspace = dirService.projectWorkspace("project-1");
-        dirService.materializeAssignmentProjectLink(runWorkspace.toString(), "project-1");
         AgentShellToolService service = new AgentShellToolService(tempDir, List.of("pwd"), dirService);
 
         OrchestrationTaskContextHolder.set(new OrchestrationTaskContext("agent-1",
@@ -505,7 +500,7 @@ class AgentShellToolServiceTest {
             AgentShellToolService.ShellExecResult result = service.exec("pwd", "projects/project-1", 5);
 
             assertThat(result.exitCode()).isZero();
-            assertThat(result.stdout().trim()).isEqualTo(projectWorkspace.toRealPath().toString());
+            assertThat(result.stdout().trim()).isEqualTo(runWorkspace.toRealPath().toString());
             assertThat(result.workingDirectory()).isEqualTo("projects/project-1");
             assertThatThrownBy(() -> service.exec("pwd", "projects/project-2", 5))
                 .isInstanceOf(IllegalArgumentException.class)

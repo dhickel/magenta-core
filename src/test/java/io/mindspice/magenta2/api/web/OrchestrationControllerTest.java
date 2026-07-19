@@ -2059,8 +2059,7 @@ class OrchestrationControllerTest {
         StubAssignmentService stubAsgn = new StubAssignmentService();
         WorkAssignment completed = new WorkAssignment(
             "asgn-10", "agent-1", "job-abc", "item-1",
-            AssignmentType.TASK_RUN, 0, OrchestrationStatus.COMPLETED,
-            null, null, 0, Map.of(),
+            AssignmentType.TASK_RUN, 0, OrchestrationStatus.COMPLETED, null, null, null, null, 0, Map.of(),
             Map.of("taskRunId", "run-123"), Map.of(), Map.of(), null, null, null,
             Instant.now(), Instant.now(), Instant.now(),
             Instant.now().minusSeconds(3600)

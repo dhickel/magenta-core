@@ -73,7 +73,6 @@ import io.mindspice.magenta2.ai.execution.MagentaWorkExecutor;
 import io.mindspice.magenta2.ai.execution.MagentaWorkKind;
 import io.mindspice.magenta2.ai.orchestration.workspaces.OutputArtifactRepository;
 import io.mindspice.magenta2.ai.orchestration.workspaces.OutputArtifactService;
-import io.mindspice.magenta2.ai.orchestration.workspaces.EffectiveWorkspaceResolver;
 import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceDirectoryServiceTestSupport;
 import io.mindspice.magenta2.ai.orchestration.workspaces.Workspace;
 import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceDirectoryServiceTestSupport;
@@ -213,7 +212,7 @@ class OrchestrationRuntimeTest {
     }
 
     @Test
-    void projectCreationPersistsManagedProjectWorkspace() throws Exception {
+    void projectCreationDoesNotCreateManagedProjectWorkspace() throws Exception {
         JdbcTemplate jdbcTemplate = jdbcTemplate();
         WorkspaceRepository workspaceRepository = new WorkspaceRepository(jdbcTemplate);
         WorkspaceService workspaceService = new WorkspaceService(workspaceRepository, aiConfig(), WorkspaceDirectoryServiceTestSupport.agentProfileRepository(true), WorkspaceDirectoryServiceTestSupport.chatExistenceRepository(true));
@@ -226,10 +225,10 @@ class OrchestrationRuntimeTest {
         );
 
         Project project = projectService.createProject("Leaseable", "desc", "agent-1", null);
-        Workspace workspace = workspaceRepository.findByOwner(WorkspaceOwnerType.PROJECT, project.id()).orElseThrow();
+        assertThat(project.id()).isNotNull();
 
-        assertThat(workspace.rootRelativePath()).isEqualTo("projects/" + project.id());
-        assertThat(Files.isDirectory(tempDir.resolve(workspace.rootRelativePath()))).isTrue();
+        // Project creation no longer materializes a workspace directory
+        assertThat(workspaceRepository.findByOwner(WorkspaceOwnerType.PROJECT, project.id())).isEmpty();
     }
 
     @Test
@@ -324,13 +323,13 @@ class OrchestrationRuntimeTest {
         ));
         runtimeRepository.saveAssignment(new WorkAssignment(
             "assignment-1", "agent-1", "orch-job-1", "orch-item-1", AssignmentType.TASK_RUN, 1,
-            OrchestrationStatus.QUEUED, null, null, 0,
+            OrchestrationStatus.QUEUED, null, null, null, null, 0,
             Map.of(), Map.of(), Map.of(), Map.of(),
             null, null, null, null, null, null, null
         ));
         runtimeRepository.saveAssignment(new WorkAssignment(
             "assignment-2", "agent-2", "orch-job-1", "orch-item-1", AssignmentType.TASK_RUN, 1,
-            OrchestrationStatus.QUEUED, null, null, 0,
+            OrchestrationStatus.QUEUED, null, null, null, null, 0,
             Map.of(), Map.of(), Map.of(), Map.of(),
             null, null, null, null, null, null, null
         ));
@@ -499,7 +498,7 @@ class OrchestrationRuntimeTest {
         // Create an assignment with agent, job, and workspace context
         WorkAssignment assignment = new WorkAssignment(
             "assign-ctx-1", agent.id(), "job-ctx-1", null, AssignmentType.REPORT, 1,
-            OrchestrationStatus.QUEUED, null, "ws-ctx-1", 0,
+            OrchestrationStatus.QUEUED, null, null, "ws-ctx-1", "ws-ctx-1", 0,
             Map.of("message", "Test context propagation"),
             Map.of(), Map.of(), Map.of(),
             null, null, null, null, null, null, null
@@ -515,8 +514,7 @@ class OrchestrationRuntimeTest {
             agent.id(),
             "agent/" + agent.id(),
             "TASK_RUN",
-            "/tmp/ws",
-            "/tmp/out");
+            "/tmp/ws");
 
         assertThat(ctx.hasAgentContext()).isTrue();
         assertThat(ctx.hasContext()).isTrue();
@@ -526,7 +524,6 @@ class OrchestrationRuntimeTest {
         assertThat(ctx.workspaceIdentity()).isEqualTo("agent/" + agent.id());
         assertThat(ctx.runType()).isEqualTo("TASK_RUN");
         assertThat(ctx.hostDurableWorkspacePath()).isEqualTo("/tmp/ws");
-        assertThat(ctx.hostOutputPath()).isEqualTo("/tmp/out");
 
         // Set and clear via holder
         OrchestrationTaskContextHolder.set(ctx);
@@ -594,7 +591,7 @@ class OrchestrationRuntimeTest {
             List.of(), List.of(), true, null, null));
         WorkAssignment running = repository.saveAssignment(new WorkAssignment(
             "assignment-interrupt", "agent-1", null, null, AssignmentType.REPORT, 1,
-            OrchestrationStatus.RUNNING, null, null, 0,
+            OrchestrationStatus.RUNNING, null, null, null, null, 0,
             Map.of(), Map.of(), Map.of(), Map.of(),
             null, "owner-1", Instant.now().plusSeconds(300),
             null, null, Instant.now(), null
@@ -634,7 +631,7 @@ class OrchestrationRuntimeTest {
 
         WorkAssignment queued = repository.saveAssignment(new WorkAssignment(
             "assignment-delete", agent.id(), null, null, AssignmentType.REPORT, 1,
-            OrchestrationStatus.QUEUED, null, null, 0,
+            OrchestrationStatus.QUEUED, null, null, null, null, 0,
             Map.of(), Map.of(), Map.of(), Map.of(), null, null, null, null, null, null, null
         ));
 
@@ -655,7 +652,7 @@ class OrchestrationRuntimeTest {
         AssignmentService service = new AssignmentService(repository, agentService, null, null);
         repository.saveAssignment(new WorkAssignment(
             "assignment-terminal", agent.id(), null, null, AssignmentType.REPORT, 1,
-            OrchestrationStatus.FAILED, null, null, 0,
+            OrchestrationStatus.FAILED, null, null, null, null, 0,
             Map.of(), Map.of(), Map.of(), Map.of(), "boom", null, null,
             null, null, Instant.now().minusSeconds(120), Instant.now().minusSeconds(60)
         ));
@@ -678,12 +675,12 @@ class OrchestrationRuntimeTest {
         AssignmentService service = new AssignmentService(repository, agentService, null, null);
         repository.saveAssignment(new WorkAssignment(
             "assignment-queued", agent.id(), null, null, AssignmentType.REPORT, 1,
-            OrchestrationStatus.QUEUED, null, null, 0,
+            OrchestrationStatus.QUEUED, null, null, null, null, 0,
             Map.of(), Map.of(), Map.of(), Map.of(), null, null, null, null, null, null, null
         ));
         repository.saveAssignment(new WorkAssignment(
             "assignment-complete", agent.id(), null, null, AssignmentType.REPORT, 1,
-            OrchestrationStatus.COMPLETED, null, null, 0,
+            OrchestrationStatus.COMPLETED, null, null, null, null, 0,
             Map.of(), Map.of(), Map.of(), Map.of(), null, null, null,
             null, null, Instant.now().minusSeconds(120), Instant.now().minusSeconds(60)
         ));
@@ -707,18 +704,18 @@ class OrchestrationRuntimeTest {
         Instant old = Instant.now().minusSeconds(3 * 24 * 60 * 60);
         repository.saveAssignment(new WorkAssignment(
             "assignment-old-terminal", agent.id(), null, null, AssignmentType.REPORT, 1,
-            OrchestrationStatus.COMPLETED, null, null, 0,
+            OrchestrationStatus.COMPLETED, null, null, null, null, 0,
             Map.of(), Map.of(), Map.of(), Map.of(), null, null, null, old, old, old, old
         ));
         repository.saveAssignmentConversationLink("assignment-old-terminal", "conversation-old");
         repository.saveAssignment(new WorkAssignment(
             "assignment-new-terminal", agent.id(), null, null, AssignmentType.REPORT, 1,
-            OrchestrationStatus.FAILED, null, null, 0,
+            OrchestrationStatus.FAILED, null, null, null, null, 0,
             Map.of(), Map.of(), Map.of(), Map.of(), null, null, null, null, null, Instant.now(), Instant.now()
         ));
         repository.saveAssignment(new WorkAssignment(
             "assignment-old-queued", agent.id(), null, null, AssignmentType.REPORT, 1,
-            OrchestrationStatus.QUEUED, null, null, 0,
+            OrchestrationStatus.QUEUED, null, null, null, null, 0,
             Map.of(), Map.of(), Map.of(), Map.of(), null, null, null, old, old, null, null
         ));
 
@@ -748,7 +745,7 @@ class OrchestrationRuntimeTest {
         Instant old = Instant.now().minusSeconds(3 * 24 * 60 * 60);
         repository.saveAssignment(new WorkAssignment(
             "assignment-auto-terminal", agent.id(), null, null, AssignmentType.REPORT, 1,
-            OrchestrationStatus.COMPLETED, null, null, 0,
+            OrchestrationStatus.COMPLETED, null, null, null, null, 0,
             Map.of(), Map.of(), Map.of(), Map.of(), null, null, null, old, old, old, old
         ));
 
@@ -986,13 +983,13 @@ class OrchestrationRuntimeTest {
 
         repository.saveAssignment(new WorkAssignment(
             "assignment-running", agent.id(), null, null, AssignmentType.REPORT, 1,
-            OrchestrationStatus.RUNNING, null, null, 0,
+            OrchestrationStatus.RUNNING, null, null, null, null, 0,
             Map.of(), Map.of(), Map.of(), Map.of(), null, "owner", Instant.now().plusSeconds(60),
             null, null, Instant.now(), null
         ));
         repository.saveAssignment(new WorkAssignment(
             "assignment-cancel", agent.id(), null, null, AssignmentType.REPORT, 1,
-            OrchestrationStatus.CANCEL_REQUESTED, null, null, 0,
+            OrchestrationStatus.CANCEL_REQUESTED, null, null, null, null, 0,
             Map.of(), Map.of(), Map.of(), Map.of(), null, null, null, null, null, null, null
         ));
 
@@ -1018,7 +1015,7 @@ class OrchestrationRuntimeTest {
 
         repository.saveAssignment(new WorkAssignment(
             "assignment-wrong-agent", "agent-1", null, null, AssignmentType.REPORT, 1,
-            OrchestrationStatus.COMPLETED, null, null, 0,
+            OrchestrationStatus.COMPLETED, null, null, null, null, 0,
             Map.of(), Map.of(), Map.of(), Map.of(), null, null, null, null, null, null, Instant.now()
         ));
 
@@ -1070,7 +1067,7 @@ class OrchestrationRuntimeTest {
         );
         repository.saveAssignment(new WorkAssignment(
             "assignment-task", "agent-1", null, null, AssignmentType.TASK_RUN, 1,
-            OrchestrationStatus.QUEUED, null, null, 0,
+            OrchestrationStatus.QUEUED, null, null, null, null, 0,
             Map.of(), Map.of("taskId", "task-1", "inputValues", Map.of("prompt", "go")),
             Map.of(), Map.of(), null, null, null, null, null, null, null
         ));
@@ -1091,7 +1088,6 @@ class OrchestrationRuntimeTest {
         WorkspaceDirectoryService directoryService = WorkspaceDirectoryServiceTestSupport.directoryService(tempDir);
         WorkspaceRepository workspaceRepository = new WorkspaceRepository(jdbcTemplate);
         WorkspaceService workspaceService = new WorkspaceService(workspaceRepository, aiConfig, WorkspaceDirectoryServiceTestSupport.agentProfileRepository(true), WorkspaceDirectoryServiceTestSupport.chatExistenceRepository(true));
-        EffectiveWorkspaceResolver effectiveWorkspaceResolver = new EffectiveWorkspaceResolver(directoryService, workspaceService);
         OutputArtifactService outputArtifactService = new OutputArtifactService(
             new OutputArtifactRepository(jdbcTemplate), directoryService, objectMapper);
         OrchestrationRuntimeRepository repository = new OrchestrationRuntimeRepository(jdbcTemplate, objectMapper);
@@ -1139,7 +1135,7 @@ class OrchestrationRuntimeTest {
         ));
         repository.saveAssignment(new WorkAssignment(
             "assignment-workflow-wait", agent.id(), null, null, AssignmentType.WORKFLOW_RUN, 1,
-            OrchestrationStatus.QUEUED, null, null, 0,
+            OrchestrationStatus.QUEUED, null, null, null, null, 0,
             Map.of(), Map.of("workflowId", workflow.id()), Map.of(), Map.of(),
             null, null, null, null, null, null, null
         ));
@@ -1281,7 +1277,7 @@ class OrchestrationRuntimeTest {
         );
         repository.saveAssignment(new WorkAssignment(
             "assignment-project-link", agent.id(), job.id(), null, AssignmentType.TASK_RUN, 1,
-            OrchestrationStatus.QUEUED, null, null, 0,
+            OrchestrationStatus.QUEUED, null, null, null, null, 0,
             Map.of(), Map.of("taskId", task.id(), "inputValues", Map.of()),
             Map.of(), Map.of(), null, null, null, null, null, null, null
         ));
@@ -1319,9 +1315,8 @@ class OrchestrationRuntimeTest {
             repository
         );
         Project project = projectService.createProject("Job Project", "desc", agent.id(), null);
-        EffectiveWorkspaceResolver resolver = new EffectiveWorkspaceResolver(directoryService, workspaceService);
         JobService jobService = new JobService(
-            new JobRepository(jdbcTemplate, objectMapper), directoryService, null, null, resolver);
+            new JobRepository(jdbcTemplate, objectMapper), directoryService, null, null, (OrchestrationRuntimeRepository) null);
         JobDefinition job = jobService.saveDefinition(new JobDefinition(
             "job-isolated", agent.id(), project.id(), "agent", agent.id(), null, null,
             "Isolated Job", "summary", List.of(), null, null, null, null, null
@@ -1341,13 +1336,13 @@ class OrchestrationRuntimeTest {
         );
         repository.saveAssignment(new WorkAssignment(
             "assignment-job-a", agent.id(), job.id(), null, AssignmentType.JOB_RUN, 1,
-            OrchestrationStatus.QUEUED, null, null, 0,
+            OrchestrationStatus.QUEUED, null, null, null, null, 0,
             Map.of(), Map.of("jobId", job.id()),
             Map.of(), Map.of(), null, null, null, null, null, null, null
         ));
         repository.saveAssignment(new WorkAssignment(
             "assignment-job-b", agent.id(), job.id(), null, AssignmentType.JOB_RUN, 1,
-            OrchestrationStatus.QUEUED, null, null, 0,
+            OrchestrationStatus.QUEUED, null, null, null, null, 0,
             Map.of(), Map.of("jobId", job.id()),
             Map.of(), Map.of(), null, null, null, null, null, null, null
         ));
@@ -1378,16 +1373,14 @@ class OrchestrationRuntimeTest {
         AiConfig aiConfig = aiConfig();
         WorkspaceDirectoryService directoryService = WorkspaceDirectoryServiceTestSupport.directoryService(tempDir);
         WorkspaceRepository workspaceRepository = new WorkspaceRepository(jdbcTemplate);
-        WorkspaceService workspaceService = new WorkspaceService(workspaceRepository, aiConfig, WorkspaceDirectoryServiceTestSupport.agentProfileRepository(true), WorkspaceDirectoryServiceTestSupport.chatExistenceRepository(true));
-        EffectiveWorkspaceResolver resolver = new EffectiveWorkspaceResolver(directoryService, workspaceService);
-        OrchestrationRuntimeRepository repository = new OrchestrationRuntimeRepository(jdbcTemplate, objectMapper);
+        WorkspaceService workspaceService = new WorkspaceService(workspaceRepository, aiConfig, WorkspaceDirectoryServiceTestSupport.agentProfileRepository(true), WorkspaceDirectoryServiceTestSupport.chatExistenceRepository(true));        OrchestrationRuntimeRepository repository = new OrchestrationRuntimeRepository(jdbcTemplate, objectMapper);
         AgentProfileService agentService = agentService(jdbcTemplate, aiConfig);
         AgentProfile agent = agentService.create(new AgentProfile(
             "agent-job-context", "Job Context Agent", AgentProfileStatus.ACTIVE, "main", "Prompt",
             List.of(), List.of(), true, null, null
         ));
         JobService jobService = new JobService(
-            new JobRepository(jdbcTemplate, objectMapper), directoryService, null, null, resolver);
+            new JobRepository(jdbcTemplate, objectMapper), directoryService, null, null, (OrchestrationRuntimeRepository) null);
         JobDefinition job = jobService.saveDefinition(new JobDefinition(
             "job-context", agent.id(), null, "agent", agent.id(), null, "READY",
             "Job Context", "summary",
@@ -1429,7 +1422,7 @@ class OrchestrationRuntimeTest {
         );
         repository.saveAssignment(new WorkAssignment(
             "assignment-job-context", agent.id(), job.id(), null, AssignmentType.JOB_RUN, 1,
-            OrchestrationStatus.QUEUED, null, null, 0,
+            OrchestrationStatus.QUEUED, null, null, null, null, 0,
             Map.of(), Map.of("jobId", job.id()), Map.of(), Map.of(),
             null, null, null, null, null, null, null
         ));
@@ -1447,16 +1440,14 @@ class OrchestrationRuntimeTest {
         AiConfig aiConfig = aiConfig();
         WorkspaceDirectoryService directoryService = WorkspaceDirectoryServiceTestSupport.directoryService(tempDir);
         WorkspaceRepository workspaceRepository = new WorkspaceRepository(jdbcTemplate);
-        WorkspaceService workspaceService = new WorkspaceService(workspaceRepository, aiConfig, WorkspaceDirectoryServiceTestSupport.agentProfileRepository(true), WorkspaceDirectoryServiceTestSupport.chatExistenceRepository(true));
-        EffectiveWorkspaceResolver resolver = new EffectiveWorkspaceResolver(directoryService, workspaceService);
-        OrchestrationRuntimeRepository repository = new OrchestrationRuntimeRepository(jdbcTemplate, objectMapper);
+        WorkspaceService workspaceService = new WorkspaceService(workspaceRepository, aiConfig, WorkspaceDirectoryServiceTestSupport.agentProfileRepository(true), WorkspaceDirectoryServiceTestSupport.chatExistenceRepository(true));        OrchestrationRuntimeRepository repository = new OrchestrationRuntimeRepository(jdbcTemplate, objectMapper);
         AgentProfileService agentService = agentService(jdbcTemplate, aiConfig);
         AgentProfile agent = agentService.create(new AgentProfile(
             "agent-job-attribution", "Job Attribution Agent", AgentProfileStatus.ACTIVE, "main", "Prompt",
             List.of(), List.of(), true, null, null
         ));
         JobService jobService = new JobService(
-            new JobRepository(jdbcTemplate, objectMapper), directoryService, null, null, resolver);
+            new JobRepository(jdbcTemplate, objectMapper), directoryService, null, null, (OrchestrationRuntimeRepository) null);
         JobDefinition job = jobService.saveDefinition(new JobDefinition(
             "job-attribution", agent.id(), null, "agent", agent.id(), null, "READY",
             "Job Attribution", "summary",
@@ -1497,7 +1488,7 @@ class OrchestrationRuntimeTest {
         );
         repository.saveAssignment(new WorkAssignment(
             "assignment-job-attribution", agent.id(), job.id(), null, AssignmentType.JOB_RUN, 1,
-            OrchestrationStatus.QUEUED, null, null, 0,
+            OrchestrationStatus.QUEUED, null, null, null, null, 0,
             Map.of(), Map.of("jobId", job.id()), Map.of(), Map.of(),
             null, null, null, null, null, null, null
         ));
@@ -1519,16 +1510,14 @@ class OrchestrationRuntimeTest {
         AiConfig aiConfig = aiConfig();
         WorkspaceDirectoryService directoryService = WorkspaceDirectoryServiceTestSupport.directoryService(tempDir);
         WorkspaceRepository workspaceRepository = new WorkspaceRepository(jdbcTemplate);
-        WorkspaceService workspaceService = new WorkspaceService(workspaceRepository, aiConfig, WorkspaceDirectoryServiceTestSupport.agentProfileRepository(true), WorkspaceDirectoryServiceTestSupport.chatExistenceRepository(true));
-        EffectiveWorkspaceResolver resolver = new EffectiveWorkspaceResolver(directoryService, workspaceService);
-        OrchestrationRuntimeRepository repository = new OrchestrationRuntimeRepository(jdbcTemplate, objectMapper);
+        WorkspaceService workspaceService = new WorkspaceService(workspaceRepository, aiConfig, WorkspaceDirectoryServiceTestSupport.agentProfileRepository(true), WorkspaceDirectoryServiceTestSupport.chatExistenceRepository(true));        OrchestrationRuntimeRepository repository = new OrchestrationRuntimeRepository(jdbcTemplate, objectMapper);
         AgentProfileService agentService = agentService(jdbcTemplate, aiConfig);
         AgentProfile agent = agentService.create(new AgentProfile(
             "agent-job-resume", "Job Resume Agent", AgentProfileStatus.ACTIVE, "main", "Prompt",
             List.of(), List.of(), true, null, null
         ));
         JobService jobService = new JobService(
-            new JobRepository(jdbcTemplate, objectMapper), directoryService, null, null, resolver);
+            new JobRepository(jdbcTemplate, objectMapper), directoryService, null, null, (OrchestrationRuntimeRepository) null);
         JobDefinition job = jobService.saveDefinition(new JobDefinition(
             "job-resume", agent.id(), null, "agent", agent.id(), null, "READY",
             "Job Resume", "summary",
@@ -1542,7 +1531,7 @@ class OrchestrationRuntimeTest {
         OrchestrationEventService eventService = new OrchestrationEventService(repository, assignmentService, true);
         repository.saveAssignment(new WorkAssignment(
             "assignment-job-resume", agent.id(), job.id(), null, AssignmentType.JOB_RUN, 1,
-            OrchestrationStatus.QUEUED, null, null, 0,
+            OrchestrationStatus.QUEUED, null, null, null, null, 0,
             Map.of(), Map.of("jobId", job.id()), Map.of(), Map.of(),
             null, null, null, null, null, null, null
         ));
@@ -1643,7 +1632,7 @@ class OrchestrationRuntimeTest {
         AssignmentService assignmentService = new AssignmentService(repository, agentService, null, null);
         repository.saveAssignment(new WorkAssignment(
             "assignment-cancel-queued", "agent-1", null, null, AssignmentType.REPORT, 1,
-            OrchestrationStatus.QUEUED, null, null, 0,
+            OrchestrationStatus.QUEUED, null, null, null, null, 0,
             Map.of(), Map.of(), Map.of(), Map.of(), null, null, null, null, null, null, null
         ));
 
@@ -1694,7 +1683,7 @@ class OrchestrationRuntimeTest {
         );
         repository.saveAssignment(new WorkAssignment(
             "assignment-cancel-running", "agent-1", null, null, AssignmentType.TASK_RUN, 1,
-            OrchestrationStatus.QUEUED, null, null, 0,
+            OrchestrationStatus.QUEUED, null, null, null, null, 0,
             Map.of(), Map.of("taskId", "task-1"), Map.of(), Map.of(),
             null, null, null, null, null, null, null
         ));
@@ -1716,7 +1705,7 @@ class OrchestrationRuntimeTest {
         OrchestrationRuntimeRepository repository = new OrchestrationRuntimeRepository(jdbcTemplate, new ObjectMapper());
         repository.saveAssignment(new WorkAssignment(
             "assignment-stale-cancel", "agent-1", null, null, AssignmentType.REPORT, 1,
-            OrchestrationStatus.CANCEL_REQUESTED, null, null, 0,
+            OrchestrationStatus.CANCEL_REQUESTED, null, null, null, null, 0,
             Map.of(), Map.of(), Map.of(), Map.of(), null, "owner-1", Instant.now().minusSeconds(5),
             null, null, Instant.now().minusSeconds(60), null
         ));
@@ -1770,12 +1759,12 @@ class OrchestrationRuntimeTest {
         OrchestrationEventService eventService = new OrchestrationEventService(repository, assignmentService, true);
         repository.saveAssignment(new WorkAssignment(
             "wait-message", agent.id(), null, null, AssignmentType.WAIT_FOR_MESSAGE, 1,
-            OrchestrationStatus.WAITING, null, null, 0,
+            OrchestrationStatus.WAITING, null, null, null, null, 0,
             Map.of(), Map.of(), Map.of(), Map.of(), null, null, null, null, null, null, null
         ));
         repository.saveAssignment(new WorkAssignment(
             "wait-workflow", agent.id(), null, null, AssignmentType.WORKFLOW_RUN, 1,
-            OrchestrationStatus.WAITING, null, null, 0,
+            OrchestrationStatus.WAITING, null, null, null, null, 0,
             Map.of(), Map.of(), Map.of(), Map.of(), null, null, null, null, null, null, null
         ));
 
@@ -1836,7 +1825,7 @@ class OrchestrationRuntimeTest {
     private WorkAssignment assignment(String id, String agentId, OrchestrationStatus status) {
         return new WorkAssignment(
             id, agentId, null, null, AssignmentType.REPORT, 1, status,
-            null, null, 0, Map.of(), Map.of(), Map.of(), Map.of(),
+            null, null, null, null, 0, Map.of(), Map.of(), Map.of(), Map.of(),
             null,
             status == OrchestrationStatus.RUNNING ? "owner-1" : null,
             status == OrchestrationStatus.RUNNING ? Instant.now().plusSeconds(300) : null,

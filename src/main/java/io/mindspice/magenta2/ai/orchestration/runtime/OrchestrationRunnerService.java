@@ -230,8 +230,7 @@ public class OrchestrationRunnerService {
             leased.workspaceKey(),
             leased.workspaceIdentity(),
             leased.assignmentType().name(), // runType
-            durablePath, // hostWorkspacePath (also hostDurableWorkspacePath in convenience ctor)
-            null // hostOutputPath — resolved by PlanService during startRun
+            durablePath // hostWorkspacePath (also hostDurableWorkspacePath in convenience ctor)
         );
 
         // Validate project membership (projectId is metadata only)

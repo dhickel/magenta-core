@@ -76,7 +76,7 @@ public class AgentsMdResolver {
             return resolveScoped(ownerRoot, remainder, "active owner root");
         }
         if (WorkspacePathLayout.OUTPUTS.equals(normalized) || normalized.startsWith(WorkspacePathLayout.OUTPUTS + "/")) {
-            Path outputRoot = requireExistingDirectory(Path.of(requiredText(context.hostOutputPath(),
+            Path outputRoot = requireExistingDirectory(Path.of(requiredText(contextWorkspacePath(context),
                 "active output path")), "active output");
             String remainder = WorkspacePathLayout.OUTPUTS.equals(normalized)
                 ? ""
@@ -213,21 +213,14 @@ public class AgentsMdResolver {
     }
 
     private String contextRunPath(OrchestrationTaskContext context) {
-        return StringUtils.hasText(context.hostRunPath())
-            ? context.hostRunPath()
-            : context.hostDurableWorkspacePath();
+        return context.hostDurableWorkspacePath();
     }
 
     private String contextRootPath(OrchestrationTaskContext context) {
-        return StringUtils.hasText(context.hostRootPath())
-            ? context.hostRootPath()
-            : contextWorkspacePath(context);
+        return context.hostDurableWorkspacePath();
     }
 
     private String boundRootText(OrchestrationTaskContext context) {
-        if (StringUtils.hasText(context.hostRootPath())) {
-            return context.hostRootPath();
-        }
         return context.hostDurableWorkspacePath();
     }
 

@@ -16,17 +16,11 @@ import io.mindspice.magenta2.ai.chat.plan.PlanService;
 import io.mindspice.magenta2.ai.orchestration.agents.AgentProfile;
 import io.mindspice.magenta2.ai.orchestration.agents.AgentProfileService;
 import io.mindspice.magenta2.ai.orchestration.workflow.WorkflowService;
-import io.mindspice.magenta2.ai.orchestration.workspaces.EffectiveWorkspace;
-import io.mindspice.magenta2.ai.orchestration.workspaces.EffectiveWorkspaceResolver;
 import io.mindspice.magenta2.ai.orchestration.workspaces.OutputArtifactService;
-import io.mindspice.magenta2.ai.orchestration.workspaces.OutputDirectoryService;
-import io.mindspice.magenta2.ai.orchestration.workspaces.OutputPublicationTarget;
-import io.mindspice.magenta2.ai.orchestration.workspaces.ResolvedOutputDirectory;
 import io.mindspice.magenta2.ai.orchestration.workspaces.RootRelativePathService;
 import io.mindspice.magenta2.ai.orchestration.workspaces.RunOutputArtifact;
 import io.mindspice.magenta2.ai.orchestration.workspaces.Workspace;
 import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceDirectoryService;
-import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceService;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.slf4j.Logger;
@@ -49,56 +43,27 @@ public class JobService {
     private final WorkspaceDirectoryService workspaceDirectoryService;
     private final PlanService planService;
     private final WorkflowService workflowService;
-    private final EffectiveWorkspaceResolver effectiveWorkspaceResolver;
     private final OrchestrationRuntimeRepository runtimeRepository;
     private final ObjectProvider<AssignmentService> assignmentServiceProvider;
     private final AgentProfileService agentProfileService;
     private final ProjectService projectService;
-    private final WorkspaceService workspaceService;
     private final OutputArtifactService outputArtifactService;
-    private final OutputDirectoryService outputDirectoryService;
     private final RootRelativePathService rootRelativePathService;
 
     public JobService(JobRepository jobRepository,
                       WorkspaceDirectoryService workspaceDirectoryService,
                       PlanService planService,
                       WorkflowService workflowService) {
-        this(jobRepository, workspaceDirectoryService, planService, workflowService, null, null);
+        this(jobRepository, workspaceDirectoryService, planService, workflowService, null);
     }
 
     public JobService(JobRepository jobRepository,
                       WorkspaceDirectoryService workspaceDirectoryService,
                       PlanService planService,
                       WorkflowService workflowService,
-                      EffectiveWorkspaceResolver effectiveWorkspaceResolver) {
-        this(jobRepository, workspaceDirectoryService, planService, workflowService, effectiveWorkspaceResolver, null);
-    }
-
-    public JobService(JobRepository jobRepository,
-                      WorkspaceDirectoryService workspaceDirectoryService,
-                      PlanService planService,
-                      WorkflowService workflowService,
-                      @Autowired(required = false) EffectiveWorkspaceResolver effectiveWorkspaceResolver,
-                      @Autowired(required = false) OrchestrationRuntimeRepository runtimeRepository) {
-        this(jobRepository, workspaceDirectoryService, planService, workflowService, effectiveWorkspaceResolver,
-            runtimeRepository, null, null, null, null, null, null, null);
-    }
-
-    public JobService(JobRepository jobRepository,
-                      WorkspaceDirectoryService workspaceDirectoryService,
-                      PlanService planService,
-                      WorkflowService workflowService,
-                      EffectiveWorkspaceResolver effectiveWorkspaceResolver,
-                      OrchestrationRuntimeRepository runtimeRepository,
-                      ObjectProvider<AssignmentService> assignmentServiceProvider,
-                      AgentProfileService agentProfileService,
-                      ProjectService projectService,
-                      WorkspaceService workspaceService,
-                      OutputArtifactService outputArtifactService,
-                      RootRelativePathService rootRelativePathService) {
-        this(jobRepository, workspaceDirectoryService, planService, workflowService, effectiveWorkspaceResolver,
-            runtimeRepository, assignmentServiceProvider, agentProfileService, projectService, workspaceService,
-            outputArtifactService, null, rootRelativePathService);
+                      OrchestrationRuntimeRepository runtimeRepository) {
+        this(jobRepository, workspaceDirectoryService, planService, workflowService,
+            runtimeRepository, null, null, null, null, null);
     }
 
     @Autowired
@@ -106,27 +71,21 @@ public class JobService {
                       WorkspaceDirectoryService workspaceDirectoryService,
                       PlanService planService,
                       WorkflowService workflowService,
-                      @Autowired(required = false) EffectiveWorkspaceResolver effectiveWorkspaceResolver,
                       @Autowired(required = false) OrchestrationRuntimeRepository runtimeRepository,
                       @Autowired(required = false) ObjectProvider<AssignmentService> assignmentServiceProvider,
                       @Autowired(required = false) AgentProfileService agentProfileService,
                       @Autowired(required = false) ProjectService projectService,
-                      @Autowired(required = false) WorkspaceService workspaceService,
                       @Autowired(required = false) OutputArtifactService outputArtifactService,
-                      @Autowired(required = false) OutputDirectoryService outputDirectoryService,
                       @Autowired(required = false) RootRelativePathService rootRelativePathService) {
         this.jobRepository = jobRepository;
         this.workspaceDirectoryService = workspaceDirectoryService;
         this.planService = planService;
         this.workflowService = workflowService;
-        this.effectiveWorkspaceResolver = effectiveWorkspaceResolver;
         this.runtimeRepository = runtimeRepository;
         this.assignmentServiceProvider = assignmentServiceProvider;
         this.agentProfileService = agentProfileService;
         this.projectService = projectService;
-        this.workspaceService = workspaceService;
         this.outputArtifactService = outputArtifactService;
-        this.outputDirectoryService = outputDirectoryService;
         this.rootRelativePathService = rootRelativePathService != null
             ? rootRelativePathService
             : workspaceDirectoryService == null ? null : new RootRelativePathService(workspaceDirectoryService);

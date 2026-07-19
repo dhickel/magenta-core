@@ -49,41 +49,6 @@ public record OutputArtifactQuery(
         return of(agentId, jobId, null, null, projectId, workspaceType, workspaceKey, workspaceIdentity, runId, planId, null, artifactType, limit);
     }
 
-    /**
-     * @deprecated Use the 10-arg of() with explicit workspaceType/workspaceKey/workspaceIdentity.
-     */
-    @Deprecated
-    public static OutputArtifactQuery of(String agentId,
-                                         String jobId,
-                                         String projectId,
-                                         String workspaceId,
-                                         String runId,
-                                         String planId,
-                                         String artifactType,
-                                         Integer limit) {
-        return of(agentId, jobId, null, null, projectId,
-            null, workspaceId, workspaceId, runId, planId, null, artifactType, limit);
-    }
-
-    /**
-     * @deprecated Use the 13-arg of() with explicit workspaceType/workspaceKey/workspaceIdentity.
-     */
-    @Deprecated
-    public static OutputArtifactQuery of(String agentId,
-                                         String jobId,
-                                         String jobAssignmentId,
-                                         String jobRunId,
-                                         String projectId,
-                                         String workspaceId,
-                                         String runId,
-                                         String planId,
-                                         String runType,
-                                         String artifactType,
-                                         Integer limit) {
-        return of(agentId, jobId, jobAssignmentId, jobRunId, projectId,
-            null, workspaceId, workspaceId, runId, planId, runType, artifactType, limit);
-    }
-
     public static OutputArtifactQuery of(String agentId,
                                          String jobId,
                                          String jobAssignmentId,
