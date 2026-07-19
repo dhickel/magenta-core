@@ -12,6 +12,7 @@ import org.springframework.jdbc.datasource.SingleConnectionDataSource;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceDirectoryServiceTestSupport;
 
 class WorkspacePathSegmentValidationTest {
     @TempDir
@@ -68,7 +69,7 @@ class WorkspacePathSegmentValidationTest {
 
     @Test
     void workspaceDirectoryServiceRejectsInvalidIdsBeforeCreatingDirectories() throws Exception {
-        WorkspaceDirectoryService service = new WorkspaceDirectoryService(aiConfig());
+        WorkspaceDirectoryService service = WorkspaceDirectoryServiceTestSupport.directoryService(tempDir);
 
         assertThat(service.agentWorkspace("agent-1"))
             .isEqualTo(tempDir.resolve("workspace/agent-1").toRealPath());
@@ -90,52 +91,45 @@ class WorkspacePathSegmentValidationTest {
     }
 
     @Test
-    void agentWorkspaceStarterFileIsWrittenOnFirstWorkspaceCreation() throws Exception {
-        WorkspaceDirectoryService service = new WorkspaceDirectoryService(aiConfig());
+    void agentWorkspaceNoLongerWritesStarterFileOnCreation() throws Exception {
+        WorkspaceDirectoryService service = WorkspaceDirectoryServiceTestSupport.directoryService(tempDir);
 
         Path root = service.agentWorkspace("agent-1");
         Path agentsFile = root.resolve("AGENTS.md");
 
-        assertThat(Files.isRegularFile(agentsFile)).isTrue();
-        String content = Files.readString(agentsFile);
-        assertThat(content).contains("plain Markdown guidance");
-        assertThat(content).contains("home/");
-        assertThat(content).contains("runs/");
-        assertThat(content).contains("runs/<runId>/outputs/");
-        assertThat(content).contains("workareas/");
-        assertThat(content).contains("Jobs bind to an agent, project, and optional Work Area context.");
-        assertThat(content).contains("Explicit user prompts and task instructions override");
+        // Phase 02: starter file generation is removed
+        assertThat(Files.isRegularFile(agentsFile)).isFalse();
     }
 
     @Test
-    void repeatedAgentWorkspaceEnsureNeverOverwritesExistingAgentsFile() throws Exception {
-        WorkspaceDirectoryService service = new WorkspaceDirectoryService(aiConfig());
+    void repeatedAgentWorkspaceEnsureIsIdempotentAndSafe() throws Exception {
+        WorkspaceDirectoryService service = WorkspaceDirectoryServiceTestSupport.directoryService(tempDir);
 
         Path root = service.agentWorkspace("agent-1");
-        Path agentsFile = root.resolve("AGENTS.md");
         String custom = "# Custom AGENTS\n\nKeep this exact content.\n";
-        Files.writeString(agentsFile, custom);
+        Files.writeString(root.resolve("AGENTS.md"), custom);
 
         service.agentWorkspace("agent-1");
         service.agentWorkspaceRoot("agent-1");
 
-        assertThat(Files.readString(agentsFile)).isEqualTo(custom);
+        assertThat(Files.readString(root.resolve("AGENTS.md"))).isEqualTo(custom);
     }
 
     @Test
     void preexistingWorkspaceRootDoesNotReceiveRetroactiveStarterFile() throws Exception {
-        WorkspaceDirectoryService service = new WorkspaceDirectoryService(aiConfig());
+        WorkspaceDirectoryService service = WorkspaceDirectoryServiceTestSupport.directoryService(tempDir);
         Path preexisting = Files.createDirectories(tempDir.resolve("workspace/agent-preexisting"));
         Path agentsFile = preexisting.resolve("AGENTS.md");
 
         service.agentWorkspace("agent-preexisting");
 
+        // Phase 02: no starter file generated
         assertThat(Files.exists(agentsFile)).isFalse();
     }
 
     @Test
     void projectLinkMaterializationCreatesUsableAssignmentPathAndCleanupRemovesLink() throws Exception {
-        WorkspaceDirectoryService service = new WorkspaceDirectoryService(aiConfig());
+        WorkspaceDirectoryService service = WorkspaceDirectoryServiceTestSupport.directoryService(tempDir);
         Path assignmentWorkspace = service.taskTemp("run-1");
         Path projectWorkspace = service.projectWorkspace("project-1");
         Files.writeString(projectWorkspace.resolve("shared.txt"), "project data");
@@ -165,7 +159,7 @@ class WorkspacePathSegmentValidationTest {
     @Test
     void effectiveWorkspaceResolverPrefersProjectWorkspaceWhenProjectIdIsPresent() throws Exception {
         WorkspaceService workspaceService = workspaceService();
-        WorkspaceDirectoryService directoryService = new WorkspaceDirectoryService(aiConfig());
+        WorkspaceDirectoryService directoryService = WorkspaceDirectoryServiceTestSupport.directoryService(tempDir);
         EffectiveWorkspaceResolver resolver = new EffectiveWorkspaceResolver(directoryService, workspaceService);
 
         EffectiveWorkspace effective = resolver.resolve("agent-1", "project-1");
@@ -189,7 +183,7 @@ class WorkspacePathSegmentValidationTest {
     @Test
     void effectiveWorkspaceResolverUsesAgentWorkspaceWhenProjectIdIsAbsent() throws Exception {
         WorkspaceService workspaceService = workspaceService();
-        WorkspaceDirectoryService directoryService = new WorkspaceDirectoryService(aiConfig());
+        WorkspaceDirectoryService directoryService = WorkspaceDirectoryServiceTestSupport.directoryService(tempDir);
         EffectiveWorkspaceResolver resolver = new EffectiveWorkspaceResolver(directoryService, workspaceService);
 
         EffectiveWorkspace effective = resolver.resolve("agent-1", null);
@@ -203,7 +197,7 @@ class WorkspacePathSegmentValidationTest {
 
     @Test
     void durableWorkspaceLayoutHelpersCreateExpectedConfinedDirectories() throws Exception {
-        WorkspaceDirectoryService service = new WorkspaceDirectoryService(aiConfig());
+        WorkspaceDirectoryService service = WorkspaceDirectoryServiceTestSupport.directoryService(tempDir);
         Path root = service.agentWorkspaceRoot("agent-1");
 
         assertThat(root).isEqualTo(tempDir.resolve("workspace/agent-1").toRealPath());
@@ -223,6 +217,14 @@ class WorkspacePathSegmentValidationTest {
 
     @Test
     void workspacePathLayoutProducesTargetRelativePathsAndValidatesSegments() {
+        assertThat(WorkspacePathLayout.relativeString(WorkspacePathLayout.agentRoot("agent-1")))
+            .isEqualTo("workspace/agent/agent-1");
+        assertThat(WorkspacePathLayout.relativeString(WorkspacePathLayout.chatRoot("chat-1")))
+            .isEqualTo("workspace/chat/chat-1");
+        assertThat(WorkspacePathLayout.relativeString(WorkspacePathLayout.userRoot("my-user")))
+            .isEqualTo("workspace/user/my-user");
+
+        // Legacy paths still produce correct output
         assertThat(WorkspacePathLayout.relativeString(WorkspacePathLayout.agentWorkspaceRoot("agent-1")))
             .isEqualTo("workspace/agent-1");
         assertThat(WorkspacePathLayout.relativeString(WorkspacePathLayout.agentHome("agent-1")))
@@ -236,6 +238,15 @@ class WorkspacePathSegmentValidationTest {
         assertThat(WorkspacePathLayout.relativeString(WorkspacePathLayout.projectRoot("project-1")))
             .isEqualTo("projects/project-1");
 
+        assertThatThrownBy(() -> WorkspacePathLayout.agentRoot("../agent"))
+            .isInstanceOf(IllegalArgumentException.class)
+            .hasMessageContaining("agentId");
+        assertThatThrownBy(() -> WorkspacePathLayout.chatRoot("%2e%2e"))
+            .isInstanceOf(IllegalArgumentException.class)
+            .hasMessageContaining("conversationId");
+        assertThatThrownBy(() -> WorkspacePathLayout.userRoot("a/b"))
+            .isInstanceOf(IllegalArgumentException.class)
+            .hasMessageContaining("userName");
         assertThatThrownBy(() -> WorkspacePathLayout.agentWorkspaceRoot("../agent"))
             .isInstanceOf(IllegalArgumentException.class)
             .hasMessageContaining("agentWorkspaceId");
@@ -246,7 +257,7 @@ class WorkspacePathSegmentValidationTest {
 
     @Test
     void workUnitOutputHelpersCreateTraceablePathsAndValidateSegments() throws Exception {
-        WorkspaceDirectoryService service = new WorkspaceDirectoryService(aiConfig());
+        WorkspaceDirectoryService service = WorkspaceDirectoryServiceTestSupport.directoryService(tempDir);
         Path root = service.projectWorkspaceRoot("project-1");
 
         assertThat(service.taskOutput(root, "task-1", "run-1"))
@@ -275,14 +286,14 @@ class WorkspacePathSegmentValidationTest {
     private WorkspaceService workspaceService() throws Exception {
         return new WorkspaceService(
             new WorkspaceRepository(new JdbcTemplate(new SingleConnectionDataSource("jdbc:sqlite::memory:?foreign_keys=true", true))),
-            aiConfig()
+            WorkspaceDirectoryServiceTestSupport.aiConfig(tempDir),
+            WorkspaceDirectoryServiceTestSupport.agentProfileRepository(true),
+            WorkspaceDirectoryServiceTestSupport.chatExistenceRepository(true)
         );
     }
 
     private AiConfig aiConfig() {
-        return new AiConfig(
-            null, null, null, null, null, 10, tempDir, null, Map.of(), Map.of()
-        );
+        return WorkspaceDirectoryServiceTestSupport.aiConfig(tempDir);
     }
 
     private static String[] invalidSegments() {

@@ -51,6 +51,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.SingleConnectionDataSource;
 import org.springframework.web.server.ResponseStatusException;
+import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceDirectoryServiceTestSupport;
 
 class AvatarDashboardControllerTest {
     @TempDir
@@ -94,7 +95,7 @@ class AvatarDashboardControllerTest {
             Map.of(),
             Map.of()
         );
-        WorkspaceDirectoryService directoryService = new WorkspaceDirectoryService(runtimeConfig);
+        WorkspaceDirectoryService directoryService = WorkspaceDirectoryServiceTestSupport.directoryService(tempDir.resolve("data"));
         WorkspaceService workspaceService = new WorkspaceService(
             workspaceRepository,
             runtimeConfig,
@@ -697,15 +698,7 @@ class AvatarDashboardControllerTest {
 
     private static class StubOutputArtifactService extends OutputArtifactService {
         StubOutputArtifactService(Path tempDir) throws IOException {
-            super(null, new WorkspaceDirectoryService(new AiConfig(
-                null,
-                null,
-                null,
-                10,
-                tempDir,
-                Map.of(),
-                Map.of()
-            )), new ObjectMapper());
+            super(null, WorkspaceDirectoryServiceTestSupport.directoryService(tempDir), new ObjectMapper());
         }
 
         @Override

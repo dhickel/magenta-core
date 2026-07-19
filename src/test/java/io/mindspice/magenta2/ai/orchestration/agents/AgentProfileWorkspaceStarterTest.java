@@ -13,8 +13,11 @@ import io.mindspice.magenta2.ai.config.user.EndpointType;
 import io.mindspice.magenta2.ai.config.user.ModelConfig;
 import io.mindspice.magenta2.ai.orchestration.workspaces.RootRelativePathService;
 import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceDirectoryService;
+import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceDirectoryServiceTestSupport;
 import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceRepository;
+import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceDirectoryServiceTestSupport;
 import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceService;
+import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceDirectoryServiceTestSupport;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.springframework.beans.factory.ObjectProvider;
@@ -28,14 +31,16 @@ class AgentProfileWorkspaceStarterTest {
     Path tempDir;
 
     @Test
-    void createUpdateAndEnablePreserveUserEditedAgentsFile() throws Exception {
+    void createDoesNotGenerateStarterFileAndUserEditedFileIsPreserved() throws Exception {
         TestContext context = context();
         AgentProfileService service = context.service();
 
         service.create(profile("agent-1", "Agent One"));
         Path agentsFile = context.dataRoot().resolve("workspace/agent-1/AGENTS.md");
-        assertThat(Files.isRegularFile(agentsFile)).isTrue();
+        // Phase 02: starter file generation is removed
+        assertThat(Files.isRegularFile(agentsFile)).isFalse();
 
+        // User-created file is preserved across updates
         String custom = "# Custom AGENTS\n\nKeep this exact content.\n";
         Files.writeString(agentsFile, custom);
 
@@ -50,12 +55,11 @@ class AgentProfileWorkspaceStarterTest {
         WorkspaceRepository workspaceRepository = new WorkspaceRepository(workspaceJdbc);
 
         AiConfig aiConfig = aiConfig();
-        WorkspaceDirectoryService directoryService = new WorkspaceDirectoryService(aiConfig);
+        WorkspaceDirectoryService directoryService = WorkspaceDirectoryServiceTestSupport.directoryService(tempDir);
         WorkspaceService workspaceService = new WorkspaceService(
             workspaceRepository,
             aiConfig,
-            new RootRelativePathService(directoryService),
-            provider(directoryService)
+            new RootRelativePathService(directoryService)
         );
 
         AgentProfileRepository profileRepository = new AgentProfileRepository(

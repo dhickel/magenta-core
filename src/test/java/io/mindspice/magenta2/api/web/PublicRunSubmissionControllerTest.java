@@ -43,6 +43,7 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceDirectoryServiceTestSupport;
 
 class PublicRunSubmissionControllerTest {
 
@@ -480,9 +481,7 @@ class PublicRunSubmissionControllerTest {
     private static OutputArtifactDeps outputArtifactDeps() {
         try {
             Path dataRoot = Files.createTempDirectory("public-run-output");
-            WorkspaceDirectoryService directories = new WorkspaceDirectoryService(new AiConfig(
-                null, null, null, null, null, 10, dataRoot, null, Map.of(), Map.of()
-            ));
+            WorkspaceDirectoryService directories = WorkspaceDirectoryServiceTestSupport.directoryService(dataRoot);
             WorkspaceRepository repository = new WorkspaceRepository(new JdbcTemplate(
                 new SingleConnectionDataSource("jdbc:sqlite::memory:?foreign_keys=true", true)
             ));

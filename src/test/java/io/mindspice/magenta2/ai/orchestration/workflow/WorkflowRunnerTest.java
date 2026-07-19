@@ -30,6 +30,7 @@ import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceDirectoryServiceTestSupport;
 
 class WorkflowRunnerTest {
 
@@ -54,17 +55,17 @@ class WorkflowRunnerTest {
 
         Path dataRoot = tempDir.resolve("data");
         java.nio.file.Files.createDirectories(dataRoot);
-        workspaceDirectoryService = new WorkspaceDirectoryService(
-            new io.mindspice.magenta2.ai.config.user.AiConfig(
-                null, null, null, null, dataRoot, null, null));
+        workspaceDirectoryService = WorkspaceDirectoryServiceTestSupport.directoryService(dataRoot);
 
         WorkspaceRepository workspaceRepository = new WorkspaceRepository(jdbcTemplate);
         outputArtifactService = new OutputArtifactService(
             workspaceRepository, workspaceDirectoryService, mapper);
         EffectiveWorkspaceResolver effectiveWorkspaceResolver = new EffectiveWorkspaceResolver(
             workspaceDirectoryService,
-            new WorkspaceService(workspaceRepository, new io.mindspice.magenta2.ai.config.user.AiConfig(
-                null, null, null, null, dataRoot, null, null))
+            new WorkspaceService(workspaceRepository,
+                    WorkspaceDirectoryServiceTestSupport.aiConfig(dataRoot),
+                    WorkspaceDirectoryServiceTestSupport.agentProfileRepository(true),
+                    WorkspaceDirectoryServiceTestSupport.chatExistenceRepository(true))
         );
         planService = new PlanService(
             planRepository, memoryRepository, null, new ChatMarkdownRenderer(),

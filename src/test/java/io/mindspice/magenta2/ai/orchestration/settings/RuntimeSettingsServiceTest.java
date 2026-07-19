@@ -1,5 +1,6 @@
 package io.mindspice.magenta2.ai.orchestration.settings;
 
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -17,6 +18,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.SingleConnectionDataSource;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class RuntimeSettingsServiceTest {
 
@@ -70,6 +72,53 @@ class RuntimeSettingsServiceTest {
 
         assertThat(service.defaultModel()).isEqualTo("summary-remote");
         assertThat(service.resolveModel(null, "main")).isEqualTo("main-remote");
+    }
+
+    @Test
+    void acceptsPersistedRemoteModelNameAfterAliasRename() {
+        Map<String, ModelConfig> models = new LinkedHashMap<>();
+        models.put("deepseek-v4-pro-high", new ModelConfig(
+            "deepseek-v4-pro", "https://api.deepseek.com", EndpointType.DEEPSEEK, 250000, 3, "sk-test"
+        ));
+        models.put("deepseek-v4-pro-max", new ModelConfig(
+            "deepseek-v4-pro", "https://api.deepseek.com", EndpointType.DEEPSEEK, 250000, 4, "sk-test"
+        ));
+        AiConfig aiConfig = new AiConfig(
+            "magenta",
+            "deepseek-v4-pro-max",
+            "deepseek-v4-pro-high",
+            "deepseek-v4-pro-max",
+            "deepseek-v4-pro-high",
+            10,
+            null,
+            null,
+            models,
+            Map.of("magenta", new AgentConfig("deepseek-v4-pro-max", "Prompt", List.of(), List.of()))
+        );
+        RuntimeSettingsRepository repository = repository();
+        repository.save(new RuntimeSettings(
+            null,
+            "magenta",
+            "deepseek-v4-pro",
+            "deepseek-v4-pro-max",
+            "deepseek-v4-pro-high",
+            "deepseek-v4-pro-high",
+            10,
+            "deepseek-v4-pro-max",
+            null,
+            null,
+            10,
+            true,
+            -1,
+            false
+        ));
+        RuntimeSettingsService service = new RuntimeSettingsService(repository, aiConfig, null);
+
+        assertThat(service.defaultModel()).isEqualTo("deepseek-v4-pro");
+        assertThat(service.resolveModel("deepseek-v4-pro")).isEqualTo("deepseek-v4-pro");
+        assertThatThrownBy(() -> service.resolveModel("missing-model"))
+            .isInstanceOf(IllegalArgumentException.class)
+            .hasMessageContaining("Unknown configured model");
     }
 
     private RuntimeSettings settings(String summaryModel, String compactionModel) {

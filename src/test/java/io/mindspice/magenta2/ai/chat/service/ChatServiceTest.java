@@ -63,6 +63,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
+import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceDirectoryServiceTestSupport;
 
 class ChatServiceTest {
 
@@ -310,7 +311,7 @@ class ChatServiceTest {
         ChatMemoryRepository memoryRepository = new ChatMemoryRepository(jdbcTemplate, objectMapper);
         ChatSessionMetadataRepository metadataRepository = new ChatSessionMetadataRepository(jdbcTemplate);
         Path dataRoot = Files.createDirectories(tempDir.resolve("validated-stream-data"));
-        WorkspaceDirectoryService directoryService = new WorkspaceDirectoryService(aiConfig(dataRoot));
+        WorkspaceDirectoryService directoryService = WorkspaceDirectoryServiceTestSupport.directoryService(dataRoot);
         PlanService planService = new PlanService(
             new PlanRepository(jdbcTemplate, objectMapper),
             memoryRepository,
@@ -394,7 +395,7 @@ class ChatServiceTest {
         ChatSessionMetadataRepository metadataRepository = new ChatSessionMetadataRepository(jdbcTemplate);
         Path dataRoot = Files.createDirectories(tempDir.resolve("new-magenta-root/root"));
         ChatFileService chatFileService = new ChatFileService(
-            new io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceDirectoryService(aiConfig(dataRoot))
+            WorkspaceDirectoryServiceTestSupport.directoryService(dataRoot)
         );
         ChatService chatService = new ChatService(
             new RepositoryBackedChatMemory(memoryRepository),
@@ -424,7 +425,8 @@ class ChatServiceTest {
         String conversationId = "00000000-0000-0000-0000-000000000001";
         memoryRepository.saveAll(conversationId, List.of(new UserMessage("hello")));
         metadataRepository.saveSurfaceIfAbsent(conversationId, ChatSessionSurface.BROWSER);
-        Path files = Files.createDirectories(dataRoot.resolve("chats/" + conversationId + "/files/nested"));
+        // Phase 02: chat files are now under workspace/chat/{conversationId}
+        Path files = Files.createDirectories(dataRoot.resolve("workspace/chat/" + conversationId + "/nested"));
         Files.writeString(files.resolve("seeded.md"), "seeded");
 
         assertThat(chatService.listSessions())

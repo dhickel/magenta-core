@@ -89,7 +89,8 @@ class PublicApiRouteBindingTest {
                 """,
             conversationId
         );
-        Path chatFile = Files.createDirectories(DATA_ROOT.resolve("chats/" + conversationId + "/files"))
+        // Phase 02: chat files are now under workspace/chat/{conversationId}
+        Path chatFile = Files.createDirectories(DATA_ROOT.resolve("workspace/chat/" + conversationId))
             .resolve("route.txt");
         Files.writeString(chatFile, "route file");
 

@@ -1,10 +1,10 @@
 package io.mindspice.magenta2.ai.chat.service;
 
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
-import java.time.Instant;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
@@ -12,7 +12,10 @@ import java.util.stream.Stream;
 
 import io.mindspice.magenta2.ai.chat.model.ChatFileListing;
 import io.mindspice.magenta2.ai.chat.model.ChatFileSummary;
+import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceDescriptor;
 import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceDirectoryService;
+import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceKind;
+import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceResolutionException;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
@@ -27,19 +30,27 @@ public class ChatFileService {
     }
 
     public int countFiles(String conversationId) {
-        try (Stream<Path> paths = Files.walk(root(conversationId))) {
+        var descriptor = resolveChat(conversationId);
+        Path root = existingRoot(descriptor);
+        if (root == null) {
+            return 0;
+        }
+        try (Stream<Path> paths = Files.walk(root)) {
             long count = paths
                 .filter(path -> Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS))
                 .count();
             return count > Integer.MAX_VALUE ? Integer.MAX_VALUE : (int) count;
-        } catch (IOException | RuntimeException e) {
-            return 0;
+        } catch (IOException | UncheckedIOException e) {
+            throw new IllegalStateException("Failed to count chat files for " + conversationId, e);
         }
     }
 
     public ChatFileListing listFiles(String conversationId) {
-        Path root = root(conversationId);
-        int totalCount = countFiles(conversationId);
+        var descriptor = resolveChat(conversationId);
+        Path root = existingRoot(descriptor);
+        if (root == null) {
+            return new ChatFileListing(conversationId, 0, false, List.of());
+        }
         try (Stream<Path> paths = Files.walk(root)) {
             List<ChatFileSummary> files = paths
                 .filter(path -> Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS))
@@ -47,9 +58,16 @@ public class ChatFileService {
                 .limit(MAX_LIST_FILES)
                 .map(path -> summarize(root, path))
                 .toList();
-            return new ChatFileListing(conversationId, totalCount, totalCount > files.size(), files);
-        } catch (IOException | RuntimeException e) {
-            throw new IllegalStateException("Failed to list chat files", e);
+            long totalCount;
+            try (Stream<Path> allPaths = Files.walk(root)) {
+                totalCount = allPaths
+                    .filter(path -> Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS))
+                    .count();
+            }
+            int total = totalCount > Integer.MAX_VALUE ? Integer.MAX_VALUE : (int) totalCount;
+            return new ChatFileListing(conversationId, total, total > files.size(), files);
+        } catch (IOException | UncheckedIOException e) {
+            throw new IllegalStateException("Failed to list chat files for " + conversationId, e);
         }
     }
 
@@ -57,20 +75,36 @@ public class ChatFileService {
         if (!StringUtils.hasText(relativePath)) {
             throw new IllegalArgumentException("file path is required");
         }
-        Path root = root(conversationId).toRealPath();
-        Path target = root.resolve(relativePath.replace('\\', '/')).normalize();
-        if (!target.startsWith(root)) {
-            throw new IllegalArgumentException("file path escapes chat files");
+        var descriptor = resolveChat(conversationId);
+        Path root = existingRoot(descriptor);
+        if (root == null) {
+            throw new IllegalArgumentException("chat file not found");
         }
-        Path real = target.toRealPath();
+        Path target = workspaceDirectoryService.confinedRelative(descriptor, relativePath);
+        if (!Files.exists(target, LinkOption.NOFOLLOW_LINKS)) {
+            throw new IllegalArgumentException("chat file not found");
+        }
+        Path real = target.toRealPath(LinkOption.NOFOLLOW_LINKS);
         if (!real.startsWith(root) || !Files.isRegularFile(real, LinkOption.NOFOLLOW_LINKS)) {
             throw new IllegalArgumentException("chat file not found");
         }
         return real;
     }
 
-    private Path root(String conversationId) {
-        return workspaceDirectoryService.chatFiles(conversationId);
+    private WorkspaceDescriptor resolveChat(String conversationId) {
+        if (!StringUtils.hasText(conversationId)) {
+            throw new WorkspaceResolutionException(
+                    WorkspaceResolutionException.Reason.NOT_FOUND,
+                    "Chat conversation id is required");
+        }
+        return workspaceDirectoryService.resolveForRead(WorkspaceKind.CHAT, conversationId);
+    }
+
+    private Path existingRoot(WorkspaceDescriptor descriptor) {
+        if (!Files.exists(descriptor.root(), LinkOption.NOFOLLOW_LINKS)) {
+            return null;
+        }
+        return workspaceDirectoryService.confinedRelative(descriptor, ".");
     }
 
     private ChatFileSummary summarize(Path root, Path path) {

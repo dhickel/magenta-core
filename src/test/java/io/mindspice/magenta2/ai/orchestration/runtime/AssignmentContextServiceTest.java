@@ -16,16 +16,23 @@ import io.mindspice.magenta2.ai.orchestration.agents.AgentProfileRepository;
 import io.mindspice.magenta2.ai.orchestration.agents.AgentProfileService;
 import io.mindspice.magenta2.ai.orchestration.agents.AgentProfileStatus;
 import io.mindspice.magenta2.ai.orchestration.workspaces.EffectiveWorkspaceResolver;
+import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceDirectoryServiceTestSupport;
 import io.mindspice.magenta2.ai.orchestration.workspaces.RootRelativePathService;
 import io.mindspice.magenta2.ai.orchestration.workspaces.WorkArea;
 import io.mindspice.magenta2.ai.orchestration.workspaces.WorkAreaRepository;
 import io.mindspice.magenta2.ai.orchestration.workspaces.WorkAreaService;
 import io.mindspice.magenta2.ai.orchestration.workspaces.Workspace;
+import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceDirectoryServiceTestSupport;
 import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceDirectoryService;
+import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceDirectoryServiceTestSupport;
 import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceLeaseService;
+import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceDirectoryServiceTestSupport;
 import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceOwnerType;
+import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceDirectoryServiceTestSupport;
 import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceRepository;
+import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceDirectoryServiceTestSupport;
 import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceService;
+import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceDirectoryServiceTestSupport;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -255,7 +262,7 @@ class AssignmentContextServiceTest {
         OrchestrationRuntimeRepository repository = new OrchestrationRuntimeRepository(jdbc, mapper);
         WorkspaceDirectoryService directoryService;
         try {
-            directoryService = new WorkspaceDirectoryService(config);
+            directoryService = WorkspaceDirectoryServiceTestSupport.directoryService(tempDir);
         } catch (Exception e) {
             throw new IllegalStateException(e);
         }

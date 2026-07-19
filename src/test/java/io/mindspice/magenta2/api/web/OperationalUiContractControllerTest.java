@@ -25,7 +25,9 @@ import io.mindspice.magenta2.ai.orchestration.workflow.InboxService;
 import io.mindspice.magenta2.ai.orchestration.workflow.WorkflowRepository;
 import io.mindspice.magenta2.ai.orchestration.workspaces.OutputArtifactService;
 import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceDirectoryService;
+import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceDirectoryServiceTestSupport;
 import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceRepository;
+import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceDirectoryServiceTestSupport;
 import io.mindspice.magenta2.ai.chat.plan.PlanFieldType;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -222,7 +224,7 @@ class OperationalUiContractControllerTest {
     private WorkspaceDirectoryService workspaceDirectoryService() throws IOException {
         Path dataRoot = Files.createDirectories(tempDir.resolve("data"));
         AiConfig aiConfig = new AiConfig(null, null, null, 10, dataRoot, Map.of(), Map.of());
-        return new WorkspaceDirectoryService(aiConfig);
+        return WorkspaceDirectoryServiceTestSupport.directoryService(dataRoot);
     }
 
     private record JobServices(JobService jobService, OutputArtifactService outputArtifactService) {}

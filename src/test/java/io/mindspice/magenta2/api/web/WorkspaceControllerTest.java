@@ -24,6 +24,7 @@ import org.springframework.web.server.ResponseStatusException;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceDirectoryServiceTestSupport;
 
 class WorkspaceControllerTest {
 
@@ -35,9 +36,10 @@ class WorkspaceControllerTest {
     void setUp() throws Exception {
         repository = new WorkspaceRepository(new JdbcTemplate(new SingleConnectionDataSource("jdbc:sqlite::memory:?foreign_keys=true", true)));
         Path dataRoot = Files.createTempDirectory("workspace-controller-test");
-        workspaceService = new WorkspaceService(repository, new AiConfig(
-            null, null, null, null, null, 10, dataRoot, null, Map.of(), Map.of()
-        ));
+        workspaceService = new WorkspaceService(repository,
+                WorkspaceDirectoryServiceTestSupport.aiConfig(dataRoot),
+                WorkspaceDirectoryServiceTestSupport.agentProfileRepository(true),
+                WorkspaceDirectoryServiceTestSupport.chatExistenceRepository(true));
         controller = new WorkspaceController(workspaceService);
     }
 

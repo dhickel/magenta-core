@@ -73,15 +73,25 @@ import io.mindspice.magenta2.ai.execution.MagentaWorkExecutor;
 import io.mindspice.magenta2.ai.execution.MagentaWorkKind;
 import io.mindspice.magenta2.ai.orchestration.workspaces.OutputArtifactService;
 import io.mindspice.magenta2.ai.orchestration.workspaces.EffectiveWorkspaceResolver;
+import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceDirectoryServiceTestSupport;
 import io.mindspice.magenta2.ai.orchestration.workspaces.Workspace;
+import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceDirectoryServiceTestSupport;
 import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceLease;
+import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceDirectoryServiceTestSupport;
 import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceLeaseService;
+import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceDirectoryServiceTestSupport;
 import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceLink;
+import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceDirectoryServiceTestSupport;
 import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceLinkType;
+import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceDirectoryServiceTestSupport;
 import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceRepository;
+import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceDirectoryServiceTestSupport;
 import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceService;
+import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceDirectoryServiceTestSupport;
 import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceOwnerType;
+import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceDirectoryServiceTestSupport;
 import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceDirectoryService;
+import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceDirectoryServiceTestSupport;
 import io.mindspice.magenta2.ai.orchestration.workspaces.RootRelativePathService;
 import io.mindspice.magenta2.ai.orchestration.workflow.InboxService;
 import io.mindspice.magenta2.ai.orchestration.workflow.WorkflowDefinition;
@@ -184,7 +194,10 @@ class OrchestrationRuntimeTest {
 
     @Test
     void workspaceCreatesRootsAndRejectsEscapes() throws Exception {
-        WorkspaceService service = new WorkspaceService(new WorkspaceRepository(jdbcTemplate()), aiConfig());
+        WorkspaceService service = new WorkspaceService(new WorkspaceRepository(jdbcTemplate()),
+                WorkspaceDirectoryServiceTestSupport.aiConfig(tempDir),
+                WorkspaceDirectoryServiceTestSupport.agentProfileRepository(true),
+                WorkspaceDirectoryServiceTestSupport.chatExistenceRepository(true));
 
         Workspace workspace = service.agentWorkspace("agent-1", "Agent 1");
         WorkspaceLink link = service.addLink(workspace.id(), new WorkspaceLink(
@@ -202,10 +215,10 @@ class OrchestrationRuntimeTest {
     void projectCreationPersistsManagedProjectWorkspace() throws Exception {
         JdbcTemplate jdbcTemplate = jdbcTemplate();
         WorkspaceRepository workspaceRepository = new WorkspaceRepository(jdbcTemplate);
-        WorkspaceService workspaceService = new WorkspaceService(workspaceRepository, aiConfig());
+        WorkspaceService workspaceService = new WorkspaceService(workspaceRepository, aiConfig(), WorkspaceDirectoryServiceTestSupport.agentProfileRepository(true), WorkspaceDirectoryServiceTestSupport.chatExistenceRepository(true));
         ProjectService projectService = new ProjectService(
             new ProjectRepository(jdbcTemplate, new ObjectMapper()),
-            new WorkspaceDirectoryService(aiConfig()),
+            WorkspaceDirectoryServiceTestSupport.directoryService(tempDir),
             workspaceService,
             new io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceLeaseService(workspaceRepository),
             new OrchestrationRuntimeRepository(jdbcTemplate, new ObjectMapper())
@@ -221,7 +234,7 @@ class OrchestrationRuntimeTest {
     @Test
     void workspaceListBoundsAndActiveLeaseReads() throws Exception {
         WorkspaceRepository repository = new WorkspaceRepository(jdbcTemplate());
-        WorkspaceService service = new WorkspaceService(repository, aiConfig());
+        WorkspaceService service = new WorkspaceService(repository, aiConfig(), WorkspaceDirectoryServiceTestSupport.agentProfileRepository(true), WorkspaceDirectoryServiceTestSupport.chatExistenceRepository(true));
 
         Workspace a1 = service.agentWorkspace("agent-1", "Agent 1");
         service.agentWorkspace("agent-2", "Agent 2");
@@ -278,7 +291,7 @@ class OrchestrationRuntimeTest {
 
         AgentProfileRepository agentRepository = new AgentProfileRepository(jdbcTemplate, objectMapper);
         WorkspaceRepository workspaceRepository = new WorkspaceRepository(jdbcTemplate);
-        WorkspaceService workspaceService = new WorkspaceService(workspaceRepository, aiConfig);
+        WorkspaceService workspaceService = new WorkspaceService(workspaceRepository, aiConfig, WorkspaceDirectoryServiceTestSupport.agentProfileRepository(true), WorkspaceDirectoryServiceTestSupport.chatExistenceRepository(true));
         OrchestrationRuntimeRepository runtimeRepository = new OrchestrationRuntimeRepository(jdbcTemplate, objectMapper);
         JobRepository jobRepository = new JobRepository(jdbcTemplate, objectMapper);
         ProjectRepository projectRepository = new ProjectRepository(jdbcTemplate, objectMapper);
@@ -1056,9 +1069,9 @@ class OrchestrationRuntimeTest {
         JdbcTemplate jdbcTemplate = jdbcTemplate();
         ObjectMapper objectMapper = new ObjectMapper().findAndRegisterModules();
         AiConfig aiConfig = aiConfig();
-        WorkspaceDirectoryService directoryService = new WorkspaceDirectoryService(aiConfig);
+        WorkspaceDirectoryService directoryService = WorkspaceDirectoryServiceTestSupport.directoryService(tempDir);
         WorkspaceRepository workspaceRepository = new WorkspaceRepository(jdbcTemplate);
-        WorkspaceService workspaceService = new WorkspaceService(workspaceRepository, aiConfig);
+        WorkspaceService workspaceService = new WorkspaceService(workspaceRepository, aiConfig, WorkspaceDirectoryServiceTestSupport.agentProfileRepository(true), WorkspaceDirectoryServiceTestSupport.chatExistenceRepository(true));
         EffectiveWorkspaceResolver effectiveWorkspaceResolver = new EffectiveWorkspaceResolver(directoryService, workspaceService);
         OutputArtifactService outputArtifactService = new OutputArtifactService(workspaceRepository, directoryService, objectMapper);
         OrchestrationRuntimeRepository repository = new OrchestrationRuntimeRepository(jdbcTemplate, objectMapper);
@@ -1167,9 +1180,9 @@ class OrchestrationRuntimeTest {
         JdbcTemplate jdbcTemplate = jdbcTemplate();
         ObjectMapper objectMapper = new ObjectMapper();
         AiConfig aiConfig = aiConfig();
-        WorkspaceDirectoryService directoryService = new WorkspaceDirectoryService(aiConfig);
+        WorkspaceDirectoryService directoryService = WorkspaceDirectoryServiceTestSupport.directoryService(tempDir);
         WorkspaceRepository workspaceRepository = new WorkspaceRepository(jdbcTemplate);
-        WorkspaceService workspaceService = new WorkspaceService(workspaceRepository, aiConfig);
+        WorkspaceService workspaceService = new WorkspaceService(workspaceRepository, aiConfig, WorkspaceDirectoryServiceTestSupport.agentProfileRepository(true), WorkspaceDirectoryServiceTestSupport.chatExistenceRepository(true));
         WorkspaceLeaseService leaseService = new WorkspaceLeaseService(workspaceRepository);
         OrchestrationRuntimeRepository repository = new OrchestrationRuntimeRepository(jdbcTemplate, objectMapper);
         AgentProfileService agentService = agentService(jdbcTemplate, aiConfig);
@@ -1274,9 +1287,9 @@ class OrchestrationRuntimeTest {
         JdbcTemplate jdbcTemplate = jdbcTemplate();
         ObjectMapper objectMapper = new ObjectMapper();
         AiConfig aiConfig = aiConfig();
-        WorkspaceDirectoryService directoryService = new WorkspaceDirectoryService(aiConfig);
+        WorkspaceDirectoryService directoryService = WorkspaceDirectoryServiceTestSupport.directoryService(tempDir);
         WorkspaceRepository workspaceRepository = new WorkspaceRepository(jdbcTemplate);
-        WorkspaceService workspaceService = new WorkspaceService(workspaceRepository, aiConfig);
+        WorkspaceService workspaceService = new WorkspaceService(workspaceRepository, aiConfig, WorkspaceDirectoryServiceTestSupport.agentProfileRepository(true), WorkspaceDirectoryServiceTestSupport.chatExistenceRepository(true));
         WorkspaceLeaseService leaseService = new WorkspaceLeaseService(workspaceRepository);
         OrchestrationRuntimeRepository repository = new OrchestrationRuntimeRepository(jdbcTemplate, objectMapper);
         AgentProfileService agentService = agentService(jdbcTemplate, aiConfig);
@@ -1350,9 +1363,9 @@ class OrchestrationRuntimeTest {
         JdbcTemplate jdbcTemplate = jdbcTemplate();
         ObjectMapper objectMapper = new ObjectMapper();
         AiConfig aiConfig = aiConfig();
-        WorkspaceDirectoryService directoryService = new WorkspaceDirectoryService(aiConfig);
+        WorkspaceDirectoryService directoryService = WorkspaceDirectoryServiceTestSupport.directoryService(tempDir);
         WorkspaceRepository workspaceRepository = new WorkspaceRepository(jdbcTemplate);
-        WorkspaceService workspaceService = new WorkspaceService(workspaceRepository, aiConfig);
+        WorkspaceService workspaceService = new WorkspaceService(workspaceRepository, aiConfig, WorkspaceDirectoryServiceTestSupport.agentProfileRepository(true), WorkspaceDirectoryServiceTestSupport.chatExistenceRepository(true));
         EffectiveWorkspaceResolver resolver = new EffectiveWorkspaceResolver(directoryService, workspaceService);
         OrchestrationRuntimeRepository repository = new OrchestrationRuntimeRepository(jdbcTemplate, objectMapper);
         AgentProfileService agentService = agentService(jdbcTemplate, aiConfig);
@@ -1420,9 +1433,9 @@ class OrchestrationRuntimeTest {
         JdbcTemplate jdbcTemplate = jdbcTemplate();
         ObjectMapper objectMapper = new ObjectMapper();
         AiConfig aiConfig = aiConfig();
-        WorkspaceDirectoryService directoryService = new WorkspaceDirectoryService(aiConfig);
+        WorkspaceDirectoryService directoryService = WorkspaceDirectoryServiceTestSupport.directoryService(tempDir);
         WorkspaceRepository workspaceRepository = new WorkspaceRepository(jdbcTemplate);
-        WorkspaceService workspaceService = new WorkspaceService(workspaceRepository, aiConfig);
+        WorkspaceService workspaceService = new WorkspaceService(workspaceRepository, aiConfig, WorkspaceDirectoryServiceTestSupport.agentProfileRepository(true), WorkspaceDirectoryServiceTestSupport.chatExistenceRepository(true));
         EffectiveWorkspaceResolver resolver = new EffectiveWorkspaceResolver(directoryService, workspaceService);
         OrchestrationRuntimeRepository repository = new OrchestrationRuntimeRepository(jdbcTemplate, objectMapper);
         AgentProfileService agentService = agentService(jdbcTemplate, aiConfig);
@@ -1492,9 +1505,9 @@ class OrchestrationRuntimeTest {
         JdbcTemplate jdbcTemplate = jdbcTemplate();
         ObjectMapper objectMapper = new ObjectMapper();
         AiConfig aiConfig = aiConfig();
-        WorkspaceDirectoryService directoryService = new WorkspaceDirectoryService(aiConfig);
+        WorkspaceDirectoryService directoryService = WorkspaceDirectoryServiceTestSupport.directoryService(tempDir);
         WorkspaceRepository workspaceRepository = new WorkspaceRepository(jdbcTemplate);
-        WorkspaceService workspaceService = new WorkspaceService(workspaceRepository, aiConfig);
+        WorkspaceService workspaceService = new WorkspaceService(workspaceRepository, aiConfig, WorkspaceDirectoryServiceTestSupport.agentProfileRepository(true), WorkspaceDirectoryServiceTestSupport.chatExistenceRepository(true));
         EffectiveWorkspaceResolver resolver = new EffectiveWorkspaceResolver(directoryService, workspaceService);
         OrchestrationRuntimeRepository repository = new OrchestrationRuntimeRepository(jdbcTemplate, objectMapper);
         AgentProfileService agentService = agentService(jdbcTemplate, aiConfig);

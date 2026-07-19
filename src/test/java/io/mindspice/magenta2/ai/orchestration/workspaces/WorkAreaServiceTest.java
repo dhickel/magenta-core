@@ -13,6 +13,7 @@ import org.springframework.jdbc.datasource.SingleConnectionDataSource;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
+import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceDirectoryServiceTestSupport;
 
 class WorkAreaServiceTest {
     @TempDir
@@ -179,7 +180,7 @@ class WorkAreaServiceTest {
         WorkAreaRepository workAreaRepository = new WorkAreaRepository(jdbc);
         Path dataRoot = tempDir.resolve("data");
         AiConfig aiConfig = new AiConfig(null, null, null, null, null, 10, dataRoot, null, Map.of(), Map.of());
-        WorkspaceDirectoryService directoryService = new WorkspaceDirectoryService(aiConfig);
+        WorkspaceDirectoryService directoryService = WorkspaceDirectoryServiceTestSupport.directoryService(dataRoot);
         WorkspaceService workspaceService = new WorkspaceService(
             workspaceRepository,
             aiConfig,

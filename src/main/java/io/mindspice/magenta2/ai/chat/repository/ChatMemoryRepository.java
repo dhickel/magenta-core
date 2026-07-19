@@ -28,6 +28,17 @@ public class ChatMemoryRepository implements org.springframework.ai.chat.memory.
         ensureMetadataColumn();
     }
 
+    public boolean existsByConversationId(String conversationId) {
+        if (!StringUtils.hasText(conversationId)) {
+            return false;
+        }
+        Integer count = jdbcTemplate.queryForObject(
+                "select count(*) from ai_chat_memory where conversation_id = ?",
+                Integer.class,
+                conversationId);
+        return count != null && count > 0;
+    }
+
     @Override
     public List<String> findConversationIds() {
         return jdbcTemplate.queryForList(

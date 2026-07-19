@@ -2,7 +2,6 @@ package io.mindspice.magenta2.ai.orchestration.workspaces;
 
 import java.io.IOException;
 import java.nio.file.Files;
-import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.time.Instant;
 import java.time.format.DateTimeFormatter;
@@ -12,8 +11,8 @@ import java.util.Optional;
 import java.util.UUID;
 
 import io.mindspice.magenta2.ai.config.user.AiConfig;
+import io.mindspice.magenta2.ai.orchestration.agents.AgentProfileRepository;
 import io.mindspice.magenta2.core.util.PlainPathSegmentValidator;
-import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
@@ -26,35 +25,32 @@ public class WorkspaceService {
 
     private final WorkspaceRepository repository;
     private final RootRelativePathService rootRelativePathService;
-    private final ObjectProvider<WorkspaceDirectoryService> workspaceDirectoryService;
     private final Path dataRoot;
 
     @Autowired
     public WorkspaceService(
         WorkspaceRepository repository,
         AiConfig aiConfig,
-        RootRelativePathService rootRelativePathService,
-        @Autowired(required = false) ObjectProvider<WorkspaceDirectoryService> workspaceDirectoryService
+        RootRelativePathService rootRelativePathService
     ) throws IOException {
         this.repository = repository;
         this.rootRelativePathService = rootRelativePathService;
-        this.workspaceDirectoryService = workspaceDirectoryService;
         if (aiConfig == null || aiConfig.dataRoot() == null) {
             throw new IllegalArgumentException("AI config dataRoot is required for workspaces");
         }
         this.dataRoot = Files.createDirectories(aiConfig.dataRoot()).toRealPath();
     }
 
+    /** Constructor adaptation for legacy callers that previously relied on
+     * the removed unchecked directory-service constructor. */
     public WorkspaceService(
-        WorkspaceRepository repository,
-        AiConfig aiConfig,
-        RootRelativePathService rootRelativePathService
-    ) throws IOException {
-        this(repository, aiConfig, rootRelativePathService, null);
-    }
-
-    public WorkspaceService(WorkspaceRepository repository, AiConfig aiConfig) throws IOException {
-        this(repository, aiConfig, new RootRelativePathService(new WorkspaceDirectoryService(aiConfig)), null);
+            WorkspaceRepository repository,
+            AiConfig aiConfig,
+            AgentProfileRepository agentProfileRepository,
+            ChatConversationExistenceRepository chatConversationExistenceRepository) throws IOException {
+        this(repository, aiConfig,
+                new RootRelativePathService(new WorkspaceDirectoryService(
+                        aiConfig, agentProfileRepository, chatConversationExistenceRepository)));
     }
 
     public Workspace get(String id) {
@@ -190,17 +186,10 @@ public class WorkspaceService {
             throw new IllegalArgumentException("workspace owner id is required");
         }
         Path root = confined(rootRelativePath);
-        boolean createdInThisCall = !Files.exists(root, LinkOption.NOFOLLOW_LINKS);
         try {
             Files.createDirectories(root);
         } catch (IOException exception) {
             throw new IllegalStateException("Failed to create workspace root: " + root, exception);
-        }
-        if (createdInThisCall && ownerType == WorkspaceOwnerType.AGENT) {
-            WorkspaceDirectoryService directories = workspaceDirectoryService();
-            if (directories != null) {
-                directories.ensureAgentWorkspaceStarterFile(root);
-            }
         }
         return repository.save(new Workspace(
             UUID.randomUUID().toString(),
@@ -282,7 +271,4 @@ public class WorkspaceService {
         return Math.max(MIN_LIST_LIMIT, Math.min(MAX_LIST_LIMIT, limit));
     }
 
-    private WorkspaceDirectoryService workspaceDirectoryService() {
-        return workspaceDirectoryService == null ? null : workspaceDirectoryService.getIfAvailable();
-    }
 }

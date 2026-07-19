@@ -6,99 +6,355 @@ import java.nio.file.FileSystemException;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
-import java.nio.file.StandardOpenOption;
+import java.util.Comparator;
+import java.util.List;
+import java.util.Objects;
 
 import io.mindspice.magenta2.ai.config.user.AiConfig;
+import io.mindspice.magenta2.ai.orchestration.agents.AgentProfileRepository;
 import io.mindspice.magenta2.core.util.PlainPathSegmentValidator;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
 /**
- * Manages filesystem paths for all workspace types. Every path is resolved
+ * Constructs trusted {@link WorkspaceDescriptor} instances and manages
+ * filesystem paths for all workspace types. Every path is resolved
  * relative to the configured {@code dataRoot} and confined so it cannot
  * escape via {@code ..} traversal.
  *
- * <h3>Layout</h3>
+ * <h3>Phase 02 trusted roots</h3>
  * <ul>
- *   <li>Agent workspace: {@code data/workspace/{agentWorkspaceId}}</li>
- *   <li>Durable workspace layout: {@code work/}, {@code outputs/}, {@code runs/}</li>
- *   <li>Agent outputs: {@code data/workspace/{agentWorkspaceId}/outputs/{slug}-{runId}/}</li>
- *   <li>Agent project links: {@code data/workspace/{agentWorkspaceId}/projects/{projectId}}</li>
- *   <li>Task temp compatibility: {@code data/runtime/task-runs/{runId}}</li>
- *   <li>Chat files: {@code data/chats/{conversationId}/files}</li>
- *   <li>Workflow temp compatibility: {@code data/runtime/workflow-runs/{runId}}</li>
- *   <li>Legacy job workspace compatibility: {@code data/jobs/{jobId}/workspace}</li>
- *   <li>Project workspace: {@code data/projects/{projectId}}</li>
+ *   <li>Agent: {@code workspace/agent/<id>}</li>
+ *   <li>Chat:  {@code workspace/chat/<id>}</li>
+ *   <li>User:  {@code workspace/user/<name>}</li>
  * </ul>
  */
 @Service
 public class WorkspaceDirectoryService {
-    private static final String AGENTS_MD_FILE_NAME = "AGENTS.md";
-    private static final String AGENT_WORKSPACE_STARTER_AGENTS_MD = """
-        # AGENTS.md
-
-        ## Workspace Scope
-
-        This file is plain Markdown guidance for this agent workspace root and its subdirectories.
-        Update it as the workspace evolves.
-
-        ## Workspace Layout
-
-        Paths below are relative to this workspace root:
-
-        - `home/` is for persistent agent-owned files and scripts.
-        - `runs/` is for run staging directories.
-        - During execution, model-facing `outputs/` maps to `runs/<runId>/outputs/`.
-        - `workareas/` contains user-controlled Work Areas.
-        - Final outputs are promoted by backend completion/validation logic.
-
-        ## Project And Job Context
-
-        Jobs bind to an agent, project, and optional Work Area context.
-        Jobs do not create or own a separate workspace root.
-
-        ## Precedence
-
-        Explicit user prompts and task instructions override this guidance.
-        """;
-
     private final Path dataRoot;
+    private final AgentProfileRepository agentProfileRepository;
+    private final ChatConversationExistenceRepository chatConversationExistenceRepository;
 
-    public WorkspaceDirectoryService(AiConfig aiConfig) throws IOException {
+    public WorkspaceDirectoryService(
+            AiConfig aiConfig,
+            AgentProfileRepository agentProfileRepository,
+            ChatConversationExistenceRepository chatConversationExistenceRepository) throws IOException {
         if (aiConfig == null || aiConfig.dataRoot() == null) {
             throw new IllegalArgumentException("AI config dataRoot is required");
         }
         this.dataRoot = Files.createDirectories(aiConfig.dataRoot()).toRealPath();
+        this.agentProfileRepository = Objects.requireNonNull(
+                agentProfileRepository, "agentProfileRepository");
+        this.chatConversationExistenceRepository = Objects.requireNonNull(
+                chatConversationExistenceRepository, "chatConversationExistenceRepository");
     }
 
-    // ── Agent ──
+    // ── Phase 02 descriptor resolution ──
 
     /**
-     * Agent execution root: {@code workspace/<id>}.
-     * Does not auto-migrate legacy directories; call
-     * {@link #migrateLegacyAgentDirs(String)} explicitly when a warm
-     * data root still contains pre-workspace directories.
+     * Resolve a descriptor for reading. Agent/chat identity is validated
+     * against repositories, but missing physical roots are not created.
+     * Missing user roots are {@link WorkspaceResolutionException.Reason#NOT_FOUND}.
      */
+    public WorkspaceDescriptor resolveForRead(WorkspaceKind kind, String key) {
+        requireKey(key, kind);
+        return switch (kind) {
+            case AGENT -> resolveAgent(key, false);
+            case CHAT -> resolveChat(key, false);
+            case USER -> resolveUser(key, false);
+        };
+    }
+
+    /**
+     * Resolve a descriptor for writing. Validates identity and creates a
+     * missing agent or chat root without scaffolding. User roots must already
+     * exist; missing user is {@link WorkspaceResolutionException.Reason#NOT_FOUND}.
+     */
+    public WorkspaceDescriptor resolveForWrite(WorkspaceKind kind, String key) {
+        requireKey(key, kind);
+        return switch (kind) {
+            case AGENT -> resolveAgent(key, true);
+            case CHAT -> resolveChat(key, true);
+            case USER -> resolveUser(key, true);
+        };
+    }
+
+    /**
+     * Explicitly create a user workspace. The parent structural directories
+     * are created as needed, then the final root is created with
+     * {@link Files#createDirectory} so an existing root or race is
+     * {@link WorkspaceResolutionException.Reason#CONFLICT}.
+     */
+    public WorkspaceDescriptor createUserWorkspace(String name) {
+        requireKey(name, WorkspaceKind.USER);
+        Path relativeRoot = WorkspacePathLayout.userRoot(name);
+        Path absoluteRoot = confined(relativeRoot);
+        try {
+            ensureDirectoryChain(absoluteRoot.getParent());
+            verifyOrAbsent(absoluteRoot);
+            Files.createDirectory(absoluteRoot);
+        } catch (FileAlreadyExistsException e) {
+            throw new WorkspaceResolutionException(
+                    WorkspaceResolutionException.Reason.CONFLICT,
+                    "User workspace already exists: " + name);
+        } catch (IOException e) {
+            throw new IllegalStateException("Failed to create user workspace: " + name, e);
+        }
+        return descriptor(WorkspaceKind.USER, name, verifyRoot(absoluteRoot));
+    }
+
+    /**
+     * List existing user workspaces. Sorted by name; absent parent returns
+     * immutable empty. Only direct non-symlink directories are returned;
+     * files, symlinks, nested entries, and malformed names are ignored.
+     */
+    public List<WorkspaceDescriptor> listUserWorkspaces() {
+        Path userParent = confined(Path.of(
+                WorkspacePathLayout.WORKSPACE, WorkspaceKind.USER.token()));
+        if (!Files.exists(userParent, LinkOption.NOFOLLOW_LINKS)) {
+            return List.of();
+        }
+        verifyRoot(userParent);
+        return safeList(userParent).stream()
+                .map(this::listedUserDescriptor)
+                .filter(d -> d != null)
+                .sorted(Comparator.comparing(WorkspaceDescriptor::key))
+                .toList();
+    }
+
+    /**
+     * Publication-only: lazily ensure the resolved descriptor root exists
+     * (agent/chat only), require user declaration, then create and return
+     * {@code <root>/outputs}.
+     */
+    public Path outputs(WorkspaceDescriptor descriptor) {
+        if (descriptor == null) {
+            throw new IllegalArgumentException("descriptor is required");
+        }
+        validateDescriptor(descriptor);
+        WorkspaceDescriptor current = switch (descriptor.kind()) {
+            case AGENT, CHAT -> resolveForWrite(descriptor.kind(), descriptor.key());
+            case USER -> resolveForRead(WorkspaceKind.USER, descriptor.key());
+        };
+        Path outputsDir = confinedChild(current.root(), WorkspacePathLayout.OUTPUTS);
+        return ensureDirectory(outputsDir);
+    }
+
+    public Path dataRoot() {
+        return dataRoot;
+    }
+
+    // ── Descriptor helpers ──
+
+    private WorkspaceDescriptor resolveAgent(String agentId, boolean create) {
+        if (!agentProfileRepository.existsById(agentId)) {
+            throw new WorkspaceResolutionException(
+                    WorkspaceResolutionException.Reason.NOT_FOUND,
+                    "Agent not found: " + agentId);
+        }
+        Path relativeRoot = WorkspacePathLayout.agentRoot(agentId);
+        Path absoluteRoot = confined(relativeRoot);
+        if (create && !Files.exists(absoluteRoot, LinkOption.NOFOLLOW_LINKS)) {
+            ensureDirectoryChain(absoluteRoot);
+        }
+        Path verified = create ? verifyRoot(absoluteRoot)
+                : verifyOrAbsent(absoluteRoot);
+        return descriptor(WorkspaceKind.AGENT, agentId, verified);
+    }
+
+    private WorkspaceDescriptor resolveChat(String conversationId, boolean create) {
+        if (!chatConversationExistenceRepository.existsByConversationId(conversationId)) {
+            throw new WorkspaceResolutionException(
+                    WorkspaceResolutionException.Reason.NOT_FOUND,
+                    "Chat conversation not found: " + conversationId);
+        }
+        Path relativeRoot = WorkspacePathLayout.chatRoot(conversationId);
+        Path absoluteRoot = confined(relativeRoot);
+        if (create && !Files.exists(absoluteRoot, LinkOption.NOFOLLOW_LINKS)) {
+            ensureDirectoryChain(absoluteRoot);
+        }
+        Path verified = create ? verifyRoot(absoluteRoot)
+                : verifyOrAbsent(absoluteRoot);
+        return descriptor(WorkspaceKind.CHAT, conversationId, verified);
+    }
+
+    private WorkspaceDescriptor resolveUser(String name, boolean create) {
+        Path relativeRoot = WorkspacePathLayout.userRoot(name);
+        Path absoluteRoot = confined(relativeRoot);
+        if (!Files.isDirectory(absoluteRoot, LinkOption.NOFOLLOW_LINKS)) {
+            throw new WorkspaceResolutionException(
+                    WorkspaceResolutionException.Reason.NOT_FOUND,
+                    "User workspace not found: " + name);
+        }
+        Path real = verifyRoot(absoluteRoot);
+        return descriptor(WorkspaceKind.USER, name, real);
+    }
+
+    private void validateDescriptor(WorkspaceDescriptor descriptor) {
+        requireKey(descriptor.key(), descriptor.kind());
+        Path expected = confined(switch (descriptor.kind()) {
+            case AGENT -> WorkspacePathLayout.agentRoot(descriptor.key());
+            case CHAT -> WorkspacePathLayout.chatRoot(descriptor.key());
+            case USER -> WorkspacePathLayout.userRoot(descriptor.key());
+        });
+        if (!descriptor.root().equals(expected)) {
+            throw new IllegalArgumentException("Descriptor root does not match its identity");
+        }
+    }
+
+    private WorkspaceDescriptor descriptor(WorkspaceKind kind, String key, Path root) {
+        return new WorkspaceDescriptor(kind, key, root);
+    }
+
+    private void requireKey(String key, WorkspaceKind kind) {
+        Objects.requireNonNull(kind, "kind");
+        String label = switch (kind) {
+            case AGENT -> "agentId";
+            case CHAT -> "conversationId";
+            case USER -> "userName";
+        };
+        PlainPathSegmentValidator.requirePlainSegment(key, label);
+    }
+
+    // ── Confinement ──
+
+    /**
+     * Verify a root exists and is a confined non-symlink directory.
+     */
+    private Path verifyRoot(Path absoluteRoot) {
+        Path normalized = verifyOrAbsent(absoluteRoot);
+        if (!Files.exists(normalized, LinkOption.NOFOLLOW_LINKS)) {
+            throw new IllegalArgumentException("Workspace root does not exist: " + normalized);
+        }
+        try {
+            Path real = normalized.toRealPath();
+            if (!real.startsWith(dataRoot) || !Files.isDirectory(real, LinkOption.NOFOLLOW_LINKS)) {
+                throw new IllegalArgumentException("Workspace root is not a confined directory: " + normalized);
+            }
+            return real;
+        } catch (IOException e) {
+            throw new IllegalArgumentException("Failed to resolve workspace root: " + normalized, e);
+        }
+    }
+
+    /**
+     * Verify lexical confinement when root may be absent. Every existing
+     * ancestor is checked with NOFOLLOW_LINKS.
+     */
+    private Path verifyOrAbsent(Path absoluteRoot) {
+        Path normalized = absoluteRoot.toAbsolutePath().normalize();
+        if (!normalized.startsWith(dataRoot)) {
+            throw new IllegalArgumentException("Workspace root escapes data root: " + normalized);
+        }
+        // Verify every existing ancestor is a non-symlink directory
+        Path ancestor = dataRoot;
+        for (Path segment : dataRoot.relativize(normalized)) {
+            ancestor = ancestor.resolve(segment);
+            if (Files.exists(ancestor, LinkOption.NOFOLLOW_LINKS)) {
+                if (Files.isSymbolicLink(ancestor)
+                        || !Files.isDirectory(ancestor, LinkOption.NOFOLLOW_LINKS)) {
+                    throw new IllegalArgumentException(
+                            "Workspace path component is not a direct directory: " + ancestor);
+                }
+                try {
+                    Path real = ancestor.toRealPath();
+                    if (!real.startsWith(dataRoot)) {
+                        throw new IllegalArgumentException("Ancestor escapes data root: " + real);
+                    }
+                } catch (IOException e) {
+                    throw new IllegalArgumentException(
+                            "Failed to resolve ancestor: " + ancestor, e);
+                }
+            }
+        }
+        return normalized;
+    }
+
+    private Path confined(String relativePath) {
+        return confined(Path.of(relativePath));
+    }
+
+    private Path confined(Path relative) {
+        if (relative.isAbsolute()) {
+            throw new IllegalArgumentException("Workspace path must be relative to data root");
+        }
+        Path resolved = dataRoot.resolve(relative).normalize();
+        if (!resolved.startsWith(dataRoot)) {
+            throw new IllegalArgumentException("Workspace path escapes data root: " + relative);
+        }
+        return resolved;
+    }
+
+    private Path confinedChild(Path parent, String child) {
+        Path resolved = parent.resolve(child).normalize();
+        if (!resolved.startsWith(parent)) {
+            throw new IllegalArgumentException("Workspace child path escapes parent: " + child);
+        }
+        if (!resolved.startsWith(dataRoot)) {
+            throw new IllegalArgumentException("Workspace child path escapes data root: " + child);
+        }
+        return resolved;
+    }
+
+    // ── Descriptor-relative path helper for chat files ──
+
+    /**
+     * Resolve a confined, non-traversing path relative to a descriptor root.
+     * Rejects blank, absolute, traversal, backslash-escaped, and symlink
+     * component paths.
+     */
+    public Path confinedRelative(WorkspaceDescriptor descriptor, String relativePath) {
+        Objects.requireNonNull(descriptor, "descriptor");
+        validateDescriptor(descriptor);
+        if (!StringUtils.hasText(relativePath) || relativePath.indexOf('\\') >= 0) {
+            throw new IllegalArgumentException("relative path is required and must use forward separators");
+        }
+        Path relative = Path.of(relativePath);
+        if (relative.isAbsolute()) {
+            throw new IllegalArgumentException("Path must be relative to the workspace root");
+        }
+        for (Path segment : relative) {
+            if ("..".equals(segment.toString())) {
+                throw new IllegalArgumentException("Path escapes workspace root");
+            }
+        }
+        Path root = verifyRoot(descriptor.root());
+        Path resolved = root.resolve(relative).normalize();
+        if (!resolved.startsWith(root)) {
+            throw new IllegalArgumentException("Path escapes workspace root");
+        }
+        Path current = root;
+        for (Path segment : root.relativize(resolved)) {
+            current = current.resolve(segment);
+            if (Files.exists(current, LinkOption.NOFOLLOW_LINKS)) {
+                if (Files.isSymbolicLink(current)) {
+                    throw new IllegalArgumentException("Symlinks are not allowed: " + current);
+                }
+                try {
+                    if (!current.toRealPath().startsWith(root)) {
+                        throw new IllegalArgumentException("Path escapes workspace root");
+                    }
+                } catch (IOException e) {
+                    throw new IllegalArgumentException("Failed to resolve path: " + current, e);
+                }
+            }
+        }
+        return resolved;
+    }
+
+    // ── Legacy methods preserved until Phase 06 ──
+
+    /**
+     * Agent execution root (legacy path). Creates the directory if missing.
+     * No starter file is generated.
+     * @deprecated New code should use {@link #resolveForRead} or {@link #resolveForWrite}
+     * with {@link WorkspaceKind#AGENT}.
+     */
+    @Deprecated
     public Path agentWorkspace(String agentId) {
         requireId(agentId, "agentId");
         Path workspaceDir = confined(WorkspacePathLayout.agentWorkspaceRoot(agentId));
-        boolean createdInThisCall = !Files.exists(workspaceDir, LinkOption.NOFOLLOW_LINKS);
-        Path ensured = ensureDir(workspaceDir);
-        if (createdInThisCall) {
-            writeAgentWorkspaceStarterFile(ensured);
-        }
-        return ensured;
-    }
-
-    void ensureAgentWorkspaceStarterFile(Path workspaceRoot) {
-        if (workspaceRoot == null) {
-            throw new IllegalArgumentException("workspaceRoot is required");
-        }
-        Path normalized = workspaceRoot.normalize();
-        if (!normalized.startsWith(dataRoot)) {
-            throw new IllegalArgumentException("workspaceRoot escapes data root");
-        }
-        writeAgentWorkspaceStarterFile(normalized);
+        return ensureDir(workspaceDir);
     }
 
     /**
@@ -258,9 +514,11 @@ public class WorkspaceDirectoryService {
     }
 
     /**
-     * Persistent file directory for an ordinary chat conversation. This is not
-     * task temp and is never auto-deleted by run cleanup.
+     * Persistent file directory for an ordinary chat conversation.
+     * @deprecated Use {@link #resolveForRead} or {@link #resolveForWrite} with
+     * {@link WorkspaceKind#CHAT} for new code. Retained for legacy callers.
      */
+    @Deprecated
     public Path chatFiles(String conversationId) {
         requireId(conversationId, "conversationId");
         return ensureDir(confined(WorkspacePathLayout.chatFiles(conversationId)));
@@ -444,25 +702,51 @@ public class WorkspaceDirectoryService {
         return path == null || path.getFileName() == null ? null : path.getFileName().toString();
     }
 
-    // ── Helpers ──
+    // ── Internal helpers ──
 
-    public Path dataRoot() {
-        return dataRoot;
+    private WorkspaceDescriptor listedUserDescriptor(Path path) {
+        if (!Files.isDirectory(path, LinkOption.NOFOLLOW_LINKS)) {
+            return null;
+        }
+        String name = path.getFileName().toString();
+        try {
+            PlainPathSegmentValidator.requirePlainSegment(name, "userName");
+            return descriptor(WorkspaceKind.USER, name, verifyRoot(path));
+        } catch (IllegalArgumentException e) {
+            return null;
+        }
     }
 
-    private Path confined(String relativePath) {
-        return confined(Path.of(relativePath));
+    private List<Path> safeList(Path dir) {
+        try (var stream = Files.list(dir)) {
+            return stream.toList();
+        } catch (IOException e) {
+            throw new IllegalStateException("Failed to list user workspaces", e);
+        }
     }
 
-    private Path confined(Path relative) {
-        if (relative.isAbsolute()) {
-            throw new IllegalArgumentException("Workspace path must be relative to data root");
+    private Path ensureDirectory(Path path) {
+        if (Files.exists(path, LinkOption.NOFOLLOW_LINKS)) {
+            return verifyRoot(path);
         }
-        Path resolved = dataRoot.resolve(relative).normalize();
-        if (!resolved.startsWith(dataRoot)) {
-            throw new IllegalArgumentException("Workspace path escapes data root: " + relative);
+        try {
+            Files.createDirectory(path);
+        } catch (FileAlreadyExistsException ignored) {
+            // A concurrent creator won the race; verify its result below.
+        } catch (IOException e) {
+            throw new IllegalStateException("Failed to create directory: " + path, e);
         }
-        return resolved;
+        return verifyRoot(path);
+    }
+
+    private Path ensureDirectoryChain(Path target) {
+        Path normalized = verifyOrAbsent(target);
+        Path current = dataRoot;
+        for (Path segment : dataRoot.relativize(normalized)) {
+            current = current.resolve(segment);
+            ensureDirectory(current);
+        }
+        return verifyRoot(normalized);
     }
 
     private Path existingConfinedDirectory(String path, String label) throws IOException {
@@ -482,17 +766,6 @@ public class WorkspaceDirectoryService {
             throw new IllegalArgumentException(label + " is not a directory");
         }
         return real;
-    }
-
-    private Path confinedChild(Path parent, String child) {
-        Path resolved = parent.resolve(child).normalize();
-        if (!resolved.startsWith(parent)) {
-            throw new IllegalArgumentException("Workspace child path escapes parent: " + child);
-        }
-        if (!resolved.startsWith(dataRoot)) {
-            throw new IllegalArgumentException("Workspace child path escapes data root: " + child);
-        }
-        return resolved;
     }
 
     private Path confinedWorkspaceChild(Path workspaceRoot, String first, String... more) {
@@ -556,22 +829,6 @@ public class WorkspaceDirectoryService {
         }
     }
 
-    private void writeAgentWorkspaceStarterFile(Path workspaceRoot) {
-        Path starterFile = workspaceRoot.resolve(AGENTS_MD_FILE_NAME);
-        try {
-            Files.writeString(
-                starterFile,
-                AGENT_WORKSPACE_STARTER_AGENTS_MD,
-                StandardOpenOption.CREATE_NEW,
-                StandardOpenOption.WRITE
-            );
-        } catch (FileAlreadyExistsException ignored) {
-            // Existing file is user-owned; preserve as-is.
-        } catch (IOException e) {
-            throw new IllegalStateException("Failed to write workspace starter file: " + starterFile, e);
-        }
-    }
-
     private void requireId(String value, String label) {
         PlainPathSegmentValidator.requirePlainSegment(value, label);
     }
@@ -579,4 +836,5 @@ public class WorkspaceDirectoryService {
     private String sanitize(String value) {
         return value.replaceAll("[^a-zA-Z0-9_.-]", "_").replaceAll("_+", "_");
     }
+
 }

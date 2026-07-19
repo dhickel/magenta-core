@@ -25,6 +25,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.SingleConnectionDataSource;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceDirectoryServiceTestSupport;
 
 class OutputControllerTest {
 
@@ -201,9 +202,7 @@ class OutputControllerTest {
             new SingleConnectionDataSource("jdbc:sqlite::memory:?foreign_keys=true", true)
         );
         Path dataRoot = Files.createDirectories(tempDir.resolve("data"));
-        WorkspaceDirectoryService directoryService = new WorkspaceDirectoryService(
-            new AiConfig(null, null, null, null, dataRoot, null, null)
-        );
+        WorkspaceDirectoryService directoryService = WorkspaceDirectoryServiceTestSupport.directoryService(dataRoot);
         WorkspaceRepository workspaceRepository = new WorkspaceRepository(jdbcTemplate);
         OutputArtifactService outputArtifactService = new OutputArtifactService(
             workspaceRepository, directoryService, mapper);

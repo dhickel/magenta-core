@@ -5,11 +5,10 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 
-import io.mindspice.magenta2.ai.chat.model.ChatSession;
 import io.mindspice.magenta2.ai.chat.service.ChatFileService;
 import io.mindspice.magenta2.ai.chat.service.ChatService;
-import io.mindspice.magenta2.ai.config.user.AiConfig;
 import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceDirectoryService;
+import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceDirectoryServiceTestSupport;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.springframework.core.io.InputStreamResource;
@@ -70,23 +69,26 @@ class ChatFileControllerTest {
     @Test
     void traversalDownloadIsRejected() throws Exception {
         ChatFileController controller = controller(List.of(CONVERSATION_ID));
+        Files.createDirectories(chatFilesRoot());
         Files.writeString(tempDir.resolve("outside.txt"), "outside");
 
         var response = controller.download(CONVERSATION_ID, "../outside.txt");
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
-        assertThat(response.getBody().toString()).contains("escapes");
+        assertThat(response.getBody().toString()).contains("escape");
     }
 
     private ChatFileController controller(List<String> conversationIds) throws Exception {
-        WorkspaceDirectoryService directoryService = new WorkspaceDirectoryService(
-            new AiConfig(null, null, null, null, Files.createDirectories(tempDir.resolve("data")), null, null)
-        );
+        Path dataRoot = Files.createDirectories(tempDir.resolve("data"));
+        WorkspaceDirectoryService directoryService = WorkspaceDirectoryServiceTestSupport.directoryService(dataRoot);
         return new ChatFileController(new StubChatService(conversationIds), new ChatFileService(directoryService));
     }
 
+    /**
+     * Phase 02: chat files are stored under workspace/chat/{conversationId}.
+     */
     private Path chatFilesRoot() throws Exception {
-        return Files.createDirectories(tempDir.resolve("data/chats/" + CONVERSATION_ID + "/files"));
+        return Files.createDirectories(tempDir.resolve("data/workspace/chat/" + CONVERSATION_ID));
     }
 
     private static final class StubChatService extends ChatService {
@@ -100,13 +102,6 @@ class ChatFileControllerTest {
         @Override
         public boolean conversationExists(String conversationId) {
             return conversationIds.contains(conversationId);
-        }
-
-        @Override
-        public List<ChatSession> listSessions() {
-            return conversationIds.stream()
-                .map(id -> new ChatSession(id, null, null))
-                .toList();
         }
     }
 }

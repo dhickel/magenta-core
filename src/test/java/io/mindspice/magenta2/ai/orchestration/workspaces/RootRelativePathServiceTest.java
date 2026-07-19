@@ -133,14 +133,7 @@ class RootRelativePathServiceTest {
 
     private TestContext context() throws Exception {
         Path configuredDataRoot = tempDir.resolve("data");
-        WorkspaceDirectoryService directories = new WorkspaceDirectoryService(new AiConfig(
-            "agent-1",
-            "summary",
-            10,
-            configuredDataRoot,
-            Map.of(),
-            Map.of()
-        ));
+        WorkspaceDirectoryService directories = WorkspaceDirectoryServiceTestSupport.directoryService(configuredDataRoot);
         return new TestContext(directories.dataRoot(), new RootRelativePathService(directories));
     }
 

@@ -27,6 +27,25 @@ public final class WorkspacePathLayout {
     private WorkspacePathLayout() {
     }
 
+    // ── Phase 02 trusted three-kind factories ──
+
+    /** {@code workspace/agent/<id>} */
+    public static Path agentRoot(String agentId) {
+        return Path.of(WORKSPACE, WorkspaceKind.AGENT.token(), segment(agentId, "agentId"));
+    }
+
+    /** {@code workspace/chat/<id>} */
+    public static Path chatRoot(String conversationId) {
+        return Path.of(WORKSPACE, WorkspaceKind.CHAT.token(), segment(conversationId, "conversationId"));
+    }
+
+    /** {@code workspace/user/<name>} */
+    public static Path userRoot(String name) {
+        return Path.of(WORKSPACE, WorkspaceKind.USER.token(), segment(name, "userName"));
+    }
+
+    // ── Legacy factories retained until Phase 06 ──
+
     public static Path agentWorkspaceRoot(String agentWorkspaceId) {
         return Path.of(WORKSPACE, segment(agentWorkspaceId, "agentWorkspaceId"));
     }

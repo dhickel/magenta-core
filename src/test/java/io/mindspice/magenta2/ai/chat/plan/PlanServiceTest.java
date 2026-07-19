@@ -16,13 +16,18 @@ import io.mindspice.magenta2.ai.config.user.ModelConfig;
 import io.mindspice.magenta2.ai.orchestration.runtime.OrchestrationTaskContext;
 import io.mindspice.magenta2.ai.orchestration.runtime.OrchestrationTaskContextHolder;
 import io.mindspice.magenta2.ai.orchestration.workspaces.EffectiveWorkspaceResolver;
+import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceDirectoryServiceTestSupport;
 import io.mindspice.magenta2.ai.orchestration.workspaces.OutputArtifactQuery;
 import io.mindspice.magenta2.ai.orchestration.workspaces.OutputArtifactService;
 import io.mindspice.magenta2.ai.orchestration.workspaces.RunOutputArtifact;
 import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceDirectoryService;
+import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceDirectoryServiceTestSupport;
 import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceOwnerType;
+import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceDirectoryServiceTestSupport;
 import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceRepository;
+import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceDirectoryServiceTestSupport;
 import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceService;
+import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceDirectoryServiceTestSupport;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.springframework.ai.chat.messages.UserMessage;
@@ -471,7 +476,7 @@ class PlanServiceTest {
             ),
             Map.of()
         );
-        WorkspaceDirectoryService workspaceDirectoryService = new WorkspaceDirectoryService(config);
+        WorkspaceDirectoryService workspaceDirectoryService = WorkspaceDirectoryServiceTestSupport.directoryService(dataRoot);
         PlanService service = new PlanService(
             planRepository,
             memoryRepository,
@@ -568,7 +573,7 @@ class PlanServiceTest {
             ),
             Map.of()
         );
-        WorkspaceDirectoryService workspaceDirectoryService = new WorkspaceDirectoryService(config);
+        WorkspaceDirectoryService workspaceDirectoryService = WorkspaceDirectoryServiceTestSupport.directoryService(dataRoot);
         PlanService service = new PlanService(
             planRepository,
             memoryRepository,
@@ -1072,13 +1077,10 @@ class PlanServiceTest {
     @Test
     void agentContextAllocatesOutputUnderAgentDirectory() throws Exception {
         Path dataRoot = Files.createDirectories(tempDir.resolve("data"));
-        WorkspaceDirectoryService dirService = new WorkspaceDirectoryService(
-            new AiConfig(null, null, null, null, dataRoot, null, null));
+        WorkspaceDirectoryService dirService = WorkspaceDirectoryServiceTestSupport.directoryService(dataRoot);
         JdbcTemplate jdbcTemplate = jdbcTemplate();
         WorkspaceRepository workspaceRepository = new WorkspaceRepository(jdbcTemplate);
-        WorkspaceService workspaceService = new WorkspaceService(
-            workspaceRepository,
-            new AiConfig(null, null, null, null, dataRoot, null, null));
+        WorkspaceService workspaceService = new WorkspaceService(workspaceRepository, WorkspaceDirectoryServiceTestSupport.aiConfig(tempDir), WorkspaceDirectoryServiceTestSupport.agentProfileRepository(true), WorkspaceDirectoryServiceTestSupport.chatExistenceRepository(true));
         EffectiveWorkspaceResolver resolver = new EffectiveWorkspaceResolver(dirService, workspaceService);
         OutputArtifactService artifactService = new OutputArtifactService(
             workspaceRepository, dirService, new ObjectMapper().findAndRegisterModules());
@@ -1121,13 +1123,10 @@ class PlanServiceTest {
     @Test
     void chatExecutionWithAgentContextUpdatesHolderWithRunScopedOutputPath() throws Exception {
         Path dataRoot = Files.createDirectories(tempDir.resolve("data-chat"));
-        WorkspaceDirectoryService dirService = new WorkspaceDirectoryService(
-            new AiConfig(null, null, null, null, dataRoot, null, null));
+        WorkspaceDirectoryService dirService = WorkspaceDirectoryServiceTestSupport.directoryService(dataRoot);
         JdbcTemplate jdbcTemplate = jdbcTemplate();
         WorkspaceRepository workspaceRepository = new WorkspaceRepository(jdbcTemplate);
-        WorkspaceService workspaceService = new WorkspaceService(
-            workspaceRepository,
-            new AiConfig(null, null, null, null, dataRoot, null, null));
+        WorkspaceService workspaceService = new WorkspaceService(workspaceRepository, WorkspaceDirectoryServiceTestSupport.aiConfig(tempDir), WorkspaceDirectoryServiceTestSupport.agentProfileRepository(true), WorkspaceDirectoryServiceTestSupport.chatExistenceRepository(true));
         EffectiveWorkspaceResolver resolver = new EffectiveWorkspaceResolver(dirService, workspaceService);
         OutputArtifactService artifactService = new OutputArtifactService(
             workspaceRepository, dirService, new ObjectMapper().findAndRegisterModules());
@@ -1177,13 +1176,10 @@ class PlanServiceTest {
     @Test
     void startRunUsesEffectiveWorkspaceTaskOutputDirectory() throws Exception {
         Path dataRoot = Files.createDirectories(tempDir.resolve("data-effective-workspace"));
-        WorkspaceDirectoryService dirService = new WorkspaceDirectoryService(
-            new AiConfig(null, null, null, null, dataRoot, null, null));
+        WorkspaceDirectoryService dirService = WorkspaceDirectoryServiceTestSupport.directoryService(dataRoot);
         JdbcTemplate jdbcTemplate = jdbcTemplate();
         WorkspaceRepository workspaceRepository = new WorkspaceRepository(jdbcTemplate);
-        WorkspaceService workspaceService = new WorkspaceService(
-            workspaceRepository,
-            new AiConfig(null, null, null, null, dataRoot, null, null));
+        WorkspaceService workspaceService = new WorkspaceService(workspaceRepository, WorkspaceDirectoryServiceTestSupport.aiConfig(tempDir), WorkspaceDirectoryServiceTestSupport.agentProfileRepository(true), WorkspaceDirectoryServiceTestSupport.chatExistenceRepository(true));
         EffectiveWorkspaceResolver resolver = new EffectiveWorkspaceResolver(dirService, workspaceService);
         OutputArtifactService artifactService = new OutputArtifactService(
             workspaceRepository, dirService, new ObjectMapper().findAndRegisterModules());
@@ -1236,8 +1232,7 @@ class PlanServiceTest {
     @Test
     void systemContextAllocatesOutputUnderSystemDirectory() throws Exception {
         Path dataRoot = Files.createDirectories(tempDir.resolve("data"));
-        WorkspaceDirectoryService dirService = new WorkspaceDirectoryService(
-            new AiConfig(null, null, null, null, dataRoot, null, null));
+        WorkspaceDirectoryService dirService = WorkspaceDirectoryServiceTestSupport.directoryService(dataRoot);
         JdbcTemplate jdbcTemplate = jdbcTemplate();
         WorkspaceRepository workspaceRepository = new WorkspaceRepository(jdbcTemplate);
         OutputArtifactService artifactService = new OutputArtifactService(
@@ -1272,8 +1267,7 @@ class PlanServiceTest {
     @Test
     void completeRunDerivesAgentAttributionFromCurrentWorkspaceOutputPath() throws Exception {
         Path dataRoot = Files.createDirectories(tempDir.resolve("data-attribution"));
-        WorkspaceDirectoryService dirService = new WorkspaceDirectoryService(
-            new AiConfig(null, null, null, null, dataRoot, null, null));
+        WorkspaceDirectoryService dirService = WorkspaceDirectoryServiceTestSupport.directoryService(dataRoot);
         JdbcTemplate jdbcTemplate = jdbcTemplate();
         WorkspaceRepository workspaceRepository = new WorkspaceRepository(jdbcTemplate);
         OutputArtifactService artifactService = new OutputArtifactService(
@@ -1318,8 +1312,7 @@ class PlanServiceTest {
     @Test
     void explicitTaskContextAttributionOverridesOutputPathFallback() throws Exception {
         Path dataRoot = Files.createDirectories(tempDir.resolve("data-explicit-attribution"));
-        WorkspaceDirectoryService dirService = new WorkspaceDirectoryService(
-            new AiConfig(null, null, null, null, dataRoot, null, null));
+        WorkspaceDirectoryService dirService = WorkspaceDirectoryServiceTestSupport.directoryService(dataRoot);
         JdbcTemplate jdbcTemplate = jdbcTemplate();
         WorkspaceRepository workspaceRepository = new WorkspaceRepository(jdbcTemplate);
         OutputArtifactService artifactService = new OutputArtifactService(
@@ -1368,8 +1361,7 @@ class PlanServiceTest {
     @Test
     void partialTaskContextPreservesProjectAndFallsBackToOutputPathAgent() throws Exception {
         Path dataRoot = Files.createDirectories(tempDir.resolve("data-partial-attribution"));
-        WorkspaceDirectoryService dirService = new WorkspaceDirectoryService(
-            new AiConfig(null, null, null, null, dataRoot, null, null));
+        WorkspaceDirectoryService dirService = WorkspaceDirectoryServiceTestSupport.directoryService(dataRoot);
         JdbcTemplate jdbcTemplate = jdbcTemplate();
         WorkspaceRepository workspaceRepository = new WorkspaceRepository(jdbcTemplate);
         OutputArtifactService artifactService = new OutputArtifactService(
@@ -1452,8 +1444,7 @@ class PlanServiceTest {
     @Test
     void completeRunCleansTempDirectoryAndDetectsLooseArtifacts() throws Exception {
         Path dataRoot = Files.createDirectories(tempDir.resolve("data2"));
-        WorkspaceDirectoryService dirService = new WorkspaceDirectoryService(
-            new AiConfig(null, null, null, null, dataRoot, null, null));
+        WorkspaceDirectoryService dirService = WorkspaceDirectoryServiceTestSupport.directoryService(dataRoot);
         JdbcTemplate jdbcTemplate = jdbcTemplate();
         WorkspaceRepository workspaceRepository = new WorkspaceRepository(jdbcTemplate);
         OutputArtifactService artifactService = new OutputArtifactService(
@@ -1501,8 +1492,7 @@ class PlanServiceTest {
     @Test
     void runStagingCleanupDeletesOnlyAfterOneDayRetentionThreshold() throws Exception {
         Path dataRoot = Files.createDirectories(tempDir.resolve("data-retention-threshold"));
-        WorkspaceDirectoryService dirService = new WorkspaceDirectoryService(
-            new AiConfig(null, null, null, null, dataRoot, null, null));
+        WorkspaceDirectoryService dirService = WorkspaceDirectoryServiceTestSupport.directoryService(dataRoot);
         JdbcTemplate jdbcTemplate = jdbcTemplate();
         WorkspaceRepository workspaceRepository = new WorkspaceRepository(jdbcTemplate);
         OutputArtifactService artifactService = new OutputArtifactService(
@@ -1541,8 +1531,7 @@ class PlanServiceTest {
     @Test
     void completeRunCanCopyTempContentsIntoFinalOutputsBeforeCleanup() throws Exception {
         Path dataRoot = Files.createDirectories(tempDir.resolve("data-include-temp"));
-        WorkspaceDirectoryService dirService = new WorkspaceDirectoryService(
-            new AiConfig(null, null, null, null, dataRoot, null, null));
+        WorkspaceDirectoryService dirService = WorkspaceDirectoryServiceTestSupport.directoryService(dataRoot);
         JdbcTemplate jdbcTemplate = jdbcTemplate();
         WorkspaceRepository workspaceRepository = new WorkspaceRepository(jdbcTemplate);
         OutputArtifactService artifactService = new OutputArtifactService(
@@ -1590,8 +1579,7 @@ class PlanServiceTest {
     @Test
     void completeRunSupportsLegacyAbsoluteCurrentRootPaths() throws Exception {
         Path dataRoot = Files.createDirectories(tempDir.resolve("data-legacy-current"));
-        WorkspaceDirectoryService dirService = new WorkspaceDirectoryService(
-            new AiConfig(null, null, null, null, dataRoot, null, null));
+        WorkspaceDirectoryService dirService = WorkspaceDirectoryServiceTestSupport.directoryService(dataRoot);
         JdbcTemplate jdbcTemplate = jdbcTemplate();
         WorkspaceRepository workspaceRepository = new WorkspaceRepository(jdbcTemplate);
         OutputArtifactService artifactService = new OutputArtifactService(
@@ -1629,8 +1617,7 @@ class PlanServiceTest {
         Path dataRoot = Files.createDirectories(tempDir.resolve("data-stale-current"));
         Path oldRoot = Files.createDirectories(tempDir.resolve("old-root/root"));
         Path oldOutput = Files.createDirectories(oldRoot.resolve("agents/system/workspace/outputs/tasks/old/run"));
-        WorkspaceDirectoryService dirService = new WorkspaceDirectoryService(
-            new AiConfig(null, null, null, null, dataRoot, null, null));
+        WorkspaceDirectoryService dirService = WorkspaceDirectoryServiceTestSupport.directoryService(dataRoot);
         JdbcTemplate jdbcTemplate = jdbcTemplate();
         WorkspaceRepository workspaceRepository = new WorkspaceRepository(jdbcTemplate);
         OutputArtifactService artifactService = new OutputArtifactService(
@@ -1669,8 +1656,7 @@ class PlanServiceTest {
             .resolve("uploaded-notes.md");
         Files.writeString(chatFile, "# chat upload\n");
 
-        WorkspaceDirectoryService dirService = new WorkspaceDirectoryService(
-            new AiConfig(null, null, null, null, dataRoot, null, null));
+        WorkspaceDirectoryService dirService = WorkspaceDirectoryServiceTestSupport.directoryService(dataRoot);
         JdbcTemplate jdbcTemplate = jdbcTemplate();
         WorkspaceRepository workspaceRepository = new WorkspaceRepository(jdbcTemplate);
         OutputArtifactService artifactService = new OutputArtifactService(
@@ -1832,7 +1818,9 @@ class PlanServiceTest {
 
     private static final class FailingWorkspaceDirectoryService extends WorkspaceDirectoryService {
         private FailingWorkspaceDirectoryService(Path dataRoot) throws Exception {
-            super(new AiConfig(null, null, null, null, dataRoot, null, null));
+            super(WorkspaceDirectoryServiceTestSupport.aiConfig(dataRoot),
+                    WorkspaceDirectoryServiceTestSupport.agentProfileRepository(true),
+                    WorkspaceDirectoryServiceTestSupport.chatExistenceRepository(true));
         }
 
         @Override

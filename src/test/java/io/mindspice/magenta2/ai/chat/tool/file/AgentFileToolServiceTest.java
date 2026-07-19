@@ -17,6 +17,7 @@ import org.junit.jupiter.api.io.TempDir;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceDirectoryServiceTestSupport;
 
 class AgentFileToolServiceTest {
 
@@ -475,8 +476,7 @@ class AgentFileToolServiceTest {
     }
 
     private WorkspaceDirectoryService workspaceDirectoryService() throws IOException {
-        return new WorkspaceDirectoryService(
-            new AiConfig(null, null, null, null, null, null, tempDir, null, null, null));
+        return WorkspaceDirectoryServiceTestSupport.directoryService(tempDir);
     }
 
     private String generatedLines(int count) {

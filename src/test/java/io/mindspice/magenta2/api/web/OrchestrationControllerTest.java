@@ -77,6 +77,7 @@ import org.springframework.jdbc.datasource.SingleConnectionDataSource;
 import org.springframework.mock.web.MockHttpServletResponse;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceDirectoryServiceTestSupport;
 
 class OrchestrationControllerTest {
 
@@ -313,9 +314,10 @@ class OrchestrationControllerTest {
             WorkspaceRepository repository = new WorkspaceRepository(new JdbcTemplate(
                 new SingleConnectionDataSource("jdbc:sqlite::memory:?foreign_keys=true", true)
             ));
-            WorkspaceService service = new WorkspaceService(repository, new AiConfig(
-                null, null, null, null, null, 10, dataRoot, null, Map.of(), Map.of()
-            ));
+            WorkspaceService service = new WorkspaceService(repository,
+                    WorkspaceDirectoryServiceTestSupport.aiConfig(dataRoot),
+                    WorkspaceDirectoryServiceTestSupport.agentProfileRepository(true),
+                    WorkspaceDirectoryServiceTestSupport.chatExistenceRepository(true));
             var workspace = service.agentWorkspace("agent-1", "Test Agent");
             service.addLink(workspace.id(), new WorkspaceLink(
                 null,
@@ -961,7 +963,7 @@ class OrchestrationControllerTest {
         Path dataRoot = Files.createTempDirectory("project-root-browser");
         JdbcTemplate jdbc = new JdbcTemplate(new SingleConnectionDataSource("jdbc:sqlite::memory:?foreign_keys=true", true));
         AiConfig config = new AiConfig(null, null, 10, dataRoot, Map.of(), Map.of());
-        WorkspaceDirectoryService directoryService = new WorkspaceDirectoryService(config);
+        WorkspaceDirectoryService directoryService = WorkspaceDirectoryServiceTestSupport.directoryService(dataRoot);
         WorkspaceService workspaceService = new WorkspaceService(
             new WorkspaceRepository(jdbc),
             config,
@@ -2699,9 +2701,7 @@ class OrchestrationControllerTest {
     private static OutputArtifactDeps outputArtifactDeps() {
         try {
             Path dataRoot = Files.createTempDirectory("orch-controller-output");
-            WorkspaceDirectoryService directories = new WorkspaceDirectoryService(new AiConfig(
-                null, null, null, null, null, 10, dataRoot, null, Map.of(), Map.of()
-            ));
+            WorkspaceDirectoryService directories = WorkspaceDirectoryServiceTestSupport.directoryService(dataRoot);
             WorkspaceRepository repository = new WorkspaceRepository(new JdbcTemplate(
                 new SingleConnectionDataSource("jdbc:sqlite::memory:?foreign_keys=true", true)
             ));

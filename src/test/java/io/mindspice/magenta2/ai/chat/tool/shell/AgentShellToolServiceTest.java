@@ -10,7 +10,9 @@ import io.mindspice.magenta2.ai.config.user.AiConfig;
 import io.mindspice.magenta2.ai.orchestration.runtime.OrchestrationTaskContext;
 import io.mindspice.magenta2.ai.orchestration.runtime.OrchestrationTaskContextHolder;
 import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceDirectoryService;
+import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceDirectoryServiceTestSupport;
 import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspacePathLayout;
+import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceDirectoryServiceTestSupport;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -242,7 +244,7 @@ class AgentShellToolServiceTest {
         Files.createDirectories(tempDir.resolve("workspace/agent-1"));
 
         AiConfig aiConfig = new AiConfig(null, null, null, null, null, null, tempDir, null, null, null);
-        WorkspaceDirectoryService dirService = new WorkspaceDirectoryService(aiConfig);
+        WorkspaceDirectoryService dirService = WorkspaceDirectoryServiceTestSupport.directoryService(tempDir);
         AgentShellToolService service = new AgentShellToolService(tempDir, List.of("pwd"), dirService);
 
         OrchestrationTaskContextHolder.set(new OrchestrationTaskContext(
@@ -265,7 +267,7 @@ class AgentShellToolServiceTest {
         Files.createDirectories(tempDir.resolve("workspace/agent-1"));
 
         AiConfig aiConfig = new AiConfig(null, null, null, null, null, null, tempDir, null, null, null);
-        WorkspaceDirectoryService dirService = new WorkspaceDirectoryService(aiConfig);
+        WorkspaceDirectoryService dirService = WorkspaceDirectoryServiceTestSupport.directoryService(tempDir);
         AgentShellToolService service = new AgentShellToolService(tempDir, List.of("pwd"), dirService);
 
         OrchestrationTaskContextHolder.set(new OrchestrationTaskContext(
@@ -288,7 +290,7 @@ class AgentShellToolServiceTest {
         Files.createDirectories(tempDir.resolve("workspace/agent-1/outputs"));
 
         AiConfig aiConfig = new AiConfig(null, null, null, null, null, null, tempDir, null, null, null);
-        WorkspaceDirectoryService dirService = new WorkspaceDirectoryService(aiConfig);
+        WorkspaceDirectoryService dirService = WorkspaceDirectoryServiceTestSupport.directoryService(tempDir);
         AgentShellToolService service = new AgentShellToolService(tempDir, List.of("pwd"), dirService);
 
         OrchestrationTaskContextHolder.set(new OrchestrationTaskContext(
@@ -309,7 +311,7 @@ class AgentShellToolServiceTest {
         Files.createDirectories(tempDir.resolve("workspace/agent-1"));
 
         AiConfig aiConfig = new AiConfig(null, null, null, null, null, null, tempDir, null, null, null);
-        WorkspaceDirectoryService dirService = new WorkspaceDirectoryService(aiConfig);
+        WorkspaceDirectoryService dirService = WorkspaceDirectoryServiceTestSupport.directoryService(tempDir);
         AgentShellToolService service = new AgentShellToolService(tempDir, List.of("pwd"), dirService);
 
         OrchestrationTaskContextHolder.set(new OrchestrationTaskContext(
@@ -330,7 +332,7 @@ class AgentShellToolServiceTest {
         Files.createDirectories(runWorkspace.resolve("nested"));
 
         AiConfig aiConfig = new AiConfig(null, null, null, null, null, null, tempDir, null, null, null);
-        WorkspaceDirectoryService dirService = new WorkspaceDirectoryService(aiConfig);
+        WorkspaceDirectoryService dirService = WorkspaceDirectoryServiceTestSupport.directoryService(tempDir);
         AgentShellToolService service = new AgentShellToolService(tempDir, List.of("pwd"), dirService);
 
         OrchestrationTaskContextHolder.set(new OrchestrationTaskContext(
@@ -354,7 +356,7 @@ class AgentShellToolServiceTest {
         Path outputDir = Files.createDirectories(runWorkspace.resolve("outputs"));
 
         AiConfig aiConfig = new AiConfig(null, null, null, null, null, null, tempDir, null, null, null);
-        WorkspaceDirectoryService dirService = new WorkspaceDirectoryService(aiConfig);
+        WorkspaceDirectoryService dirService = WorkspaceDirectoryServiceTestSupport.directoryService(tempDir);
         AgentShellToolService service = new AgentShellToolService(tempDir, List.of("pwd"), dirService);
 
         OrchestrationTaskContextHolder.set(new OrchestrationTaskContext(
@@ -380,7 +382,7 @@ class AgentShellToolServiceTest {
         Path outputDir = Files.createDirectories(runWorkspace.resolve("outputs"));
 
         AiConfig aiConfig = new AiConfig(null, null, null, null, null, null, tempDir, null, null, null);
-        WorkspaceDirectoryService dirService = new WorkspaceDirectoryService(aiConfig);
+        WorkspaceDirectoryService dirService = WorkspaceDirectoryServiceTestSupport.directoryService(tempDir);
         AgentShellToolService service = new AgentShellToolService(tempDir, List.of("pwd"), dirService);
 
         OrchestrationTaskContextHolder.set(new OrchestrationTaskContext(
@@ -409,7 +411,7 @@ class AgentShellToolServiceTest {
         Path outputDir = Files.createDirectories(durableWorkspace.resolve("runs/run-1/outputs"));
 
         AiConfig aiConfig = new AiConfig(null, null, null, null, null, null, tempDir, null, null, null);
-        WorkspaceDirectoryService dirService = new WorkspaceDirectoryService(aiConfig);
+        WorkspaceDirectoryService dirService = WorkspaceDirectoryServiceTestSupport.directoryService(tempDir);
         AgentShellToolService service = new AgentShellToolService(tempDir, List.of("pwd"), dirService);
 
         OrchestrationTaskContextHolder.set(new OrchestrationTaskContext(
@@ -435,7 +437,7 @@ class AgentShellToolServiceTest {
         Path outputDir = Files.createDirectories(runWorkspace.resolve("outputs"));
 
         AiConfig aiConfig = new AiConfig(null, null, null, null, null, null, tempDir, null, null, null);
-        WorkspaceDirectoryService dirService = new WorkspaceDirectoryService(aiConfig);
+        WorkspaceDirectoryService dirService = WorkspaceDirectoryServiceTestSupport.directoryService(tempDir);
         Path projectWorkspace = dirService.projectWorkspace("project-1");
         dirService.materializeAssignmentProjectLink(runWorkspace.toString(), "project-1");
         AgentShellToolService service = new AgentShellToolService(tempDir, List.of("pwd"), dirService);
@@ -463,7 +465,7 @@ class AgentShellToolServiceTest {
         Files.createDirectories(tempDir.resolve("workspace/agent-1"));
 
         AiConfig aiConfig = new AiConfig(null, null, null, null, null, null, tempDir, null, null, null);
-        WorkspaceDirectoryService dirService = new WorkspaceDirectoryService(aiConfig);
+        WorkspaceDirectoryService dirService = WorkspaceDirectoryServiceTestSupport.directoryService(tempDir);
         AgentShellToolService service = new AgentShellToolService(tempDir, List.of("pwd"), dirService);
 
         OrchestrationTaskContextHolder.set(new OrchestrationTaskContext(
@@ -483,7 +485,7 @@ class AgentShellToolServiceTest {
         Files.createDirectories(tempDir.resolve("workspace/agent-1"));
 
         AiConfig aiConfig = new AiConfig(null, null, null, null, null, null, tempDir, null, null, null);
-        WorkspaceDirectoryService dirService = new WorkspaceDirectoryService(aiConfig);
+        WorkspaceDirectoryService dirService = WorkspaceDirectoryServiceTestSupport.directoryService(tempDir);
         AgentShellToolService service = new AgentShellToolService(tempDir, List.of("pwd"), dirService);
 
         OrchestrationTaskContextHolder.set(new OrchestrationTaskContext(

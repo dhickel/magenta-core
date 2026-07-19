@@ -14,6 +14,7 @@ import org.springframework.jdbc.datasource.SingleConnectionDataSource;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceDirectoryServiceTestSupport;
 
 class OutputArtifactServiceAttributionTest {
 
@@ -25,9 +26,7 @@ class OutputArtifactServiceAttributionTest {
         JdbcTemplate jdbc = new JdbcTemplate(new SingleConnectionDataSource("jdbc:sqlite::memory:?foreign_keys=true", true));
         WorkspaceRepository repository = new WorkspaceRepository(jdbc);
         Path dataRoot = Files.createDirectories(tempDir.resolve("data"));
-        WorkspaceDirectoryService directoryService = new WorkspaceDirectoryService(
-            new AiConfig(null, null, null, null, dataRoot, null, null)
-        );
+        WorkspaceDirectoryService directoryService = WorkspaceDirectoryServiceTestSupport.directoryService(dataRoot);
         OutputArtifactService service = new OutputArtifactService(
             repository,
             directoryService,
@@ -89,9 +88,7 @@ class OutputArtifactServiceAttributionTest {
         JdbcTemplate jdbc = new JdbcTemplate(new SingleConnectionDataSource("jdbc:sqlite::memory:?foreign_keys=true", true));
         Path dataRoot = Files.createDirectories(tempDir.resolve("project-job-output"));
         WorkspaceRepository repository = new WorkspaceRepository(jdbc);
-        WorkspaceDirectoryService directoryService = new WorkspaceDirectoryService(
-            new AiConfig(null, null, null, null, dataRoot, null, null)
-        );
+        WorkspaceDirectoryService directoryService = WorkspaceDirectoryServiceTestSupport.directoryService(dataRoot);
         OutputArtifactService service = new OutputArtifactService(
             repository,
             directoryService,
@@ -127,9 +124,7 @@ class OutputArtifactServiceAttributionTest {
         JdbcTemplate jdbc = new JdbcTemplate(new SingleConnectionDataSource("jdbc:sqlite::memory:?foreign_keys=true", true));
         Path dataRoot = Files.createDirectories(tempDir.resolve("collision-root"));
         WorkspaceRepository repository = new WorkspaceRepository(jdbc);
-        WorkspaceDirectoryService directoryService = new WorkspaceDirectoryService(
-            new AiConfig(null, null, null, null, dataRoot, null, null)
-        );
+        WorkspaceDirectoryService directoryService = WorkspaceDirectoryServiceTestSupport.directoryService(dataRoot);
         OutputArtifactService service = new OutputArtifactService(
             repository,
             directoryService,
@@ -159,9 +154,7 @@ class OutputArtifactServiceAttributionTest {
         JdbcTemplate jdbc = new JdbcTemplate(new SingleConnectionDataSource("jdbc:sqlite::memory:?foreign_keys=true", true));
         Path dataRoot = Files.createDirectories(tempDir.resolve("root"));
         WorkspaceRepository repository = new WorkspaceRepository(jdbc);
-        WorkspaceDirectoryService directoryService = new WorkspaceDirectoryService(
-            new AiConfig(null, null, null, null, dataRoot, null, null)
-        );
+        WorkspaceDirectoryService directoryService = WorkspaceDirectoryServiceTestSupport.directoryService(dataRoot);
         OutputArtifactService service = new OutputArtifactService(
             repository,
             directoryService,
@@ -194,9 +187,7 @@ class OutputArtifactServiceAttributionTest {
         JdbcTemplate jdbc = new JdbcTemplate(new SingleConnectionDataSource("jdbc:sqlite::memory:?foreign_keys=true", true));
         Path dataRoot = Files.createDirectories(tempDir.resolve("root-run-scoped"));
         WorkspaceRepository repository = new WorkspaceRepository(jdbc);
-        WorkspaceDirectoryService directoryService = new WorkspaceDirectoryService(
-            new AiConfig(null, null, null, null, dataRoot, null, null)
-        );
+        WorkspaceDirectoryService directoryService = WorkspaceDirectoryServiceTestSupport.directoryService(dataRoot);
         OutputArtifactService service = new OutputArtifactService(
             repository,
             directoryService,
@@ -227,9 +218,7 @@ class OutputArtifactServiceAttributionTest {
         JdbcTemplate jdbc = new JdbcTemplate(new SingleConnectionDataSource("jdbc:sqlite::memory:?foreign_keys=true", true));
         Path dataRoot = Files.createDirectories(tempDir.resolve("root2"));
         WorkspaceRepository repository = new WorkspaceRepository(jdbc);
-        WorkspaceDirectoryService directoryService = new WorkspaceDirectoryService(
-            new AiConfig(null, null, null, null, dataRoot, null, null)
-        );
+        WorkspaceDirectoryService directoryService = WorkspaceDirectoryServiceTestSupport.directoryService(dataRoot);
         OutputArtifactService service = new OutputArtifactService(
             repository,
             directoryService,
@@ -260,9 +249,7 @@ class OutputArtifactServiceAttributionTest {
         JdbcTemplate jdbc = new JdbcTemplate(new SingleConnectionDataSource("jdbc:sqlite::memory:?foreign_keys=true", true));
         Path dataRoot = Files.createDirectories(tempDir.resolve("copy-root"));
         WorkspaceRepository repository = new WorkspaceRepository(jdbc);
-        WorkspaceDirectoryService directoryService = new WorkspaceDirectoryService(
-            new AiConfig(null, null, null, null, dataRoot, null, null)
-        );
+        WorkspaceDirectoryService directoryService = WorkspaceDirectoryServiceTestSupport.directoryService(dataRoot);
         OutputArtifactService service = new OutputArtifactService(
             repository,
             directoryService,
@@ -297,9 +284,7 @@ class OutputArtifactServiceAttributionTest {
         JdbcTemplate jdbc = new JdbcTemplate(new SingleConnectionDataSource("jdbc:sqlite::memory:?foreign_keys=true", true));
         WorkspaceRepository repository = new WorkspaceRepository(jdbc);
         Path dataRoot = Files.createDirectories(tempDir.resolve("root3"));
-        WorkspaceDirectoryService directoryService = new WorkspaceDirectoryService(
-            new AiConfig(null, null, null, null, dataRoot, null, null)
-        );
+        WorkspaceDirectoryService directoryService = WorkspaceDirectoryServiceTestSupport.directoryService(dataRoot);
         OutputArtifactService service = new OutputArtifactService(
             repository,
             directoryService,
@@ -327,9 +312,7 @@ class OutputArtifactServiceAttributionTest {
         JdbcTemplate jdbc = new JdbcTemplate(new SingleConnectionDataSource("jdbc:sqlite::memory:?foreign_keys=true", true));
         Path dataRoot = Files.createDirectories(tempDir.resolve("symlink-root"));
         WorkspaceRepository repository = new WorkspaceRepository(jdbc);
-        WorkspaceDirectoryService directoryService = new WorkspaceDirectoryService(
-            new AiConfig(null, null, null, null, dataRoot, null, null)
-        );
+        WorkspaceDirectoryService directoryService = WorkspaceDirectoryServiceTestSupport.directoryService(dataRoot);
         OutputArtifactService service = new OutputArtifactService(
             repository,
             directoryService,
@@ -362,9 +345,7 @@ class OutputArtifactServiceAttributionTest {
         JdbcTemplate jdbc = new JdbcTemplate(new SingleConnectionDataSource("jdbc:sqlite::memory:?foreign_keys=true", true));
         Path dataRoot = Files.createDirectories(tempDir.resolve("broken-root"));
         WorkspaceRepository repository = new WorkspaceRepository(jdbc);
-        WorkspaceDirectoryService directoryService = new WorkspaceDirectoryService(
-            new AiConfig(null, null, null, null, dataRoot, null, null)
-        );
+        WorkspaceDirectoryService directoryService = WorkspaceDirectoryServiceTestSupport.directoryService(dataRoot);
         OutputArtifactService service = new OutputArtifactService(
             repository,
             directoryService,
@@ -396,9 +377,7 @@ class OutputArtifactServiceAttributionTest {
         JdbcTemplate jdbc = new JdbcTemplate(new SingleConnectionDataSource("jdbc:sqlite::memory:?foreign_keys=true", true));
         Path dataRoot = Files.createDirectories(tempDir.resolve("missing-root"));
         WorkspaceRepository repository = new WorkspaceRepository(jdbc);
-        WorkspaceDirectoryService directoryService = new WorkspaceDirectoryService(
-            new AiConfig(null, null, null, null, dataRoot, null, null)
-        );
+        WorkspaceDirectoryService directoryService = WorkspaceDirectoryServiceTestSupport.directoryService(dataRoot);
         OutputArtifactService service = new OutputArtifactService(
             repository,
             directoryService,
@@ -429,9 +408,7 @@ class OutputArtifactServiceAttributionTest {
         JdbcTemplate jdbc = new JdbcTemplate(new SingleConnectionDataSource("jdbc:sqlite::memory:?foreign_keys=true", true));
         WorkspaceRepository repository = new WorkspaceRepository(jdbc);
         Path dataRoot = Files.createDirectories(tempDir.resolve("root4"));
-        WorkspaceDirectoryService directoryService = new WorkspaceDirectoryService(
-            new AiConfig(null, null, null, null, dataRoot, null, null)
-        );
+        WorkspaceDirectoryService directoryService = WorkspaceDirectoryServiceTestSupport.directoryService(dataRoot);
         OutputArtifactService service = new OutputArtifactService(
             repository,
             directoryService,
@@ -461,9 +438,7 @@ class OutputArtifactServiceAttributionTest {
         JdbcTemplate jdbc = new JdbcTemplate(new SingleConnectionDataSource("jdbc:sqlite::memory:?foreign_keys=true", true));
         WorkspaceRepository repository = new WorkspaceRepository(jdbc);
         Path dataRoot = Files.createDirectories(tempDir.resolve("root-shallow"));
-        WorkspaceDirectoryService directoryService = new WorkspaceDirectoryService(
-            new AiConfig(null, null, null, null, dataRoot, null, null)
-        );
+        WorkspaceDirectoryService directoryService = WorkspaceDirectoryServiceTestSupport.directoryService(dataRoot);
         OutputArtifactService service = new OutputArtifactService(
             repository,
             directoryService,
@@ -494,9 +469,7 @@ class OutputArtifactServiceAttributionTest {
         JdbcTemplate jdbc = new JdbcTemplate(new SingleConnectionDataSource("jdbc:sqlite::memory:?foreign_keys=true", true));
         WorkspaceRepository repository = new WorkspaceRepository(jdbc);
         Path dataRoot = Files.createDirectories(tempDir.resolve("root-disabled"));
-        WorkspaceDirectoryService directoryService = new WorkspaceDirectoryService(
-            new AiConfig(null, null, null, null, dataRoot, null, null)
-        );
+        WorkspaceDirectoryService directoryService = WorkspaceDirectoryServiceTestSupport.directoryService(dataRoot);
         OutputArtifactService service = new OutputArtifactService(
             repository,
             directoryService,
@@ -519,9 +492,7 @@ class OutputArtifactServiceAttributionTest {
         JdbcTemplate jdbc = new JdbcTemplate(new SingleConnectionDataSource("jdbc:sqlite::memory:?foreign_keys=true", true));
         WorkspaceRepository repository = new WorkspaceRepository(jdbc);
         Path dataRoot = Files.createDirectories(tempDir.resolve("root-loose-symlink"));
-        WorkspaceDirectoryService directoryService = new WorkspaceDirectoryService(
-            new AiConfig(null, null, null, null, dataRoot, null, null)
-        );
+        WorkspaceDirectoryService directoryService = WorkspaceDirectoryServiceTestSupport.directoryService(dataRoot);
         OutputArtifactService service = new OutputArtifactService(
             repository,
             directoryService,
@@ -546,9 +517,7 @@ class OutputArtifactServiceAttributionTest {
         JdbcTemplate jdbc = new JdbcTemplate(new SingleConnectionDataSource("jdbc:sqlite::memory:?foreign_keys=true", true));
         WorkspaceRepository repository = new WorkspaceRepository(jdbc);
         Path dataRoot = Files.createDirectories(tempDir.resolve("root-publish"));
-        WorkspaceDirectoryService directoryService = new WorkspaceDirectoryService(
-            new AiConfig(null, null, null, null, dataRoot, null, null)
-        );
+        WorkspaceDirectoryService directoryService = WorkspaceDirectoryServiceTestSupport.directoryService(dataRoot);
         OutputArtifactService service = new OutputArtifactService(
             repository,
             directoryService,
@@ -581,9 +550,7 @@ class OutputArtifactServiceAttributionTest {
         JdbcTemplate jdbc = new JdbcTemplate(new SingleConnectionDataSource("jdbc:sqlite::memory:?foreign_keys=true", true));
         WorkspaceRepository repository = new WorkspaceRepository(jdbc);
         Path dataRoot = Files.createDirectories(tempDir.resolve("root-publish-temp"));
-        WorkspaceDirectoryService directoryService = new WorkspaceDirectoryService(
-            new AiConfig(null, null, null, null, dataRoot, null, null)
-        );
+        WorkspaceDirectoryService directoryService = WorkspaceDirectoryServiceTestSupport.directoryService(dataRoot);
         OutputArtifactService service = new OutputArtifactService(
             repository,
             directoryService,
@@ -620,9 +587,7 @@ class OutputArtifactServiceAttributionTest {
         JdbcTemplate jdbc = new JdbcTemplate(new SingleConnectionDataSource("jdbc:sqlite::memory:?foreign_keys=true", true));
         WorkspaceRepository repository = new WorkspaceRepository(jdbc);
         Path dataRoot = Files.createDirectories(tempDir.resolve("root-publish-temp-symlink"));
-        WorkspaceDirectoryService directoryService = new WorkspaceDirectoryService(
-            new AiConfig(null, null, null, null, dataRoot, null, null)
-        );
+        WorkspaceDirectoryService directoryService = WorkspaceDirectoryServiceTestSupport.directoryService(dataRoot);
         OutputArtifactService service = new OutputArtifactService(
             repository,
             directoryService,
@@ -657,9 +622,7 @@ class OutputArtifactServiceAttributionTest {
         JdbcTemplate jdbc = new JdbcTemplate(new SingleConnectionDataSource("jdbc:sqlite::memory:?foreign_keys=true", true));
         WorkspaceRepository repository = new WorkspaceRepository(jdbc);
         Path dataRoot = Files.createDirectories(tempDir.resolve("root-publish-temp-reject"));
-        WorkspaceDirectoryService directoryService = new WorkspaceDirectoryService(
-            new AiConfig(null, null, null, null, dataRoot, null, null)
-        );
+        WorkspaceDirectoryService directoryService = WorkspaceDirectoryServiceTestSupport.directoryService(dataRoot);
         OutputArtifactService service = new OutputArtifactService(
             repository,
             directoryService,

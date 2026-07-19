@@ -209,12 +209,17 @@ public class RuntimeSettingsService {
         return legacyDefaultModelKey();
     }
 
-    private String remoteModelName(String modelKey) {
-        ModelConfig model = aiConfig.models().get(modelKey);
-        if (model == null) {
-            throw new IllegalArgumentException("Unknown configured model: " + modelKey);
+    private String remoteModelName(String modelReference) {
+        ModelConfig model = aiConfig.models().get(modelReference);
+        if (model != null) {
+            return model.remoteModelName();
         }
-        return model.remoteModelName();
+        boolean configuredRemoteName = aiConfig.models().values().stream()
+            .anyMatch(config -> modelReference.equals(config.remoteModelName()));
+        if (configuredRemoteName) {
+            return modelReference;
+        }
+        throw new IllegalArgumentException("Unknown configured model: " + modelReference);
     }
 
     private String keyForModelOrRemoteName(String value) {

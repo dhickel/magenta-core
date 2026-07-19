@@ -15,6 +15,7 @@ import org.springframework.jdbc.datasource.SingleConnectionDataSource;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceDirectoryServiceTestSupport;
 
 class OutputArtifactPathSemanticsTest {
 
@@ -91,9 +92,7 @@ class OutputArtifactPathSemanticsTest {
         );
         WorkspaceRepository repository = new WorkspaceRepository(jdbc);
         Path dataRoot = Files.createDirectories(tempDir.resolve(name).resolve("data"));
-        WorkspaceDirectoryService directoryService = new WorkspaceDirectoryService(
-            new AiConfig(null, null, null, null, dataRoot, null, null)
-        );
+        WorkspaceDirectoryService directoryService = WorkspaceDirectoryServiceTestSupport.directoryService(dataRoot);
         OutputArtifactService service = new OutputArtifactService(
             repository,
             directoryService,

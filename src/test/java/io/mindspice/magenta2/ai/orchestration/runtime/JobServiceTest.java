@@ -15,6 +15,7 @@ import io.mindspice.magenta2.ai.orchestration.agents.AgentProfileService;
 import io.mindspice.magenta2.ai.orchestration.agents.AgentProfileStatus;
 import io.mindspice.magenta2.ai.orchestration.workspaces.RootRelativePathService;
 import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceDirectoryService;
+import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceDirectoryServiceTestSupport;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -38,7 +39,7 @@ class JobServiceTest {
     void setUp() throws IOException {
         Path dataRoot = Files.createDirectories(tempDir.resolve("data"));
         AiConfig aiConfig = new AiConfig(null, null, null, 10, dataRoot, Map.of(), Map.of());
-        workspaceDirectoryService = new WorkspaceDirectoryService(aiConfig);
+        workspaceDirectoryService = WorkspaceDirectoryServiceTestSupport.directoryService(dataRoot);
 
         jobRepository = repository();
         jobService = new JobService(jobRepository, workspaceDirectoryService, null, null);
@@ -407,7 +408,7 @@ class JobServiceTest {
     void activeJobAssignmentBlocksExecutionAffectingEditsAndDeleteButAllowsLabels() throws IOException {
         JdbcTemplate jdbc = jdbcTemplate();
         AiConfig aiConfig = new AiConfig(null, null, null, 10, tempDir.resolve("active-job"), Map.of(), Map.of());
-        WorkspaceDirectoryService directoryService = new WorkspaceDirectoryService(aiConfig);
+        WorkspaceDirectoryService directoryService = WorkspaceDirectoryServiceTestSupport.directoryService(tempDir.resolve("active-job"));
         JobRepository jobs = new JobRepository(jdbc, new ObjectMapper().registerModule(new JavaTimeModule()));
         OrchestrationRuntimeRepository runtime = new OrchestrationRuntimeRepository(jdbc, new ObjectMapper());
         JobService service = new JobService(jobs, directoryService, null, null, null, runtime);
