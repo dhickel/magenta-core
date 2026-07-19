@@ -92,26 +92,6 @@ public class OrchestrationRunnerService {
             DEFAULT_LEASE_DURATION.toSeconds(), DEFAULT_HEARTBEAT_INTERVAL.toSeconds());
     }
 
-    /**
-     * Backward-compatible constructor for tests that don't pass task/workflow/inbox/event services.
-     * @deprecated Use the full @Autowired constructor.
-     */
-    @Deprecated
-    public OrchestrationRunnerService(
-        OrchestrationRuntimeRepository repository,
-        AssignmentService assignmentService,
-        JobService jobService,
-        ChatService chatService,
-        AgentProfileService agentProfileService,
-        WorkspaceDirectoryService workspaceDirectoryService,
-        ProjectService projectService,
-        MagentaWorkExecutor executor
-    ) {
-        this(repository, assignmentService, jobService, null, null, chatService, null, null,
-            agentProfileService, null, projectService, workspaceDirectoryService, null,
-            executor, DEFAULT_LEASE_DURATION.toSeconds(), DEFAULT_HEARTBEAT_INTERVAL.toSeconds());
-    }
-
     @Autowired
     public OrchestrationRunnerService(
         OrchestrationRuntimeRepository repository,
@@ -225,12 +205,16 @@ public class OrchestrationRunnerService {
             leased.agentId(),
             profile != null ? profile.name() : null,
             leased.jobId(),
+            null,
+            null,
             resolveProjectId(leased), // projectId for attribution only
             leased.workspaceType(),
             leased.workspaceKey(),
             leased.workspaceIdentity(),
             leased.assignmentType().name(), // runType
-            durablePath // hostWorkspacePath (also hostDurableWorkspacePath in convenience ctor)
+            null,
+            durablePath, // hostDurableWorkspacePath
+            null
         );
 
         // Validate project membership (projectId is metadata only)

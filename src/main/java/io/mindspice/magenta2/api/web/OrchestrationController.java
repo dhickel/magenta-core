@@ -2465,10 +2465,13 @@ public class OrchestrationController {
     public String createWorkflowDraftEditor() {
         WorkflowDefinition created = workflowService.saveDefinition(new WorkflowDefinition(
             null,
+            WorkflowDefinition.CURRENT_SCHEMA_VERSION,
             "Untitled Workflow",
             "",
+            WorkflowDefinition.DEFAULT_MAX_CONCURRENCY,
             List.of(),
             List.of(),
+            Map.of(),
             null,
             null));
         return workflowEditorFragment(created).render();
@@ -2499,9 +2502,9 @@ public class OrchestrationController {
                 .render();
         }
         WorkflowDefinition created = workflowService.saveDefinition(new WorkflowDefinition(
-            null, title,
-            nn(params.get("summary")),
-            List.of(), List.of(), null, null));
+            null, WorkflowDefinition.CURRENT_SCHEMA_VERSION, title,
+            nn(params.get("summary")), WorkflowDefinition.DEFAULT_MAX_CONCURRENCY,
+            List.of(), List.of(), Map.of(), null, null));
         return workflowEditorFragment(created).render();
     }
 
@@ -2513,9 +2516,12 @@ public class OrchestrationController {
             current = workflowService.getDefinition(workflowId);
             WorkflowDefinition updated = new WorkflowDefinition(
                 workflowId,
+                current.schemaVersion(),
                 params.containsKey("title") ? nn(params.get("title")) : current.title(),
                 params.containsKey("summary") ? nn(params.get("summary")) : current.summary(),
+                current.maxConcurrency(),
                 current.nodes(), current.routes(),
+                current.uiLayout(),
                 current.createdAt(), current.updatedAt());
             workflowService.saveDefinition(updated);
             return workflowEditorFragment(workflowService.getDefinition(workflowId)).render();
@@ -2554,13 +2560,15 @@ public class OrchestrationController {
                 .max().orElse(0);
             String key = "node_" + (maxIdx + 1);
             nodes.add(new WorkflowNode(key, WorkflowNodeType.fromWireName(nodeType),
-                nn(params.get("planId")), key, null, Map.of(),
+                nn(params.get("planId")), key, null, List.of(), List.of(), Map.of(),
                 false, List.of(),
                 nn(params.get("messageTemplate")),
                 nn(params.get("resumePolicy"))));
             WorkflowDefinition updated = new WorkflowDefinition(
-                workflowId, current.title(), current.summary(),
-                nodes, current.routes(), current.createdAt(), current.updatedAt());
+                workflowId, current.schemaVersion(), current.title(), current.summary(),
+                current.maxConcurrency(),
+                nodes, current.routes(), current.uiLayout(),
+                current.createdAt(), current.updatedAt());
             workflowService.saveDefinition(updated);
             return workflowNodesSection(workflowService.getDefinition(workflowId)).render();
         } catch (Exception e) {
@@ -2581,8 +2589,10 @@ public class OrchestrationController {
                 .filter(r -> !nodeKey.equals(r.fromNodeKey()) && !nodeKey.equals(r.toNodeKey()))
                 .toList();
             WorkflowDefinition updated = new WorkflowDefinition(
-                workflowId, current.title(), current.summary(),
-                nodes, routes, current.createdAt(), current.updatedAt());
+                workflowId, current.schemaVersion(), current.title(), current.summary(),
+                current.maxConcurrency(),
+                nodes, routes, current.uiLayout(),
+                current.createdAt(), current.updatedAt());
             workflowService.saveDefinition(updated);
             // Refresh full editor
             return workflowEditorFragment(workflowService.getDefinition(workflowId)).render();
@@ -2608,6 +2618,8 @@ public class OrchestrationController {
                         params.containsKey("planId") ? nn(params.get("planId")) : old.planId(),
                         params.containsKey("label") ? nn(params.get("label")) : old.label(),
                         params.containsKey("inputName") ? nn(params.get("inputName")) : old.inputName(),
+                        old.inputPorts(),
+                        old.outputPorts(),
                         old.config(),
                         params.containsKey("parallel") ? "true".equals(params.get("parallel")) : old.parallel(),
                         old.inputBindings(),
@@ -2618,8 +2630,10 @@ public class OrchestrationController {
                 }
             }
             WorkflowDefinition updated = new WorkflowDefinition(
-                workflowId, current.title(), current.summary(),
-                nodes, current.routes(), current.createdAt(), current.updatedAt());
+                workflowId, current.schemaVersion(), current.title(), current.summary(),
+                current.maxConcurrency(),
+                nodes, current.routes(), current.uiLayout(),
+                current.createdAt(), current.updatedAt());
             workflowService.saveDefinition(updated);
             return workflowNodesSection(workflowService.getDefinition(workflowId)).render();
         } catch (Exception e) {
@@ -2663,8 +2677,10 @@ public class OrchestrationController {
                 nn(params.get("condition"))
             ));
             WorkflowDefinition updated = new WorkflowDefinition(
-                workflowId, current.title(), current.summary(),
-                current.nodes(), routes, current.createdAt(), current.updatedAt());
+                workflowId, current.schemaVersion(), current.title(), current.summary(),
+                current.maxConcurrency(),
+                current.nodes(), routes, current.uiLayout(),
+                current.createdAt(), current.updatedAt());
             workflowService.saveDefinition(updated);
             return workflowRoutesSection(workflowService.getDefinition(workflowId)).render();
         } catch (Exception e) {
@@ -2682,8 +2698,10 @@ public class OrchestrationController {
                 .filter(r -> !r.id().equals(routeId))
                 .toList();
             WorkflowDefinition updated = new WorkflowDefinition(
-                workflowId, current.title(), current.summary(),
-                current.nodes(), routes, current.createdAt(), current.updatedAt());
+                workflowId, current.schemaVersion(), current.title(), current.summary(),
+                current.maxConcurrency(),
+                current.nodes(), routes, current.uiLayout(),
+                current.createdAt(), current.updatedAt());
             workflowService.saveDefinition(updated);
             return workflowRoutesSection(workflowService.getDefinition(workflowId)).render();
         } catch (Exception e) {
@@ -2715,8 +2733,10 @@ public class OrchestrationController {
                 }
             }
             WorkflowDefinition updated = new WorkflowDefinition(
-                workflowId, current.title(), current.summary(),
-                current.nodes(), routes, current.createdAt(), current.updatedAt());
+                workflowId, current.schemaVersion(), current.title(), current.summary(),
+                current.maxConcurrency(),
+                current.nodes(), routes, current.uiLayout(),
+                current.createdAt(), current.updatedAt());
             workflowService.saveDefinition(updated);
             return workflowRoutesSection(workflowService.getDefinition(workflowId)).render();
         } catch (Exception e) {
@@ -6798,7 +6818,7 @@ public class OrchestrationController {
                 return new Div().withClass("orch-error").withInnerText("Shell execution service is unavailable.").render();
             }
             OrchestrationTaskContextHolder.set(new OrchestrationTaskContext(
-                agentId, agent.name(), null, null, null, null, null, null, null));
+                agentId, agent.name(), null, null, null, null, null, null, null, null, null, null, null));
             try {
                 var result = shellService.exec(
                     required(params.get("command"), "command is required"),

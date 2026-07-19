@@ -58,6 +58,10 @@ class AgentProfilePathSegmentValidationTest {
                 new ObjectMapper()
             ),
             aiConfig(),
+            null,
+            null,
+            null,
+            null,
             null
         );
     }

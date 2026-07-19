@@ -49,24 +49,6 @@ public class AssignmentService {
         this(repository, agentProfileService, runtimeSettingsService, jobService, null, null, null, null);
     }
 
-    /**
-     * Backward-compatible constructor for tests that pass AuditRepository and optional services.
-     * @deprecated Use the @Autowired constructor with explicit workspaceDirectoryService.
-     */
-    @Deprecated
-    public AssignmentService(
-        OrchestrationRuntimeRepository repository,
-        AgentProfileService agentProfileService,
-        RuntimeSettingsService runtimeSettingsService,
-        JobService jobService,
-        AuditRepository auditRepository,
-        PlanService planService,
-        WorkflowService workflowService
-    ) {
-        this(repository, agentProfileService, runtimeSettingsService, jobService,
-            auditRepository, planService, workflowService, null);
-    }
-
     @Autowired
     public AssignmentService(
         OrchestrationRuntimeRepository repository,

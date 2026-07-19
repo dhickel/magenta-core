@@ -14,6 +14,7 @@ import org.springframework.jdbc.datasource.SingleConnectionDataSource;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import io.mindspice.magenta2.ai.orchestration.workspaces.RootRelativePathService;
 import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceDirectoryServiceTestSupport;
 
 class OutputArtifactServiceAttributionTest {
@@ -30,6 +31,7 @@ class OutputArtifactServiceAttributionTest {
         OutputArtifactService service = new OutputArtifactService(
             repository,
             directoryService,
+            new RootRelativePathService(directoryService),
             new ObjectMapper().findAndRegisterModules()
         );
 
@@ -92,6 +94,7 @@ class OutputArtifactServiceAttributionTest {
         OutputArtifactService service = new OutputArtifactService(
             repository,
             directoryService,
+            new RootRelativePathService(directoryService),
             new ObjectMapper().findAndRegisterModules()
         );
         Path projectRoot = directoryService.resolveForWrite(io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceKind.AGENT, "agent-1").root();
@@ -128,6 +131,7 @@ class OutputArtifactServiceAttributionTest {
         OutputArtifactService service = new OutputArtifactService(
             repository,
             directoryService,
+            new RootRelativePathService(directoryService),
             new ObjectMapper().findAndRegisterModules()
         );
         Path outputDir = Files.createDirectories(dataRoot.resolve("outputs-collision"));
@@ -158,6 +162,7 @@ class OutputArtifactServiceAttributionTest {
         OutputArtifactService service = new OutputArtifactService(
             repository,
             directoryService,
+            new RootRelativePathService(directoryService),
             new ObjectMapper().findAndRegisterModules()
         );
 
@@ -191,6 +196,7 @@ class OutputArtifactServiceAttributionTest {
         OutputArtifactService service = new OutputArtifactService(
             repository,
             directoryService,
+            new RootRelativePathService(directoryService),
             new ObjectMapper().findAndRegisterModules()
         );
 
@@ -222,6 +228,7 @@ class OutputArtifactServiceAttributionTest {
         OutputArtifactService service = new OutputArtifactService(
             repository,
             directoryService,
+            new RootRelativePathService(directoryService),
             new ObjectMapper().findAndRegisterModules()
         );
 
@@ -253,6 +260,7 @@ class OutputArtifactServiceAttributionTest {
         OutputArtifactService service = new OutputArtifactService(
             repository,
             directoryService,
+            new RootRelativePathService(directoryService),
             new ObjectMapper().findAndRegisterModules()
         );
 
@@ -288,6 +296,7 @@ class OutputArtifactServiceAttributionTest {
         OutputArtifactService service = new OutputArtifactService(
             repository,
             directoryService,
+            new RootRelativePathService(directoryService),
             new ObjectMapper().findAndRegisterModules()
         );
 
@@ -316,6 +325,7 @@ class OutputArtifactServiceAttributionTest {
         OutputArtifactService service = new OutputArtifactService(
             repository,
             directoryService,
+            new RootRelativePathService(directoryService),
             new ObjectMapper().findAndRegisterModules()
         );
 
@@ -349,6 +359,7 @@ class OutputArtifactServiceAttributionTest {
         OutputArtifactService service = new OutputArtifactService(
             repository,
             directoryService,
+            new RootRelativePathService(directoryService),
             new ObjectMapper().findAndRegisterModules()
         );
 
@@ -381,6 +392,7 @@ class OutputArtifactServiceAttributionTest {
         OutputArtifactService service = new OutputArtifactService(
             repository,
             directoryService,
+            new RootRelativePathService(directoryService),
             new ObjectMapper().findAndRegisterModules()
         );
 
@@ -412,6 +424,7 @@ class OutputArtifactServiceAttributionTest {
         OutputArtifactService service = new OutputArtifactService(
             repository,
             directoryService,
+            new RootRelativePathService(directoryService),
             new ObjectMapper().findAndRegisterModules()
         );
 

@@ -55,12 +55,6 @@ public class OutputArtifactService {
         this.objectMapper = objectMapper;
     }
 
-    public OutputArtifactService(OutputArtifactRepository repository,
-                                 WorkspaceDirectoryService directoryService,
-                                 ObjectMapper objectMapper) {
-        this(repository, directoryService, new RootRelativePathService(directoryService), objectMapper);
-    }
-
     /**
      * Materialize a single output value into the given output directory.
      *

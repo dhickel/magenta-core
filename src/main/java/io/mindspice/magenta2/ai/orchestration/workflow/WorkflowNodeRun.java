@@ -35,17 +35,4 @@ public record WorkflowNodeRun(
         routeContext = routeContext == null ? List.of() : List.copyOf(routeContext);
     }
 
-    /** Compatibility constructor for older callers. */
-    @Deprecated
-    public WorkflowNodeRun(
-        String nodeKey,
-        WorkflowNodeType type,
-        WorkflowNodeRunStatus status,
-        Map<String, Object> inputValues,
-        Map<String, Object> outputValues,
-        Instant startedAt,
-        Instant completedAt
-    ) {
-        this(nodeKey, type, status, inputValues, outputValues, List.of(), startedAt, completedAt);
-    }
 }

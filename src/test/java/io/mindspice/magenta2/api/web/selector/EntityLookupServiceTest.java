@@ -58,7 +58,7 @@ class EntityLookupServiceTest {
         private final List<AgentProfile> agents;
 
         StubAgentProfileService(List<AgentProfile> agents) {
-            super(null, null, null);
+            super(null, null, null, null, null, null, null);
             this.agents = agents;
         }
 

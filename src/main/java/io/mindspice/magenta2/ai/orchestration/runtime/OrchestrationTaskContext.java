@@ -27,25 +27,6 @@ public record OrchestrationTaskContext(
     public static final OrchestrationTaskContext EMPTY = new OrchestrationTaskContext(
         null, null, null, null, null, null, null, null, null, null, null, null, null);
 
-    /**
-     * Convenience constructor for agent-scoped execution without an active runtime path.
-     */
-    public OrchestrationTaskContext(
-        String agentId,
-        String agentName,
-        String jobId,
-        String projectId,
-        String workspaceType,
-        String workspaceKey,
-        String workspaceIdentity,
-        String runType,
-        String hostWorkspacePath
-    ) {
-        this(agentId, agentName, jobId, null, null, projectId,
-            workspaceType, workspaceKey, workspaceIdentity, runType, null,
-            hostWorkspacePath, null);
-    }
-
     public OrchestrationTaskContext {
         agentId = normalize(agentId);
         agentName = normalize(agentName);

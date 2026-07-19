@@ -45,7 +45,7 @@ class RuntimeSettingsServiceTest {
         JdbcTemplate jdbcTemplate = jdbcTemplate();
         AiConfig aiConfig = aiConfig();
         AgentProfileRepository agentRepository = new AgentProfileRepository(jdbcTemplate, new ObjectMapper());
-        AgentProfileService agentService = new AgentProfileService(agentRepository, aiConfig, null);
+        AgentProfileService agentService = new AgentProfileService(agentRepository, aiConfig, null, null, null, null, null);
         agentService.create(new AgentProfile(
             "agent-1",
             "magenta",

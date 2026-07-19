@@ -36,30 +36,6 @@ public record WorkflowNode(
         config = config == null ? Map.of() : Map.copyOf(config);
     }
 
-    /**
-     * Compatibility constructor for old callers.
-     */
-    @Deprecated
-    public WorkflowNode(String key, WorkflowNodeType type, String planId,
-                        String label, String inputName, Map<String, Object> config,
-                        boolean parallel, List<WorkflowBinding> inputBindings,
-                        String messageTemplate, String resumePolicy) {
-        this(key, type, planId, label, inputName, List.of(), List.of(),
-            config, parallel, inputBindings, messageTemplate, resumePolicy);
-    }
-
-    /**
-     * Compatibility constructor for old callers.
-     */
-    @Deprecated
-    public WorkflowNode(String key, WorkflowNodeType type, String planId,
-                        List<WorkflowBinding> inputBindings,
-                        String messageTemplate, String resumePolicy,
-                        boolean parallel) {
-        this(key, type, planId, key, null, List.of(), List.of(), Map.of(), parallel,
-            inputBindings, messageTemplate, resumePolicy);
-    }
-
     public boolean isGate() {
         return type.isGate();
     }

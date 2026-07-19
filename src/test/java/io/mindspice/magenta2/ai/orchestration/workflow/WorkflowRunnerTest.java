@@ -8,6 +8,7 @@ import io.mindspice.magenta2.ai.orchestration.runtime.OrchestrationTaskContext;
 import io.mindspice.magenta2.ai.orchestration.runtime.OrchestrationTaskContextHolder;
 import io.mindspice.magenta2.ai.orchestration.workspaces.OutputArtifactRepository;
 import io.mindspice.magenta2.ai.orchestration.workspaces.OutputArtifactService;
+import io.mindspice.magenta2.ai.orchestration.workspaces.RootRelativePathService;
 import io.mindspice.magenta2.ai.orchestration.workspaces.RunOutputArtifact;
 import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceDirectoryService;
 import org.junit.jupiter.api.BeforeEach;
@@ -56,7 +57,8 @@ class WorkflowRunnerTest {
         workspaceDirectoryService = WorkspaceDirectoryServiceTestSupport.directoryService(dataRoot);
 
         outputArtifactService = new OutputArtifactService(
-            new OutputArtifactRepository(jdbcTemplate), workspaceDirectoryService, mapper);
+            new OutputArtifactRepository(jdbcTemplate), workspaceDirectoryService,
+            new RootRelativePathService(workspaceDirectoryService), mapper);
         planService = new PlanService(
             planRepository, memoryRepository, null, new ChatMarkdownRenderer(),
             workspaceDirectoryService, outputArtifactService);

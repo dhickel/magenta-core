@@ -509,8 +509,8 @@ public class ChatService {
         ));
         markAgentConversation(resolvedRequest.conversationId(), agent.id());
         OrchestrationTaskContext turnContext = new OrchestrationTaskContext(
-            agent.id(), agent.name(), null, null,
-            null, null, null, "AGENT_CHAT", null
+            agent.id(), agent.name(), null, null, null, null,
+            null, null, null, "AGENT_CHAT", null, null, null
         );
         List<String> agentApprovedTools = agent.approvedTools() == null ? List.of() : agent.approvedTools();
         return chat(resolvedRequest, agentApprovedTools, turnContext);
@@ -523,7 +523,7 @@ public class ChatService {
         try {
             Path dir = planService.chatFileDirectory(conversationId).toRealPath();
             OrchestrationTaskContextHolder.set(new OrchestrationTaskContext(
-                null, null, null, null, null, null, null, "CHAT", dir.toString()
+                null, null, null, null, null, null, null, null, null, "CHAT", null, dir.toString(), null
             ));
             return true;
         } catch (RuntimeException | IOException ignored) {

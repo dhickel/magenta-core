@@ -120,7 +120,7 @@ class AgentProfileControllerTest {
     }
 
     private static AgentProfileService stubService() {
-        return new AgentProfileService(null, null, null) {
+        return new AgentProfileService(null, null, null, null, null, null, null) {
             @Override
             public List<AgentProfile> list() {
                 return List.of(new AgentProfile(
@@ -149,7 +149,7 @@ class AgentProfileControllerTest {
     }
 
     private static AgentProfileService missingService() {
-        return new AgentProfileService(null, null, null) {
+        return new AgentProfileService(null, null, null, null, null, null, null) {
             @Override
             public AgentProfile get(String id) {
                 throw new IllegalStateException("agent not found: " + id);
@@ -180,6 +180,10 @@ class AgentProfileControllerTest {
                 Map.of("main", new ModelConfig("main-remote", "http://localhost:11434", EndpointType.OLLAMA, 4096, 0, null)),
                 Map.of("legacy", new AgentConfig("main", "Prompt", List.of(), List.of("*")))
             ),
+            null,
+            null,
+            null,
+            null,
             null
         );
     }

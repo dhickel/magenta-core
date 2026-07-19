@@ -31,23 +31,6 @@ public class AgentProfileService {
     private final ObjectProvider<JobRepository> jobRepository;
     private final ObjectProvider<ProjectRepository> projectRepository;
 
-    // Compatibility constructor for tests that instantiate the service directly.
-    public AgentProfileService(
-        AgentProfileRepository repository,
-        AiConfig aiConfig,
-        ObjectProvider<ChatToolRegistry> chatToolRegistry
-    ) {
-        this(
-            repository,
-            aiConfig,
-            chatToolRegistry,
-            null,
-            null,
-            null,
-            null
-        );
-    }
-
     @Autowired
     public AgentProfileService(
         AgentProfileRepository repository,

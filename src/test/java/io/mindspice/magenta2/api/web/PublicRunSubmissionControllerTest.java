@@ -34,6 +34,7 @@ import io.mindspice.magenta2.ai.orchestration.workflow.WorkflowService;
 import io.mindspice.magenta2.ai.orchestration.workflow.WorkflowValidator;
 import io.mindspice.magenta2.ai.orchestration.workspaces.OutputArtifactRepository;
 import io.mindspice.magenta2.ai.orchestration.workspaces.OutputArtifactService;
+import io.mindspice.magenta2.ai.orchestration.workspaces.RootRelativePathService;
 import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceDirectoryService;
 import org.junit.jupiter.api.Test;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -394,7 +395,9 @@ class PublicRunSubmissionControllerTest {
         @Override
         public WorkflowDefinition getDefinition(String id) {
             if ("workflow-1".equals(id)) {
-                return new WorkflowDefinition(id, "Workflow", null, List.of(), Instant.now(), Instant.now());
+                return new WorkflowDefinition(id, WorkflowDefinition.CURRENT_SCHEMA_VERSION,
+                    "Workflow", null, WorkflowDefinition.DEFAULT_MAX_CONCURRENCY,
+                    List.of(), List.of(), Map.of(), Instant.now(), Instant.now());
             }
             throw new IllegalArgumentException("Workflow not found: " + id);
         }
@@ -408,7 +411,9 @@ class PublicRunSubmissionControllerTest {
     private static class EmptyWorkflowService extends StubWorkflowService {
         @Override
         public WorkflowDefinition getDefinition(String id) {
-            return new WorkflowDefinition(id, "Workflow", null, List.of(), Instant.now(), Instant.now());
+            return new WorkflowDefinition(id, WorkflowDefinition.CURRENT_SCHEMA_VERSION,
+                "Workflow", null, WorkflowDefinition.DEFAULT_MAX_CONCURRENCY,
+                List.of(), List.of(), Map.of(), Instant.now(), Instant.now());
         }
 
         @Override
@@ -464,7 +469,8 @@ class PublicRunSubmissionControllerTest {
         }
 
         private StubOutputArtifactService(OutputArtifactDeps deps) {
-            super(deps.repository(), deps.directoryService(), deps.objectMapper());
+            super(deps.repository(), deps.directoryService(),
+                new RootRelativePathService(deps.directoryService()), deps.objectMapper());
         }
     }
 
@@ -490,7 +496,7 @@ class PublicRunSubmissionControllerTest {
 
     private static class StubAgentProfileService extends AgentProfileService {
         StubAgentProfileService() {
-            super(null, null, null);
+            super(null, null, null, null, null, null, null);
         }
 
         @Override

@@ -326,7 +326,7 @@ class AgentOrchestrationControllerTest {
         private String requestedId;
 
         StubAgentProfileService() {
-            super(null, null, null);
+            super(null, null, null, null, null, null, null);
         }
 
         @Override

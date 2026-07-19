@@ -15,6 +15,7 @@ import io.mindspice.magenta2.ai.orchestration.runtime.JobService;
 import io.mindspice.magenta2.ai.orchestration.workspaces.OutputArtifactContext;
 import io.mindspice.magenta2.ai.orchestration.workspaces.OutputArtifactRepository;
 import io.mindspice.magenta2.ai.orchestration.workspaces.OutputArtifactService;
+import io.mindspice.magenta2.ai.orchestration.workspaces.RootRelativePathService;
 import io.mindspice.magenta2.ai.orchestration.workspaces.RunOutputArtifact;
 import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceDirectoryService;
 import org.junit.jupiter.api.Test;
@@ -208,7 +209,8 @@ class OutputControllerTest {
         WorkspaceDirectoryService directoryService = WorkspaceDirectoryServiceTestSupport.directoryService(dataRoot);
         OutputArtifactRepository outputArtifactRepository = new OutputArtifactRepository(jdbcTemplate);
         OutputArtifactService outputArtifactService = new OutputArtifactService(
-            outputArtifactRepository, directoryService, mapper);
+            outputArtifactRepository, directoryService,
+            new RootRelativePathService(directoryService), mapper);
         JobService jobService = new JobService(
             new JobRepository(jdbcTemplate, mapper), directoryService, null, null);
         return new Services(jobService, outputArtifactService, outputArtifactRepository, dataRoot);
