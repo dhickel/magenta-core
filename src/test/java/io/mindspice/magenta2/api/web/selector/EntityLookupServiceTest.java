@@ -50,14 +50,7 @@ class EntityLookupServiceTest {
 
     private EntityLookupService service(AgentProfileService agents, ChatService chat) {
         return new EntityLookupService(
-            agents,
-            null,
-            null,
-            null,
-            null,
-            null,
-            null,
-            chat
+            agents, null, null, null, null, chat
         );
     }
 

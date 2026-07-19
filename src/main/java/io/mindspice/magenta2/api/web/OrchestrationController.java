@@ -1,8 +1,6 @@
 package io.mindspice.magenta2.api.web;
 
 import java.io.IOException;
-import java.net.URLEncoder;
-import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -74,12 +72,8 @@ import io.mindspice.magenta2.ai.orchestration.workspaces.OutputArtifactService;
 import io.mindspice.magenta2.ai.orchestration.workspaces.RunOutputArtifact;
 import io.mindspice.magenta2.ai.orchestration.workspaces.AgentWorkspaceStatus;
 import io.mindspice.magenta2.ai.orchestration.workspaces.AgentWorkspaceStatusService;
-import io.mindspice.magenta2.ai.orchestration.workspaces.WorkArea;
-import io.mindspice.magenta2.ai.orchestration.workspaces.WorkAreaService;
 import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceDirectoryService;
 import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceExplorerService;
-import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceOwnerType;
-import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceService;
 import io.mindspice.magenta2.api.web.selector.EntityKind;
 import io.mindspice.magenta2.api.web.selector.EntityLookupService;
 import io.mindspice.magenta2.api.web.selector.EntitySelectorComponents;
@@ -141,9 +135,7 @@ public class OrchestrationController {
     private final io.mindspice.magenta2.ai.orchestration.runtime.InboxService runtimeInboxService;
     private final OutputArtifactService outputArtifactService;
     private final RuntimeSettingsService runtimeSettingsService;
-    private final WorkspaceService workspaceService;
     private final ObjectProvider<AgentWorkspaceStatusService> workspaceStatusServiceRef;
-    private final ObjectProvider<WorkAreaService> workAreaServiceRef;
     private final ObjectProvider<WorkspaceDirectoryService> workspaceDirectoryServiceRef;
     private final ObjectProvider<WorkspaceExplorerService> workspaceExplorerServiceRef;
     private final EntityLookupService entityLookupService;
@@ -173,7 +165,6 @@ public class OrchestrationController {
                                    io.mindspice.magenta2.ai.orchestration.runtime.InboxService runtimeInboxService,
                                    OutputArtifactService outputArtifactService,
                                    RuntimeSettingsService runtimeSettingsService,
-                                   WorkspaceService workspaceService,
                                    ObjectProvider<AgentWorkspaceStatusService> workspaceStatusServiceRef,
                                    PlanService planService,
                                    AssignmentService assignmentService,
@@ -194,9 +185,7 @@ public class OrchestrationController {
             runtimeInboxService,
             outputArtifactService,
             runtimeSettingsService,
-            workspaceService,
             workspaceStatusServiceRef,
-            emptyObjectProvider(),
             emptyObjectProvider(),
             emptyObjectProvider(),
             planService,
@@ -221,9 +210,7 @@ public class OrchestrationController {
                                    io.mindspice.magenta2.ai.orchestration.runtime.InboxService runtimeInboxService,
                                    OutputArtifactService outputArtifactService,
                                    RuntimeSettingsService runtimeSettingsService,
-                                   WorkspaceService workspaceService,
                                    ObjectProvider<AgentWorkspaceStatusService> workspaceStatusServiceRef,
-                                   ObjectProvider<WorkAreaService> workAreaServiceRef,
                                    ObjectProvider<WorkspaceDirectoryService> workspaceDirectoryServiceRef,
                                    ObjectProvider<WorkspaceExplorerService> workspaceExplorerServiceRef,
                                    PlanService planService,
@@ -244,9 +231,7 @@ public class OrchestrationController {
         this.runtimeInboxService = runtimeInboxService;
         this.outputArtifactService = outputArtifactService;
         this.runtimeSettingsService = runtimeSettingsService;
-        this.workspaceService = workspaceService;
         this.workspaceStatusServiceRef = workspaceStatusServiceRef;
-        this.workAreaServiceRef = workAreaServiceRef;
         this.workspaceDirectoryServiceRef = workspaceDirectoryServiceRef;
         this.workspaceExplorerServiceRef = workspaceExplorerServiceRef;
         this.planService = planService;
@@ -4599,284 +4584,6 @@ public class OrchestrationController {
         }
     }
 
-    @GetMapping("/projects/_detail/{projectId}/files")
-    @ResponseBody
-    public String projectFilesFragment(
-        @PathVariable String projectId,
-        @RequestParam(defaultValue = ".") String path
-    ) {
-        try {
-            WorkspaceExplorerService explorer = requireWorkspaceExplorerService();
-            java.nio.file.Path projectRoot = requireWorkspaceDirectoryService().projectWorkspace(projectId);
-            WorkspaceExplorerService.ProjectBridge bridge = explorer.new ProjectBridge(projectRoot);
-            WorkspaceExplorerService.DirectoryListing listing = bridge.list(explorer.normalizeRelativePath(path));
-            return projectFilesPanel(
-                projectId,
-                listing,
-                null,
-                null
-            ).render();
-        } catch (Exception e) {
-            return new Div().withId("project-files-section")
-                .withChild(new Div().withClass("orch-error").withInnerText("Project directory unavailable: " + e.getMessage()))
-                .render();
-        }
-    }
-
-    @GetMapping("/projects/_detail/{projectId}/files/edit")
-    @ResponseBody
-    public String projectFileEditorFragment(
-        @PathVariable String projectId,
-        @RequestParam String path
-    ) {
-        try {
-            WorkspaceExplorerService explorer = requireWorkspaceExplorerService();
-            java.nio.file.Path projectRoot = requireWorkspaceDirectoryService().projectWorkspace(projectId);
-            WorkspaceExplorerService.ProjectBridge bridge = explorer.new ProjectBridge(projectRoot);
-            WorkspaceExplorerService.FilePreview preview = bridge.preview(explorer.normalizeRelativePath(path));
-            return projectFileEditor(projectId, preview).render();
-        } catch (Exception e) {
-            return new Div().withId("project-file-editor")
-                .withChild(new Div().withClass("orch-error").withInnerText("Cannot edit file: " + e.getMessage()))
-                .render();
-        }
-    }
-
-    @PutMapping("/projects/_detail/{projectId}/files/text")
-    @ResponseBody
-    public String saveProjectTextFile(
-        @PathVariable String projectId,
-        @RequestParam String path,
-        @RequestParam(defaultValue = "") String content
-    ) {
-        try {
-            WorkspaceExplorerService explorer = requireWorkspaceExplorerService();
-            java.nio.file.Path projectRoot = requireWorkspaceDirectoryService().projectWorkspace(projectId);
-            WorkspaceExplorerService.ProjectBridge bridge = explorer.new ProjectBridge(projectRoot);
-            bridge.saveText(explorer.normalizeRelativePath(path), content);
-            String listPath = parentPath(path);
-            WorkspaceExplorerService.DirectoryListing listing = bridge.list(explorer.normalizeRelativePath(listPath));
-            return projectFilesPanel(
-                projectId,
-                listing,
-                "Saved " + path + ".",
-                null
-            ).render();
-        } catch (Exception e) {
-            return new Div().withId("project-files-section")
-                .withChild(new Div().withClass("orch-error").withInnerText("Save failed: " + e.getMessage()))
-                .render();
-        }
-    }
-
-    @PostMapping("/projects/_detail/{projectId}/files/text")
-    @ResponseBody
-    public String createProjectTextFile(
-        @PathVariable String projectId,
-        @RequestParam(defaultValue = ".") String path,
-        @RequestParam String fileName
-    ) {
-        try {
-            WorkspaceExplorerService explorer = requireWorkspaceExplorerService();
-            java.nio.file.Path projectRoot = requireWorkspaceDirectoryService().projectWorkspace(projectId);
-            WorkspaceExplorerService.ProjectBridge bridge = explorer.new ProjectBridge(projectRoot);
-            WorkspaceExplorerService.Entry created = bridge.createTextFile(explorer.normalizeRelativePath(path), fileName);
-            WorkspaceExplorerService.DirectoryListing listing = bridge.list(explorer.normalizeRelativePath(path));
-            return projectFilesPanel(
-                projectId,
-                listing,
-                "Created " + created.path() + ".",
-                null
-            ).render();
-        } catch (Exception e) {
-            return new Div().withId("project-files-section")
-                .withChild(new Div().withClass("orch-error").withInnerText("Create file failed: " + e.getMessage()))
-                .render();
-        }
-    }
-
-    @PostMapping("/projects/_detail/{projectId}/directories")
-    @ResponseBody
-    public String createProjectDirectory(
-        @PathVariable String projectId,
-        @RequestParam(defaultValue = ".") String path,
-        @RequestParam String directoryName
-    ) {
-        try {
-            WorkspaceExplorerService explorer = requireWorkspaceExplorerService();
-            java.nio.file.Path projectRoot = requireWorkspaceDirectoryService().projectWorkspace(projectId);
-            String childPath = ".".equals(projectPath(path)) ? directoryName : projectPath(path) + "/" + directoryName;
-            WorkspaceExplorerService.ProjectBridge bridge = explorer.new ProjectBridge(projectRoot);
-            WorkspaceExplorerService.Entry created = bridge.createDirectory(explorer.normalizeRelativePath(childPath));
-            WorkspaceExplorerService.DirectoryListing listing = bridge.list(explorer.normalizeRelativePath(path));
-            return projectFilesPanel(
-                projectId,
-                listing,
-                "Created " + created.path() + ".",
-                null
-            ).render();
-        } catch (Exception e) {
-            return new Div().withId("project-files-section")
-                .withChild(new Div().withClass("orch-error").withInnerText("Create folder failed: " + e.getMessage()))
-                .render();
-        }
-    }
-
-    private WorkspaceDirectoryService requireWorkspaceDirectoryService() {
-        WorkspaceDirectoryService service = workspaceDirectoryServiceRef == null ? null : workspaceDirectoryServiceRef.getIfAvailable();
-        if (service == null) {
-            throw new IllegalStateException("Workspace directory service is unavailable");
-        }
-        return service;
-    }
-
-    private WorkspaceExplorerService requireWorkspaceExplorerService() {
-        WorkspaceExplorerService service = workspaceExplorerServiceRef == null ? null : workspaceExplorerServiceRef.getIfAvailable();
-        if (service == null) {
-            throw new IllegalStateException("Workspace explorer service is unavailable");
-        }
-        return service;
-    }
-
-    private Component projectFilesPanel(
-        String projectId,
-        WorkspaceExplorerService.DirectoryListing listing,
-        String status,
-        Component editor
-    ) {
-        String currentPath = projectPath(listing.path());
-        Div panel = new Div().withId("project-files-section").withClass("project-files-panel");
-        Div toolbar = new Div().withClass("project-files-toolbar")
-            .withChild(new HtmlTag("span").withClass("project-files-path").withInnerText("Path: " + currentPath));
-        if (!".".equals(currentPath)) {
-            toolbar.withChild(Button.create("Up")
-                .withAttribute("type", "button")
-                .withAttribute("hx-get", "/projects/_detail/" + escapeAttr(projectId) + "/files?path=" + url(parentPath(currentPath)))
-                .withAttribute("hx-target", "#project-files-section")
-                .withAttribute("hx-swap", "outerHTML"));
-        }
-        toolbar.withChild(Button.create("Refresh")
-            .withAttribute("type", "button")
-            .withAttribute("hx-get", "/projects/_detail/" + escapeAttr(projectId) + "/files?path=" + url(currentPath))
-            .withAttribute("hx-target", "#project-files-section")
-            .withAttribute("hx-swap", "outerHTML"));
-        panel.withChild(toolbar);
-
-        String inputSuffix = Integer.toHexString(Objects.hash(projectId, currentPath));
-        String folderInputId = "project-new-folder-name-" + inputSuffix;
-        String textInputId = "project-new-text-name-" + inputSuffix;
-        Div createRow = new Div().withClass("project-file-create-row")
-            .withChild(TextInput.create("directoryName")
-                .withId(folderInputId)
-                .withAttribute("placeholder", "Folder name"))
-            .withChild(Button.create("New Folder")
-                .withAttribute("type", "button")
-                .withAttribute("hx-post", "/projects/_detail/" + escapeAttr(projectId) + "/directories?path=" + url(currentPath))
-                .withAttribute("hx-include", "#" + folderInputId)
-                .withAttribute("hx-target", "#project-files-section")
-                .withAttribute("hx-swap", "outerHTML"))
-            .withChild(TextInput.create("fileName")
-                .withId(textInputId)
-                .withAttribute("placeholder", "Text file name"))
-            .withChild(Button.create("New Text")
-                .withAttribute("type", "button")
-                .withAttribute("hx-post", "/projects/_detail/" + escapeAttr(projectId) + "/files/text?path=" + url(currentPath))
-                .withAttribute("hx-include", "#" + textInputId)
-                .withAttribute("hx-target", "#project-files-section")
-                .withAttribute("hx-swap", "outerHTML"));
-        panel.withChild(createRow);
-
-        if (StringUtils.hasText(status)) {
-            panel.withChild(new Div().withClass("orch-status").withInnerText(status));
-        }
-
-        Div rows = new Div().withClass("project-file-list");
-        if (!".".equals(currentPath)) {
-            rows.withChild(projectDirectoryRow(projectId, "..", parentPath(currentPath)));
-        }
-        for (WorkspaceExplorerService.Entry entry : listing.entries()) {
-            rows.withChild(projectFileRow(projectId, currentPath, entry));
-        }
-        if (listing.entries().isEmpty() && ".".equals(currentPath)) {
-            rows.withChild(new Div().withClass("dashboard-empty").withInnerText("No files yet."));
-        }
-        panel.withChild(rows);
-        panel.withChild(editor == null
-            ? new Div().withId("project-file-editor").withClass("project-file-editor-empty")
-                .withInnerText("Select Edit on a text file to modify it here.")
-            : editor);
-        return panel;
-    }
-
-    private Component projectDirectoryRow(String projectId, String label, String path) {
-        return new Div().withClass("project-file-row")
-            .withChild(new Div().withClass("project-file-name")
-                .withChild(new HtmlTag("strong").withInnerText(label))
-                .withChild(new HtmlTag("span").withInnerText("Folder")))
-            .withChild(Button.create("Open")
-                .withAttribute("type", "button")
-                .withAttribute("hx-get", "/projects/_detail/" + escapeAttr(projectId) + "/files?path=" + url(path))
-                .withAttribute("hx-target", "#project-files-section")
-                .withAttribute("hx-swap", "outerHTML"));
-    }
-
-    private Component projectFileRow(String projectId, String currentPath, WorkspaceExplorerService.Entry entry) {
-        if (entry.directory()) {
-            return projectDirectoryRow(projectId, entry.name(), entry.path());
-        }
-        Div actions = new Div().withClass("project-file-actions");
-        if (entry.canView()) {
-            actions.withChild(Button.create("Edit")
-                .withAttribute("type", "button")
-                .withAttribute("hx-get", "/projects/_detail/" + escapeAttr(projectId) + "/files/edit?path=" + url(entry.path()))
-                .withAttribute("hx-target", "#project-file-editor")
-                .withAttribute("hx-swap", "outerHTML"));
-        }
-        return new Div().withClass("project-file-row")
-            .withChild(new Div().withClass("project-file-name")
-                .withChild(new HtmlTag("strong").withInnerText(entry.name()))
-                .withChild(new HtmlTag("span").withInnerText(entry.fileType() + " · " + entry.sizeLabel()
-                    + " · modified " + (entry.modifiedAt() == null ? "unknown" : formatSince(entry.modifiedAt())))))
-            .withChild(actions);
-    }
-
-    private Component projectFileEditor(String projectId, WorkspaceExplorerService.FilePreview preview) {
-        Div editor = new Div().withId("project-file-editor").withClass("project-file-editor");
-        editor.withChild(new Div().withClass("project-file-editor-header")
-            .withChild(Header.H3("Editing " + preview.path()))
-            .withChild(Button.create("Save")
-                .withAttribute("type", "button")
-                .withAttribute("hx-put", "/projects/_detail/" + escapeAttr(projectId) + "/files/text?path=" + url(preview.path()))
-                .withAttribute("hx-include", "#project-file-editor [name='content']")
-                .withAttribute("hx-target", "#project-files-section")
-                .withAttribute("hx-swap", "outerHTML")));
-        if (!preview.text()) {
-            editor.withChild(new Div().withClass("dashboard-empty").withInnerText("This file cannot be edited as text."));
-            return editor;
-        }
-        editor.withChild(TextArea.create("content").withRows(12)
-            .withInnerText(preview.content() == null ? "" : preview.content()));
-        return editor;
-    }
-
-    private String projectPath(String path) {
-        return path == null || path.isBlank() ? "." : path;
-    }
-
-    private String parentPath(String path) {
-        String clean = projectPath(path);
-        int idx = clean.lastIndexOf('/');
-        if (idx < 0) {
-            return ".";
-        }
-        return idx == 0 ? clean.substring(0, 1) : clean.substring(0, idx);
-    }
-
-    private String url(String value) {
-        return URLEncoder.encode(projectPath(value), StandardCharsets.UTF_8);
-    }
-
-    // ── Project editor rendering ──
 
     private Component projectEditorFragment(Project project) {
         return projectEditorFragment(project, null);
@@ -5002,13 +4709,6 @@ public class OrchestrationController {
                 nn(member.agentId()) + " (" + nn(member.role()) + ")"));
         }
         return panel.render();
-    }
-
-    @PostMapping("/projects/_detail/{projectId}/workspace/release")
-    @ResponseBody
-    public String requestProjectWorkspaceRelease(@PathVariable String projectId) {
-        projectService.requestWorkspaceRelease(projectId);
-        return projectEditor(projectId);
     }
 
     // Deprecated: old project detail page, redirects to /projects
@@ -5556,7 +5256,8 @@ public class OrchestrationController {
         try {
             var wds = workspaceDirectoryServiceRef.getIfAvailable();
             if (wds != null) {
-                wds.agentWorkspace(agent.id());
+                wds.resolveForRead(
+                    io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceKind.AGENT, agent.id());
             }
             return "READY";
         } catch (Exception e) {
@@ -5773,11 +5474,9 @@ public class OrchestrationController {
         section.withChild(Header.H2("Workspace Health"));
         Div grid = new Div().withClass("orch-form-grid");
         grid.withChild(agentMetaItem("Health", status.health() != null ? status.health().name() : "UNKNOWN"));
-        grid.withChild(agentMetaItem("Path", status.workspaceRelativePath() != null ? status.workspaceRelativePath() : "—"));
+        grid.withChild(agentMetaItem("Identity", status.canonicalIdentity() != null ? status.canonicalIdentity() : "—"));
         grid.withChild(agentMetaItem("Writable", status.writable() ? "Yes" : "No"));
         grid.withChild(agentMetaItem("Active Runs", String.valueOf(status.activeRunCount())));
-        grid.withChild(agentMetaItem("Active Leases", String.valueOf(status.activeLeaseCount())));
-        grid.withChild(agentMetaItem("Linked Projects", formatLinkedProjects(status.linkedProjectIds())));
         grid.withChild(agentMetaItem("Output Artifacts", String.valueOf(status.outputArtifactCount())));
         grid.withChild(agentMetaItem("Output Bytes", String.valueOf(status.outputBytes())));
         grid.withChild(agentMetaItem("Last Activity", status.lastActivityAt() != null ? formatSince(status.lastActivityAt()) : "—"));
@@ -6628,7 +6327,7 @@ public class OrchestrationController {
             .withHxTarget("#agent-exec-result")
             .withHxSwap("innerHTML");
         form.withChild(label("Command", TextInput.create("command").withPlaceholder("pwd")));
-        form.withChild(label("Working Directory", TextInput.create("workingDirectory").withValue("workspace")));
+        form.withChild(label("Working Directory", TextInput.create("workingDirectory").withValue(".")));
         form.withChild(Button.create("Run").withClass("orch-primary").withAttribute("type", "submit"));
         panel.withChild(form);
         panel.withChild(new Div().withId("agent-exec-result"));
@@ -6654,7 +6353,7 @@ public class OrchestrationController {
             try {
                 var result = shellService.exec(
                     required(params.get("command"), "command is required"),
-                    params.getOrDefault("workingDirectory", "workspace"),
+                    params.getOrDefault("workingDirectory", "."),
                     null);
                 return new Div().withClass("orch-panel")
                     .withChild(new Div().withClass("orch-meta")

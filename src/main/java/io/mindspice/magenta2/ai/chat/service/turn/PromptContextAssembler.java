@@ -15,7 +15,6 @@ import io.mindspice.magenta2.ai.orchestration.settings.RuntimeSettingsService;
 import io.mindspice.magenta2.ai.orchestration.workspaces.AgentsMdLayer;
 import io.mindspice.magenta2.ai.orchestration.workspaces.AgentsMdResolution;
 import io.mindspice.magenta2.ai.orchestration.workspaces.AgentsMdResolver;
-import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspacePathLayout;
 import io.mindspice.magenta2.ai.skills.AgentSkillPromptCatalogAssembler;
 import org.springframework.ai.chat.messages.Message;
 import org.springframework.ai.chat.messages.SystemMessage;
@@ -23,7 +22,6 @@ import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.util.StringUtils;
 
 import java.io.IOException;
-import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
@@ -193,27 +191,7 @@ public class PromptContextAssembler {
     }
 
     private String runtimeActivePath(OrchestrationTaskContext context) {
-        if (StringUtils.hasText(context.activeRuntimePath())) {
-            return context.activeRuntimePath();
-        }
-        String workspaceRootText = context.hostDurableWorkspacePath();
-        if (!StringUtils.hasText(workspaceRootText)) {
-            return WorkspacePathLayout.WORKSPACE;
-        }
-        try {
-            Path workspaceRoot = Path.of(workspaceRootText).normalize();
-            Path activeWorkspacePath = workspaceRoot;
-            if (!activeWorkspacePath.startsWith(workspaceRoot)) {
-                return WorkspacePathLayout.WORKSPACE;
-            }
-            String relative = workspaceRoot.relativize(activeWorkspacePath).toString().replace('\\', '/');
-            if (!StringUtils.hasText(relative) || ".".equals(relative)) {
-                return WorkspacePathLayout.WORKSPACE;
-            }
-            return WorkspacePathLayout.WORKSPACE + "/" + relative;
-        } catch (RuntimeException ignored) {
-            return WorkspacePathLayout.WORKSPACE;
-        }
+        return StringUtils.hasText(context.activeRuntimePath()) ? context.activeRuntimePath() : ".";
     }
 
     private String formatAgentsMdPromptBlock(AgentsMdResolution resolution) {

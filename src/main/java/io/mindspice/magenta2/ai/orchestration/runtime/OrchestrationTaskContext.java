@@ -6,9 +6,8 @@ import org.springframework.util.StringUtils;
  * Task execution context set by the orchestration runner and visible to
  * tool implementations (shell, file) during model-backed task execution.
  *
- * <p>Contains agent, job, project identifiers plus a single durable workspace
- * path. All workspace aliases ({@code workspace/}, {@code root/}, {@code outputs/},
- * {@code run/}, {@code work/}) resolve to the same durable workspace root.
+ * <p>Contains agent, job, project identifiers plus one trusted descriptor root
+ * and one direct workspace-relative active path.
  */
 public record OrchestrationTaskContext(
     String agentId,
@@ -45,54 +44,6 @@ public record OrchestrationTaskContext(
         this(agentId, agentName, jobId, null, null, projectId,
             workspaceType, workspaceKey, workspaceIdentity, runType, null,
             hostWorkspacePath, null);
-    }
-
-    /**
-     * @deprecated Retained for source compatibility only. Use the 9-arg or canonical constructor.
-     */
-    @Deprecated
-    public OrchestrationTaskContext(
-        String agentId,
-        String agentName,
-        String jobId,
-        String projectId,
-        String workspaceType,
-        String workspaceKey,
-        String workspaceIdentity,
-        String runType,
-        String hostWorkspacePath,
-        String hostOutputPath
-    ) {
-        this(agentId, agentName, jobId, null, null, projectId,
-            workspaceType, workspaceKey, workspaceIdentity, runType, null,
-            hostWorkspacePath, null);
-    }
-
-    /**
-     * @deprecated Retained for source compatibility only. Use the 13-arg canonical constructor.
-     */
-    @Deprecated
-    public OrchestrationTaskContext(
-        String agentId,
-        String agentName,
-        String jobId,
-        String jobAssignmentId,
-        String jobRunId,
-        String projectId,
-        String workspaceType,
-        String workspaceKey,
-        String workspaceIdentity,
-        String runType,
-        String runDisplayName,
-        String hostDurableWorkspacePath,
-        String hostOutputPath,
-        String hostRunPath,
-        String hostRootPath,
-        String activeRuntimePath
-    ) {
-        this(agentId, agentName, jobId, jobAssignmentId, jobRunId, projectId,
-            workspaceType, workspaceKey, workspaceIdentity, runType, runDisplayName,
-            hostDurableWorkspacePath, activeRuntimePath);
     }
 
     public OrchestrationTaskContext {

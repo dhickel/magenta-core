@@ -51,7 +51,7 @@ class EntitySelectorControllerTest {
         private final AtomicReference<SelectorQuery> lastQuery = new AtomicReference<>();
 
         CapturingLookupService() {
-            super(null, null, null, null, null, null, null, null);
+            super(null, null, null, null, null, null);
         }
 
         @Override

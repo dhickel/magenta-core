@@ -105,7 +105,19 @@ class AgentToolAuthorizationServiceTest {
     }
 
     private OrchestrationTaskContext context(String agentId) {
-        return new OrchestrationTaskContext(agentId, "Agent", null, null, "agent", agentId, "agent/" + agentId, "TASK_RUN", "/tmp/run", "/tmp/out");
+        return new OrchestrationTaskContext(agentId,
+            "Agent",
+            null,
+            null,
+            null,
+            null,
+            "agent",
+            agentId,
+            "agent/" + agentId,
+            "TASK_RUN",
+            null,
+            "/tmp/run",
+            null);
     }
 
     private AgentProfile profile(String id, List<String> approvedTools, AgentProfileStatus status) {

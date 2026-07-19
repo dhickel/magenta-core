@@ -1,22 +1,22 @@
 # Topic
-Agent shell workspace alias resolution for operator Exec flows.
+Direct descriptor-relative file and shell tool paths.
 
 # Source References
+- `.internal-dev/specifications/architecture.md` (`ARCH-20260719-01`)
+- `src/main/java/io/mindspice/magenta2/ai/chat/tool/file/AgentFileToolService.java`
 - `src/main/java/io/mindspice/magenta2/ai/chat/tool/shell/AgentShellToolService.java`
-- `src/main/java/io/mindspice/magenta2/api/web/OrchestrationController.java`
-- `src/test/java/io/mindspice/magenta2/ai/chat/tool/shell/AgentShellToolServiceTest.java`
-- Playwright revalidation on 2026-05-15 against `/agents` Exec tab.
+- Phase 06 validation on 2026-07-19
 
 # Key Takeaways
-- Agent-context shell execution must run with `OrchestrationTaskContextHolder` populated with `agentId`; otherwise resolution falls back to host `dataRoot` behavior.
-- The Exec UI default uses `workingDirectory=workspace`, so resolver must treat `workspace` as a first-class alias for the selected Work Area when one is active, otherwise the effective durable workspace root.
-- Supporting `workspace/<subpath>` avoids accidental double-prefix resolution (`workspace/workspace/...`).
-- Keep `.` as an equivalent alias for the workspace root for compatibility with prior operator usage.
-- During assignment execution, `outputs/` is the active run-local output staging directory, physically `runs/<runId>/outputs/` under the relevant agent workspace root. Final output destinations are backend promotion targets, not shell working directories.
-- Legacy `scratch` and job workspace aliases should remain compatibility-only if implementation still accepts them; new prompts and UI guidance should not advertise them as current workflow paths.
+- The earlier alias model in this file was superseded by the filesystem-first descriptor contract.
+- In active execution context, blank or `.` selects the resolved descriptor root; ordinary paths are direct workspace-relative paths.
+- `workspace/`, `root/`, `run/`, `work/`, `projects/`, scratch, and job prefixes are rejected instead of remapped.
+- `outputs/` is a real reserved child. File reads may inspect it, but file mutations and shell working-directory selection reject it; output publication is its only writer.
+- Tool target tracking stores the direct workspace-relative target (for example `src/main`) so `AgentsMdResolver` can layer instructions from the descriptor root without alias stripping.
+- Canonical agent roots are `workspace/agent/<agentId>`, not `workspace/<agentId>` or `workspace/agent-<id>`.
 
 # Engine Relevance
-This is a direct operator-flow reliability issue: if alias semantics diverge from UI defaults, production runtime appears broken even when backend isolation logic exists.
+Alias compatibility can silently recreate retired filesystem identities. Tests and UI defaults must use direct relative paths and assert that retired prefixes fail closed.
 
 # Open Questions
-Should we normalize the Exec form to a dropdown of allowed aliases such as `workspace`, `root`, `outputs`, and `run` to reduce free-text errors?
+None for the Phase 06 contract.

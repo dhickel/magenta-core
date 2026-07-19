@@ -450,54 +450,6 @@ create table if not exists runtime_settings (
     retain_temp_work integer not null default 0
 );
 
-create table if not exists workspaces (
-    id text primary key,
-    owner_type text not null,
-    owner_id text not null,
-    root_relative_path text not null,
-    display_name text not null,
-    metadata_json text,
-    created_at text not null,
-    updated_at text not null
-);
-
-create unique index if not exists idx_workspaces_owner
-    on workspaces(owner_type, owner_id);
-
-create table if not exists workspace_links (
-    id text primary key,
-    workspace_id text not null,
-    label text not null,
-    link_type text not null,
-    target text not null,
-    readable integer not null,
-    writable integer not null,
-    created_at text not null,
-    updated_at text not null,
-    foreign key(workspace_id) references workspaces(id)
-);
-
-create table if not exists work_areas (
-    id text primary key,
-    owner_type text not null,
-    owner_id text not null,
-    workspace_id text,
-    root_relative_path text not null,
-    area_relative_path text not null,
-    display_name text not null,
-    system_flag integer not null default 0,
-    home_flag integer not null default 0,
-    active_flag integer not null default 1,
-    metadata_json text not null default '{}',
-    created_at text not null,
-    updated_at text not null,
-    unique(owner_type, owner_id, area_relative_path),
-    foreign key(workspace_id) references workspaces(id)
-);
-
-create index if not exists idx_work_areas_owner
-    on work_areas(owner_type, owner_id, active_flag);
-
 create table if not exists workspace_file_labels (
     id text primary key,
     slug text not null unique,
@@ -548,33 +500,6 @@ create index if not exists idx_workspace_file_action_log_identity
 
 create index if not exists idx_workspace_file_action_log_type
     on workspace_file_action_log(action_type, created_at desc);
-
--- Exclusive writable leases on job/project workspaces. Only one active
--- writable lease per workspace at a time. Extension must verify holder
--- ownership.
-create table if not exists workspace_leases (
-    id text primary key,
-    workspace_id text not null,
-    holder_type text not null,
-    holder_id text not null,
-    mode text not null,
-    expires_at text,
-    release_requested integer not null default 0,
-    released_at text,
-    created_at text not null,
-    updated_at text not null,
-    foreign key(workspace_id) references workspaces(id)
-);
-
--- At most one active WRITE lease per workspace. Enforced by the database,
--- not by application-level check-then-insert logic.
-create unique index if not exists idx_workspace_leases_active_write
-    on workspace_leases(workspace_id)
-    where mode = 'WRITE' and released_at is null;
-
-create index if not exists idx_workspace_leases_active_holder
-    on workspace_leases(holder_type, holder_id)
-    where released_at is null;
 
 -- Output artifacts materialized during plan/task runs. Each row records
 -- a single output file written or copied into the run's output directory.

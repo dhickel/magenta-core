@@ -117,24 +117,25 @@ class AgentsMdResolverTest {
 
     @Test
     void resolvesProjectBoundRootWithSelectedWorkAreaAsNestedContext() throws Exception {
-        Path agentRoot = Files.createDirectories(tempDir.resolve("workspace/agent-1"));
+        Path agentRoot = Files.createDirectories(tempDir.resolve("workspace/agent/agent-1"));
         Path nestedDir = Files.createDirectories(agentRoot.resolve("nested"));
         writeAgents(agentRoot, "agent-root");
         writeAgents(nestedDir, "nested-layer");
-        OrchestrationTaskContext context = new OrchestrationTaskContext(
-            "agent-1",
+        OrchestrationTaskContext context = new OrchestrationTaskContext("agent-1",
             "Agent One",
+            null,
+            null,
             null,
             null,
             null,
             "TASK_RUN",
             agentRoot.toString(),
             agentRoot.resolve("outputs").toString(),
+            null,
             agentRoot.toString(),
-            agentRoot.resolve("runs/run-1").toString()
-        );
+            null);
 
-        Optional<AgentsMdResolution> result = new AgentsMdResolver().resolveForContext(context, "workspace/nested/file.txt");
+        Optional<AgentsMdResolution> result = new AgentsMdResolver().resolveForContext(context, "nested/file.txt");
 
         assertThat(result).isPresent();
         assertThat(result.orElseThrow().boundRoot()).isEqualTo(agentRoot.toRealPath());
@@ -144,24 +145,25 @@ class AgentsMdResolverTest {
 
     @Test
     void resolvesAgentEffectiveWorkspaceWhenNoOwnerRootIsProvided() throws Exception {
-        Path workspaceRoot = Files.createDirectories(tempDir.resolve("workspace/agent-1"));
+        Path workspaceRoot = Files.createDirectories(tempDir.resolve("workspace/agent/agent-1"));
         Path nested = Files.createDirectories(workspaceRoot.resolve("docs"));
         writeAgents(workspaceRoot, "workspace-root");
         writeAgents(nested, "docs-layer");
-        OrchestrationTaskContext context = new OrchestrationTaskContext(
-            "agent-1",
+        OrchestrationTaskContext context = new OrchestrationTaskContext("agent-1",
             "Agent One",
+            null,
+            null,
             null,
             null,
             null,
             "TASK_RUN",
             workspaceRoot.toString(),
             workspaceRoot.resolve("runs/run-1/outputs").toString(),
+            null,
             workspaceRoot.toString(),
-            workspaceRoot.resolve("runs/run-1").toString()
-        );
+            null);
 
-        Optional<AgentsMdResolution> result = new AgentsMdResolver().resolveForContext(context, "workspace/docs/file.txt");
+        Optional<AgentsMdResolution> result = new AgentsMdResolver().resolveForContext(context, "docs/file.txt");
 
         assertThat(result).isPresent();
         assertThat(result.orElseThrow().boundRoot()).isEqualTo(workspaceRoot.toRealPath());

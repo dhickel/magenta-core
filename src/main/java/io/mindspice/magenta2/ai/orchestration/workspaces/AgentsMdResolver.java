@@ -15,8 +15,9 @@ import org.springframework.util.StringUtils;
 /**
  * Resolves AGENTS.md layers confined to a bound root and active path.
  *
- * <p>Magenta keeps all ancestor layers from the bound root to the active path
- * and uses closest-wins only for conflicts.
+ * <p>Walks ancestors from the bound root to the confined target directory,
+ * collecting user-authored AGENTS.md files in root-to-leaf order.
+ * No starter file is generated and no alias escapes the root.
  */
 @Service
 public class AgentsMdResolver {
@@ -47,61 +48,41 @@ public class AgentsMdResolver {
             return Optional.empty();
         }
         Path boundRoot = requireExistingDirectory(Path.of(boundRootText), "bound root");
-        Path resolvedActivePath = resolveContextActivePath(context, activePath);
+        Path resolvedActivePath = resolveContextActivePath(context, boundRoot, activePath);
         return Optional.of(resolve(boundRoot, resolvedActivePath));
+    }
+
+    /**
+     * Resolve using a descriptor as the bound root. The active path is
+     * resolved relative to the descriptor root.
+     */
+    public AgentsMdResolution resolveForDescriptor(
+        WorkspaceDescriptor descriptor,
+        String relativePath
+    ) throws IOException {
+        if (descriptor == null) {
+            throw new IllegalArgumentException("descriptor is required");
+        }
+        Path boundRoot = requireExistingDirectory(descriptor.root(), "descriptor root");
+        String requested = StringUtils.hasText(relativePath) ? relativePath.trim() : ".";
+        if (requested.startsWith("/")) {
+            throw new IllegalArgumentException("Absolute paths are not allowed for AGENTS.md resolution");
+        }
+        Path active = ".".equals(requested) ? boundRoot : boundRoot.resolve(requested).normalize();
+        return resolve(boundRoot, active);
     }
 
     private Path resolveContextActivePath(
         OrchestrationTaskContext context,
+        Path boundRoot,
         String activePath
     ) throws IOException {
-        Path workspaceRoot = requireExistingDirectory(Path.of(requiredText(contextWorkspacePath(context),
-            "active durable workspace path")), "active durable workspace");
-        String requested = StringUtils.hasText(activePath) ? activePath.trim() : WorkspacePathLayout.WORKSPACE;
-        String normalized = normalizeRequest(requested);
-        if (isAliasRoot(normalized, WorkspacePathLayout.WORKSPACE)) {
-            return workspaceRoot;
+        String requested = StringUtils.hasText(activePath) ? activePath.trim() : ".";
+        if (requested.startsWith("/")) {
+            throw new IllegalArgumentException("Absolute paths are not allowed for AGENTS.md resolution: " + activePath);
         }
-        if (normalized.startsWith(WorkspacePathLayout.WORKSPACE + "/")) {
-            return resolveScoped(workspaceRoot, normalized.substring((WorkspacePathLayout.WORKSPACE + "/").length()),
-                "active durable workspace");
-        }
-        if (WorkspacePathLayout.ROOT_ALIAS.equals(normalized) || normalized.startsWith(WorkspacePathLayout.ROOT_ALIAS + "/")) {
-            Path ownerRoot = requireExistingDirectory(
-                Path.of(requiredText(contextRootPath(context), "active owner root path")),
-                "active owner root");
-            String remainder = WorkspacePathLayout.ROOT_ALIAS.equals(normalized)
-                ? ""
-                : normalized.substring((WorkspacePathLayout.ROOT_ALIAS + "/").length());
-            return resolveScoped(ownerRoot, remainder, "active owner root");
-        }
-        if (WorkspacePathLayout.OUTPUTS.equals(normalized) || normalized.startsWith(WorkspacePathLayout.OUTPUTS + "/")) {
-            Path outputRoot = requireExistingDirectory(Path.of(requiredText(contextWorkspacePath(context),
-                "active output path")), "active output");
-            String remainder = WorkspacePathLayout.OUTPUTS.equals(normalized)
-                ? ""
-                : normalized.substring((WorkspacePathLayout.OUTPUTS + "/").length());
-            return resolveScoped(outputRoot, remainder, "active output");
-        }
-        if (WorkspacePathLayout.RUN_ALIAS.equals(normalized) || normalized.startsWith(WorkspacePathLayout.RUN_ALIAS + "/")) {
-            Path runRoot = requireExistingDirectory(Path.of(requiredText(contextRunPath(context),
-                "active run path")), "active run");
-            String remainder = WorkspacePathLayout.RUN_ALIAS.equals(normalized)
-                ? ""
-                : normalized.substring((WorkspacePathLayout.RUN_ALIAS + "/").length());
-            return resolveScoped(runRoot, remainder, "active run");
-        }
-        if (normalized.startsWith(WorkspacePathLayout.PROJECTS + "/")) {
-            String requiredProjectPrefix = WorkspacePathLayout.PROJECTS + "/" + requiredText(context.projectId(), "projectId");
-            if (!normalized.equals(requiredProjectPrefix) && !normalized.startsWith(requiredProjectPrefix + "/")) {
-                throw new IllegalArgumentException("Project path is not bound to this execution context: " + activePath);
-            }
-            Path ownerRoot = requireExistingDirectory(
-                Path.of(requiredText(contextRootPath(context), "active owner root path")),
-                "active owner root");
-            return resolveScoped(ownerRoot, normalized, "active owner root");
-        }
-        return resolveScoped(workspaceRoot, normalized, "active durable workspace");
+        Path active = ".".equals(requested) ? boundRoot : boundRoot.resolve(requested).normalize();
+        return resolveConfinedPath(boundRoot, active, "active path");
     }
 
     private List<AgentsMdLayer> collectLayers(Path realBoundRoot, Path lookupDirectory) throws IOException {
@@ -180,12 +161,6 @@ public class AgentsMdResolver {
         return normalized;
     }
 
-    private Path resolveScoped(Path scopeRoot, String relativePath, String label) throws IOException {
-        rejectUnsafeRelativePath(relativePath, label);
-        Path resolved = scopeRoot.resolve(relativePath).normalize();
-        return resolveConfinedPath(scopeRoot, resolved, label);
-    }
-
     private Path requireExistingDirectory(Path path, String label) throws IOException {
         if (path == null) {
             throw new IllegalArgumentException(label + " is required");
@@ -208,52 +183,8 @@ public class AgentsMdResolver {
         return current;
     }
 
-    private String contextWorkspacePath(OrchestrationTaskContext context) {
-        return context.hostDurableWorkspacePath();
-    }
-
-    private String contextRunPath(OrchestrationTaskContext context) {
-        return context.hostDurableWorkspacePath();
-    }
-
-    private String contextRootPath(OrchestrationTaskContext context) {
-        return context.hostDurableWorkspacePath();
-    }
-
     private String boundRootText(OrchestrationTaskContext context) {
         return context.hostDurableWorkspacePath();
-    }
-
-    private String normalizeRequest(String requested) {
-        String normalized = requested.replace('\\', '/').trim();
-        if (normalized.startsWith("/")) {
-            throw new IllegalArgumentException("Absolute paths are not allowed for AGENTS.md resolution: " + requested);
-        }
-        if (normalized.contains("//")) {
-            throw new IllegalArgumentException("AGENTS.md active path is invalid: " + requested);
-        }
-        return normalized;
-    }
-
-    private boolean isAliasRoot(String normalized, String alias) {
-        return normalized.isEmpty() || ".".equals(normalized) || alias.equals(normalized);
-    }
-
-    private void rejectUnsafeRelativePath(String relativePath, String label) {
-        String normalized = relativePath == null ? "" : relativePath.replace('\\', '/');
-        if (normalized.equals("..")
-            || normalized.startsWith("../")
-            || normalized.endsWith("/..")
-            || normalized.contains("/../")) {
-            throw new IllegalArgumentException(label + " path escapes its scope");
-        }
-    }
-
-    private String requiredText(String value, String label) {
-        if (!StringUtils.hasText(value)) {
-            throw new IllegalArgumentException(label + " is required");
-        }
-        return value;
     }
 
     private String normalizeRelative(Path relativePath) {

@@ -17,6 +17,7 @@ import java.util.Deque;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Locale;
+import java.util.Set;
 import java.util.regex.Pattern;
 import java.util.regex.PatternSyntaxException;
 import java.util.stream.Stream;
@@ -25,13 +26,16 @@ import io.mindspice.magenta2.ai.config.user.AiConfig;
 import io.mindspice.magenta2.ai.orchestration.runtime.OrchestrationTaskContext;
 import io.mindspice.magenta2.ai.orchestration.runtime.OrchestrationTaskContextHolder;
 import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceDirectoryService;
-import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspacePathLayout;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
 @Service
 public class AgentFileToolService {
+    private static final String OUTPUTS = "outputs";
+    private static final Set<String> RETIRED_PREFIXES = Set.of(
+        "workspace", "root", "run", "work", "projects", "scratch", "jobs", "job"
+    );
     private static final int DEFAULT_MAX_ENTRIES = 200;
     private static final int MAX_ENTRIES = 1_000;
     private static final int DEFAULT_READ_LINES = 200;
@@ -245,6 +249,7 @@ public class AgentFileToolService {
 
     public FileWriteResult write(String path, String content, boolean overwrite) throws IOException {
         ResolvedFilePath target = resolveForWrite(path);
+        rejectReservedOutputMutation(target);
         recordActiveRuntimePath(target);
         boolean existed = Files.exists(target.path(), LinkOption.NOFOLLOW_LINKS);
         if (existed && !overwrite) {
@@ -261,6 +266,7 @@ public class AgentFileToolService {
 
     public FileAppendResult append(String path, String content, boolean create) throws IOException {
         ResolvedFilePath target = create ? resolveForWrite(path) : resolveTextFile(path);
+        rejectReservedOutputMutation(target);
         recordActiveRuntimePath(target);
         boolean existed = Files.exists(target.path(), LinkOption.NOFOLLOW_LINKS);
         if (existed && !Files.isRegularFile(target.path(), LinkOption.NOFOLLOW_LINKS)) {
@@ -283,6 +289,7 @@ public class AgentFileToolService {
 
     public FileReplaceResult replace(String path, String startAnchor, String endAnchor, String replacement) throws IOException {
         ResolvedFilePath target = resolveTextFile(path);
+        rejectReservedOutputMutation(target);
         recordActiveRuntimePath(target);
         long fileSize = Files.size(target.path());
         if (fileSize > MAX_FULL_BUFFER_BYTES) {
@@ -405,42 +412,8 @@ public class AgentFileToolService {
 
     private FileScope resolveAssignmentScope(OrchestrationTaskContext ctx, String normalized, String requested)
         throws IOException {
-        Path workspaceRoot = activeScopeRoot(contextWorkspacePath(ctx), "active durable workspace");
-        if (isRootAlias(normalized, WorkspacePathLayout.WORKSPACE)) {
-            return new FileScope(workspaceRoot, WorkspacePathLayout.WORKSPACE, "active durable workspace", "");
-        }
-        if (normalized.startsWith(WorkspacePathLayout.WORKSPACE + "/")) {
-            return workspaceScope(workspaceRoot, normalized.substring((WorkspacePathLayout.WORKSPACE + "/").length()), requested,
-                "active durable workspace");
-        }
-        if (WorkspacePathLayout.ROOT_ALIAS.equals(normalized) || normalized.startsWith(WorkspacePathLayout.ROOT_ALIAS + "/")) {
-            Path ownerRoot = activeScopeRoot(contextRootPath(ctx), "active owner root");
-            String remainder = WorkspacePathLayout.ROOT_ALIAS.equals(normalized) ? "" : normalized.substring((WorkspacePathLayout.ROOT_ALIAS + "/").length());
-            rejectUnsafeRelativePath(remainder, "path escapes active owner root: " + requested);
-            return new FileScope(ownerRoot, WorkspacePathLayout.ROOT_ALIAS, "active owner root", remainder);
-        }
-        if (WorkspacePathLayout.OUTPUTS.equals(normalized) || normalized.startsWith(WorkspacePathLayout.OUTPUTS + "/")) {
-            Path outputRoot = activeScopeRoot(contextWorkspacePath(ctx), "active assignment output directory");
-            String remainder = WorkspacePathLayout.OUTPUTS.equals(normalized) ? "" : normalized.substring((WorkspacePathLayout.OUTPUTS + "/").length());
-            rejectUnsafeRelativePath(remainder, "path escapes active assignment output directory: " + requested);
-            return new FileScope(outputRoot, WorkspacePathLayout.OUTPUTS, "active assignment output directory", remainder);
-        }
-        if (WorkspacePathLayout.RUN_ALIAS.equals(normalized) || normalized.startsWith(WorkspacePathLayout.RUN_ALIAS + "/")) {
-            Path runRoot = activeScopeRoot(contextRunPath(ctx), "active run workspace");
-            String remainder = WorkspacePathLayout.RUN_ALIAS.equals(normalized) ? "" : normalized.substring((WorkspacePathLayout.RUN_ALIAS + "/").length());
-            rejectUnsafeRelativePath(remainder, "path escapes active run workspace: " + requested);
-            return new FileScope(runRoot, WorkspacePathLayout.RUN_ALIAS, "active run workspace", remainder);
-        }
-        if (WorkspacePathLayout.WORK.equals(normalized) || normalized.startsWith(WorkspacePathLayout.WORK + "/")) {
-            Path workRoot = durableChildScope(workspaceRoot, WorkspacePathLayout.WORK);
-            String remainder = WorkspacePathLayout.WORK.equals(normalized) ? "" : normalized.substring((WorkspacePathLayout.WORK + "/").length());
-            rejectUnsafeRelativePath(remainder, "path escapes active durable work directory: " + requested);
-            return new FileScope(workRoot, WorkspacePathLayout.WORK, "active durable work directory", remainder);
-        }
-        if (normalized.startsWith(WorkspacePathLayout.PROJECTS + "/")) {
-            return resolveProjectScope(ctx, normalized, requested);
-        }
-        return workspaceScope(workspaceRoot, normalized, requested, "active durable workspace");
+        Path workspaceRoot = activeScopeRoot(ctx.hostDurableWorkspacePath(), "active workspace");
+        return directWorkspaceScope(workspaceRoot, normalized, requested, "active workspace");
     }
 
     private FileScope resolveAgentScope(OrchestrationTaskContext ctx, String normalized, String requested)
@@ -448,37 +421,21 @@ public class AgentFileToolService {
         if (workspaceDirectoryService == null) {
             throw new IllegalStateException("Workspace directory service is not available");
         }
-        Path workspaceRoot = workspaceDirectoryService.agentWorkspace(ctx.agentId()).toRealPath();
-        if (isRootAlias(normalized, WorkspacePathLayout.WORKSPACE)) {
-            return new FileScope(workspaceRoot, WorkspacePathLayout.WORKSPACE, "agent workspace", "");
-        }
-        if (normalized.startsWith(WorkspacePathLayout.WORKSPACE + "/")) {
-            return workspaceScope(workspaceRoot, normalized.substring((WorkspacePathLayout.WORKSPACE + "/").length()), requested, "agent workspace");
-        }
-        if (normalized.startsWith(WorkspacePathLayout.PROJECTS + "/")) {
-            return resolveProjectScope(ctx, normalized, requested);
-        }
-        return workspaceScope(workspaceRoot, normalized, requested, "agent workspace");
+        Path workspaceRoot = workspaceDirectoryService.resolveForWrite(
+            io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceKind.AGENT,
+            ctx.agentId()
+        ).root().toRealPath();
+        return directWorkspaceScope(workspaceRoot, normalized, requested, "agent workspace");
     }
 
-    private FileScope workspaceScope(Path workspaceRoot, String relativePath, String requested, String label) {
-        rejectUnsafeRelativePath(relativePath, "path escapes " + label + ": " + requested);
-        return new FileScope(workspaceRoot, "workspace", label, relativePath);
-    }
-
-    private FileScope resolveProjectScope(OrchestrationTaskContext ctx, String normalized, String requested)
-        throws IOException {
-        if (!StringUtils.hasText(ctx.projectId())) {
-            throw new IllegalArgumentException("Project workspace is not available for this assignment");
+    private FileScope directWorkspaceScope(Path workspaceRoot, String normalized, String requested, String label) {
+        String relative = normalized.isEmpty() || ".".equals(normalized) ? "" : normalized;
+        String firstSegment = relative.contains("/") ? relative.substring(0, relative.indexOf('/')) : relative;
+        if (RETIRED_PREFIXES.contains(firstSegment)) {
+            throw new IllegalArgumentException("retired workspace path prefix is not allowed: " + requested);
         }
-        String projectPrefix = WorkspacePathLayout.PROJECTS + "/" + ctx.projectId();
-        if (!normalized.equals(projectPrefix) && !normalized.startsWith(projectPrefix + "/")) {
-            throw new IllegalArgumentException("Project path is not linked to this assignment: " + requested);
-        }
-        Path projectRoot = activeScopeRoot(contextWorkspacePath(ctx), "project workspace");
-        String remainder = normalized.equals(projectPrefix) ? "" : normalized.substring((projectPrefix + "/").length());
-        rejectUnsafeRelativePath(remainder, "path escapes current project workspace: " + requested);
-        return new FileScope(projectRoot, projectPrefix, "current project workspace", remainder);
+        rejectUnsafeRelativePath(relative, "path escapes " + label + ": " + requested);
+        return new FileScope(workspaceRoot, "", label, relative);
     }
 
     private String normalizeContextRequest(String requested) {
@@ -490,10 +447,6 @@ public class AgentFileToolService {
             throw new IllegalArgumentException("path escapes active workspace: " + requested);
         }
         return normalized;
-    }
-
-    private boolean isRootAlias(String normalized, String alias) {
-        return normalized.isEmpty() || ".".equals(normalized) || alias.equals(normalized);
     }
 
     private void rejectUnsafeRelativePath(String relativePath, String message) {
@@ -520,25 +473,15 @@ public class AgentFileToolService {
         return real;
     }
 
-    private String contextWorkspacePath(OrchestrationTaskContext ctx) {
-        return ctx.hostDurableWorkspacePath();
-    }
-
-    private String contextRunPath(OrchestrationTaskContext ctx) {
-        return ctx.hostDurableWorkspacePath();
-    }
-
-    private String contextRootPath(OrchestrationTaskContext ctx) {
-        return ctx.hostDurableWorkspacePath();
-    }
-
-    private Path durableChildScope(Path workspaceRoot, String child) throws IOException {
-        Path resolved = Files.createDirectories(workspaceRoot.resolve(child).normalize());
-        Path real = resolved.toRealPath();
-        if (!real.startsWith(workspaceRoot)) {
-            throw new IllegalArgumentException("path escapes active durable workspace");
+    private void rejectReservedOutputMutation(ResolvedFilePath target) {
+        OrchestrationTaskContext context = OrchestrationTaskContextHolder.current();
+        if (context == null || !context.hasContext()) {
+            return;
         }
-        return real;
+        Path relative = target.scope().root().relativize(target.path().toAbsolutePath().normalize());
+        if (!relative.toString().isEmpty() && OUTPUTS.equals(relative.getName(0).toString())) {
+            throw new IllegalArgumentException("outputs is reserved for output publication");
+        }
     }
 
     private Path nearestExistingParent(Path path) {

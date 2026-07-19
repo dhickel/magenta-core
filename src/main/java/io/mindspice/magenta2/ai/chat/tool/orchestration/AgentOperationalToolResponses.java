@@ -19,30 +19,15 @@ final class AgentOperationalToolResponses {
 
     record WorkspaceStatusItem(
         String agentId,
-        String workspaceRelativePath,
+        String canonicalIdentity,
         String health,
         boolean exists,
         boolean writable,
         int activeRunCount,
-        int activeLeaseCount,
-        List<String> linkedProjectIds,
         long outputArtifactCount,
         long outputBytes,
         Instant lastActivityAt,
         String message
-    ) {
-    }
-
-    record WorkspaceLinkItem(
-        String id,
-        String workspaceId,
-        String label,
-        String linkType,
-        String target,
-        boolean readable,
-        boolean writable,
-        Instant createdAt,
-        Instant updatedAt
     ) {
     }
 
@@ -67,8 +52,6 @@ final class AgentOperationalToolResponses {
         AssignmentItem assignment,
         Instant lastProgressAt,
         Instant lastHeartbeatAt,
-        Long progressAgeSeconds,
-        Long heartbeatAgeSeconds,
         boolean suspectedStuck,
         List<LinkedRunItem> linkedRuns,
         List<AuditEventItem> auditEvents,
@@ -161,19 +144,6 @@ final class AgentOperationalToolResponses {
     }
 
     record ProjectEventItem(String id, String projectId, String type, String payloadPreview, Instant createdAt) {
-    }
-
-    record ProjectWorkspaceItem(
-        String workspaceId,
-        String ownerAgentId,
-        String rootKind,
-        String displayPath,
-        int linkCount,
-        String leaseId,
-        String leaseHolderAssignmentId,
-        String mountedAgentId,
-        boolean releaseRequested
-    ) {
     }
 
     record OutputItem(

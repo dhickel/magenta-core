@@ -25,7 +25,6 @@ import io.mindspice.magenta2.ai.orchestration.runtime.WorkAssignment;
 import io.mindspice.magenta2.ai.orchestration.workspaces.AgentWorkspaceStatus;
 import io.mindspice.magenta2.ai.orchestration.workspaces.AgentWorkspaceStatusService;
 import io.mindspice.magenta2.ai.orchestration.workspaces.OutputArtifactService;
-import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceService;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
@@ -47,7 +46,6 @@ class AgentOperationalToolServiceTest {
     private final InboxService inboxService = mock(InboxService.class);
     private final ScheduleService scheduleService = mock(ScheduleService.class);
     private final JobService jobService = mock(JobService.class);
-    private final WorkspaceService workspaceService = mock(WorkspaceService.class);
     private final AgentWorkspaceStatusService workspaceStatusService = mock(AgentWorkspaceStatusService.class);
     private final OutputArtifactService outputArtifactService = mock(OutputArtifactService.class);
     private final AgentToolAuthorizationService authorization = new AgentToolAuthorizationService(
@@ -130,7 +128,6 @@ class AgentOperationalToolServiceTest {
             scheduleService,
             jobService,
             projectService,
-            workspaceService,
             workspaceStatusService,
             outputArtifactService,
             schedulesEnabled
@@ -138,7 +135,19 @@ class AgentOperationalToolServiceTest {
     }
 
     private OrchestrationTaskContext context(String agentId) {
-        return new OrchestrationTaskContext(agentId, "Agent", null, null, "agent", agentId, "agent/" + agentId, "TASK_RUN", "/tmp/run", "/tmp/out");
+        return new OrchestrationTaskContext(agentId,
+            "Agent",
+            null,
+            null,
+            null,
+            null,
+            "agent",
+            agentId,
+            "agent/" + agentId,
+            "TASK_RUN",
+            null,
+            "/tmp/run",
+            null);
     }
 
     private AgentProfile profile(String id, List<String> approvedTools, AgentProfileStatus status) {

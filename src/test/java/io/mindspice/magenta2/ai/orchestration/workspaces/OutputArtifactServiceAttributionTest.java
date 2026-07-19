@@ -94,8 +94,8 @@ class OutputArtifactServiceAttributionTest {
             directoryService,
             new ObjectMapper().findAndRegisterModules()
         );
-        Path projectRoot = directoryService.projectWorkspaceRoot("project-1");
-        Path outputDir = directoryService.outputsDir(projectRoot);
+        Path projectRoot = directoryService.resolveForWrite(io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceKind.AGENT, "agent-1").root();
+        Path outputDir = directoryService.outputs(directoryService.resolveForWrite(io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceKind.AGENT, "agent-1"));
 
         service.materialize(
             "job-run-1",
@@ -111,7 +111,7 @@ class OutputArtifactServiceAttributionTest {
 
         RunOutputArtifact artifact = repository.findArtifactsByRunId("job-run-1").getFirst();
         assertThat(artifact.filePath())
-            .startsWith("projects/project-1/outputs/");
+            .startsWith("workspace/agent/agent-1/outputs/");
         assertThat(Path.of(artifact.filePath()).isAbsolute()).isFalse();
         assertThat(artifact.jobId()).isEqualTo("job-1");
         assertThat(artifact.jobAssignmentId()).isEqualTo("assignment-1");

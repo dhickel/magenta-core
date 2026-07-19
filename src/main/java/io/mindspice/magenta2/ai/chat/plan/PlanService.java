@@ -216,7 +216,8 @@ public class PlanService {
         if (workspaceDirectoryService == null) {
             throw new IllegalStateException("Workspace directory service is not available");
         }
-        return workspaceDirectoryService.chatFiles(conversationId);
+        return workspaceDirectoryService.resolveForWrite(
+                io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceKind.CHAT, conversationId).root();
     }
 
     public Path persistChatFinalMessage(String conversationId, String finalMessage) {

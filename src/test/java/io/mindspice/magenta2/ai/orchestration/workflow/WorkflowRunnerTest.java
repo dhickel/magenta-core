@@ -417,10 +417,19 @@ class WorkflowRunnerTest {
             List.of(finalNode), List.of(), Map.of(), null, null
         ));
 
-        OrchestrationTaskContextHolder.set(new OrchestrationTaskContext(
-            "agent-1", "Agent 1", "job-1", "project-1", "agent", "agent-1", "agent/agent-1",
-            "JOB_WORKFLOW_ITEM", null, null
-        ).withJobRun("assignment-1", "job-run-1"));
+        OrchestrationTaskContextHolder.set(new OrchestrationTaskContext("agent-1",
+            "Agent 1",
+            "job-1",
+            null,
+            null,
+            "project-1",
+            "agent",
+            "agent-1",
+            "agent/agent-1",
+            "JOB_WORKFLOW_ITEM",
+            null,
+            null,
+            null).withJobRun("assignment-1", "job-run-1"));
         try {
             WorkflowRun run = workflowService.startRun(def.id());
             WorkflowRun finished = pollForTerminal(run.id());
@@ -462,11 +471,19 @@ class WorkflowRunnerTest {
             return completedPlanRun(planRunId, planId, inputs, Map.of("status", "ok"));
         });
 
-        OrchestrationTaskContextHolder.set(new OrchestrationTaskContext(
-            "agent-1", "Agent 1", "job-1", "project-1", "agent", "agent-1", "agent/agent-1",
-            "WORKFLOW_RUN", tempDir.resolve("caller-workspace").toString(),
-            tempDir.resolve("caller-outputs").toString()
-        ));
+        OrchestrationTaskContextHolder.set(new OrchestrationTaskContext("agent-1",
+            "Agent 1",
+            "job-1",
+            null,
+            null,
+            "project-1",
+            "agent",
+            "agent-1",
+            "agent/agent-1",
+            "WORKFLOW_RUN",
+            null,
+            tempDir.resolve("caller-workspace").toString(),
+            null));
         try {
             WorkflowRun run = workflowService.startRun(def.id());
             WorkflowRun finished = pollForTerminal(run.id());
@@ -493,16 +510,19 @@ class WorkflowRunnerTest {
             List.of(node), List.of(), Map.of(), null, null
         ));
 
-        OrchestrationTaskContextHolder.set(new OrchestrationTaskContext(
-            "agent-1", "Agent 1", null, null, null, null,
-            null, "workspace-1", "workspace-1", "WORKFLOW_RUN",
+        OrchestrationTaskContextHolder.set(new OrchestrationTaskContext("agent-1",
+            "Agent 1",
+            null,
+            null,
+            null,
+            null,
+            null,
+            "workspace-1",
+            "workspace-1",
+            "WORKFLOW_RUN",
             "Daily workflow run",
             tempDir.resolve("caller-workspace").toString(),
-            tempDir.resolve("caller-outputs").toString(),
-            tempDir.resolve("caller-workspace").toString(),
-            tempDir.resolve("caller-workspace").toString(),
-            null
-        ));
+            null));
         try {
             WorkflowRun run = workflowService.startRun(def.id());
             WorkflowRun finished = pollForTerminal(run.id());
@@ -540,11 +560,14 @@ class WorkflowRunnerTest {
         OrchestrationTaskContextHolder.set(new OrchestrationTaskContext("agent-1",
             "Agent 1",
             "job-1",
+            null,
+            null,
             "project-1",
             "agent",
             "agent-1",
             "agent/agent-1",
             "WORKFLOW_RUN",
+            null,
             null,
             null));
         try {

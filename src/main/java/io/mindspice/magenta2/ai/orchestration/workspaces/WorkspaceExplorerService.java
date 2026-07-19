@@ -237,45 +237,6 @@ public class WorkspaceExplorerService {
         return createDirectoryRoot(root, relativePath);
     }
 
-    /**
-     * Transitional handle for project file operations. All methods are
-     * delegated to the owning service's package-private root bridges.
-     * Scheduled for removal in Phase 06. Only the project file browser in
-     * {@code OrchestrationController} should construct this bridge.
-     *
-     * @deprecated Use descriptor-based explorer methods for agent, chat, and
-     * user workspaces. This bridge exists only because project workspaces
-     * lack a {@link WorkspaceKind} and are scheduled for removal.
-     */
-    @Deprecated
-    public final class ProjectBridge {
-        private final Path root;
-
-        public ProjectBridge(Path projectRoot) {
-            this.root = projectRoot;
-        }
-
-        public DirectoryListing list(RelativePath relativePath) {
-            return WorkspaceExplorerService.this.list(root, relativePath);
-        }
-
-        public FilePreview preview(RelativePath relativePath) {
-            return WorkspaceExplorerService.this.preview(root, relativePath);
-        }
-
-        public FilePreview saveText(RelativePath relativePath, String content) {
-            return WorkspaceExplorerService.this.saveText(root, relativePath, content);
-        }
-
-        public Entry createTextFile(RelativePath parent, String fileName) {
-            return WorkspaceExplorerService.this.createTextFile(root, parent, fileName);
-        }
-
-        public Entry createDirectory(RelativePath relativePath) {
-            return WorkspaceExplorerService.this.createDirectory(root, relativePath);
-        }
-    }
-
     /* ── Internal descriptor-based bridges ── */
 
     DirectoryListing list(WorkspaceDescriptor descriptor, Path root, RelativePath relativePath) {

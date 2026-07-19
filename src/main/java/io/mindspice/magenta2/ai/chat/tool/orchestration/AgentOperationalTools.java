@@ -18,24 +18,9 @@ public class AgentOperationalTools {
         this.objectMapper = objectMapper;
     }
 
-    @Tool(name = "agent_workspace_status", description = "Inspect the current agent workspace health, active run count, leases, linked projects, and output activity from the active orchestration context.")
+    @Tool(name = "agent_workspace_status", description = "Inspect the current agent workspace health, active run count, and output activity from the active orchestration context.")
     public String agentWorkspaceStatus() {
         return json(service.agentWorkspaceStatus());
-    }
-
-    @Tool(name = "agent_workspace_links", description = "List links registered on the current agent workspace. Uses the current orchestration agent identity.")
-    public String agentWorkspaceLinks() {
-        return json(service.agentWorkspaceLinks());
-    }
-
-    @Tool(name = "agent_project_release_workspace", description = "Request graceful release of a project workspace lease for a project the current agent belongs to. Requires confirmation text REQUEST RELEASE <projectId>.")
-    public String agentProjectReleaseWorkspace(
-        @ToolParam(description = "Project id whose workspace lease should receive a release request.")
-        String projectId,
-        @ToolParam(description = "Exact confirmation text: REQUEST RELEASE <projectId>.")
-        String confirmation
-    ) {
-        return json(service.agentProjectReleaseWorkspace(projectId, confirmation));
     }
 
     @Tool(name = "agent_queue_list", description = "List queued and active assignments for the current agent. Results are compact and capped.")
@@ -201,11 +186,6 @@ public class AgentOperationalTools {
     @Tool(name = "agent_project_members", description = "List members of a project where the current agent is a member.")
     public String agentProjectMembers(@ToolParam(description = "Project id whose members should be listed.") String projectId) {
         return json(service.agentProjectMembers(projectId));
-    }
-
-    @Tool(name = "agent_project_workspace_status", description = "Inspect workspace and lease state for a project where the current agent is a member.")
-    public String agentProjectWorkspaceStatus(@ToolParam(description = "Project id whose workspace should be inspected.") String projectId) {
-        return json(service.agentProjectWorkspaceStatus(projectId));
     }
 
     @Tool(name = "agent_project_events", description = "List recent events for a project where the current agent is a member.")

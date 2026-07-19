@@ -3,12 +3,10 @@ package io.mindspice.magenta2.ai.orchestration.workspaces;
 import org.springframework.util.StringUtils;
 
 /**
- * Simplified target descriptor for output publication. Work Area routing,
- * workspace IDs, and direct-output fields have been retired; output
- * materialization now uses the workspace context from the active run.
+ * Simplified target descriptor for output publication.
  */
 public record OutputPublicationTarget(
-    OutputDirectoryKind kind,
+    String kind,
     String workUnitId,
     String runId,
     String agentId,
@@ -17,8 +15,12 @@ public record OutputPublicationTarget(
     String jobAssignmentId,
     String jobRunId
 ) {
+    public static final String KIND_TASK = "TASK";
+    public static final String KIND_WORKFLOW = "WORKFLOW";
+    public static final String KIND_JOB = "JOB";
+
     public OutputPublicationTarget {
-        if (kind == null) {
+        if (!StringUtils.hasText(kind)) {
             throw new IllegalArgumentException("kind is required");
         }
         workUnitId = normalize(workUnitId);
@@ -37,7 +39,7 @@ public record OutputPublicationTarget(
         String projectId
     ) {
         return new OutputPublicationTarget(
-            OutputDirectoryKind.TASK, taskId, runId, agentId, projectId, null, null, null);
+            KIND_TASK, taskId, runId, agentId, projectId, null, null, null);
     }
 
     public static OutputPublicationTarget workflow(
@@ -47,7 +49,7 @@ public record OutputPublicationTarget(
         String projectId
     ) {
         return new OutputPublicationTarget(
-            OutputDirectoryKind.WORKFLOW, workflowId, runId, agentId, projectId, null, null, null);
+            KIND_WORKFLOW, workflowId, runId, agentId, projectId, null, null, null);
     }
 
     public static OutputPublicationTarget job(
@@ -58,7 +60,7 @@ public record OutputPublicationTarget(
         String projectId
     ) {
         return new OutputPublicationTarget(
-            OutputDirectoryKind.JOB, null, null, agentId, projectId, jobId, jobAssignmentId, jobRunId);
+            KIND_JOB, null, null, agentId, projectId, jobId, jobAssignmentId, jobRunId);
     }
 
     private static String normalize(String value) {

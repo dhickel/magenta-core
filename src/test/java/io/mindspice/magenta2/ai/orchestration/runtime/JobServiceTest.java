@@ -72,8 +72,19 @@ class JobServiceTest {
     @Test
     void runUsesExactContextSelection() {
         JobDefinition saved = service.saveDefinition(def(null, "Job", List.of()));
-        OrchestrationTaskContextHolder.set(new OrchestrationTaskContext(
-            "agent-1", "Agent", saved.id(), null, "user", "shared", "user/shared", "JOB_RUN", null, null));
+        OrchestrationTaskContextHolder.set(new OrchestrationTaskContext("agent-1",
+            "Agent",
+            saved.id(),
+            null,
+            null,
+            null,
+            "user",
+            "shared",
+            "user/shared",
+            "JOB_RUN",
+            null,
+            null,
+            null));
         try {
             JobRun run = service.startRun(saved.id(), "agent-1", null, "assignment-user");
             assertThat(run.workspaceIdentity()).isEqualTo("user/shared");

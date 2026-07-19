@@ -29,8 +29,6 @@ class AgentOperationalToolConfigurationTest {
 
         assertThat(names).containsExactlyInAnyOrder(
             "agent_workspace_status",
-            "agent_workspace_links",
-            "agent_project_release_workspace",
             "agent_queue_list",
             "agent_assignment_get",
             "agent_assignment_cancel",
@@ -57,7 +55,6 @@ class AgentOperationalToolConfigurationTest {
             "agent_project_list",
             "agent_project_get",
             "agent_project_members",
-            "agent_project_workspace_status",
             "agent_project_events",
             "agent_output_list",
             "agent_output_read"

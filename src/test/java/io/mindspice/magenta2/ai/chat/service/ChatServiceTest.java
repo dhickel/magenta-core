@@ -351,7 +351,7 @@ class ChatServiceTest {
 
         chatService.handlePlanExecutionStreamFinished("conversation-validated", "Validated final message");
 
-        Path finalMessage = dataRoot.resolve("chats/conversation-validated/files/final-message.md");
+        Path finalMessage = dataRoot.resolve("workspace/chat/conversation-validated/final-message.md");
         assertThat(finalMessage).exists();
         assertThat(Files.readString(finalMessage)).isEqualTo("Validated final message\n");
     }
@@ -604,7 +604,7 @@ class ChatServiceTest {
         ToolTranscriptService transcriptService = new ToolTranscriptService(objectMapper);
         ContextUsageTracker usageTracker = new ContextUsageTracker();
         Path dataRoot = Files.createDirectories(tempDir.resolve("agents-md-tool-loop"));
-        Path workspaceRoot = Files.createDirectories(dataRoot.resolve("workspace/agent-1"));
+        Path workspaceRoot = Files.createDirectories(dataRoot.resolve("workspace/agent/agent-1"));
         Path outputRoot = Files.createDirectories(workspaceRoot.resolve("runs/run-1/outputs"));
         Files.createDirectories(workspaceRoot.resolve("a"));
         Files.createDirectories(workspaceRoot.resolve("b"));
@@ -662,18 +662,19 @@ class ChatServiceTest {
             null,
             new AgentsMdResolver()
         );
-        OrchestrationTaskContextHolder.set(new OrchestrationTaskContext(
-            "agent-1",
+        OrchestrationTaskContextHolder.set(new OrchestrationTaskContext("agent-1",
             "TestAgent",
+            null,
+            null,
             null,
             null,
             null,
             "TASK_RUN",
             workspaceRoot.toString(),
             outputRoot.toString(),
+            null,
             workspaceRoot.toString(),
-            workspaceRoot.resolve("runs/run-1").toString()
-        ));
+            null));
 
         try {
             ChatResponse.MsgResponse response = chatService.chat("conversation-1", "read both files", "main");
@@ -685,7 +686,7 @@ class ChatServiceTest {
             assertThat(chatModel.prompts().get(2)).contains("nested-b-guidance");
             assertThat(chatModel.prompts().get(2)).doesNotContain("nested-a-guidance");
             assertThat(OrchestrationTaskContextHolder.current().activeRuntimePath())
-                .isEqualTo("workspace/b/file.txt");
+                .isEqualTo("b/file.txt");
         } finally {
             OrchestrationTaskContextHolder.clear();
         }
@@ -1096,10 +1097,10 @@ class ChatServiceTest {
                 .collect(Collectors.joining("\n")));
             int call = calls.getAndIncrement();
             if (call == 0) {
-                return toolCallResponse("call-a", "{\"path\":\"workspace/a/file.txt\",\"startLine\":1,\"maxLines\":10}");
+                return toolCallResponse("call-a", "{\"path\":\"a/file.txt\",\"startLine\":1,\"maxLines\":10}");
             }
             if (call == 1) {
-                return toolCallResponse("call-b", "{\"path\":\"workspace/b/file.txt\",\"startLine\":1,\"maxLines\":10}");
+                return toolCallResponse("call-b", "{\"path\":\"b/file.txt\",\"startLine\":1,\"maxLines\":10}");
             }
             return new org.springframework.ai.chat.model.ChatResponse(List.of(
                 new Generation(new AssistantMessage("done"))

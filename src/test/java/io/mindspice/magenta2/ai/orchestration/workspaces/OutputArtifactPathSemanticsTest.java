@@ -96,8 +96,7 @@ class OutputArtifactPathSemanticsTest {
             repository,
             directoryService,
             new RootRelativePathService(directoryService),
-            new ObjectMapper().findAndRegisterModules(),
-            true
+            new ObjectMapper().findAndRegisterModules()
         );
         return new Fixture(repository, service, directoryService.dataRoot());
     }

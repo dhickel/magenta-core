@@ -14,7 +14,6 @@ import io.mindspice.magenta2.ai.orchestration.agents.AgentProfile;
 import io.mindspice.magenta2.ai.orchestration.agents.AgentProfileRepository;
 import io.mindspice.magenta2.ai.orchestration.agents.AgentProfileService;
 import io.mindspice.magenta2.ai.orchestration.agents.AgentProfileStatus;
-import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceService;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpStatus;
@@ -31,7 +30,7 @@ class AgentProfileControllerTest {
 
     @Test
     void createRejectsBlankName() {
-        AgentProfileController controller = new AgentProfileController(stubService(), null);
+        AgentProfileController controller = new AgentProfileController(stubService());
         AgentProfile blankName = new AgentProfile(
             null, "  ", AgentProfileStatus.ACTIVE, "qwen3", null, List.of(), List.of(), true, null, null
         );
@@ -44,7 +43,7 @@ class AgentProfileControllerTest {
 
     @Test
     void getReturns404ForMissingId() {
-        AgentProfileController controller = new AgentProfileController(missingService(), null);
+        AgentProfileController controller = new AgentProfileController(missingService());
 
         assertThatThrownBy(() -> controller.get("non-existent"))
             .isInstanceOfSatisfying(ResponseStatusException.class, exception -> {
@@ -54,7 +53,7 @@ class AgentProfileControllerTest {
 
     @Test
     void updateReturns404ForMissingId() {
-        AgentProfileController controller = new AgentProfileController(missingService(), null);
+        AgentProfileController controller = new AgentProfileController(missingService());
         AgentProfile profile = new AgentProfile(
             "non-existent", "Test", AgentProfileStatus.ACTIVE, "qwen3", null,
             List.of(), List.of(), true, null, null
@@ -68,7 +67,7 @@ class AgentProfileControllerTest {
 
     @Test
     void createSucceedsWithValidProfile() {
-        AgentProfileController controller = new AgentProfileController(stubService(), null);
+        AgentProfileController controller = new AgentProfileController(stubService());
         AgentProfile valid = new AgentProfile(
             null, "Valid Agent", AgentProfileStatus.ACTIVE, "qwen3", null,
             List.of(), List.of(), true, null, null
@@ -82,7 +81,7 @@ class AgentProfileControllerTest {
 
     @Test
     void createReturns400ForInvalidPathSegmentId() {
-        AgentProfileController controller = new AgentProfileController(realService(), null);
+        AgentProfileController controller = new AgentProfileController(realService());
         AgentProfile invalid = new AgentProfile(
             "%2e%2e", "Invalid Agent", AgentProfileStatus.ACTIVE, "main", null,
             List.of(), List.of(), true, null, null
@@ -97,7 +96,7 @@ class AgentProfileControllerTest {
 
     @Test
     void updateReturns400ForInvalidPathAgentId() {
-        AgentProfileController controller = new AgentProfileController(realService(), null);
+        AgentProfileController controller = new AgentProfileController(realService());
         AgentProfile profile = new AgentProfile(
             "../projects/example", "Invalid Agent", AgentProfileStatus.ACTIVE, "main", null,
             List.of(), List.of(), true, null, null
@@ -112,7 +111,7 @@ class AgentProfileControllerTest {
 
     @Test
     void listReturnsProfiles() {
-        AgentProfileController controller = new AgentProfileController(stubService(), null);
+        AgentProfileController controller = new AgentProfileController(stubService());
 
         List<AgentProfile> result = controller.list();
 

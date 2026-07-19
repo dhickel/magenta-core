@@ -62,31 +62,6 @@ public class OutputArtifactService {
     }
 
     /**
-     * @deprecated Retained for source compatibility. The looseArtifactDiscoveryEnabled
-     *             parameter is no longer used; discoverLooseArtifacts has been removed.
-     */
-    @Deprecated
-    public OutputArtifactService(OutputArtifactRepository repository,
-                                 WorkspaceDirectoryService directoryService,
-                                 RootRelativePathService rootRelativePathService,
-                                 ObjectMapper objectMapper,
-                                 boolean looseArtifactDiscoveryEnabled) {
-        this(repository, directoryService, rootRelativePathService, objectMapper);
-    }
-
-    /**
-     * @deprecated Retained for source compatibility. The looseArtifactDiscoveryEnabled
-     *             parameter is no longer used; discoverLooseArtifacts has been removed.
-     */
-    @Deprecated
-    public OutputArtifactService(OutputArtifactRepository repository,
-                                 WorkspaceDirectoryService directoryService,
-                                 ObjectMapper objectMapper,
-                                 boolean looseArtifactDiscoveryEnabled) {
-        this(repository, directoryService, objectMapper);
-    }
-
-    /**
      * Materialize a single output value into the given output directory.
      *
      * @param runId          the plan run id
