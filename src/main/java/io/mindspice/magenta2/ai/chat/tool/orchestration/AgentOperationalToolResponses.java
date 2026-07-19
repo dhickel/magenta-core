@@ -125,9 +125,10 @@ final class AgentOperationalToolResponses {
         String title,
         String ownerAgentId,
         String projectId,
-        String workspaceId,
+        String workspaceType,
+        String workspaceKey,
+        String workspaceIdentity,
         String status,
-        boolean persistentWorkspaceEnabled,
         int itemCount,
         Instant updatedAt
     ) {
@@ -137,10 +138,10 @@ final class AgentOperationalToolResponses {
         String id,
         String jobId,
         String assignmentId,
-        String workspaceId,
+        String workspaceType,
+        String workspaceKey,
+        String workspaceIdentity,
         JobRunStatus status,
-        String workspacePath,
-        String outputDir,
         Instant startedAt,
         Instant completedAt,
         Instant updatedAt

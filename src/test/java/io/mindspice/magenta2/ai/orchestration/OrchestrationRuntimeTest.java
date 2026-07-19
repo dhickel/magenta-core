@@ -71,6 +71,7 @@ import io.mindspice.magenta2.ai.chat.task.TaskRunStatus;
 import io.mindspice.magenta2.ai.chat.tool.file.AgentFileToolService;
 import io.mindspice.magenta2.ai.execution.MagentaWorkExecutor;
 import io.mindspice.magenta2.ai.execution.MagentaWorkKind;
+import io.mindspice.magenta2.ai.orchestration.workspaces.OutputArtifactRepository;
 import io.mindspice.magenta2.ai.orchestration.workspaces.OutputArtifactService;
 import io.mindspice.magenta2.ai.orchestration.workspaces.EffectiveWorkspaceResolver;
 import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceDirectoryServiceTestSupport;
@@ -314,7 +315,8 @@ class OrchestrationRuntimeTest {
         ));
 
         runtimeRepository.saveJob(new OrchestrationJob(
-            "orch-job-1", "agent-1", "Owned Job", "summary", null, null, OrchestrationStatus.QUEUED, null, null
+            "orch-job-1", "agent-1", "Owned Job", "summary", null,
+            "agent", "agent-1", null, OrchestrationStatus.QUEUED, null, null
         ));
         runtimeRepository.saveJobItem(new OrchestrationJobItem(
             "orch-item-1", "orch-job-1", 0, AssignmentType.TASK_RUN, "task-1", null,
@@ -352,11 +354,12 @@ class OrchestrationRuntimeTest {
         ));
 
         jobRepository.saveDefinition(new JobDefinition(
-            "job-def-1", "agent-1", null, null, false, "DRAFT", "Job", "summary", List.of(), null, null, null, null, null
+            "job-def-1", "agent-1", null, "agent", "agent-1", null, "DRAFT",
+            "Job", "summary", List.of(), null, null, null, null, null
         ));
         jobRepository.saveRun(new JobRun(
-            "job-run-1", "job-def-1", JobRunStatus.RUNNING, null,
-            "/tmp/ws", "/tmp/out", null, null, null, null, Instant.now(), null
+            "job-run-1", "job-def-1", null, "agent", "agent-1", null,
+            JobRunStatus.RUNNING, List.of(), null, null, null, null, Instant.now(), null
         ));
         jobRepository.saveRecurrence(new JobRecurrence(
             "job-rec-1", "job-def-1", "*/5 * * * *", "UTC", Instant.now().plusSeconds(60), true, null, null
@@ -504,18 +507,25 @@ class OrchestrationRuntimeTest {
         runtimeRepository.saveAssignment(assignment);
 
         // Verify OrchestrationTaskContext can be set and cleared without leaking
-        OrchestrationTaskContext ctx = new OrchestrationTaskContext(
-            agent.id(), agent.name(), "job-ctx-1", null, "ws-ctx-1",
-            "TASK_RUN", "/tmp/ws", "/tmp/out");
+        OrchestrationTaskContext ctx = new OrchestrationTaskContext(agent.id(),
+            agent.name(),
+            "job-ctx-1",
+            null,
+            "agent",
+            agent.id(),
+            "agent/" + agent.id(),
+            "TASK_RUN",
+            "/tmp/ws",
+            "/tmp/out");
 
         assertThat(ctx.hasAgentContext()).isTrue();
         assertThat(ctx.hasContext()).isTrue();
         assertThat(ctx.agentId()).isEqualTo(agent.id());
         assertThat(ctx.agentName()).isEqualTo("runner-agent");
         assertThat(ctx.jobId()).isEqualTo("job-ctx-1");
-        assertThat(ctx.workspaceId()).isEqualTo("ws-ctx-1");
+        assertThat(ctx.workspaceIdentity()).isEqualTo("agent/" + agent.id());
         assertThat(ctx.runType()).isEqualTo("TASK_RUN");
-        assertThat(ctx.hostWorkspacePath()).isEqualTo("/tmp/ws");
+        assertThat(ctx.hostDurableWorkspacePath()).isEqualTo("/tmp/ws");
         assertThat(ctx.hostOutputPath()).isEqualTo("/tmp/out");
 
         // Set and clear via holder
@@ -527,8 +537,16 @@ class OrchestrationRuntimeTest {
 
     @Test
     void orchestrationTaskContextHolderIsThreadLocal() throws Exception {
-        OrchestrationTaskContext mainCtx = new OrchestrationTaskContext(
-            "main-agent", "Main", null, null, null, "TASK_RUN", null, null);
+        OrchestrationTaskContext mainCtx = new OrchestrationTaskContext("main-agent",
+            "Main",
+            null,
+            null,
+            "agent",
+            "main-agent",
+            "agent/main-agent",
+            "TASK_RUN",
+            null,
+            null);
 
         OrchestrationTaskContextHolder.set(mainCtx);
 
@@ -553,8 +571,8 @@ class OrchestrationRuntimeTest {
         OrchestrationRuntimeRepository repository = new OrchestrationRuntimeRepository(jdbcTemplate, new ObjectMapper());
         Instant oldProgress = Instant.now().minusSeconds(1200);
         WorkAssignment saved = repository.saveAssignment(new WorkAssignment(
-            "assignment-progress", "agent-1", null, null, AssignmentType.REPORT, 1,
-            OrchestrationStatus.RUNNING, null, null, 0,
+            "assignment-progress", "agent-1", null, null, AssignmentType.REPORT, null, 1,
+            OrchestrationStatus.RUNNING, null, null, null, null, null, 0,
             Map.of("phase", "blocking-call"), Map.of(), Map.of(), Map.of(),
             null, "owner-1", Instant.now().plusSeconds(300),
             null, null, Instant.now().minusSeconds(1300), null, oldProgress, oldProgress
@@ -586,8 +604,8 @@ class OrchestrationRuntimeTest {
         WorkAssignment interrupted = assignmentService.forceInterrupt("agent-1", running.id(), "blocked model call");
         WorkAssignment lateCompletion = new WorkAssignment(
             interrupted.id(), interrupted.agentId(), interrupted.jobId(), interrupted.jobItemId(),
-            interrupted.assignmentType(), interrupted.priority(), OrchestrationStatus.COMPLETED,
-            interrupted.modelOverride(), interrupted.workspaceId(), interrupted.currentItemIndex(),
+            interrupted.assignmentType(), interrupted.runDisplayName(), interrupted.priority(), OrchestrationStatus.COMPLETED,
+            interrupted.modelOverride(), interrupted.workspaceType(), interrupted.workspaceKey(), interrupted.workspaceIdentity(), interrupted.projectId(), interrupted.currentItemIndex(),
             interrupted.checkpoint(), interrupted.input(), Map.of("message", "late"), interrupted.evidence(),
             null, null, null, interrupted.createdAt(), interrupted.updatedAt(), interrupted.startedAt(),
             Instant.now(), interrupted.lastProgressAt(), interrupted.lastHeartbeatAt()
@@ -1011,7 +1029,7 @@ class OrchestrationRuntimeTest {
     }
 
     @Test
-    void taskAssignmentCheckpointsConversationBeforeModelExecution() {
+    void taskAssignmentCheckpointsConversationBeforeModelExecution() throws Exception {
         JdbcTemplate jdbcTemplate = jdbcTemplate();
         ObjectMapper objectMapper = new ObjectMapper();
         OrchestrationRuntimeRepository repository = new OrchestrationRuntimeRepository(jdbcTemplate, objectMapper);
@@ -1044,7 +1062,8 @@ class OrchestrationRuntimeTest {
             }
         };
         OrchestrationRunnerService runner = new OrchestrationRunnerService(
-            repository, assignmentService, null, null, null, chatService, null, null,
+            repository, assignmentService, null, chatService, null,
+            WorkspaceDirectoryServiceTestSupport.directoryService(tempDir.resolve("checkpoint-workspace")), null,
             new MagentaWorkExecutor(Map.of(
                 MagentaWorkKind.BACKGROUND_JOB, new MagentaWorkExecutor.LaneSettings("test-bg-", 1, 10)
             ))
@@ -1073,7 +1092,8 @@ class OrchestrationRuntimeTest {
         WorkspaceRepository workspaceRepository = new WorkspaceRepository(jdbcTemplate);
         WorkspaceService workspaceService = new WorkspaceService(workspaceRepository, aiConfig, WorkspaceDirectoryServiceTestSupport.agentProfileRepository(true), WorkspaceDirectoryServiceTestSupport.chatExistenceRepository(true));
         EffectiveWorkspaceResolver effectiveWorkspaceResolver = new EffectiveWorkspaceResolver(directoryService, workspaceService);
-        OutputArtifactService outputArtifactService = new OutputArtifactService(workspaceRepository, directoryService, objectMapper);
+        OutputArtifactService outputArtifactService = new OutputArtifactService(
+            new OutputArtifactRepository(jdbcTemplate), directoryService, objectMapper);
         OrchestrationRuntimeRepository repository = new OrchestrationRuntimeRepository(jdbcTemplate, objectMapper);
         AgentProfileService agentService = agentService(jdbcTemplate, aiConfig);
         AgentProfile agent = agentService.create(new AgentProfile(
@@ -1088,13 +1108,12 @@ class OrchestrationRuntimeTest {
             new ChatMemoryRepository(jdbcTemplate, objectMapper));
         InboxService workflowInboxService = new InboxService(workflowRepository, objectMapper);
         WorkflowRunner workflowRunner = new WorkflowRunner(
-            workflowRepository, planService, workflowInboxService, directoryService, outputArtifactService,
-            effectiveWorkspaceResolver
+            workflowRepository, planService, workflowInboxService, directoryService, outputArtifactService
         );
         WorkflowService workflowService = new WorkflowService(workflowRepository, planService, workflowRunner);
         OrchestrationRunnerService runner = new OrchestrationRunnerService(
             repository, assignmentService, null, null, workflowService, null, null, null,
-            agentService, outputArtifactService, null, null, null, directoryService,
+            agentService, outputArtifactService, null, directoryService, null,
             new MagentaWorkExecutor(Map.of(
                 MagentaWorkKind.BACKGROUND_JOB, new MagentaWorkExecutor.LaneSettings("test-bg-", 1, 10)
             )),
@@ -1131,11 +1150,10 @@ class OrchestrationRuntimeTest {
         String workflowRunId = waiting.checkpoint().get("workflowRunId").toString();
         WorkflowRun waitingRun = workflowService.getRun(workflowRunId);
         assertThat(waitingRun.status()).isEqualTo(WorkflowRunStatus.WAITING);
-        assertThat(waitingRun.workspacePath()).startsWith("workspace/agent-1/runs/");
-        assertThat(waitingRun.outputDir()).startsWith("workspace/agent-1/runs/");
-        assertThat(waitingRun.outputDir()).endsWith("/outputs");
-        assertThat(Files.isDirectory(resolveStored(directoryService, waitingRun.workspacePath()))).isTrue();
-        assertThat(Files.isDirectory(resolveStored(directoryService, waitingRun.outputDir()))).isTrue();
+        assertThat(waitingRun.workspaceType()).isEqualTo("agent");
+        assertThat(waitingRun.workspaceKey()).isEqualTo("agent-1");
+        assertThat(waitingRun.workspaceIdentity()).isEqualTo("agent/agent-1");
+        assertThat(Files.exists(directoryService.dataRoot().resolve("workspace/agent/agent-1/outputs"))).isFalse();
         String messageId = waitingRun.nodeRuns().stream()
             .filter(node -> node.nodeKey().equals("gate"))
             .findFirst()
@@ -1170,9 +1188,9 @@ class OrchestrationRuntimeTest {
             assertThat(node.nodeKey()).isEqualTo("approved");
             assertThat(node.status()).isEqualTo(WorkflowNodeRunStatus.COMPLETED);
         });
-        assertThat(resolveStored(directoryService, completedRun.outputDir()))
-            .startsWith(directoryService.dataRoot().resolve("workspace/agent-1/runs"));
-        assertThat(Files.isDirectory(resolveStored(directoryService, completedRun.workspacePath()))).isTrue();
+        assertThat(completedRun.workspaceIdentity()).isEqualTo("agent/agent-1");
+        assertThat(Files.isDirectory(directoryService.dataRoot()
+            .resolve("workspace/agent/agent-1/outputs"))).isTrue();
     }
 
     @Test
@@ -1202,7 +1220,7 @@ class OrchestrationRuntimeTest {
         Files.writeString(projectWorkspace.resolve("shared.txt"), "leased project\n");
         JobService jobService = new JobService(new JobRepository(jdbcTemplate, objectMapper), directoryService, null, null);
         JobDefinition job = jobService.saveDefinition(new JobDefinition(
-            "job-project", agent.id(), project.id(), null, false, "READY",
+            "job-project", agent.id(), project.id(), "agent", agent.id(), null, "READY",
             "Project Job", "summary", List.of(), null, null, null, null, null
         ));
         PlanService planService = new PlanService(
@@ -1211,7 +1229,7 @@ class OrchestrationRuntimeTest {
             null,
             new ChatMarkdownRenderer(),
             directoryService,
-            new OutputArtifactService(workspaceRepository, directoryService, objectMapper)
+            new OutputArtifactService(new OutputArtifactRepository(jdbcTemplate), directoryService, objectMapper)
         );
         PlanDefinition task = planService.saveTask(new PlanDefinition(
             null, PlanKind.TASK_TEMPLATE, PlanStatus.APPROVED,
@@ -1238,15 +1256,12 @@ class OrchestrationRuntimeTest {
                 OrchestrationTaskContext context = OrchestrationTaskContextHolder.current();
                 TaskRun started = taskService.startChatExecution(conversationId, taskId, inputValues, context);
                 OrchestrationTaskContext updated = OrchestrationTaskContextHolder.current();
-                Path link = Path.of(updated.hostWorkspacePath()).resolve("projects").resolve(project.id());
+                Path link = Path.of(updated.hostDurableWorkspacePath()).resolve("projects").resolve(project.id());
                 materializedLink.set(link);
+                // Project workspaces are now accessed through resolved paths, not symlinks
                 try {
-                    assertThat(Files.isSymbolicLink(link)).isTrue();
-                    assertThat(link.toRealPath()).isEqualTo(projectWorkspace.toRealPath());
-                    AgentFileToolService fileTool = new AgentFileToolService(aiConfig, directoryService);
-                    AgentFileToolService.FileReadResult read = fileTool.read(
-                        "projects/" + project.id() + "/shared.txt", 1, 10);
-                    assertThat(read.lines().getFirst()).endsWith("|leased project");
+                    assertThat(Files.exists(projectWorkspace)).isTrue();
+                    assertThat(Files.readString(projectWorkspace.resolve("shared.txt"))).isEqualTo("leased project\n");
                 } catch (Exception e) {
                     throw new IllegalStateException(e);
                 }
@@ -1257,7 +1272,7 @@ class OrchestrationRuntimeTest {
         };
         OrchestrationRunnerService runner = new OrchestrationRunnerService(
             repository, assignmentService, jobService, taskService, null, chatService, null, null,
-            agentService, null, projectService, workspaceService, leaseService, directoryService,
+            agentService, null, projectService, directoryService, null,
             new MagentaWorkExecutor(Map.of(
                 MagentaWorkKind.BACKGROUND_JOB, new MagentaWorkExecutor.LaneSettings("test-bg-", 1, 10)
             )),
@@ -1275,10 +1290,9 @@ class OrchestrationRuntimeTest {
 
         assertThat(result.errorText()).isNull();
         assertThat(result.status()).isEqualTo(OrchestrationStatus.COMPLETED);
+        // Project symlink leases are retired; symlinks are no longer created
         assertThat(materializedLink.get()).isNotNull();
-        assertThat(Files.exists(materializedLink.get())).isFalse();
-        Workspace workspace = workspaceRepository.findByOwner(WorkspaceOwnerType.PROJECT, project.id()).orElseThrow();
-        assertThat(workspaceService.activeLeases(workspace.id())).isEmpty();
+        assertThat(Files.isSymbolicLink(materializedLink.get())).isFalse();
         assertThat(Files.readString(projectWorkspace.resolve("shared.txt"))).isEqualTo("leased project\n");
     }
 
@@ -1309,8 +1323,8 @@ class OrchestrationRuntimeTest {
         JobService jobService = new JobService(
             new JobRepository(jdbcTemplate, objectMapper), directoryService, null, null, resolver);
         JobDefinition job = jobService.saveDefinition(new JobDefinition(
-            "job-isolated", agent.id(), project.id(), null, true, "Isolated Job", "summary",
-            List.of(), null, null, null, null, null
+            "job-isolated", agent.id(), project.id(), "agent", agent.id(), null, null,
+            "Isolated Job", "summary", List.of(), null, null, null, null, null
         ));
         RuntimeSettingsService settingsService = new RuntimeSettingsService(
             new RuntimeSettingsRepository(jdbcTemplate), aiConfig, agentService);
@@ -1318,7 +1332,7 @@ class OrchestrationRuntimeTest {
         OrchestrationEventService eventService = new OrchestrationEventService(repository, assignmentService, true);
         OrchestrationRunnerService runner = new OrchestrationRunnerService(
             repository, assignmentService, jobService, null, null, null, null, eventService,
-            agentService, null, projectService, workspaceService, leaseService, directoryService,
+            agentService, null, projectService, directoryService, null,
             new MagentaWorkExecutor(Map.of(
                 MagentaWorkKind.BACKGROUND_JOB, new MagentaWorkExecutor.LaneSettings("test-bg-", 1, 10)
             )),
@@ -1351,11 +1365,10 @@ class OrchestrationRuntimeTest {
         assertThat(secondRun.completedAt()).isNotNull();
         assertThat(firstRun.finalMessage()).isEqualTo("Job run completed");
         assertThat(secondRun.finalMessage()).isEqualTo("Job run completed");
-        assertThat(firstRun.workspacePath()).isNull();
-        assertThat(secondRun.workspacePath()).isNull();
-        assertThat(firstRun.outputDir()).isEqualTo("projects/" + project.id() + "/outputs");
-        assertThat(secondRun.outputDir()).isEqualTo("projects/" + project.id() + "/outputs");
-        assertThat(Files.isDirectory(resolveStored(directoryService, firstRun.outputDir()))).isTrue();
+        assertThat(firstRun.workspaceIdentity()).isEqualTo("agent/agent-job");
+        assertThat(secondRun.workspaceIdentity()).isEqualTo("agent/agent-job");
+        assertThat(Files.exists(directoryService.dataRoot()
+            .resolve("workspace/agent/agent-job/outputs"))).isFalse();
     }
 
     @Test
@@ -1376,7 +1389,7 @@ class OrchestrationRuntimeTest {
         JobService jobService = new JobService(
             new JobRepository(jdbcTemplate, objectMapper), directoryService, null, null, resolver);
         JobDefinition job = jobService.saveDefinition(new JobDefinition(
-            "job-context", agent.id(), null, null, true, "READY",
+            "job-context", agent.id(), null, "agent", agent.id(), null, "READY",
             "Job Context", "summary",
             List.of(new JobWorkItem(
                 "task", JobWorkItemType.PLAN, "task-context", null, Map.of(), 0, null, null)),
@@ -1396,7 +1409,7 @@ class OrchestrationRuntimeTest {
                 String modelOverride
             ) {
                 OrchestrationTaskContext context = OrchestrationTaskContextHolder.current();
-                jobWorkspaceSeen.set(context == null ? null : context.hostJobWorkspacePath());
+                jobWorkspaceSeen.set(context == null ? null : context.hostDurableWorkspacePath());
                 TaskRun run = new TaskRun(
                     "task-run-context", taskId, TaskRunStatus.COMPLETED, inputValues, Map.of("ok", true),
                     null, List.of("evidence"), List.of(), "done", null,
@@ -1407,8 +1420,7 @@ class OrchestrationRuntimeTest {
         };
         OrchestrationRunnerService runner = new OrchestrationRunnerService(
             repository, assignmentService, jobService, null, null, chatService, null, eventService,
-            agentService, null, null, null, null, directoryService,
-            new RootRelativePathService(directoryService),
+            agentService, null, null, directoryService, null,
             new MagentaWorkExecutor(Map.of(
                 MagentaWorkKind.BACKGROUND_JOB, new MagentaWorkExecutor.LaneSettings("test-bg-", 1, 10)
             )),
@@ -1425,7 +1437,7 @@ class OrchestrationRuntimeTest {
         WorkAssignment result = runner.runAssignment("assignment-job-context");
 
         assertThat(result.status()).as(result.errorText()).isEqualTo(OrchestrationStatus.COMPLETED);
-        assertThat(jobWorkspaceSeen.get()).isNull();
+        assertThat(jobWorkspaceSeen.get()).isNotNull();
     }
 
     @Test
@@ -1446,7 +1458,7 @@ class OrchestrationRuntimeTest {
         JobService jobService = new JobService(
             new JobRepository(jdbcTemplate, objectMapper), directoryService, null, null, resolver);
         JobDefinition job = jobService.saveDefinition(new JobDefinition(
-            "job-attribution", agent.id(), null, null, false, "READY",
+            "job-attribution", agent.id(), null, "agent", agent.id(), null, "READY",
             "Job Attribution", "summary",
             List.of(new JobWorkItem(
                 "task", JobWorkItemType.PLAN, "task-attribution", null, Map.of(), 0, null, null)),
@@ -1476,7 +1488,7 @@ class OrchestrationRuntimeTest {
         };
         OrchestrationRunnerService runner = new OrchestrationRunnerService(
             repository, assignmentService, jobService, null, null, chatService, null, eventService,
-            agentService, null, null, null, null, directoryService,
+            agentService, null, null, directoryService, null,
             new MagentaWorkExecutor(Map.of(
                 MagentaWorkKind.BACKGROUND_JOB, new MagentaWorkExecutor.LaneSettings("test-bg-", 1, 10)
             )),
@@ -1497,7 +1509,7 @@ class OrchestrationRuntimeTest {
         assertThat(context).isNotNull();
         assertThat(context.jobAssignmentId()).isEqualTo("assignment-job-attribution");
         assertThat(context.jobRunId()).isNotBlank();
-        assertThat(context.hostJobWorkspacePath()).isNull();
+        assertThat(context.hostDurableWorkspacePath()).isNotNull();
     }
 
     @Test
@@ -1518,7 +1530,7 @@ class OrchestrationRuntimeTest {
         JobService jobService = new JobService(
             new JobRepository(jdbcTemplate, objectMapper), directoryService, null, null, resolver);
         JobDefinition job = jobService.saveDefinition(new JobDefinition(
-            "job-resume", agent.id(), null, null, false, "READY",
+            "job-resume", agent.id(), null, "agent", agent.id(), null, "READY",
             "Job Resume", "summary",
             List.of(new JobWorkItem(
                 "task", JobWorkItemType.PLAN, "task-resume", null, Map.of(), 0, null, null)),
@@ -1556,7 +1568,7 @@ class OrchestrationRuntimeTest {
         };
         OrchestrationRunnerService runner = new OrchestrationRunnerService(
             repository, assignmentService, jobService, null, null, chatService, null, eventService,
-            agentService, null, null, null, null, directoryService,
+            agentService, null, null, directoryService, null,
             new MagentaWorkExecutor(Map.of(
                 MagentaWorkKind.BACKGROUND_JOB, new MagentaWorkExecutor.LaneSettings("test-bg-", 1, 10)
             )),
@@ -1590,8 +1602,8 @@ class OrchestrationRuntimeTest {
 
         Instant started = Instant.now().minusSeconds(30);
         repository.saveAssignment(new WorkAssignment(
-            "assignment-links", "agent-1", null, null, AssignmentType.TASK_RUN, 1,
-            OrchestrationStatus.RUNNING, null, null, 0,
+            "assignment-links", "agent-1", null, null, AssignmentType.TASK_RUN, null, 1,
+            OrchestrationStatus.RUNNING, null, null, null, null, null, 0,
             Map.of("conversationId", "conversation-checkpoint"),
             Map.of("taskId", "plan-legacy"), Map.of(), Map.of(),
             null, "owner-1", Instant.now().plusSeconds(300),
@@ -1677,7 +1689,8 @@ class OrchestrationRuntimeTest {
             MagentaWorkKind.BACKGROUND_JOB, new MagentaWorkExecutor.LaneSettings("test-bg-", 1, 10)
         ));
         OrchestrationRunnerService runner = new OrchestrationRunnerService(
-            repository, assignmentService, null, null, null, chatService, null, null, executor
+            repository, assignmentService, null, chatService, null,
+            WorkspaceDirectoryServiceTestSupport.directoryService(tempDir.resolve("cancel-workspace")), null, executor
         );
         repository.saveAssignment(new WorkAssignment(
             "assignment-cancel-running", "agent-1", null, null, AssignmentType.TASK_RUN, 1,

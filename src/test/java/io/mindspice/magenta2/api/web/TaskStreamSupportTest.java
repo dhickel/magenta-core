@@ -123,7 +123,7 @@ class TaskStreamSupportTest {
     @Test
     void toContextWithRequestPopulatesFields() {
         var request = new TaskController.TaskRunRequest(
-            Map.of(), "conv-1", "agent-1", "job-1", "project-1", "ws-1", "model-1", 5
+            Map.of(), "conv-1", "agent-1", "job-1", "project-1", null, "ws-1", null, "model-1", 5
         );
 
         OrchestrationRunContext context = TaskStreamSupport.toContext(request);
@@ -131,7 +131,7 @@ class TaskStreamSupportTest {
         assertThat(context.agentId()).isEqualTo("agent-1");
         assertThat(context.jobId()).isEqualTo("job-1");
         assertThat(context.projectId()).isEqualTo("project-1");
-        assertThat(context.workspaceId()).isEqualTo("ws-1");
+        assertThat(context.workspaceKey()).isEqualTo("ws-1");
         assertThat(context.modelOverride()).isEqualTo("model-1");
         assertThat(context.priority()).isEqualTo(5);
     }

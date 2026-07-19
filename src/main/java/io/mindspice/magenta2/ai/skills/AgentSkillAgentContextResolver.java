@@ -47,11 +47,11 @@ public class AgentSkillAgentContextResolver {
             return Optional.of(conversationIdHint.trim());
         }
         OrchestrationTaskContext context = OrchestrationTaskContextHolder.current();
-        if (context == null || !StringUtils.hasText(context.workspaceId()) || !StringUtils.hasText(context.runType())) {
+        if (context == null || !StringUtils.hasText(context.workspaceIdentity()) || !StringUtils.hasText(context.runType())) {
             return Optional.empty();
         }
         if ("CHAT".equalsIgnoreCase(context.runType()) || "AGENT_CHAT".equalsIgnoreCase(context.runType())) {
-            return Optional.of(context.workspaceId());
+            return Optional.of(context.workspaceIdentity());
         }
         return Optional.empty();
     }

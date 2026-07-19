@@ -78,9 +78,6 @@ import io.mindspice.magenta2.ai.orchestration.workspaces.WorkArea;
 import io.mindspice.magenta2.ai.orchestration.workspaces.WorkAreaService;
 import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceDirectoryService;
 import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceExplorerService;
-import io.mindspice.magenta2.ai.orchestration.workspaces.Workspace;
-import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceLease;
-import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceLink;
 import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceOwnerType;
 import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceService;
 import io.mindspice.magenta2.api.web.selector.EntityKind;
@@ -484,8 +481,7 @@ public class OrchestrationController {
                 statusBadgeHtml(w.status()),
                 new HtmlTag("span").withInnerText(
                     w.projectId() != null ? w.projectId() : "—"),
-                new HtmlTag("span").withInnerText(
-                    w.workspaceId() != null ? w.workspaceId() : "—")
+                new HtmlTag("span").withInnerText(displayValue(w.workspaceIdentity()))
             );
         }
         for (WorkAssignment assignment : activeAssignments) {
@@ -498,7 +494,7 @@ public class OrchestrationController {
                 statusBadgeHtml(assignment.status() != null ? assignment.status().name() : "unknown"),
                 new HtmlTag("span").withInnerText(displayValue(assignment.projectId())),
                 new HtmlTag("span").withInnerText(effectiveWorkspaceLabel(
-                    assignment.effectiveWorkspaceKind(), assignment.effectiveWorkspaceId()))
+                    assignment.workspaceType(), assignment.workspaceKey()))
             );
         }
         return table.render();
@@ -1725,7 +1721,6 @@ public class OrchestrationController {
             int priority = parseIntOrDefault(params.get("priority"), 9);
             validateSelectedEntity(EntityKind.MODEL, params.get("modelOverride"), false, "Model Override");
             validateSelectedEntity(EntityKind.PROJECT, params.get("projectId"), false, "Project");
-            validateSelectedEntity(EntityKind.WORKSPACE, params.get("workspaceId"), false, "Workspace");
             Map<String, Object> inputValues = parsePlanInputValues(plan, params);
             String runDisplayName = requireRunDisplayName(params.get("runDisplayName"), "task submissions");
             WorkAssignment assignment = assignmentService.create(new AssignmentRequest(
@@ -1734,11 +1729,8 @@ public class OrchestrationController {
                 priority,
                 nn(params.get("modelOverride")),
                 nn(params.get("projectId")),
-                nn(params.get("workspaceId")),
-                nn(params.get("selectedWorkAreaId")),
-                routeTypeParam(params),
-                nn(params.get("outputWorkAreaId")),
-                nn(params.get("outputDirectRelativePath")),
+                nn(params.get("workspaceType")),
+                nn(params.get("workspaceKey")),
                 Map.of("taskId", planId, "inputValues", inputValues)
             ));
             return submitResultFragment(assignment, plan).render();
@@ -2306,10 +2298,7 @@ public class OrchestrationController {
             .withChild(label("Run Name", TextInput.create("runDisplayName")
                 .withPlaceholder("e.g. Weekly research pass")))
             .withChild(entitySelector("projectId", EntityKind.PROJECT, null,
-                "Project", "optional project context", false))
-            .withChild(entitySelector("workspaceId", EntityKind.WORKSPACE, null,
-                "Compatibility Workspace", "optional compatibility workspace metadata", false))
-            .withChild(submitRoutingFields(Map.of())));
+                "Project", "optional project context", false)));
 
         // Generated input form from declared inputs
         if (!plan.inputs().isEmpty()) {
@@ -2801,7 +2790,6 @@ public class OrchestrationController {
             int priority = parseIntOrDefault(params.get("priority"), 9);
             validateSelectedEntity(EntityKind.MODEL, params.get("modelOverride"), false, "Model Override");
             validateSelectedEntity(EntityKind.PROJECT, params.get("projectId"), false, "Project");
-            validateSelectedEntity(EntityKind.WORKSPACE, params.get("workspaceId"), false, "Workspace");
             String runDisplayName = requireRunDisplayName(params.get("runDisplayName"), "workflow submissions");
             WorkAssignment assignment = assignmentService.create(new AssignmentRequest(
                 agentId, null, null, AssignmentType.WORKFLOW_RUN,
@@ -2809,11 +2797,8 @@ public class OrchestrationController {
                 priority,
                 nn(params.get("modelOverride")),
                 nn(params.get("projectId")),
-                nn(params.get("workspaceId")),
-                nn(params.get("selectedWorkAreaId")),
-                routeTypeParam(params),
-                nn(params.get("outputWorkAreaId")),
-                nn(params.get("outputDirectRelativePath")),
+                nn(params.get("workspaceType")),
+                nn(params.get("workspaceKey")),
                 Map.of("workflowId", workflowId)
             ));
             return workflowSubmitResultFragment(assignment, wf).render();
@@ -3387,10 +3372,7 @@ public class OrchestrationController {
             .withChild(label("Run Name", TextInput.create("runDisplayName")
                 .withPlaceholder("e.g. Nightly workflow review")))
             .withChild(entitySelector("projectId", EntityKind.PROJECT, null,
-                "Project", "optional project context", false))
-            .withChild(entitySelector("workspaceId", EntityKind.WORKSPACE, null,
-                "Compatibility Workspace", "optional compatibility workspace metadata", false))
-            .withChild(submitRoutingFields(Map.of())));
+                "Project", "optional project context", false)));
 
         form.withChild(Button.create("Submit").withClass("orch-primary").withAttribute("type", "submit"));
         panel.withChild(form);
@@ -3582,19 +3564,9 @@ public class OrchestrationController {
             validateSelectedEntity(EntityKind.PROJECT, params.get("projectId"), false, "Project");
             validateSelectedEntity(EntityKind.MODEL, params.get("model"), false, "Default Model");
             JobDefinition created = jobService.saveDefinition(new JobDefinition(
-                null, // id - auto-generated
-                nn(params.get("ownerAgentId")),
-                nn(params.get("projectId")),
-                null, // workspaceId - auto-managed
-                "true".equalsIgnoreCase(params.get("persistentWorkspaceEnabled")),
-                "DRAFT",
-                title,
-                nn(params.get("summary")),
-                List.of(), // items start empty
-                nn(params.get("promptProfile")),
-                nn(params.get("model")),
-                null, // settingsOverrideJson
-                null, null // timestamps
+                null, nn(params.get("ownerAgentId")), nn(params.get("projectId")),
+                null, null, null, "DRAFT", title, nn(params.get("summary")), List.of(),
+                nn(params.get("promptProfile")), nn(params.get("model")), null, null, null
             ));
             return jobEditorFragment(created).render();
         } catch (Exception e) {
@@ -3616,10 +3588,7 @@ public class OrchestrationController {
                 jobId,
                 params.containsKey("ownerAgentId") ? nn(params.get("ownerAgentId")) : current.ownerAgentId(),
                 params.containsKey("projectId") ? nn(params.get("projectId")) : current.projectId(),
-                current.workspaceId(),
-                params.containsKey("persistentWorkspaceEnabledPresent")
-                    ? "true".equalsIgnoreCase(params.get("persistentWorkspaceEnabled"))
-                    : current.persistentWorkspaceEnabled(),
+                current.workspaceType(), current.workspaceKey(), current.workspaceIdentity(),
                 params.containsKey("status") ? nn(params.get("status")) : current.status(),
                 params.containsKey("title") ? nn(params.get("title")) : current.title(),
                 params.containsKey("summary") ? nn(params.get("summary")) : current.summary(),
@@ -3800,8 +3769,7 @@ public class OrchestrationController {
         Div panel = new Div().withClass("orch-panel");
         panel.withChild(Header.H2("Submit to Agent"));
         panel.withChild(new Div().withClass("orch-meta")
-            .withChild(new HtmlTag("span").withInnerText("Saved project: " + displayValue(job.projectId())))
-            .withChild(new HtmlTag("span").withInnerText("Compatibility workspace: " + displayValue(job.workspaceId()))));
+            .withChild(new HtmlTag("span").withInnerText("Saved project: " + displayValue(job.projectId()))));
 
         Form form = Form.create()
             .withHxPost("/jobs/_submit/" + jobId)
@@ -3814,11 +3782,8 @@ public class OrchestrationController {
                 "Model Override", "optional model", false))
             .withChild(entitySelector("projectId", EntityKind.PROJECT, nn(job.projectId()),
                 "Project Override", "optional project context", false, Map.of("agentId", nn(job.ownerAgentId()))))
-            .withChild(entitySelector("workspaceId", EntityKind.WORKSPACE, nn(job.workspaceId()),
-                "Compatibility Workspace", "optional compatibility workspace metadata", false))
             .withChild(label("Priority", TextInput.number("priority")
-                .withValue("9").withMin("0").withMax("100")))
-            .withChild(submitRoutingFields(Map.of("ownerType", "AGENT", "ownerId", nn(job.ownerAgentId())))));
+                .withValue("9").withMin("0").withMax("100"))));
 
         form.withChild(Button.create("Submit").withClass("orch-primary")
             .withAttribute("type", "submit"));
@@ -3841,10 +3806,8 @@ public class OrchestrationController {
             validateSelectedEntity(EntityKind.AGENT, agentId, true, "Agent");
             validateSelectedEntity(EntityKind.MODEL, params.get("modelOverride"), false, "Model Override");
             validateSelectedEntity(EntityKind.PROJECT, params.get("projectId"), false, "Project");
-            validateSelectedEntity(EntityKind.WORKSPACE, params.get("workspaceId"), false, "Workspace");
 
             String projectId = params.containsKey("projectId") ? nn(params.get("projectId")) : job.projectId();
-            String workspaceId = params.containsKey("workspaceId") ? nn(params.get("workspaceId")) : job.workspaceId();
 
             AssignmentRequest request = new AssignmentRequest(
                 agentId,
@@ -3854,11 +3817,8 @@ public class OrchestrationController {
                 parseIntOrDefault(params.get("priority"), 9),
                 nn(params.get("modelOverride")),
                 projectId,
-                workspaceId,
-                nn(params.get("selectedWorkAreaId")),
-                routeTypeParam(params),
-                nn(params.get("outputWorkAreaId")),
-                nn(params.get("outputDirectRelativePath")),
+                nn(params.get("workspaceType")),
+                nn(params.get("workspaceKey")),
                 Map.of("jobId", jobId)
             );
             WorkAssignment assignment = assignmentService.create(request);
@@ -3916,7 +3876,7 @@ public class OrchestrationController {
     public String jobOutputsFragment(@PathVariable String jobId) {
         try {
             List<RunOutputArtifact> artifacts = queryOutputs(
-                null, jobId, null, null, null, null, null, null, null, null, 40);
+                null, jobId, null, null, null, null, null, null, null, null, null, null, 40);
             if (artifacts.isEmpty()) {
                 return new Div().withClass("dashboard-empty")
                     .withInnerText("No outputs.").render();
@@ -3967,10 +3927,6 @@ public class OrchestrationController {
                 "Owner Agent", "agent", false))
             .withChild(entitySelector("projectId", EntityKind.PROJECT, isNew ? "" : nn(job.projectId()),
                 "Project", "optional project", false))
-            .withChild(new HtmlTag("input", true)
-                .withAttribute("type", "hidden")
-                .withAttribute("name", "persistentWorkspaceEnabledPresent")
-                .withAttribute("value", "true"))
             .withChild(label("Status", TextInput.create("status")
                 .withId("job-status")
                 .withValue(isNew ? "DRAFT" : nn(job.status())))));
@@ -3990,10 +3946,8 @@ public class OrchestrationController {
                 .withChild(new Div().withClass("orch-form-grid")
                     .withChild(label("ID", new HtmlTag("code").withInnerText(job.id())))
                     .withChild(label("Status", statusBadgeHtml(job.status())))
-                    .withChild(label("Workspace ID", new HtmlTag("code")
-                        .withInnerText(job.workspaceId() != null ? job.workspaceId() : "—")))
-                    .withChild(label("Legacy Workspace Flag", new HtmlTag("span")
-                        .withInnerText(job.persistentWorkspaceEnabled() ? "compatibility true" : "compatibility false")))
+                    .withChild(label("Workspace", new HtmlTag("code")
+                        .withInnerText(displayValue(job.workspaceIdentity()))))
                     .withChild(label("Created", new HtmlTag("span")
                         .withInnerText(job.createdAt() != null ? job.createdAt().toString() : "—")))));
             form.withChild(advanced);
@@ -4161,13 +4115,9 @@ public class OrchestrationController {
                     .withChild(new HtmlTag("span").withInnerText("Project: " + displayValue(firstNonBlank(summary.projectName(), summary.projectId(), null)))),
                 new Div().withClass("orch-meta")
                     .withChild(new HtmlTag("span").withInnerText(effectiveWorkspaceLabel(
-                        summary.effectiveWorkspaceKind(), summary.effectiveWorkspaceId())))
-                    .withChild(new HtmlTag("span").withInnerText(displayValue(summary.effectiveWorkspaceDisplayPath())))
-                    .withChild(new HtmlTag("span").withInnerText("Compatibility: "
-                        + displayValue(summary.compatibilityWorkspaceId()))),
+                        summary.workspaceType(), summary.workspaceKey())))
+                    .withChild(new HtmlTag("span").withInnerText(displayValue(summary.workspaceIdentity()))),
                 new Div().withClass("orch-meta")
-                    .withChild(new HtmlTag("span").withInnerText("Promoted output target: "
-                        + displayValue(summary.outputDirectory())))
                     .withChild(new HtmlTag("span").withInnerText("Child runs: "
                         + Integer.toString(summary.childRunIds() == null ? 0 : summary.childRunIds().size()))),
                 new HtmlTag("span").withInnerText(Integer.toString(summary.outputCount())),
@@ -4199,9 +4149,7 @@ public class OrchestrationController {
                     .withInnerText("No active agents available. Create an agent first.").render();
             }
             validateSelectedEntity(EntityKind.PROJECT, params.get("projectId"), false, "Project");
-            validateSelectedEntity(EntityKind.WORKSPACE, params.get("workspaceId"), false, "Workspace");
             String projectId = params.containsKey("projectId") ? nn(params.get("projectId")) : job.projectId();
-            String workspaceId = params.containsKey("workspaceId") ? nn(params.get("workspaceId")) : job.workspaceId();
             WorkAssignment assignment = assignmentService.create(new AssignmentRequest(
                 agentId,
                 jobId,
@@ -4210,11 +4158,8 @@ public class OrchestrationController {
                 9,
                 nn(job.model()),
                 projectId,
-                workspaceId,
-                nn(params.get("selectedWorkAreaId")),
-                routeTypeParam(params),
-                nn(params.get("outputWorkAreaId")),
-                nn(params.get("outputDirectRelativePath")),
+                nn(params.get("workspaceType")),
+                nn(params.get("workspaceKey")),
                 Map.of("jobId", jobId)
             ));
             return jobAssignmentCreatedPanel(assignment).render();
@@ -4380,7 +4325,7 @@ public class OrchestrationController {
             .withId("projects-page")
             .withAttribute("data-orchestration-page", "projects")
             .withChild(Header.H1("Projects"))
-            .withChild(new Paragraph("Shared project workspaces for durable context, membership, and cross-agent visibility."))
+            .withChild(new Paragraph("Projects group durable context, membership, attribution, and cross-agent visibility."))
             .withChild(new Div().withClass("browser-layout browser-layout-wide")
                 .withChild(new Div().withClass("browser-sidebar")
                     .withChild(new Div().withClass("browser-sidebar-header")
@@ -4633,7 +4578,7 @@ public class OrchestrationController {
     public String projectOutputsFragment(@PathVariable String projectId) {
         try {
             List<RunOutputArtifact> artifacts = queryOutputs(
-                null, null, null, null, projectId, null, null, null, null, null, 40);
+                null, null, null, null, projectId, null, null, null, null, null, null, null, 40);
             if (artifacts.isEmpty()) {
                 return new Div().withClass("dashboard-empty")
                     .withInnerText("No recent outputs.").render();
@@ -4978,39 +4923,6 @@ public class OrchestrationController {
 
         // Agent membership section (only for existing)
         if (!isNew) {
-            // Workspace info
-            form.withChild(sectionHeader("Workspace", "Project workspace directory."));
-            try {
-                var ws = projectService.workspaceSummary(projectId);
-                form.withChild(new Div().withId("project-workspace-section")
-                    .withChild(new Div().withClass("orch-meta")
-                        .withChild(new HtmlTag("span").withInnerText(
-                            "Legacy initial agent: " + (ws.ownerAgentId() != null ? ws.ownerAgentId() : "—")))
-                        .withChild(new HtmlTag("span").withInnerText(
-                            "Kind: " + (ws.rootKind() != null ? ws.rootKind() : "—")))
-                        .withChild(new HtmlTag("span").withInnerText(
-                            "Path: " + (ws.displayPath() != null ? ws.displayPath() : "—")))
-                        .withChild(new HtmlTag("span").withInnerText(
-                            "Members: " + ws.linkCount()))
-                        .withChild(new HtmlTag("span").withInnerText(
-                            "Lease: " + (ws.leaseId() != null ? ws.leaseId() : "—")))
-                        .withChild(new HtmlTag("span").withInnerText(
-                            "Mounted Agent: " + (ws.mountedAgentId() != null ? ws.mountedAgentId() : "—")))
-                        .withChild(new HtmlTag("span").withInnerText(
-                            "Release Requested: " + ws.releaseRequested()))));
-                if (ws.leaseId() != null && !ws.releaseRequested()) {
-                    form.withChild(Button.create("Request release after current turn")
-                        .withAttribute("type", "button")
-                        .withAttribute("hx-post", "/projects/_detail/" + projectId + "/workspace/release")
-                        .withAttribute("hx-target", "#project-editor-container")
-                        .withAttribute("hx-swap", "innerHTML"));
-                }
-            } catch (Exception e) {
-                form.withChild(new Div().withId("project-workspace-section")
-                    .withChild(new Div().withClass("dashboard-empty")
-                        .withInnerText("Workspace: " + e.getMessage())));
-            }
-
             form.withChild(sectionHeader("Project Network", "Linked agents and membership context for this project."));
             form.withChild(new Div().withId("project-network-section")
                 .hxGet("/projects/_detail/" + projectId + "/network")
@@ -5038,7 +4950,7 @@ public class OrchestrationController {
                 .withChild(loadingPlaceholder()));
 
             // Recent outputs
-            form.withChild(sectionHeader("Recent Outputs", "Output artifacts attributed to this project workspace."));
+            form.withChild(sectionHeader("Recent Outputs", "Output artifacts attributed to this project."));
             form.withChild(new Div().withId("project-outputs-section")
                 .hxGet("/projects/_detail/" + projectId + "/outputs")
                 .hxTarget("#project-outputs-section")
@@ -5046,13 +4958,6 @@ public class OrchestrationController {
                 .hxSwap("innerHTML")
                 .withChild(loadingPlaceholder()));
 
-            form.withChild(sectionHeader("Project Directory", "Browse and edit files in this project's confined directory."));
-            form.withChild(new Div().withId("project-files-section")
-                .hxGet("/projects/_detail/" + projectId + "/files")
-                .hxTarget("#project-files-section")
-                .hxTrigger("load")
-                .hxSwap("innerHTML")
-                .withChild(loadingPlaceholder()));
 
             // Advanced metadata
             Div advanced = new Div().withClass("field-group");
@@ -5116,7 +5021,7 @@ public class OrchestrationController {
             .withId("projects-page")
             .withAttribute("data-orchestration-page", "projects")
             .withChild(Header.H1("Projects"))
-            .withChild(new Paragraph("Shared project workspaces for durable context, membership, and cross-agent visibility."))
+            .withChild(new Paragraph("Projects group durable context, membership, attribution, and cross-agent visibility."))
             .withChild(new Div().withClass("browser-layout browser-layout-wide")
                 .withChild(new Div().withClass("browser-sidebar")
                     .withChild(new Div().withClass("browser-sidebar-header")
@@ -5321,14 +5226,16 @@ public class OrchestrationController {
         @RequestParam(value = "jobAssignmentId", required = false) String jobAssignmentId,
         @RequestParam(value = "jobRunId", required = false) String jobRunId,
         @RequestParam(value = "projectId", required = false) String projectId,
-        @RequestParam(value = "workspaceId", required = false) String workspaceId,
+        @RequestParam(value = "workspaceType", required = false) String workspaceType,
+        @RequestParam(value = "workspaceKey", required = false) String workspaceKey,
+        @RequestParam(value = "workspaceIdentity", required = false) String workspaceIdentity,
         @RequestParam(value = "runId", required = false) String runId,
         @RequestParam(value = "planId", required = false) String planId,
         @RequestParam(value = "runType", required = false) String runType,
         @RequestParam(value = "type", required = false) String type
     ) {
         List<RunOutputArtifact> artifacts = queryOutputs(
-            agentId, jobId, jobAssignmentId, jobRunId, projectId, workspaceId, runId, planId, runType, type, 100);
+            agentId, jobId, jobAssignmentId, jobRunId, projectId, workspaceType, workspaceKey, workspaceIdentity, runId, planId, runType, type, 100);
         if (artifacts.isEmpty()) {
             return new Div().withClass("dashboard-empty").withInnerText("No outputs found.").render();
         }
@@ -5380,7 +5287,7 @@ public class OrchestrationController {
                 .withChild(new HtmlTag("span").withInnerText("Run type: " + nn(artifact.runType())))
                 .withChild(new HtmlTag("span").withInnerText("Agent: " + nn(artifact.agentId())))
                 .withChild(new HtmlTag("span").withInnerText("Project: " + nn(artifact.projectId())))
-                .withChild(new HtmlTag("span").withInnerText("Workspace: " + nn(artifact.workspaceId())))
+                .withChild(new HtmlTag("span").withInnerText("Workspace: " + nn(artifact.workspaceIdentity())))
                 .withChild(new HtmlTag("span").withInnerText("Job: " + nn(artifact.jobId())))
                 .withChild(new HtmlTag("span").withInnerText("Job assignment: " + nn(artifact.jobAssignmentId())))
                 .withChild(new HtmlTag("span").withInnerText("Job run: " + nn(artifact.jobRunId())))
@@ -5418,7 +5325,9 @@ public class OrchestrationController {
             .withChild(entitySelector("agentId", EntityKind.AGENT, null, "Agent", "all agents", false))
             .withChild(entitySelector("jobId", EntityKind.JOB, null, "Job", "all jobs", false))
             .withChild(entitySelector("projectId", EntityKind.PROJECT, null, "Project", "all projects", false))
-            .withChild(TextInput.create("workspaceId").withPlaceholder("workspace ID"))
+            .withChild(TextInput.create("workspaceType").withPlaceholder("workspace type"))
+            .withChild(TextInput.create("workspaceKey").withPlaceholder("workspace key"))
+            .withChild(TextInput.create("workspaceIdentity").withPlaceholder("workspace identity"))
             .withChild(TextInput.create("planId").withPlaceholder("plan/workflow ID"))
             .withChild(TextInput.create("jobAssignmentId").withPlaceholder("job assignment ID"))
             .withChild(TextInput.create("jobRunId").withPlaceholder("job run ID"))
@@ -5435,7 +5344,7 @@ public class OrchestrationController {
                 label("plan", artifact.planId()),
                 label("agent", artifact.agentId()),
                 label("project", artifact.projectId()),
-                label("workspace", artifact.workspaceId()),
+                label("workspace", artifact.workspaceIdentity()),
                 label("job", artifact.jobId()),
                 label("assignment", artifact.jobAssignmentId()),
                 label("job run", artifact.jobRunId()),
@@ -5450,7 +5359,7 @@ public class OrchestrationController {
         return java.util.stream.Stream.of(
                 label("run", artifact.runId()),
                 label("project", artifact.projectId()),
-                label("workspace", artifact.workspaceId()),
+                label("workspace", artifact.workspaceIdentity()),
                 label("job", artifact.jobId()),
                 label("assignment", artifact.jobAssignmentId()),
                 label("job run", artifact.jobRunId()))
@@ -5468,7 +5377,9 @@ public class OrchestrationController {
         String jobAssignmentId,
         String jobRunId,
         String projectId,
-        String workspaceId,
+        String workspaceType,
+        String workspaceKey,
+        String workspaceIdentity,
         String runId,
         String planId,
         String runType,
@@ -5481,7 +5392,9 @@ public class OrchestrationController {
             jobAssignmentId,
             jobRunId,
             projectId,
-            workspaceId,
+            workspaceType,
+            workspaceKey,
+            workspaceIdentity,
             runId,
             planId,
             runType,
@@ -5492,7 +5405,9 @@ public class OrchestrationController {
         if (!direct.isEmpty()
             || StringUtils.hasText(runId)
             || StringUtils.hasText(planId)
-            || StringUtils.hasText(workspaceId)
+            || StringUtils.hasText(workspaceType)
+            || StringUtils.hasText(workspaceKey)
+            || StringUtils.hasText(workspaceIdentity)
             || StringUtils.hasText(jobAssignmentId)
             || StringUtils.hasText(jobRunId)
             || StringUtils.hasText(runType)) {
@@ -5982,7 +5897,8 @@ public class OrchestrationController {
         HttpServletResponse response
     ) {
         try {
-            assignmentService.requeueWorkspaceBlockedAssignment(assignmentId);
+            // Workspace lease requeue is removed; this endpoint now resumes the assignment directly
+            assignmentService.resume(agentId, assignmentId);
             return agentQueueTab(agentId);
         } catch (IllegalArgumentException | IllegalStateException exception) {
             response.setStatus(assignmentLifecycleStatus(exception));
@@ -6342,7 +6258,6 @@ public class OrchestrationController {
         String assignmentType = templateString(template, "assignmentType", AssignmentType.JOB_RUN.name());
         int priority = templateInt(template, "priority", 0);
         String modelOverride = templateString(template, "modelOverride", "");
-        String workspaceId = templateString(template, "workspaceId", "");
         String inputJson = toJsonText(templateInput(template));
         boolean enabled = schedule != null && schedule.enabled();
 
@@ -6363,7 +6278,6 @@ public class OrchestrationController {
         grid.withChild(label("Assignment Type", assignmentTypeSelect("assignmentType", assignmentType)));
         grid.withChild(label("Priority", TextInput.number("priority").withMin("0").withMax("9").withValue(String.valueOf(priority))));
         grid.withChild(entitySelector("modelOverride", EntityKind.MODEL, modelOverride, "Model Override", "model", false));
-        grid.withChild(entitySelector("workspaceId", EntityKind.WORKSPACE, workspaceId, "Workspace", "workspace ID", false));
         grid.withChild(label("Enabled", Select.create("enabled")
             .addOption("true", "Enabled", enabled)
             .addOption("false", "Disabled", !enabled)));
@@ -6403,7 +6317,6 @@ public class OrchestrationController {
         String assignmentType = templateString(template, "assignmentType", AssignmentType.REPORT.name());
         int priority = templateInt(template, "priority", 0);
         String modelOverride = templateString(template, "modelOverride", "");
-        String workspaceId = templateString(template, "workspaceId", "");
         String inputJson = toJsonText(templateInput(template));
         boolean enabled = reaction != null && reaction.enabled();
         String filterJson = toJsonText(reaction == null ? Map.of() : reaction.filter());
@@ -6422,7 +6335,6 @@ public class OrchestrationController {
         grid.withChild(label("Assignment Type", assignmentTypeSelect("assignmentType", assignmentType)));
         grid.withChild(label("Priority", TextInput.number("priority").withMin("0").withMax("9").withValue(String.valueOf(priority))));
         grid.withChild(entitySelector("modelOverride", EntityKind.MODEL, modelOverride, "Model Override", "model", false));
-        grid.withChild(entitySelector("workspaceId", EntityKind.WORKSPACE, workspaceId, "Workspace", "workspace ID", false));
         grid.withChild(label("Enabled", Select.create("enabled")
             .addOption("true", "Enabled", enabled)
             .addOption("false", "Disabled", !enabled)));
@@ -6458,7 +6370,6 @@ public class OrchestrationController {
         }
         validateSelectedEntity(EntityKind.JOB, params.get("jobId"), true, "Job");
         validateSelectedEntity(EntityKind.MODEL, params.get("modelOverride"), false, "Model Override");
-        validateSelectedEntity(EntityKind.WORKSPACE, params.get("workspaceId"), false, "Workspace");
         Map<String, Object> assignmentTemplate = assignmentTemplate(
             agentId,
             normalize(params.get("jobId")),
@@ -6466,7 +6377,6 @@ public class OrchestrationController {
             AssignmentType.JOB_RUN,
             params.get("priority"),
             params.get("modelOverride"),
-            params.get("workspaceId"),
             params.get("inputJson")
         );
         return new AgentSchedule(
@@ -6490,7 +6400,6 @@ public class OrchestrationController {
         Map<String, String> params
     ) {
         validateSelectedEntity(EntityKind.MODEL, params.get("modelOverride"), false, "Model Override");
-        validateSelectedEntity(EntityKind.WORKSPACE, params.get("workspaceId"), false, "Workspace");
         Map<String, Object> assignmentTemplate = assignmentTemplate(
             agentId,
             normalize(params.get("jobId")),
@@ -6498,7 +6407,6 @@ public class OrchestrationController {
             AssignmentType.REPORT,
             params.get("priority"),
             params.get("modelOverride"),
-            params.get("workspaceId"),
             params.get("inputJson")
         );
         return new AgentEventReaction(
@@ -6521,7 +6429,6 @@ public class OrchestrationController {
         AssignmentType defaultAssignmentType,
         String priority,
         String modelOverride,
-        String workspaceId,
         String inputJson
     ) {
         Map<String, Object> template = new LinkedHashMap<>();
@@ -6530,7 +6437,6 @@ public class OrchestrationController {
         template.put("assignmentType", parseAssignmentType(assignmentType, defaultAssignmentType).name());
         template.put("priority", parsePriority(priority));
         template.put("modelOverride", normalize(modelOverride));
-        template.put("workspaceId", normalize(workspaceId));
         template.put("input", parseJsonMap(inputJson, "inputJson"));
         return template;
     }
@@ -6670,76 +6576,13 @@ public class OrchestrationController {
         Div panel = new Div();
         panel.withChild(Header.H2("Workspace"));
 
-        Workspace workspace = workspaceService.agentWorkspace(agent.id(), agent.name());
-        List<WorkspaceLink> links = workspaceService.links(workspace.id());
-        List<WorkspaceLease> activeLeases = workspaceService.activeLeases(workspace.id());
-        String outputHint = workspaceOutputHint(workspace);
-
+        String workspaceIdentity = "agent/" + agent.id();
         panel.withChild(new Div().withClass("orch-meta")
             .withChild(new HtmlTag("span").withInnerText("Agent: " + (agent.name() != null ? agent.name() : agentId)))
-            .withChild(new HtmlTag("span").withInnerText("Agent ID: " + agent.id()))
-            .withChild(new HtmlTag("span").withInnerText("Workspace ID: " + workspace.id()))
-            .withChild(new HtmlTag("span").withInnerText("Owner: "
-                + (workspace.ownerType() != null ? workspace.ownerType().name() : "—")
-                + ":" + nn(workspace.ownerId())))
-            .withChild(new HtmlTag("span").withInnerText("Display Name: " + nn(workspace.displayName())))
-            .withChild(new HtmlTag("span").withInnerText("Diagnostic Path: " + nn(workspace.rootRelativePath())))
-            .withChild(new HtmlTag("span").withInnerText("Final Output Target: " + outputHint))
-            .withChild(new HtmlTag("span").withInnerText("Metadata: " + nn(workspace.metadataJson())))
-            .withChild(new HtmlTag("span").withInnerText("Updated: "
-                + (workspace.updatedAt() != null ? formatSince(workspace.updatedAt()) : "—"))));
-
-        panel.withChild(Header.H3("Active Leases"));
-        if (activeLeases.isEmpty()) {
-            panel.withChild(new Div().withClass("dashboard-empty")
-                .withInnerText("No active leases."));
-        } else {
-            Table leasesTable = Table.create()
-                .withHeaders("Holder", "Mode", "Expires", "Created")
-                .withClass("dashboard-table");
-            for (WorkspaceLease lease : activeLeases) {
-                leasesTable.addRow(
-                    new HtmlTag("span").withInnerText(nn(lease.holderType()) + ":" + nn(lease.holderId())),
-                    new HtmlTag("span").withInnerText(lease.mode() != null ? lease.mode().name() : "—"),
-                    new HtmlTag("span").withInnerText(lease.expiresAt() != null ? lease.expiresAt().toString() : "—"),
-                    new HtmlTag("span").withInnerText(lease.createdAt() != null ? formatSince(lease.createdAt()) : "—")
-                );
-            }
-            panel.withChild(leasesTable);
-        }
-
-        panel.withChild(Header.H3("Workspace Links"));
-        if (links.isEmpty()) {
-            panel.withChild(new Div().withClass("dashboard-empty")
-                .withInnerText("No workspace links configured."));
-            return panel.render();
-        }
-
-        Table table = Table.create()
-            .withHeaders("Label", "Type", "Target", "Access")
-            .withClass("dashboard-table");
-        for (WorkspaceLink link : links) {
-            String access = (link.readable() ? "r" : "-") + (link.writable() ? "w" : "-");
-            table.addRow(
-                new HtmlTag("span").withInnerText(link.label() != null ? link.label() : "link"),
-                new HtmlTag("span").withInnerText(link.linkType() != null ? link.linkType().name() : "PATH"),
-                new HtmlTag("code").withInnerText(link.target() != null ? link.target() : "—"),
-                new HtmlTag("span").withInnerText(access)
-            );
-        }
-        panel.withChild(table);
+            .withChild(new HtmlTag("span").withInnerText("Workspace: " + workspaceIdentity))
+            .withChild(new HtmlTag("span").withInnerText(
+                "Output Target: workspace/" + workspaceIdentity + "/outputs (lazy)")));
         return panel.render();
-    }
-
-    private String workspaceOutputHint(Workspace workspace) {
-        if (workspace == null || workspace.ownerType() == null || !StringUtils.hasText(workspace.ownerId())) {
-            return "—";
-        }
-        return switch (workspace.ownerType()) {
-            case AGENT -> "workspace/" + workspace.ownerId() + "/outputs";
-            case JOB -> "job-bound outputs promote through the selected Work Area or project";
-            case PROJECT -> "projects/" + workspace.ownerId();
-        };
     }
 
     @GetMapping("/agents/_detail/{agentId}/outputs")
@@ -6749,7 +6592,7 @@ public class OrchestrationController {
         panel.withChild(Header.H2("Recent Outputs"));
 
         List<RunOutputArtifact> outputs = queryOutputs(
-            agentId, null, null, null, null, null, null, null, null, null, 20);
+            agentId, null, null, null, null, null, null, null, null, null, null, null, 20);
         if (outputs.isEmpty()) {
             panel.withChild(new Div().withClass("dashboard-empty").withInnerText("No recent outputs."));
             return panel.render();
@@ -6804,7 +6647,7 @@ public class OrchestrationController {
                 return new Div().withClass("orch-error").withInnerText("Shell execution service is unavailable.").render();
             }
             OrchestrationTaskContextHolder.set(new OrchestrationTaskContext(
-                agentId, agent.name(), null, null, null, null, null, null));
+                agentId, agent.name(), null, null, null, null, null, null, null, null));
             try {
                 var result = shellService.exec(
                     required(params.get("command"), "command is required"),
@@ -6967,14 +6810,6 @@ public class OrchestrationController {
             .withClass("dashboard-table");
         for (var a : assignments) {
             Div actions = new Div().withClass("orch-actions");
-            if (a.status() == OrchestrationStatus.WAITING
-                && a.checkpoint() != null
-                && a.checkpoint().containsKey("workspaceBlocker")) {
-                actions.withChild(Button.create("Requeue Workspace")
-                    .withAttribute("hx-post", "/agents/_detail/" + agentId + "/queue/" + a.id() + "/requeue-workspace")
-                    .withAttribute("hx-target", "#agent-tab-panel")
-                    .withAttribute("hx-swap", "innerHTML"));
-            }
             if (a.status() == OrchestrationStatus.QUEUED || a.status() == OrchestrationStatus.RUNNING) {
                 actions.withChild(Button.create("Pause")
                     .withAttribute("hx-post", "/agents/_detail/" + agentId + "/queue/" + a.id() + "/pause")
@@ -7122,13 +6957,9 @@ public class OrchestrationController {
         meta.withChild(agentMetaItem("Run Name", displayValue(a.runDisplayName())));
         meta.withChild(agentMetaItem("Status", a.status() != null ? a.status().name() : "unknown"));
         meta.withChild(agentMetaItem("Project", displayValue(a.projectId())));
-        meta.withChild(agentMetaItem("Effective Workspace", effectiveWorkspaceLabel(a.effectiveWorkspaceKind(), a.effectiveWorkspaceId())));
-        meta.withChild(agentMetaItem("Diagnostic Workspace Path", displayValue(workspaceDisplayPath(a.effectiveWorkspaceId()))));
-        meta.withChild(agentMetaItem("Compatibility Workspace", displayValue(a.workspaceId())));
-        meta.withChild(agentMetaItem("Workspace Blocker",
-            a.checkpoint() != null && a.checkpoint().containsKey("workspaceBlocker")
-                ? String.valueOf(a.checkpoint().get("workspaceBlocker"))
-                : "—"));
+        meta.withChild(agentMetaItem("Effective Workspace", effectiveWorkspaceLabel(a.workspaceType(), a.workspaceKey())));
+        meta.withChild(agentMetaItem("Workspace Identity", displayValue(a.workspaceIdentity())));
+        meta.withChild(agentMetaItem("Workspace Key", displayValue(a.workspaceKey())));
         meta.withChild(agentMetaItem("Last Progress", diagnostics.lastProgressAt() != null ? formatSince(diagnostics.lastProgressAt()) : "—"));
         meta.withChild(agentMetaItem("Last Heartbeat", diagnostics.lastHeartbeatAt() != null ? formatSince(diagnostics.lastHeartbeatAt()) : "—"));
         meta.withChild(agentMetaItem("Progress Age", formatDuration(diagnostics.progressAge())));
@@ -7562,9 +7393,6 @@ public class OrchestrationController {
 
         form.withChild(entitySelector("projectId", EntityKind.PROJECT, null,
             "Project", "optional project context", false, Map.of("agentId", agent.id())));
-        form.withChild(entitySelector("workspaceId", EntityKind.WORKSPACE, null,
-            "Compatibility Workspace", "optional compatibility workspace metadata", false));
-        form.withChild(submitRoutingFields(Map.of("ownerType", "AGENT", "ownerId", agent.id())));
 
         form.withChild(new Div().withClass("orch-actions")
             .withChild(Button.create("Submit").withClass("orch-primary").withAttribute("type", "submit")));
@@ -7581,11 +7409,10 @@ public class OrchestrationController {
         String targetId,
         int priority,
         String modelOverride,
-        String projectId,
-        String workspaceId
+        String projectId
     ) {
-        return submitToAgent(agentId, assignmentType, targetId, priority, modelOverride, projectId, workspaceId,
-            "", "", "", "", "");
+        return submitToAgent(agentId, assignmentType, targetId, priority, modelOverride, projectId,
+            "", "", "");
     }
 
     @PostMapping("/agents/_submit/{agentId}")
@@ -7597,11 +7424,8 @@ public class OrchestrationController {
         @RequestParam(value = "priority", defaultValue = "0") int priority,
         @RequestParam(value = "modelOverride", defaultValue = "") String modelOverride,
         @RequestParam(value = "projectId", defaultValue = "") String projectId,
-        @RequestParam(value = "workspaceId", defaultValue = "") String workspaceId,
-        @RequestParam(value = "selectedWorkAreaId", defaultValue = "") String selectedWorkAreaId,
-        @RequestParam(value = "outputRouteType", defaultValue = "") String outputRouteType,
-        @RequestParam(value = "outputWorkAreaId", defaultValue = "") String outputWorkAreaId,
-        @RequestParam(value = "outputDirectRelativePath", defaultValue = "") String outputDirectRelativePath,
+        @RequestParam(value = "workspaceType", defaultValue = "") String workspaceType,
+        @RequestParam(value = "workspaceKey", defaultValue = "") String workspaceKey,
         @RequestParam(value = "runDisplayName", defaultValue = "") String runDisplayName
     ) {
         try {
@@ -7610,7 +7434,6 @@ public class OrchestrationController {
             validateSelectedEntity(targetKindForAssignment(type), targetId, true, "Target");
             validateSelectedEntity(EntityKind.MODEL, modelOverride, false, "Model Override");
             validateSelectedEntity(EntityKind.PROJECT, projectId, false, "Project");
-            validateSelectedEntity(EntityKind.WORKSPACE, workspaceId, false, "Workspace");
 
             java.util.Map<String, Object> input = new java.util.LinkedHashMap<>();
             if (type == AssignmentType.TASK_RUN) {
@@ -7629,11 +7452,8 @@ public class OrchestrationController {
                 agentId, jobId, null, type, normalizedRunDisplayName, priority,
                 modelOverride.isBlank() ? null : modelOverride.trim(),
                 nn(projectId),
-                nn(workspaceId),
-                nn(selectedWorkAreaId),
-                StringUtils.hasText(outputRouteType) ? outputRouteType : null,
-                nn(outputWorkAreaId),
-                nn(outputDirectRelativePath),
+                nn(workspaceType),
+                nn(workspaceKey),
                 input
             ));
 
@@ -7863,19 +7683,9 @@ public class OrchestrationController {
         meta.withChild(new HtmlTag("span").withInnerText("Run name: " + displayValue(assignment.runDisplayName())));
         meta.withChild(new HtmlTag("span").withInnerText("Project: " + displayValue(assignment.projectId())));
         meta.withChild(new HtmlTag("span").withInnerText("Effective workspace: "
-            + effectiveWorkspaceLabel(assignment.effectiveWorkspaceKind(), assignment.effectiveWorkspaceId())));
-        meta.withChild(new HtmlTag("span").withInnerText("Selected Work Area: "
-            + displayValue(assignment.selectedWorkAreaId())));
-        meta.withChild(new HtmlTag("span").withInnerText("Output route: "
-            + displayValue(assignment.outputRouteType())));
-        meta.withChild(new HtmlTag("span").withInnerText("Compatibility workspace: "
-            + displayValue(assignment.workspaceId())));
-        if (assignment.status() == OrchestrationStatus.WAITING
-            && assignment.checkpoint() != null
-            && assignment.checkpoint().containsKey("workspaceBlocker")) {
-            meta.withChild(new HtmlTag("span").withInnerText("Workspace blocker: "
-                + displayValue(String.valueOf(assignment.checkpoint().get("workspaceBlocker")))));
-        }
+            + effectiveWorkspaceLabel(assignment.workspaceType(), assignment.workspaceKey())));
+        meta.withChild(new HtmlTag("span").withInnerText("Workspace identity: "
+            + displayValue(assignment.workspaceIdentity())));
         return meta;
     }
 
@@ -7887,16 +7697,11 @@ public class OrchestrationController {
         return prefix + (StringUtils.hasText(id) ? " " + id : "");
     }
 
-    private String workspaceDisplayPath(String workspaceId) {
-        if (!StringUtils.hasText(workspaceId)) {
+    private String workspaceDisplayPath(String workspaceKey) {
+        if (!StringUtils.hasText(workspaceKey)) {
             return null;
         }
-        try {
-            Workspace workspace = workspaceService.get(workspaceId);
-            return workspace.rootRelativePath();
-        } catch (RuntimeException exception) {
-            return null;
-        }
+        return "workspace/" + workspaceKey;
     }
 
     private String requireRunDisplayName(String value, String context) {
@@ -7947,27 +7752,6 @@ public class OrchestrationController {
 
     private Component label(String text, Component input) {
         return new HtmlTag("label").withChild(new TextNode(text)).withChild(input);
-    }
-
-    private Component submitRoutingFields(Map<String, String> context) {
-        Div group = new Div().withClass("orch-form-stack");
-        group.withChild(new HtmlTag("h4").withInnerText("Work Area / Outputs"));
-        group.withChild(entitySelector("selectedWorkAreaId", EntityKind.WORK_AREA, null,
-            "Selected Work Area", "blank uses Home", false, context));
-        Select routeType = Select.create("outputRouteType")
-            .addOption("", "Default: selected Work Area outputs", true)
-            .addOption(AssignmentRequest.OUTPUT_ROUTE_WORK_AREA, "Redirect to Work Area outputs", false)
-            .addOption(AssignmentRequest.OUTPUT_ROUTE_DIRECT_DIRECTORY, "Redirect to direct directory", false);
-        group.withChild(label("Output Route", routeType));
-        group.withChild(entitySelector("outputWorkAreaId", EntityKind.WORK_AREA, null,
-            "Output Work Area", "required for Work Area redirect", false, context));
-        group.withChild(label("Direct Output Directory", TextInput.create("outputDirectRelativePath")
-            .withPlaceholder("existing owner-root-relative directory")));
-        return group;
-    }
-
-    private String routeTypeParam(Map<String, String> params) {
-        return StringUtils.hasText(params.get("outputRouteType")) ? params.get("outputRouteType") : null;
     }
 
     private Component tabNav(String agentId, String... names) {

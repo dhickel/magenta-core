@@ -30,18 +30,18 @@ class WorkspaceRepositoryAttributionTest {
             )
             """);
 
-        new WorkspaceRepository(jdbc);
+        new OutputArtifactRepository(jdbc);
 
         Set<String> columns = jdbc.queryForList("select name from pragma_table_info('run_output_artifacts')", String.class)
             .stream()
             .collect(Collectors.toSet());
         assertThat(columns).contains(
-            "agent_id", "job_id", "job_assignment_id", "job_run_id", "project_id", "workspace_id", "run_type");
+            "agent_id", "job_id", "job_assignment_id", "job_run_id", "project_id", "workspace_type", "workspace_key", "workspace_identity", "run_type");
     }
 
     @Test
     void findArtifactsFiltersByAttributionFields() {
-        WorkspaceRepository repository = new WorkspaceRepository(jdbc());
+        OutputArtifactRepository repository = new OutputArtifactRepository(jdbc());
         RunOutputArtifact artifact = repository.saveArtifact(new RunOutputArtifact(
             "artifact-1",
             "run-1",
@@ -51,7 +51,9 @@ class WorkspaceRepositoryAttributionTest {
             "assignment-1",
             "job-run-1",
             "project-1",
-            "workspace-1",
+            "agent",
+            "agent-1",
+            "agent/agent-1",
             "TASK_RUN",
             "summary",
             "text",
@@ -61,41 +63,43 @@ class WorkspaceRepositoryAttributionTest {
             Instant.now()
         ));
 
-        assertThat(repository.findArtifacts(OutputArtifactQuery.of("agent-1", null, null, null, null, null, null, 10)))
+        assertThat(repository.findArtifacts(OutputArtifactQuery.of("agent-1", null, null, null, null, null, null, null, null, 10)))
             .extracting(RunOutputArtifact::id)
             .containsExactly(artifact.id());
-        assertThat(repository.findArtifacts(OutputArtifactQuery.of(null, "job-1", null, null, null, null, null, 10)))
+        assertThat(repository.findArtifacts(OutputArtifactQuery.of(null, "job-1", null, null, null, null, null, null, null, 10)))
             .extracting(RunOutputArtifact::id)
             .containsExactly(artifact.id());
-        assertThat(repository.findArtifacts(OutputArtifactQuery.of(null, null, "assignment-1", null, null, null, null, null, null, null, 10)))
+        assertThat(repository.findArtifacts(OutputArtifactQuery.of(null, null, "assignment-1", null, null, null, null, null, null, null, null, null, 10)))
             .extracting(RunOutputArtifact::id)
             .containsExactly(artifact.id());
-        assertThat(repository.findArtifacts(OutputArtifactQuery.of(null, null, null, "job-run-1", null, null, null, null, null, null, 10)))
+        assertThat(repository.findArtifacts(OutputArtifactQuery.of(null, null, null, "job-run-1", null, null, null, null, null, null, null, null, 10)))
             .extracting(RunOutputArtifact::id)
             .containsExactly(artifact.id());
-        assertThat(repository.findArtifacts(OutputArtifactQuery.of(null, null, "project-1", null, null, null, null, 10)))
+        assertThat(repository.findArtifacts(OutputArtifactQuery.of(null, null, "project-1", null, null, null, null, null, null, 10)))
             .extracting(RunOutputArtifact::id)
             .containsExactly(artifact.id());
-        assertThat(repository.findArtifacts(OutputArtifactQuery.of(null, null, null, "workspace-1", null, null, null, 10)))
+        assertThat(repository.findArtifacts(OutputArtifactQuery.of(null, null, null, null, null, "agent", "agent-1", "agent/agent-1", null, null, null, null, 10)))
             .extracting(RunOutputArtifact::id)
             .containsExactly(artifact.id());
-        assertThat(repository.findArtifacts(OutputArtifactQuery.of(null, null, null, null, null, null, null, "plan-1", null, null, 10)))
+        assertThat(repository.findArtifacts(OutputArtifactQuery.of(null, null, null, null, null, null, null, null, null, "plan-1", null, null, 10)))
             .extracting(RunOutputArtifact::id)
             .containsExactly(artifact.id());
-        assertThat(repository.findArtifacts(OutputArtifactQuery.of(null, null, null, null, null, null, null, null, "TASK_RUN", null, 10)))
+        assertThat(repository.findArtifacts(OutputArtifactQuery.of(null, null, null, null, null, null, null, null, null, null, "TASK_RUN", null, 10)))
             .extracting(RunOutputArtifact::id)
             .containsExactly(artifact.id());
-        assertThat(repository.findArtifacts(OutputArtifactQuery.of("missing", null, null, null, null, null, null, 10)))
+        assertThat(repository.findArtifacts(OutputArtifactQuery.of("missing", null, null, null, null, null, null, null, null, 10)))
             .isEmpty();
     }
 
     @Test
     void backfillAttributionSetsOnlyMissingValues() {
-        WorkspaceRepository repository = new WorkspaceRepository(jdbc());
+        OutputArtifactRepository repository = new OutputArtifactRepository(jdbc());
         repository.saveArtifact(new RunOutputArtifact(
             "artifact-1",
             "run-1",
             "plan-1",
+            null,
+            null,
             null,
             null,
             null,
@@ -113,7 +117,7 @@ class WorkspaceRepositoryAttributionTest {
 
         int updated = repository.backfillArtifactAttribution(
             "run-1",
-            new OutputArtifactContext("agent-1", "job-1", "assignment-1", "job-run-1", "project-1", "workspace-1", "TASK_RUN")
+            new OutputArtifactContext("agent-1", "job-1", "assignment-1", "job-run-1", "project-1", null, null, "workspace-1", "TASK_RUN")
         );
         assertThat(updated).isEqualTo(1);
 
@@ -123,7 +127,7 @@ class WorkspaceRepositoryAttributionTest {
         assertThat(artifact.jobAssignmentId()).isEqualTo("assignment-1");
         assertThat(artifact.jobRunId()).isEqualTo("job-run-1");
         assertThat(artifact.projectId()).isEqualTo("project-1");
-        assertThat(artifact.workspaceId()).isEqualTo("workspace-1");
+        assertThat(artifact.workspaceIdentity()).isEqualTo("workspace-1");
         assertThat(artifact.runType()).isEqualTo("TASK_RUN");
     }
 

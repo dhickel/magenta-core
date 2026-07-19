@@ -91,11 +91,9 @@ public class JobController {
         try {
             return jobService.saveDefinition(new JobDefinition(
                 jobId, definition.ownerAgentId(), definition.projectId(),
-                definition.workspaceId(), definition.persistentWorkspaceEnabled(), definition.status(),
-                definition.title(), definition.summary(),
-                definition.items(), definition.promptProfile(),
-                definition.model(), definition.settingsOverrideJson(),
-                definition.createdAt(), definition.updatedAt()
+                definition.workspaceType(), definition.workspaceKey(), definition.workspaceIdentity(), definition.status(),
+                definition.title(), definition.summary(), definition.items(), definition.promptProfile(),
+                definition.model(), definition.settingsOverrideJson(), definition.createdAt(), definition.updatedAt()
             ));
         } catch (IllegalArgumentException e) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, e.getMessage());
@@ -174,11 +172,8 @@ public class JobController {
                 request == null || request.priority() == null ? PUBLIC_SUBMIT_PRIORITY : request.priority(),
                 normalize(request == null ? null : request.modelOverride(), job.model()),
                 normalize(request == null ? null : request.projectId(), job.projectId()),
-                normalize(request == null ? null : request.workspaceId(), job.workspaceId()),
-                normalize(request == null ? null : request.selectedWorkAreaId(), null),
-                normalize(request == null ? null : request.outputRouteType(), null),
-                normalize(request == null ? null : request.outputWorkAreaId(), null),
-                normalize(request == null ? null : request.outputDirectRelativePath(), null),
+                normalize(request == null ? null : request.workspaceType(), null),
+                normalize(request == null ? null : request.workspaceKey(), null),
                 Map.of("jobId", jobId)
             ));
         } catch (IllegalArgumentException e) {
@@ -288,21 +283,17 @@ public class JobController {
         String agentId,
         String modelOverride,
         String projectId,
-        String workspaceId,
-        String selectedWorkAreaId,
-        String outputRouteType,
-        String outputWorkAreaId,
-        String outputDirectRelativePath,
+        String workspaceType,
+        String workspaceKey,
         Integer priority
     ) {
         public JobRunRequest(
             String agentId,
             String modelOverride,
             String projectId,
-            String workspaceId,
             Integer priority
         ) {
-            this(agentId, modelOverride, projectId, workspaceId, null, null, null, null, priority);
+            this(agentId, modelOverride, projectId, null, null, priority);
         }
     }
 

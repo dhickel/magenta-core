@@ -109,7 +109,6 @@ public class AgentProfileService {
             null,
             null
         ));
-        ensureAgentDurableStorage(created.id(), created.name());
         return created;
     }
 
@@ -128,7 +127,6 @@ public class AgentProfileService {
             current.createdAt(),
             current.updatedAt()
         ));
-        ensureAgentDurableStorage(updated.id(), updated.name());
         return updated;
     }
 
@@ -147,7 +145,6 @@ public class AgentProfileService {
             profile.createdAt(),
             profile.updatedAt()
         ));
-        ensureAgentDurableStorage(enabled.id(), enabled.name());
         return enabled;
     }
 
@@ -283,19 +280,6 @@ public class AgentProfileService {
             if (SHELL_WRAPPERS.contains(command)) {
                 throw new IllegalArgumentException("shell wrapper commands are not allowed: " + command);
             }
-        }
-    }
-
-    private void ensureAgentDurableStorage(String agentId, String agentName) {
-        WorkspaceService ws = workspaceService();
-        if (ws != null) {
-            ws.agentWorkspace(agentId, agentName);
-        }
-        WorkspaceDirectoryService dir = workspaceDirectoryService();
-        if (dir != null) {
-            dir.agentWorkspaceRoot(agentId);
-            dir.agentWorkspace(agentId);
-            dir.agentWorkspaceOutputs(agentId);
         }
     }
 

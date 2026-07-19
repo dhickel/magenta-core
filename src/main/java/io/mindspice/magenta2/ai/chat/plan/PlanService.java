@@ -31,6 +31,7 @@ import io.mindspice.magenta2.ai.orchestration.workspaces.ResolvedOutputDirectory
 import io.mindspice.magenta2.ai.orchestration.workspaces.RootRelativePathService;
 import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspacePathLayout;
 import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceDirectoryService;
+import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceKind;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.memory.ChatMemoryRepository;
@@ -920,83 +921,11 @@ public class PlanService {
         }
         Instant now = Instant.now();
         String runId = UUID.randomUUID().toString();
-        OrchestrationTaskContext effectiveContext = context;
-        OrchestrationTaskContext previousContext = OrchestrationTaskContextHolder.current();
         String runDisplayName = context == null ? null : context.runDisplayName();
 
-        // Allocate workspace directories
-        String tempWorkspacePath = null;
-        String outputDirectoryPath = null;
-        String effectiveWorkspaceId = null;
-        String durableWorkspacePath = null;
-        if (workspaceDirectoryService != null) {
-            try {
-                String agentId = context != null && context.hasAgentContext() ? context.agentId() : "system";
-                Path agentWorkspace = workspaceDirectoryService.agentWorkspaceRoot(agentId).toRealPath();
-                Path realRunDir = Files.createDirectories(agentWorkspace
-                    .resolve(WorkspacePathLayout.RUNS)
-                    .resolve(runId)).toRealPath();
-                Path realOutputDir = Files.createDirectories(realRunDir
-                    .resolve(WorkspacePathLayout.OUTPUTS)).toRealPath();
-                tempWorkspacePath = storePath(realRunDir);
-                String ownerRootPath = null;
-                if (outputDirectoryService != null) {
-                    ResolvedOutputDirectory resolved = outputDirectoryService.resolve(OutputPublicationTarget.task(
-                        definition.id(),
-                        runId,
-                        agentId,
-                        context == null ? null : context.projectId(),
-                        null,
-                        context == null ? null : context.selectedWorkAreaId(),
-                        context == null ? null : context.outputRouteType(),
-                        context == null ? null : context.outputWorkAreaId(),
-                        context == null ? null : context.outputDirectRelativePath()
-                    ));
-                    effectiveWorkspaceId = resolved.workspaceId();
-                    durableWorkspacePath = resolved.workspaceRoot().toRealPath().toString();
-                    ownerRootPath = resolved.ownerRoot().toRealPath().toString();
-                } else if (effectiveWorkspaceResolver != null) {
-                    EffectiveWorkspace effectiveWorkspace = effectiveWorkspaceResolver.resolve(
-                        agentId,
-                        context == null ? null : context.projectId());
-                    effectiveWorkspaceId = effectiveWorkspace.workspaceId();
-                    durableWorkspacePath = effectiveWorkspace.root().toRealPath().toString();
-                } else {
-                    durableWorkspacePath = agentWorkspace.toString();
-                }
-                outputDirectoryPath = storePath(realOutputDir);
-                String hostTempWorkspacePath = realRunDir.toString();
-                String hostOutputDirectoryPath = realOutputDir.toString();
-                effectiveContext = context == null
-                    ? null
-                    : context.withExecutionPaths(durableWorkspacePath, hostOutputDirectoryPath, hostTempWorkspacePath,
-                        ownerRootPath);
-                if (effectiveContext != null && OrchestrationTaskContextHolder.current() != null) {
-                    OrchestrationTaskContextHolder.set(effectiveContext);
-                }
-                log.info("Allocated run={} durableWorkspace={} stagingOutput={} agent={} for runId={}",
-                    hostTempWorkspacePath, durableWorkspacePath, hostOutputDirectoryPath, agentId, runId);
-            } catch (Exception e) {
-                return saveAllocationFailureRun(
-                    runId, definition, cleanInputs, effectiveWorkspaceId,
-                    tempWorkspacePath, outputDirectoryPath, runDisplayName, now, e, previousContext);
-            }
-        }
-        try {
-            if (workspaceDirectoryService != null
-                && effectiveContext != null
-                && StringUtils.hasText(effectiveContext.hostWorkspacePath())
-                && StringUtils.hasText(effectiveContext.projectId())) {
-                Path projectLink = workspaceDirectoryService.materializeAssignmentProjectLink(
-                    effectiveContext.hostWorkspacePath(), effectiveContext.projectId());
-                log.info("Materialized project workspace link={} project={} run={}",
-                    projectLink, effectiveContext.projectId(), runId);
-            }
-        } catch (Exception e) {
-            return saveAllocationFailureRun(
-                runId, definition, cleanInputs, effectiveWorkspaceId,
-                tempWorkspacePath, outputDirectoryPath, runDisplayName, now, e, previousContext);
-        }
+        String workspaceType = context != null ? context.workspaceType() : null;
+        String workspaceKey = context != null ? context.workspaceKey() : null;
+        String workspaceIdentity = context != null ? context.workspaceIdentity() : null;
 
         return planRepository.saveRun(new PlanRun(
             runId,
@@ -1006,9 +935,9 @@ public class PlanService {
             cleanInputs,
             Map.of(),
             definition,
-            effectiveWorkspaceId,
-            outputDirectoryPath,
-            tempWorkspacePath,
+            workspaceType,
+            workspaceKey,
+            workspaceIdentity,
             List.of(definition.kind() == PlanKind.TASK_TEMPLATE ? "Task run started." : "Plan execution started."),
             List.of(),
             List.of(),
@@ -1018,48 +947,6 @@ public class PlanService {
             now,
             now,
             null
-        ));
-    }
-
-    private PlanRun saveAllocationFailureRun(
-        String runId,
-        PlanDefinition definition,
-        Map<String, Object> cleanInputs,
-        String effectiveWorkspaceId,
-        String tempWorkspacePath,
-        String outputDirectoryPath,
-        String runDisplayName,
-        Instant startedAt,
-        Exception exception,
-        OrchestrationTaskContext previousContext
-    ) {
-        String message = "Filesystem workspace/output allocation failed for run " + runId + ": "
-            + rootCauseMessage(exception);
-        log.error("Failed to allocate workspace directories for run={}: {}", runId, message, exception);
-        if (previousContext != null) {
-            OrchestrationTaskContextHolder.set(previousContext);
-        }
-        Instant completedAt = Instant.now();
-        return planRepository.saveRun(new PlanRun(
-            runId,
-            definition.id(),
-            runDisplayName,
-            PlanRunStatus.FAILED,
-            cleanInputs,
-            Map.of(),
-            definition,
-            effectiveWorkspaceId,
-            outputDirectoryPath,
-            tempWorkspacePath,
-            List.of("Failure: " + message),
-            List.of(),
-            List.of(),
-            null,
-            message,
-            startedAt,
-            completedAt,
-            startedAt,
-            completedAt
         ));
     }
 
@@ -1152,14 +1039,6 @@ public class PlanService {
         }
 
         // Materialize outputs to the output directory
-        materializeRunOutputs(run, cleanOutputs, task);
-
-        publishTempDirectoryIfRequested(run, task, includeTempWithOutput);
-
-        // Discover any loose artifacts in the output directory
-        discoverLooseArtifactsForRun(run, task);
-
-        promoteRunOutputs(run, task);
 
         List<String> entries = new ArrayList<>(run.executionEvidence());
         entries.addAll(cleanList(evidence).stream().map(value -> "Evidence: " + value).toList());
@@ -1175,20 +1054,15 @@ public class PlanService {
             .withFinalMessage(normalize(finalMessage))
             .withCompletedAt(Instant.now()));
 
-        // Retain run staging for resumability and delayed inspection.
-        cleanupTempForRun(completed, true);
-
         return completed;
     }
 
     public PlanRun failRun(String runId, String errorText) {
         PlanRun run = requireRun(runId);
-        PlanRun failed = planRepository.saveRun(run
+        return planRepository.saveRun(run
             .withStatus(PlanRunStatus.FAILED)
             .withErrorText(normalize(errorText))
             .withCompletedAt(Instant.now()));
-        cleanupTempForRun(failed, true);
-        return failed;
     }
 
     public PlanRun markRunNeedsReview(String runId, String reason) {
@@ -1198,12 +1072,10 @@ public class PlanService {
         if (normalizedReason != null) {
             feedback.add(normalizedReason);
         }
-        PlanRun reviewed = planRepository.saveRun(run
+        return planRepository.saveRun(run
             .withStatus(PlanRunStatus.NEEDS_REVIEW)
             .withValidationFeedback(feedback)
             .withCompletedAt(Instant.now()));
-        cleanupTempForRun(reviewed, false);
-        return reviewed;
     }
 
     public PlanRun markActiveRunNeedsReview(String conversationId, String reason) {
@@ -2000,254 +1872,36 @@ Approved plan:
     /**
      * Materialize output values into the run's output directory and persist
      * artifact metadata. Called during {@link #completeRun}.
-     */
-    /**
-     * Scan the output directory for files not already registered as artifacts
-     * and register them as discovered artifacts.
-     */
-    private void discoverLooseArtifactsForRun(PlanRun run, PlanDefinition task) {
-        if (outputArtifactService == null) {
-            return;
-        }
-        String outputDirPath = run.outputDirectory();
-        if (!StringUtils.hasText(outputDirPath)) {
-            return;
-        }
-        Path outputDir = resolveStoredPath(outputDirPath);
-        if (!Files.isDirectory(outputDir)) {
-            return;
-        }
-        try {
-            OutputArtifactContext context = outputArtifactContext(run, task);
-            int discovered = outputArtifactService.discoverLooseArtifacts(
-                run.id(), run.planId(), outputDir, context);
-            if (discovered > 0) {
-                log.info("Discovered {} loose artifacts for run={}", discovered, run.id());
-            }
-        } catch (IOException | RuntimeException e) {
-            log.warn("Failed to scan for loose artifacts for run={}: {}", run.id(), e.getMessage());
-        }
-    }
-
-    private void publishTempDirectoryIfRequested(PlanRun run, PlanDefinition task, boolean includeTempWithOutput) {
-        if (!includeTempWithOutput) {
-            return;
-        }
-        if (outputArtifactService == null) {
-            throw new IllegalStateException("Temp output publication requires OutputArtifactService");
-        }
-        if (!StringUtils.hasText(run.tempWorkspacePath())) {
-            throw new IllegalStateException("Temp output publication requires a temp workspace path");
-        }
-        if (!StringUtils.hasText(run.outputDirectory())) {
-            throw new IllegalStateException("Temp output publication requires an output directory");
-        }
-        try {
-            outputArtifactService.publishDirectoryContents(
-                run.id(),
-                run.planId(),
-                resolveStoredPath(run.tempWorkspacePath()),
-                resolveStoredPath(run.outputDirectory()),
-                outputArtifactContext(run, task)
-            );
-        } catch (IOException exception) {
-            throw new IllegalStateException("Failed to publish retained temp files for run " + run.id(), exception);
-        }
-    }
-
-    /**
-     * Resolve the agent ID from the output directory path, or return null.
-     */
-    private String resolveOutputAgentId(PlanRun run) {
-        String outputDir = run.outputDirectory();
-        if (!StringUtils.hasText(outputDir)) {
-            return null;
-        }
-        Path outputPath = resolveStoredPath(outputDir);
-        for (int i = 0; i < outputPath.getNameCount() - 1; i++) {
-            if (WorkspacePathLayout.WORKSPACE.equals(outputPath.getName(i).toString())) {
-                String agentId = outputPath.getName(i + 1).toString();
-                boolean runOutputLayout = i + 4 < outputPath.getNameCount()
-                    && WorkspacePathLayout.RUNS.equals(outputPath.getName(i + 2).toString())
-                    && WorkspacePathLayout.OUTPUTS.equals(outputPath.getName(i + 4).toString());
-                boolean finalOutputLayout = i + 2 < outputPath.getNameCount()
-                    && WorkspacePathLayout.OUTPUTS.equals(outputPath.getName(i + 2).toString());
-                if ((runOutputLayout || finalOutputLayout) && !"system".equals(agentId)) {
-                    return agentId;
-                }
-            }
-            if (WorkspacePathLayout.AGENTS.equals(outputPath.getName(i).toString())) {
-                String agentId = outputPath.getName(i + 1).toString();
-                boolean legacyCurrentWorkspaceLayout = i + 3 < outputPath.getNameCount()
-                    && WorkspacePathLayout.WORKSPACE.equals(outputPath.getName(i + 2).toString())
-                    && WorkspacePathLayout.OUTPUTS.equals(outputPath.getName(i + 3).toString());
-                boolean legacyOutputLayout = i + 2 < outputPath.getNameCount()
-                    && WorkspacePathLayout.OUTPUTS.equals(outputPath.getName(i + 2).toString());
-                if ((legacyCurrentWorkspaceLayout || legacyOutputLayout) && !"system".equals(agentId)) {
-                    return agentId;
-                }
-            }
-        }
-        return null;
-    }
-
-    private void materializeRunOutputs(PlanRun run, Map<String, Object> outputs, PlanDefinition task) {
-        if (outputArtifactService == null || workspaceDirectoryService == null) {
-            return;
-        }
-        if (outputs.isEmpty()) {
-            return;
-        }
-        String outputDirPath = run.outputDirectory();
-        if (!StringUtils.hasText(outputDirPath)) {
-            return;
-        }
-        Path outputDir = resolveStoredPath(outputDirPath);
-        Map<String, PlanFieldType> outputTypes = outputTypeMap(task.outputs());
-        try {
-            outputArtifactService.materializeAll(
-                run.id(), run.planId(), outputs, outputTypes, outputDir, outputArtifactContext(run, task));
-            log.info("Materialized {} output artifacts for run={}", outputs.size(), run.id());
-        } catch (IOException e) {
-            log.error("Failed to materialize outputs for run={}: {}", run.id(), e.getMessage(), e);
-        }
-    }
-
-    private void promoteRunOutputs(PlanRun run, PlanDefinition task) {
-        if (outputArtifactService == null || workspaceDirectoryService == null) {
-            return;
-        }
-        if (!StringUtils.hasText(run.outputDirectory())) {
-            return;
-        }
-        Path stagingOutputDir = resolveStoredPath(run.outputDirectory());
-        if (!Files.isDirectory(stagingOutputDir)) {
-            return;
-        }
-        try {
-            Path finalOutputDir = finalOutputDirectory(run, task);
-            if (finalOutputDir == null) {
-                return;
-            }
-            List<?> promoted = outputArtifactService.promoteDirectoryContents(
-                run.id(), run.planId(), stagingOutputDir, finalOutputDir, outputArtifactContext(run, task));
-            if (!promoted.isEmpty()) {
-                log.info("Promoted {} staged output artifacts for run={}", promoted.size(), run.id());
-            }
-        } catch (IOException | RuntimeException exception) {
-            throw new IllegalStateException("Failed to promote run outputs for run " + run.id(), exception);
-        }
-    }
-
-    private Path finalOutputDirectory(PlanRun run, PlanDefinition task) throws IOException {
-        OrchestrationTaskContext taskContext = OrchestrationTaskContextHolder.current();
-        String agentId = taskContext != null && StringUtils.hasText(taskContext.agentId())
-            ? taskContext.agentId()
-            : resolveOutputAgentId(run);
-        if (!StringUtils.hasText(agentId)) {
-            agentId = "system";
-        }
-        if (outputDirectoryService != null) {
-            ResolvedOutputDirectory resolved = outputDirectoryService.resolve(OutputPublicationTarget.task(
-                task.id(),
-                run.id(),
-                agentId,
-                taskContext == null ? null : taskContext.projectId(),
-                taskContext == null ? run.workspaceId() : taskContext.workspaceId(),
-                taskContext == null ? null : taskContext.selectedWorkAreaId(),
-                taskContext == null ? null : taskContext.outputRouteType(),
-                taskContext == null ? null : taskContext.outputWorkAreaId(),
-                taskContext == null ? null : taskContext.outputDirectRelativePath()
-            ));
-            return resolved.outputDirectory().toRealPath();
-        }
-        return workspaceDirectoryService.agentWorkspaceOutputs(agentId).toRealPath();
-    }
 
     private OutputArtifactContext outputArtifactContext(PlanRun run, PlanDefinition task) {
         String defaultRunType = task.kind() == PlanKind.TASK_TEMPLATE ? "TASK_RUN" : "PLAN_RUN";
         OrchestrationTaskContext taskContext = OrchestrationTaskContextHolder.current();
         if (taskContext != null && taskContext.hasContext()) {
-            String agentId = StringUtils.hasText(taskContext.agentId())
-                ? taskContext.agentId()
-                : resolveOutputAgentId(run);
             return new OutputArtifactContext(
-                agentId,
+                taskContext.agentId(),
                 taskContext.jobId(),
                 taskContext.jobAssignmentId(),
                 taskContext.jobRunId(),
                 taskContext.projectId(),
-                StringUtils.hasText(taskContext.workspaceId())
-                    ? taskContext.workspaceId()
-                    : run.workspaceId(),
+                StringUtils.hasText(taskContext.workspaceType())
+                    ? taskContext.workspaceType()
+                    : run.workspaceType(),
+                StringUtils.hasText(taskContext.workspaceKey())
+                    ? taskContext.workspaceKey()
+                    : run.workspaceKey(),
+                StringUtils.hasText(taskContext.workspaceIdentity())
+                    ? taskContext.workspaceIdentity()
+                    : run.workspaceIdentity(),
                 StringUtils.hasText(taskContext.runType())
                     ? taskContext.runType()
                     : defaultRunType
             );
         }
-        String agentId = resolveOutputAgentId(run);
         return new OutputArtifactContext(
-            agentId, null, null, run.workspaceId(),
+            null, null, null,
+            run.workspaceType(), run.workspaceKey(), run.workspaceIdentity(),
             defaultRunType
         );
-    }
-
-    /**
-     * Retention-aware cleanup for run staging. Immediate terminal paths keep
-     * staging available for at least one day.
-     */
-    private void cleanupTempForRun(PlanRun run, boolean cleanCompletion) {
-        if (workspaceDirectoryService == null) {
-            return;
-        }
-        if (runtimeSettingsService != null && runtimeSettingsService.retainTempWork()) {
-            log.debug("Retaining temp dir for run={} because retainTempWork=true", run.id());
-            return;
-        }
-        if (!cleanCompletion) {
-            log.debug("Retaining temp dir for run={} because run needs review or failed validation", run.id());
-            return;
-        }
-        Instant terminalAt = run.completedAt();
-        if (terminalAt == null || terminalAt.plus(RUN_STAGING_RETENTION).isAfter(Instant.now())) {
-            log.debug("Retaining run staging for run={} until retention threshold passes", run.id());
-            return;
-        }
-        String tempPath = run.tempWorkspacePath();
-        if (!StringUtils.hasText(tempPath)) {
-            // Legacy fallback for runs created before tempWorkspacePath was stored.
-            tempPath = workspaceDirectoryService.taskTempPath(run.id());
-        }
-        if (!StringUtils.hasText(tempPath)) {
-            return;
-        }
-        try {
-            workspaceDirectoryService.deleteTempDir(resolveStoredPath(tempPath));
-            log.debug("Cleaned temp dir for run={} path={}", run.id(), tempPath);
-        } catch (Exception e) {
-            log.warn("Failed to clean temp dir for run={} path={}: {}", run.id(), tempPath, e.getMessage());
-        }
-    }
-
-    private String storePath(Path path) {
-        return rootRelativePathService == null ? path.toString() : rootRelativePathService.store(path);
-    }
-
-    private Path resolveStoredPath(String storedPath) {
-        return rootRelativePathService == null ? Path.of(storedPath).normalize() : rootRelativePathService.resolve(storedPath);
-    }
-
-    private String slugFromTitle(String title) {
-        if (!StringUtils.hasText(title)) {
-            return "run";
-        }
-        String slug = title.toLowerCase()
-            .replaceAll("[^a-z0-9]+", "-")
-            .replaceAll("^-+|-+$", "");
-        if (slug.length() > 48) {
-            slug = slug.substring(0, 48).replaceAll("-$", "");
-        }
-        return slug.isEmpty() ? "run" : slug;
     }
 
     private Map<String, PlanFieldType> outputTypeMap(List<PlanFieldDefinition> outputs) {
@@ -2262,54 +1916,35 @@ Approved plan:
 
     /**
      * Returns filesystem workspace context text to inject into the execution prompt.
-     * Explains the workspace directory layout and output behavior.
      */
     public String workspaceRuntimeContext() {
         return """
             ## Filesystem Workspace Environment
 
-            You are executing on the host filesystem inside the effective durable workspace.
-            The following directories are available:
-
-            - workspace/ — the effective durable workspace root (project workspace when project-scoped, otherwise agent workspace)
-            - work/ — durable working files shared across runs in this workspace
-            - outputs/ — the current run-local output staging directory
-            - run/ — this run's staging directory
+            You are executing on the host filesystem inside the effective workspace.
+            The workspace root is available for file operations.
 
             ### Output Directory
 
-            When completing a task, write or copy all required output files into the run-specific
-            outputs/ directory. Final output destinations are populated by Magenta after completion.
+            When completing a task, write or copy all required output files.
+            Final output destinations are populated by Magenta after completion.
 
             ### Python and Virtual Environments
 
             If your task requires pip packages, create and use a virtual environment:
 
             ```
-            python -m venv work/.venv
-            source work/.venv/bin/activate
+            python -m venv .venv
+            source .venv/bin/activate
             pip install <packages>
             ```
-
-            The virtual environment will persist in work/ until cleaned.
             """.stripIndent();
     }
 
     public String workspaceRuntimeContext(PlanRun run) {
-        String runOutputPath = run != null && StringUtils.hasText(run.outputDirectory())
-            ? run.outputDirectory() : "outputs";
-        return workspaceRuntimeContext() + "\n\n" + """
-            ### Current Run Output Path
-
-            For this run, write deliverable files to outputs/.
-            When reporting file_path outputs, use either the output directory/<file> or
-            the bare filename for files written directly in that directory.
-            """.stripIndent();
+        return workspaceRuntimeContext();
     }
 
-    /**
-     * Returns execution instructions appended to the workspace context for a run.
-     */
     String executionInstructionsWithWorkspace(PlanRun run) {
         return executionInstructions(run);
     }

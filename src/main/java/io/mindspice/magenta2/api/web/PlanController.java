@@ -187,11 +187,8 @@ public class PlanController {
                 request.priority() != null ? request.priority() : PUBLIC_SUBMIT_PRIORITY,
                 normalize(request.modelOverride()),
                 normalize(request.projectId()),
-                request.workspaceId(),
-                normalize(request.selectedWorkAreaId()),
-                normalize(request.outputRouteType()),
-                normalize(request.outputWorkAreaId()),
-                normalize(request.outputDirectRelativePath()),
+                normalize(request.workspaceType()),
+                normalize(request.workspaceKey()),
                 Map.of("taskId", planId)
             ));
         } catch (IllegalStateException exception) {
@@ -310,11 +307,8 @@ public class PlanController {
                 request == null || request.priority() == null ? PUBLIC_SUBMIT_PRIORITY : request.priority(),
                 normalize(request == null ? null : request.modelOverride()),
                 normalize(request == null ? null : request.projectId()),
-                normalize(request == null ? null : request.workspaceId()),
-                normalize(request == null ? null : request.selectedWorkAreaId()),
-                normalize(request == null ? null : request.outputRouteType()),
-                normalize(request == null ? null : request.outputWorkAreaId()),
-                normalize(request == null ? null : request.outputDirectRelativePath()),
+                normalize(request == null ? null : request.workspaceType()),
+                normalize(request == null ? null : request.workspaceKey()),
                 taskRunInput(planId, request)
             ));
             SseStreamLifecycle.sendSseEvent(emitter, "submitted", Map.of(
@@ -375,11 +369,8 @@ public class PlanController {
         String agentId,
         String jobId,
         String projectId,
-        String workspaceId,
-        String selectedWorkAreaId,
-        String outputRouteType,
-        String outputWorkAreaId,
-        String outputDirectRelativePath,
+        String workspaceType,
+        String workspaceKey,
         String modelOverride,
         Integer priority
     ) {
@@ -389,12 +380,10 @@ public class PlanController {
             String agentId,
             String jobId,
             String projectId,
-            String workspaceId,
             String modelOverride,
             Integer priority
         ) {
-            this(inputValues, conversationId, agentId, jobId, projectId, workspaceId,
-                null, null, null, null, modelOverride, priority);
+            this(inputValues, conversationId, agentId, jobId, projectId, null, null, modelOverride, priority);
         }
     }
 
@@ -403,20 +392,16 @@ public class PlanController {
         String modelOverride,
         Integer priority,
         String projectId,
-        String workspaceId,
-        String selectedWorkAreaId,
-        String outputRouteType,
-        String outputWorkAreaId,
-        String outputDirectRelativePath
+        String workspaceType,
+        String workspaceKey
     ) {
         public SubmitRequest(
             String agentId,
             String modelOverride,
             Integer priority,
-            String projectId,
-            String workspaceId
+            String projectId
         ) {
-            this(agentId, modelOverride, priority, projectId, workspaceId, null, null, null, null);
+            this(agentId, modelOverride, priority, projectId, null, null);
         }
     }
 

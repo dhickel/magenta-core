@@ -39,27 +39,27 @@ import org.springframework.util.StringUtils;
  */
 @Service
 public class OutputArtifactService {
-    private final WorkspaceRepository repository;
+    private final OutputArtifactRepository repository;
     private final WorkspaceDirectoryService directoryService;
     private final RootRelativePathService rootRelativePathService;
     private final ObjectMapper objectMapper;
     private final boolean looseArtifactDiscoveryEnabled;
 
     @Autowired
-    public OutputArtifactService(WorkspaceRepository repository,
+    public OutputArtifactService(OutputArtifactRepository repository,
                                  WorkspaceDirectoryService directoryService,
                                  RootRelativePathService rootRelativePathService,
                                  ObjectMapper objectMapper) {
         this(repository, directoryService, rootRelativePathService, objectMapper, true);
     }
 
-    public OutputArtifactService(WorkspaceRepository repository,
+    public OutputArtifactService(OutputArtifactRepository repository,
                                  WorkspaceDirectoryService directoryService,
                                  ObjectMapper objectMapper) {
         this(repository, directoryService, new RootRelativePathService(directoryService), objectMapper, true);
     }
 
-    public OutputArtifactService(WorkspaceRepository repository,
+    public OutputArtifactService(OutputArtifactRepository repository,
                                  WorkspaceDirectoryService directoryService,
                                  ObjectMapper objectMapper,
                                  boolean looseArtifactDiscoveryEnabled) {
@@ -67,7 +67,7 @@ public class OutputArtifactService {
             looseArtifactDiscoveryEnabled);
     }
 
-    public OutputArtifactService(WorkspaceRepository repository,
+    public OutputArtifactService(OutputArtifactRepository repository,
                                  WorkspaceDirectoryService directoryService,
                                  RootRelativePathService rootRelativePathService,
                                  ObjectMapper objectMapper,
@@ -157,13 +157,13 @@ public class OutputArtifactService {
 
     public List<RunOutputArtifact> query(String runId, String planId, String artifactType, Integer limit) {
         return query(OutputArtifactQuery.of(
-            null, null, null, null, runId, planId, artifactType, limit
+            null, null, null, null, null, null, null, null, runId, planId, null, artifactType, limit
         ));
     }
 
     public List<RunOutputArtifact> query(OutputArtifactQuery query) {
         return repository.findArtifacts(query == null
-            ? OutputArtifactQuery.of(null, null, null, null, null, null, null, 50)
+            ? OutputArtifactQuery.of(null, null, null, null, null, null, null, null, null, null, null, null, 50)
             : query
         );
     }
@@ -706,7 +706,9 @@ public class OutputArtifactService {
             resolvedContext.jobAssignmentId(),
             resolvedContext.jobRunId(),
             resolvedContext.projectId(),
-            resolvedContext.workspaceId(),
+            resolvedContext.workspaceType(),
+            resolvedContext.workspaceKey(),
+            resolvedContext.workspaceIdentity(),
             resolvedContext.runType(),
             outputName,
             artifactType,

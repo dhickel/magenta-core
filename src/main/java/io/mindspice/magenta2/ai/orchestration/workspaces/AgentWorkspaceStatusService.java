@@ -103,7 +103,7 @@ public class AgentWorkspaceStatusService {
         long outputBytes;
         try {
             List<RunOutputArtifact> artifacts = outputArtifactService.query(
-                OutputArtifactQuery.of(agentId, null, null, null, null, null, null, 200));
+                OutputArtifactQuery.of(agentId, null, null, null, null, null, null, null, null, 200));
             outputArtifactCount = artifacts.size();
             outputBytes = artifacts.stream()
                 .mapToLong(a -> {
@@ -124,7 +124,7 @@ public class AgentWorkspaceStatusService {
         Instant lastActivity = null;
         try {
             List<RunOutputArtifact> recent = outputArtifactService.query(
-                OutputArtifactQuery.of(agentId, null, null, null, null, null, null, 1));
+                OutputArtifactQuery.of(agentId, null, null, null, null, null, null, null, null, 1));
             if (!recent.isEmpty() && recent.getFirst().createdAt() != null) {
                 lastActivity = recent.getFirst().createdAt();
             }

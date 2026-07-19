@@ -91,19 +91,17 @@ public class OutputDirectoryService {
         Path executionRoot = workAreaService.resolve(selected);
         String routeType = StringUtils.hasText(target.outputRouteType())
             ? target.outputRouteType()
-            : AssignmentRequest.OUTPUT_ROUTE_DEFAULT;
-        boolean routed = !AssignmentRequest.OUTPUT_ROUTE_DEFAULT.equals(routeType);
-        Path outputRoot = switch (routeType) {
-            case AssignmentRequest.OUTPUT_ROUTE_WORK_AREA -> {
-                WorkArea outputArea = workAreaService.requireActiveOwned(
-                    target.outputWorkAreaId(), ownerType, ownerId, "output Work Area");
-                yield workAreaService.resolve(outputArea);
-            }
-            case AssignmentRequest.OUTPUT_ROUTE_DIRECT_DIRECTORY ->
-                ownerRoot.resolve(workAreaService.requireExistingOwnerDirectory(
-                    ownerType, ownerId, target.outputDirectRelativePath(), "direct output directory")).normalize();
-            default -> executionRoot;
-        };
+            : "";
+        boolean routed = StringUtils.hasText(routeType);
+        Path outputRoot = executionRoot;
+        if ("WORK_AREA".equals(routeType)) {
+            WorkArea outputArea = workAreaService.requireActiveOwned(
+                target.outputWorkAreaId(), ownerType, ownerId, "output Work Area");
+            outputRoot = workAreaService.resolve(outputArea);
+        } else if ("DIRECT_DIRECTORY".equals(routeType)) {
+            outputRoot = ownerRoot.resolve(workAreaService.requireExistingOwnerDirectory(
+                ownerType, ownerId, target.outputDirectRelativePath(), "direct output directory")).normalize();
+        }
         outputRoot = ensureRealDirectory(outputRoot);
         return new WorkAreaPaths(ownerRoot, executionRoot, outputRoot, routed || StringUtils.hasText(target.selectedWorkAreaId()));
     }

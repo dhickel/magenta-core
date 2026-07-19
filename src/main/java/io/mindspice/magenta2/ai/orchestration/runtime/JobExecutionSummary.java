@@ -3,10 +3,7 @@ package io.mindspice.magenta2.ai.orchestration.runtime;
 import java.time.Instant;
 import java.util.List;
 
-/**
- * Stable read model that bridges a job definition, assignment-owned execution,
- * legacy compatibility workspace fields, and currently indexed outputs.
- */
+/** Stable read model for assignment-owned job execution. */
 public record JobExecutionSummary(
     String jobId,
     String jobTitle,
@@ -21,17 +18,11 @@ public record JobExecutionSummary(
     String agentStatus,
     String projectId,
     String projectName,
-    String compatibilityWorkspaceId,
-    String effectiveWorkspaceId,
-    String effectiveWorkspaceKind,
-    String effectiveWorkspaceDisplayPath,
-    boolean persistentWorkspaceEnabled,
-    String persistentJobWorkspaceId,
-    String persistentJobWorkspacePath,
-    boolean persistentJobWorkspacePresent,
+    String workspaceType,
+    String workspaceKey,
+    String workspaceIdentity,
     String jobRunId,
     JobRunStatus jobRunStatus,
-    String outputDirectory,
     List<String> childRunIds,
     int outputCount,
     Instant latestOutputAt,

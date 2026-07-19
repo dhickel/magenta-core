@@ -247,8 +247,16 @@ class AgentShellToolServiceTest {
         WorkspaceDirectoryService dirService = WorkspaceDirectoryServiceTestSupport.directoryService(tempDir);
         AgentShellToolService service = new AgentShellToolService(tempDir, List.of("pwd"), dirService);
 
-        OrchestrationTaskContextHolder.set(new OrchestrationTaskContext(
-            "agent-1", "TestAgent", null, null, null, "TASK_RUN", null, null));
+        OrchestrationTaskContextHolder.set(new OrchestrationTaskContext("agent-1",
+            "TestAgent",
+            null,
+            null,
+            "agent",
+            "agent-1",
+            "agent/agent-1",
+            "TASK_RUN",
+            null,
+            null));
 
         try {
             AgentShellToolService.ShellExecResult result = service.exec("pwd", "", 5);
@@ -270,8 +278,16 @@ class AgentShellToolServiceTest {
         WorkspaceDirectoryService dirService = WorkspaceDirectoryServiceTestSupport.directoryService(tempDir);
         AgentShellToolService service = new AgentShellToolService(tempDir, List.of("pwd"), dirService);
 
-        OrchestrationTaskContextHolder.set(new OrchestrationTaskContext(
-            "agent-1", "TestAgent", null, null, null, "TASK_RUN", null, null));
+        OrchestrationTaskContextHolder.set(new OrchestrationTaskContext("agent-1",
+            "TestAgent",
+            null,
+            null,
+            "agent",
+            "agent-1",
+            "agent/agent-1",
+            "TASK_RUN",
+            null,
+            null));
 
         try {
             AgentShellToolService.ShellExecResult result = service.exec("pwd", "workspace", 5);
@@ -293,8 +309,16 @@ class AgentShellToolServiceTest {
         WorkspaceDirectoryService dirService = WorkspaceDirectoryServiceTestSupport.directoryService(tempDir);
         AgentShellToolService service = new AgentShellToolService(tempDir, List.of("pwd"), dirService);
 
-        OrchestrationTaskContextHolder.set(new OrchestrationTaskContext(
-            "agent-1", "TestAgent", null, null, null, "TASK_RUN", null, null));
+        OrchestrationTaskContextHolder.set(new OrchestrationTaskContext("agent-1",
+            "TestAgent",
+            null,
+            null,
+            "agent",
+            "agent-1",
+            "agent/agent-1",
+            "TASK_RUN",
+            null,
+            null));
 
         try {
             AgentShellToolService.ShellExecResult result = service.exec("pwd", "outputs", 5);
@@ -314,8 +338,16 @@ class AgentShellToolServiceTest {
         WorkspaceDirectoryService dirService = WorkspaceDirectoryServiceTestSupport.directoryService(tempDir);
         AgentShellToolService service = new AgentShellToolService(tempDir, List.of("pwd"), dirService);
 
-        OrchestrationTaskContextHolder.set(new OrchestrationTaskContext(
-            "agent-1", "TestAgent", null, null, null, "TASK_RUN", null, null));
+        OrchestrationTaskContextHolder.set(new OrchestrationTaskContext("agent-1",
+            "TestAgent",
+            null,
+            null,
+            "agent",
+            "agent-1",
+            "agent/agent-1",
+            "TASK_RUN",
+            null,
+            null));
 
         try {
             assertThatThrownBy(() -> service.exec("pwd", WorkspacePathLayout.LEGACY_SCRATCH, 5))
@@ -335,9 +367,16 @@ class AgentShellToolServiceTest {
         WorkspaceDirectoryService dirService = WorkspaceDirectoryServiceTestSupport.directoryService(tempDir);
         AgentShellToolService service = new AgentShellToolService(tempDir, List.of("pwd"), dirService);
 
-        OrchestrationTaskContextHolder.set(new OrchestrationTaskContext(
-            "agent-1", "TestAgent", null, null, null, "TASK_RUN",
-            runWorkspace.toString(), outputDir.toString()));
+        OrchestrationTaskContextHolder.set(new OrchestrationTaskContext("agent-1",
+            "TestAgent",
+            null,
+            null,
+            "agent",
+            "agent-1",
+            "agent/agent-1",
+            "TASK_RUN",
+            runWorkspace.toString(),
+            outputDir.toString()));
 
         try {
             AgentShellToolService.ShellExecResult result = service.exec("pwd", "nested", 5);
@@ -359,9 +398,16 @@ class AgentShellToolServiceTest {
         WorkspaceDirectoryService dirService = WorkspaceDirectoryServiceTestSupport.directoryService(tempDir);
         AgentShellToolService service = new AgentShellToolService(tempDir, List.of("pwd"), dirService);
 
-        OrchestrationTaskContextHolder.set(new OrchestrationTaskContext(
-            "agent-1", "TestAgent", null, null, null, "TASK_RUN",
-            runWorkspace.toString(), outputDir.toString()));
+        OrchestrationTaskContextHolder.set(new OrchestrationTaskContext("agent-1",
+            "TestAgent",
+            null,
+            null,
+            "agent",
+            "agent-1",
+            "agent/agent-1",
+            "TASK_RUN",
+            runWorkspace.toString(),
+            outputDir.toString()));
 
         try {
             AgentShellToolService.ShellExecResult result = service.exec("pwd", "outputs", 5);
@@ -386,9 +432,10 @@ class AgentShellToolServiceTest {
         AgentShellToolService service = new AgentShellToolService(tempDir, List.of("pwd"), dirService);
 
         OrchestrationTaskContextHolder.set(new OrchestrationTaskContext(
-            "agent-1", "TestAgent", null, "project-1", "workspace-1", "TASK_RUN",
-            runWorkspace.toString(), outputDir.toString(), durableWorkspace.toString(), runWorkspace.toString(),
-            null));
+            "agent-1", "TestAgent", null, null, null, "project-1",
+            null, "workspace-1", "workspace-1", "TASK_RUN", null,
+            durableWorkspace.toString(), outputDir.toString(),
+            runWorkspace.toString(), durableWorkspace.toString(), null));
 
         try {
             assertThat(service.exec("pwd", "workspace", 5).stdout().trim())
@@ -415,9 +462,10 @@ class AgentShellToolServiceTest {
         AgentShellToolService service = new AgentShellToolService(tempDir, List.of("pwd"), dirService);
 
         OrchestrationTaskContextHolder.set(new OrchestrationTaskContext(
-            "agent-1", "TestAgent", null, null, null, "TASK_RUN",
-            durableWorkspace.toString(), outputDir.toString(), durableWorkspace.toString(),
-            durableWorkspace.resolve("runs/run-1").toString()));
+            "agent-1", "TestAgent", null, null, null, null,
+            null, "workspace-1", "workspace-1", "TASK_RUN", null,
+            durableWorkspace.toString(), outputDir.toString(),
+            durableWorkspace.resolve("runs/run-1").toString(), durableWorkspace.toString(), null));
 
         try {
             AgentShellToolService.ShellExecResult result = service.exec("pwd", "workspace/nested", 5);
@@ -442,9 +490,16 @@ class AgentShellToolServiceTest {
         dirService.materializeAssignmentProjectLink(runWorkspace.toString(), "project-1");
         AgentShellToolService service = new AgentShellToolService(tempDir, List.of("pwd"), dirService);
 
-        OrchestrationTaskContextHolder.set(new OrchestrationTaskContext(
-            "agent-1", "TestAgent", null, "project-1", null, "TASK_RUN",
-            runWorkspace.toString(), outputDir.toString()));
+        OrchestrationTaskContextHolder.set(new OrchestrationTaskContext("agent-1",
+            "TestAgent",
+            null,
+            "project-1",
+            "agent",
+            "agent-1",
+            "agent/agent-1",
+            "TASK_RUN",
+            runWorkspace.toString(),
+            outputDir.toString()));
 
         try {
             AgentShellToolService.ShellExecResult result = service.exec("pwd", "projects/project-1", 5);
@@ -468,8 +523,16 @@ class AgentShellToolServiceTest {
         WorkspaceDirectoryService dirService = WorkspaceDirectoryServiceTestSupport.directoryService(tempDir);
         AgentShellToolService service = new AgentShellToolService(tempDir, List.of("pwd"), dirService);
 
-        OrchestrationTaskContextHolder.set(new OrchestrationTaskContext(
-            "agent-1", "TestAgent", null, null, null, "TASK_RUN", null, null));
+        OrchestrationTaskContextHolder.set(new OrchestrationTaskContext("agent-1",
+            "TestAgent",
+            null,
+            null,
+            "agent",
+            "agent-1",
+            "agent/agent-1",
+            "TASK_RUN",
+            null,
+            null));
 
         try {
             assertThatThrownBy(() -> service.exec("pwd", "/etc", 5))
@@ -488,8 +551,16 @@ class AgentShellToolServiceTest {
         WorkspaceDirectoryService dirService = WorkspaceDirectoryServiceTestSupport.directoryService(tempDir);
         AgentShellToolService service = new AgentShellToolService(tempDir, List.of("pwd"), dirService);
 
-        OrchestrationTaskContextHolder.set(new OrchestrationTaskContext(
-            "agent-1", "TestAgent", null, null, null, "TASK_RUN", null, null));
+        OrchestrationTaskContextHolder.set(new OrchestrationTaskContext("agent-1",
+            "TestAgent",
+            null,
+            null,
+            "agent",
+            "agent-1",
+            "agent/agent-1",
+            "TASK_RUN",
+            null,
+            null));
 
         try {
             assertThatThrownBy(() -> service.exec("pwd", "..", 5))

@@ -139,7 +139,7 @@ public class AgentShellToolService {
      */
     private ResolvedWorkingDirectory resolveContextWorkingDirectory(OrchestrationTaskContext ctx, String workingDirectory)
         throws IOException {
-        if (StringUtils.hasText(ctx.hostWorkspacePath()) || StringUtils.hasText(ctx.hostDurableWorkspacePath())) {
+        if (StringUtils.hasText(ctx.hostDurableWorkspacePath())) {
             return resolveAssignmentWorkingDirectory(ctx, workingDirectory);
         }
         if (ctx.hasAgentContext()) {
@@ -237,8 +237,8 @@ public class AgentShellToolService {
         if (!normalized.equals(projectPrefix) && !normalized.startsWith(projectPrefix + "/")) {
             throw new IllegalArgumentException("Project working directory is not linked to this assignment: " + workingDirectory);
         }
-        Path projectRoot = StringUtils.hasText(ctx.hostWorkspacePath())
-            ? workspaceDirectoryService.requireAssignmentProjectLinkTarget(ctx.hostWorkspacePath(), ctx.projectId())
+        Path projectRoot = StringUtils.hasText(ctx.hostDurableWorkspacePath())
+            ? workspaceDirectoryService.requireAssignmentProjectLinkTarget(ctx.hostDurableWorkspacePath(), ctx.projectId())
             : workspaceDirectoryService.projectWorkspace(ctx.projectId()).toRealPath();
         String remainder = normalized.equals(projectPrefix) ? "" : normalized.substring((projectPrefix + "/").length());
         Path resolved = resolveScopedDirectory(projectRoot, remainder, workingDirectory);
@@ -480,15 +480,13 @@ public class AgentShellToolService {
     }
 
     private String contextWorkspacePath(OrchestrationTaskContext ctx) {
-        return StringUtils.hasText(ctx.hostDurableWorkspacePath())
-            ? ctx.hostDurableWorkspacePath()
-            : ctx.hostWorkspacePath();
+        return ctx.hostDurableWorkspacePath();
     }
 
     private String contextRunPath(OrchestrationTaskContext ctx) {
         return StringUtils.hasText(ctx.hostRunPath())
             ? ctx.hostRunPath()
-            : ctx.hostWorkspacePath();
+            : ctx.hostDurableWorkspacePath();
     }
 
     private String contextRootPath(OrchestrationTaskContext ctx) {

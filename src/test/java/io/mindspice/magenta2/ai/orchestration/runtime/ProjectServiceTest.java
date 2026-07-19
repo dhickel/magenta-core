@@ -79,7 +79,7 @@ class ProjectServiceTest {
         Project project = service.createProject("Active", "desc", "agent-active", null);
         runtime.saveAssignment(new WorkAssignment(
             "assignment-active", "agent-active", null, null, AssignmentType.REPORT, 1,
-            OrchestrationStatus.RUNNING, null, null, project.id(), null, null,
+            OrchestrationStatus.RUNNING, null, null, "ws-1", "ws-1", project.id(),
             0, Map.of(), Map.of("projectId", project.id()), Map.of(), Map.of(),
             null, "lease-owner", Instant.now().plusSeconds(60), null, null, Instant.now(), null
         ));

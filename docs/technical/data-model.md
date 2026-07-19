@@ -45,7 +45,7 @@ Compatibility notes:
 Source package: [`ai/chat/plan`](../../src/main/java/io/mindspice/magenta2/ai/chat/plan). Task-facing records live in [`ai/chat/task`](../../src/main/java/io/mindspice/magenta2/ai/chat/task).
 
 - `plan_definitions`: unified saved plan/task definitions. It stores kind, status, title, summary, goal, notes, deliverables, inputs, outputs, assumptions, steps, validation criteria, execution evidence, validation feedback, prompt/work profile, planning/execution model, settings overrides, planning task text, pending questions/index, plan start order, final message, conversation id, and timestamps.
-- `plan_runs`: execution history for saved definitions. It snapshots the full definition, input/output values, effective workspace/output paths, run staging path, evidence, validation feedback, deliverable evidence, final/error messages, status, and timestamps.
+- `plan_runs`: execution history for saved definitions. It snapshots the full definition, input/output values, workspace type/key/identity, evidence, validation feedback, deliverable evidence, final/error messages, status, and timestamps.
 
 Important invariants:
 
@@ -53,34 +53,31 @@ Important invariants:
 - Task templates use UUID ids and may carry conversation id for draft tracking.
 - Saved plan chats are keyed by saved `plan_id`; anonymous `/chat` planning remains keyed by conversation id and does not use `plan_chat_messages`.
 - Runs snapshot definitions at start time so later edits do not change historical run meaning.
-- Project-scoped runs use the project workspace as the effective durable workspace; agent-scoped runs use the agent workspace.
-- During execution, task outputs are staged under the current run-local `runs/<runId>/outputs/`. Backend completion, validation, or promotion writes final artifacts to the selected agent, project, or Work Area output destination.
-- `PlanRepository` adds `plan_runs.temp_workspace_path`, output path, workspace, and project compatibility columns for warm databases as needed.
-- New `plan_runs.output_directory` and `plan_runs.temp_workspace_path` values are stored relative to the configured data root. Legacy absolute values under the current data root remain compatibility-readable; stale old-root absolute values fail when filesystem operations use them.
+- Execution selection is persisted as `workspace_type`, `workspace_key`, and internal `workspace_identity`; project ids remain attribution metadata.
+- Declared outputs publish directly beneath the selected workspace's lazy `outputs/` subtree.
 
 ## Workflows
 
 Source package: [`ai/orchestration/workflow`](../../src/main/java/io/mindspice/magenta2/ai/orchestration/workflow).
 
 - `workflow_definitions`: v2 workflow definitions with schema version, title, summary, max concurrency, nodes JSON, routes JSON, UI layout JSON, and timestamps.
-- `workflow_runs`: workflow execution records with current node index, denormalized node runs JSON, run staging path, final output path, nullable agent/job/job-assignment/job-run/project/workspace/run-type attribution, workflow snapshot JSON, final outputs, artifact ids, final/error messages, status, and timestamps.
+- `workflow_runs`: workflow execution records with current node index, denormalized node runs JSON, nullable agent/job/job-assignment/job-run/project/run-type attribution, workspace type/key/identity, workflow snapshot JSON, final outputs, artifact ids, final/error messages, status, and timestamps.
 - `workflow_node_runs`: queryable per-node run rows denormalized from `workflow_runs.node_runs_json`.
 - `inbox_messages`: workflow-owned inbox messages for user approvals, workflow agent approvals, notifications, and run-output delivery.
 
 Compatibility notes:
 
-- `WorkflowRepository` adds schema version, max concurrency, UI layout, node/route JSON, run output fields, current node index, node run JSON, workspace/output fields, snapshot, final/error messages, and timestamps when missing.
+- `WorkflowRepository` adds typed workspace columns to warm databases without recreating obsolete path/id columns.
 - Workflow inbox messages are intentionally separate from runtime direct-line agent inbox messages.
-- During execution, workflow outputs are staged under the current run-local `runs/<runId>/outputs/`. Runtime execution state remains available while a run is `WAITING`; backend completion, validation, or promotion writes final artifacts to the selected agent, project, or Work Area output destination.
-- New `workflow_runs.workspace_path` and `workflow_runs.output_dir` values are stored relative to the configured data root. Legacy absolute values under the current data root remain compatibility-readable; stale old-root absolute values fail at operation time.
+- `WAITING` runs retain the exact typed selection and re-resolve it for the resumed attempt.
 
 ## Agents, Assignments, Runtime Jobs, Inbox, Schedules, Reactions
 
 Source packages: [`ai/orchestration/agents`](../../src/main/java/io/mindspice/magenta2/ai/orchestration/agents), [`ai/orchestration/runtime`](../../src/main/java/io/mindspice/magenta2/ai/orchestration/runtime).
 
 - `agent_profiles`: durable agent profiles with name, status, default model, system prompt, approved tools JSON, shell allowlist JSON, direct-line flag, and timestamps.
-- `orchestration_jobs` and `orchestration_job_items`: legacy/runtime orchestration job records used by runtime internals.
-- `work_assignments`: durable assignment queue. Fields include agent id, job/job item ids, assignment type, priority, status, model override, compatibility workspace id, first-class project id, effective workspace id/kind, current item index, checkpoint/input/output/evidence JSON, error, lease owner/expires, progress/heartbeat timestamps, lifecycle timestamps.
+- `orchestration_jobs` and `orchestration_job_items`: runtime orchestration job records with typed workspace selection.
+- `work_assignments`: durable assignment queue. Fields include agent id, job/job item ids, assignment type, priority, status, model override, project attribution, workspace type/key/identity, current item index, checkpoint/input/output/evidence JSON, error, queue lease owner/expires, progress/heartbeat timestamps, and lifecycle timestamps.
 - `assignment_conversation_links`: durable mapping from assignment ids to chat conversation ids so transcripts remain visible even if checkpoint output is incomplete.
 - `agent_inbox_messages`: runtime direct-line agent/operator inbox messages with read/handled flags.
 - `agent_schedules` and `schedule_firings`: cron-like assignment scheduling and de-duplication of due firings.
@@ -97,18 +94,16 @@ Compatibility notes:
 
 Source package: [`ai/orchestration/runtime`](../../src/main/java/io/mindspice/magenta2/ai/orchestration/runtime).
 
-- `job_definitions`: user-facing jobs with owner agent runtime hint, project, compatibility workspace, `persistent_workspace_enabled`, status, title, summary, ordered `items_json`, prompt profile, model, settings override JSON, and timestamps.
-- `job_runs`: execution records with job assignment id, effective workspace id, work item run JSON, compatibility workspace/path fields where present, output path, final/error messages, status, and timestamps.
+- `job_definitions`: user-facing jobs with owner agent, project attribution, workspace type/key/identity, status, title, summary, ordered `items_json`, prompt profile, model, settings override JSON, and timestamps.
+- `job_runs`: execution records with job assignment id, workspace type/key/identity, work item run JSON, final/error messages, status, and timestamps.
 - `job_recurrences`: one recurrence per job, with cron expression, timezone, next fire time, enabled flag, and timestamps.
 
 Compatibility notes:
 
-- `JobRepository` can add owner agent, project, workspace, legacy persistent workspace, assignment id, and status columns to older job tables.
+- `JobRepository` adds only `workspace_type`, `workspace_key`, `workspace_identity`, assignment id, and other active columns to older job tables; it does not recreate obsolete routing/path columns.
 - Public job definitions can be saved as empty `DRAFT` rows before items are added.
-- Legacy persistent job workspace fields are compatibility-only for older records. New job behavior must not allocate job-owned directories.
-- During execution, job outputs are staged under the current run-local `runs/<runId>/outputs/`; backend completion, validation, or promotion writes final artifacts to the bound Work Area or project output destination.
-- Job execution summaries are service read models, not separate tables. They join job definition, assignment, run, workspace, project/agent labels, child run ids, and output counts.
-- New `job_runs.workspace_path` and `job_runs.output_dir` values are stored relative to the configured data root. Legacy absolute values under the current data root remain compatibility-readable; stale old-root absolute values fail at operation time.
+- Job execution creates no job-owned, run-staging, or eager output directory.
+- Job execution summaries are service read models, not separate tables. They combine definition, assignment, run, project/agent attribution, typed workspace identity, child run ids, and output counts.
 
 ## Projects
 
@@ -118,34 +113,18 @@ Source package: [`ai/orchestration/runtime`](../../src/main/java/io/mindspice/ma
 - `project_agent_memberships`: unique project/agent membership rows with roles.
 - `project_events`: append-only project event log.
 
-Projects are shared workspace and visibility records, not executable work units. Project services also coordinate with workspace tables for project workspace summaries and release requests.
+Projects are membership, tracking, and visibility records, not executable work units or filesystem selectors.
 
-## Workspaces, Leases, Links, Outputs
+## Typed Workspaces and Outputs
 
 Source package: [`ai/orchestration/workspaces`](../../src/main/java/io/mindspice/magenta2/ai/orchestration/workspaces).
 
-- `workspaces`: owner type/id, root relative path, display name, metadata JSON, and timestamps.
-- `workspace_links`: labeled readable/writable links from a workspace to external targets.
-- `workspace_leases`: writable/read leases with holder, mode, expiry, release request flag, released timestamp, and timestamps.
-- `work_areas`: user-selectable confined directories inside an agent or project workspace root, including system/Home flags and active state.
-- `workspace_file_labels`: reusable labels for files and directories, including the built-in note label used by the Work Area explorer.
-- `workspace_file_label_assignments`: label assignments scoped to workspace-relative file paths.
-- `workspace_file_actions`: recent Work Area explorer mutation/action rows for diagnostics and future UI visibility.
-- `run_output_artifacts`: output artifact metadata including run id, plan id, optional agent/job/job-assignment/job-run/project/workspace ids, run type, output name, artifact type, file name/path, content JSON, and timestamp.
+Filesystem workspace identity is derived from type and key and therefore has no active registry table. Execution tables persist `workspace_type`, `workspace_key`, and `workspace_identity`.
 
-Important constraints:
-
-- `idx_workspaces_owner` enforces one workspace per owner.
-- `idx_work_areas_owner` supports active Work Area lookup by owner.
-- `idx_workspace_leases_active_write` enforces at most one unreleased `WRITE` lease per workspace.
-- Output artifact queries are indexed by run, agent, job, project, and workspace.
-- New `workspace_links.target` values for `PATH` links and new `run_output_artifacts.file_path` values are stored relative to the configured data root. Non-`PATH` link targets are not filesystem-normalized. Legacy absolute current-root values remain compatibility-readable; stale old-root absolute values fail when used.
-
-Compatibility notes:
-
-- `WorkspaceRepository` can add output scoping columns, `workspace_leases.release_requested`, Work Area/output routing columns on assignments, and migrate old lease/output tables into the current shape.
-- `WorkAreaRepository` and workspace file metadata repositories create Work Area, label, label assignment, and action-log tables defensively for warm databases.
-- `WorkspaceDirectoryService` migrates legacy `agents/<id>/home` and `agents/<id>/outputs` directories into the current `agents/<id>/workspace/` layout when safe.
+- `run_output_artifacts`: output artifact metadata including run/plan and optional agent/job/job-assignment/job-run/project attribution, workspace type/key/identity, run type, output name, artifact type, portable data-root-relative file path, content JSON, and timestamp.
+- Artifact queries are indexed by run and major attribution fields.
+- `OutputArtifactRepository` exclusively owns artifact schema compatibility, persistence, mapping, queries, and deletion.
+- Obsolete `workspaces`, links, leases, Work Areas, and file metadata structures may remain in existing databases but are inert pending deletion; active startup does not migrate or recreate them.
 
 ## Runtime Settings
 

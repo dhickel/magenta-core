@@ -193,11 +193,8 @@ public class TaskController {
                 request == null || request.priority() == null ? PUBLIC_SUBMIT_PRIORITY : request.priority(),
                 normalize(request == null ? null : request.modelOverride()),
                 normalize(request == null ? null : request.projectId()),
-                normalize(request == null ? null : request.workspaceId()),
-                normalize(request == null ? null : request.selectedWorkAreaId()),
-                normalize(request == null ? null : request.outputRouteType()),
-                normalize(request == null ? null : request.outputWorkAreaId()),
-                normalize(request == null ? null : request.outputDirectRelativePath()),
+                normalize(request == null ? null : request.workspaceType()),
+                normalize(request == null ? null : request.workspaceKey()),
                 taskRunInput(taskId, request)
             ));
             SseStreamLifecycle.sendSseEvent(emitter, "submitted", Map.of(
@@ -282,11 +279,8 @@ public class TaskController {
         String agentId,
         String jobId,
         String projectId,
-        String workspaceId,
-        String selectedWorkAreaId,
-        String outputRouteType,
-        String outputWorkAreaId,
-        String outputDirectRelativePath,
+        String workspaceType,
+        String workspaceKey,
         String runDisplayName,
         String modelOverride,
         Integer priority
@@ -297,12 +291,10 @@ public class TaskController {
             String agentId,
             String jobId,
             String projectId,
-            String workspaceId,
             String modelOverride,
             Integer priority
         ) {
-            this(inputValues, conversationId, agentId, jobId, projectId, workspaceId,
-                null, null, null, null, null, modelOverride, priority);
+            this(inputValues, conversationId, agentId, jobId, projectId, null, null, null, modelOverride, priority);
         }
     }
 

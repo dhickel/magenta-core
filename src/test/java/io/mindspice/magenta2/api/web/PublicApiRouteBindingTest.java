@@ -180,7 +180,8 @@ class PublicApiRouteBindingTest {
                 .content(json(Map.of(
                     "agentId", agentId,
                     "projectId", projectId,
-                    "workspaceId", "legacy-workspace-1"
+                    "workspaceType", "agent",
+                    "workspaceKey", agentId
                 ))))
             .andExpect(request().asyncStarted())
             .andReturn();
@@ -195,7 +196,7 @@ class PublicApiRouteBindingTest {
 
         Map<String, Object> assignmentRow = jdbcTemplate.queryForMap(
             """
-                select workspace_id, input_json
+                select workspace_type, workspace_key, workspace_identity, input_json
                 from work_assignments
                 where assignment_type = 'TASK_RUN'
                   and input_json like ?
@@ -204,7 +205,10 @@ class PublicApiRouteBindingTest {
                 """,
             "%" + planId + "%"
         );
-        assertThat(assignmentRow).containsEntry("workspace_id", "legacy-workspace-1");
+        assertThat(assignmentRow)
+            .containsEntry("workspace_type", "agent")
+            .containsEntry("workspace_key", agentId)
+            .containsEntry("workspace_identity", "agent/" + agentId);
         assertThat((String) assignmentRow.get("input_json")).contains(projectId);
     }
 

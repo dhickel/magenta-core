@@ -7,7 +7,6 @@ import java.util.List;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.mindspice.magenta2.ai.chat.plan.PlanFieldType;
-import io.mindspice.magenta2.ai.config.user.AiConfig;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -90,7 +89,7 @@ class OutputArtifactPathSemanticsTest {
         JdbcTemplate jdbc = new JdbcTemplate(
             new SingleConnectionDataSource("jdbc:sqlite::memory:?foreign_keys=true", true)
         );
-        WorkspaceRepository repository = new WorkspaceRepository(jdbc);
+        OutputArtifactRepository repository = new OutputArtifactRepository(jdbc);
         Path dataRoot = Files.createDirectories(tempDir.resolve(name).resolve("data"));
         WorkspaceDirectoryService directoryService = WorkspaceDirectoryServiceTestSupport.directoryService(dataRoot);
         OutputArtifactService service = new OutputArtifactService(
@@ -115,6 +114,8 @@ class OutputArtifactPathSemanticsTest {
             null,
             null,
             null,
+            null,
+            null,
             "summary",
             "text",
             "summary.txt",
@@ -132,7 +133,7 @@ class OutputArtifactPathSemanticsTest {
     }
 
     private record Fixture(
-        WorkspaceRepository repository,
+        OutputArtifactRepository repository,
         OutputArtifactService service,
         Path dataRoot
     ) {

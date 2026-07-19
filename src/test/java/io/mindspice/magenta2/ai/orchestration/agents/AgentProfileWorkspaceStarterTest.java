@@ -15,9 +15,7 @@ import io.mindspice.magenta2.ai.orchestration.workspaces.RootRelativePathService
 import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceDirectoryService;
 import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceDirectoryServiceTestSupport;
 import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceRepository;
-import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceDirectoryServiceTestSupport;
 import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceService;
-import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceDirectoryServiceTestSupport;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.springframework.beans.factory.ObjectProvider;
@@ -36,12 +34,12 @@ class AgentProfileWorkspaceStarterTest {
         AgentProfileService service = context.service();
 
         service.create(profile("agent-1", "Agent One"));
-        Path agentsFile = context.dataRoot().resolve("workspace/agent-1/AGENTS.md");
-        // Phase 02: starter file generation is removed
-        assertThat(Files.isRegularFile(agentsFile)).isFalse();
+        Path workspaceRoot = context.dataRoot().resolve("workspace/agent/agent-1");
+        Path agentsFile = workspaceRoot.resolve("AGENTS.md");
+        assertThat(Files.exists(workspaceRoot)).isFalse();
 
-        // User-created file is preserved across updates
         String custom = "# Custom AGENTS\n\nKeep this exact content.\n";
+        Files.createDirectories(workspaceRoot);
         Files.writeString(agentsFile, custom);
 
         service.update("agent-1", profile("agent-1", "Agent One Updated"));

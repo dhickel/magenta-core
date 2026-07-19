@@ -23,6 +23,7 @@ import io.mindspice.magenta2.ai.orchestration.runtime.ProjectService;
 import io.mindspice.magenta2.ai.orchestration.workflow.InboxMessageToType;
 import io.mindspice.magenta2.ai.orchestration.workflow.InboxService;
 import io.mindspice.magenta2.ai.orchestration.workflow.WorkflowRepository;
+import io.mindspice.magenta2.ai.orchestration.workspaces.OutputArtifactRepository;
 import io.mindspice.magenta2.ai.orchestration.workspaces.OutputArtifactService;
 import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceDirectoryService;
 import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceDirectoryServiceTestSupport;
@@ -85,7 +86,7 @@ class OperationalUiContractControllerTest {
         JobController controller = new JobController(services.jobService(), services.outputArtifactService());
 
         var job = controller.create(new io.mindspice.magenta2.ai.orchestration.runtime.JobDefinition(
-            null, "agent-1", "project-1", null, "DRAFT",
+            null, "agent-1", "project-1", "agent", "agent-1", null, "DRAFT",
             "Job", "", List.of(), null, null, null, null, null
         ));
         assertThat(job.items()).isEmpty();
@@ -106,7 +107,7 @@ class OperationalUiContractControllerTest {
         var services = jobServices();
         JobController controller = new JobController(services.jobService(), services.outputArtifactService());
         var job = controller.create(new io.mindspice.magenta2.ai.orchestration.runtime.JobDefinition(
-            null, null, null, null, "DRAFT", "Job", "", List.of(), null, null, null, null, null
+            null, null, null, null, null, null, "DRAFT", "Job", "", List.of(), null, null, null, null, null
         ));
 
         assertThatThrownBy(() -> controller.addItem(job.id(), new JobController.JobItemRequest(
@@ -133,9 +134,7 @@ class OperationalUiContractControllerTest {
         );
         var inboxService = new InboxService(new WorkflowRepository(jdbcTemplate, mapper), mapper);
         var outputService = new OutputArtifactService(
-            new WorkspaceRepository(jdbcTemplate),
-            directoryService,
-            mapper
+            new OutputArtifactRepository(jdbcTemplate), directoryService, mapper
         );
         DashboardController controller = new DashboardController(
             projectService, jobService, agentProfileService, inboxService, outputService
@@ -143,15 +142,15 @@ class OperationalUiContractControllerTest {
 
         var project = projectService.createProject("Alpha", "Active project", "agent-1", null);
         jobService.saveDefinition(new io.mindspice.magenta2.ai.orchestration.runtime.JobDefinition(
-            null, "agent-1", project.id(), null, "RUNNING", "Running Job", "", List.of(),
+            null, "agent-1", project.id(), "agent", "agent-1", null, "RUNNING", "Running Job", "", List.of(),
             null, null, null, null, null
         ));
         jobService.saveDefinition(new io.mindspice.magenta2.ai.orchestration.runtime.JobDefinition(
-            null, "agent-1", project.id(), null, "QUEUED", "Queued Job", "", List.of(),
+            null, "agent-1", project.id(), "agent", "agent-1", null, "QUEUED", "Queued Job", "", List.of(),
             null, null, null, null, null
         ));
         jobService.saveDefinition(new io.mindspice.magenta2.ai.orchestration.runtime.JobDefinition(
-            null, "agent-1", project.id(), null, "COMPLETED", "Completed Job", "", List.of(),
+            null, "agent-1", project.id(), "agent", "agent-1", null, "COMPLETED", "Completed Job", "", List.of(),
             null, null, null, null, null
         ));
         agentProfileService.create(new AgentProfile(
@@ -187,7 +186,7 @@ class OperationalUiContractControllerTest {
         var services = jobServices();
         OutputController controller = new OutputController(services.outputArtifactService(), services.jobService());
 
-        assertThat(controller.query(null, "missing", null, null, null, null, null, null, null, null, 20)).isEmpty();
+        assertThat(controller.query(null, "missing", null, null, null, null, null, null, null, null, null, null, 20)).isEmpty();
     }
 
     private ProjectController projectController() throws IOException {
@@ -206,9 +205,7 @@ class OperationalUiContractControllerTest {
         var directoryService = workspaceDirectoryService();
         var jobService = new JobService(new JobRepository(jdbcTemplate, mapper), directoryService, null, null);
         var outputService = new OutputArtifactService(
-            new WorkspaceRepository(jdbcTemplate),
-            directoryService,
-            mapper
+            new OutputArtifactRepository(jdbcTemplate), directoryService, mapper
         );
         return new JobServices(jobService, outputService);
     }

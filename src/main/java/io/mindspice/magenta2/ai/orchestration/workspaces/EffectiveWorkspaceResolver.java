@@ -29,26 +29,8 @@ public class EffectiveWorkspaceResolver {
 
     public EffectiveWorkspace resolve(String agentId, String projectId) {
         String cleanAgentId = normalize(agentId);
-        String cleanProjectId = normalize(projectId);
-        if (StringUtils.hasText(cleanProjectId)) {
-            PlainPathSegmentValidator.requirePlainSegment(cleanProjectId, "projectId");
-            if (StringUtils.hasText(cleanAgentId)) {
-                PlainPathSegmentValidator.requirePlainSegment(cleanAgentId, "agentId");
-            }
-            Workspace workspace = workspaceService.projectWorkspace(cleanProjectId, "Project " + cleanProjectId);
-            Path root = directoryService.projectWorkspaceRoot(cleanProjectId);
-            return resolved(
-                WorkspaceOwnerType.PROJECT,
-                cleanProjectId,
-                cleanAgentId,
-                cleanProjectId,
-                workspace.id(),
-                root
-            );
-        }
-
         if (!StringUtils.hasText(cleanAgentId)) {
-            throw new IllegalArgumentException("agentId is required when projectId is absent");
+            throw new IllegalArgumentException("agentId is required");
         }
         PlainPathSegmentValidator.requirePlainSegment(cleanAgentId, "agentId");
         Workspace workspace = workspaceService.agentWorkspace(cleanAgentId, "Agent " + cleanAgentId);
@@ -57,7 +39,7 @@ public class EffectiveWorkspaceResolver {
             WorkspaceOwnerType.AGENT,
             cleanAgentId,
             cleanAgentId,
-            null,
+            normalize(projectId),
             workspace.id(),
             root
         );

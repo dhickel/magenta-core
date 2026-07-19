@@ -5,7 +5,6 @@ import java.nio.file.Path;
 import java.util.Map;
 
 import io.mindspice.magenta2.ai.config.user.AiConfig;
-import io.mindspice.magenta2.ai.orchestration.runtime.AssignmentRequest;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -24,13 +23,13 @@ class OutputDirectoryServiceTest {
         ResolvedOutputDirectory resolved = fixture.service().resolve(OutputPublicationTarget.task(
             "task-1", "run-1", "agent-1", "project-1", "legacy-workspace-id"));
 
-        assertThat(resolved.workspaceOwnerType()).isEqualTo(WorkspaceOwnerType.PROJECT);
-        assertThat(resolved.workspaceOwnerId()).isEqualTo("project-1");
+        assertThat(resolved.workspaceOwnerType()).isEqualTo(WorkspaceOwnerType.AGENT);
+        assertThat(resolved.workspaceOwnerId()).isEqualTo("agent-1");
         assertThat(resolved.outputDirectory())
-            .isEqualTo(fixture.dataRoot().resolve("projects/project-1/outputs"));
+            .isEqualTo(fixture.dataRoot().resolve("workspace/agent-1/outputs"));
         assertThat(resolved.workspaceId()).isNotEqualTo("legacy-workspace-id");
-        assertThat(resolved.artifactContext().workspaceId()).isEqualTo(resolved.workspaceId());
-        assertThat(resolved.artifactContext().projectId()).isEqualTo("project-1");
+        assertThat(resolved.artifactContext().workspaceIdentity()).isEqualTo(resolved.workspaceId());
+        assertThat(resolved.artifactContext().projectId()).isNull();
         assertThat(resolved.artifactContext().runType()).isEqualTo("TASK_RUN");
         assertThat(Files.isDirectory(resolved.outputDirectory())).isTrue();
     }
@@ -57,10 +56,8 @@ class OutputDirectoryServiceTest {
             "job-1", "assignment-1", "job-run-1", "agent-1", "project-1", null));
 
         assertThat(resolved.outputDirectory())
-            .isEqualTo(fixture.dataRoot().resolve("projects/project-1/outputs"));
+            .isEqualTo(fixture.dataRoot().resolve("workspace/agent-1/outputs"));
         assertThat(resolved.artifactContext().jobId()).isEqualTo("job-1");
-        assertThat(resolved.artifactContext().jobAssignmentId()).isEqualTo("assignment-1");
-        assertThat(resolved.artifactContext().jobRunId()).isEqualTo("job-run-1");
         assertThat(resolved.artifactContext().runType()).isEqualTo("JOB_RUN");
     }
 
@@ -73,7 +70,7 @@ class OutputDirectoryServiceTest {
 
         ResolvedOutputDirectory resolved = fixture.service().resolve(OutputPublicationTarget.task(
             "task-1", "run-1", "agent-1", null, null,
-            selected.id(), AssignmentRequest.OUTPUT_ROUTE_DEFAULT, null, null));
+            selected.id(), "", null, null));
 
         assertThat(resolved.ownerRoot())
             .isEqualTo(fixture.dataRoot().resolve("workspace/agent-1"));
@@ -95,7 +92,7 @@ class OutputDirectoryServiceTest {
 
         ResolvedOutputDirectory resolved = fixture.service().resolve(OutputPublicationTarget.workflow(
             "workflow-1", "run-1", "agent-1", null, null,
-            selected.id(), AssignmentRequest.OUTPUT_ROUTE_WORK_AREA, output.id(), null));
+            selected.id(), "WORK_AREA", output.id(), null));
 
         assertThat(resolved.workspaceRoot())
             .isEqualTo(fixture.workAreaService().resolve(selected));
@@ -113,7 +110,7 @@ class OutputDirectoryServiceTest {
 
         ResolvedOutputDirectory resolved = fixture.service().resolve(OutputPublicationTarget.job(
             "job-1", "assignment-1", "job-run-1", "agent-1", null, null,
-            selected.id(), AssignmentRequest.OUTPUT_ROUTE_DIRECT_DIRECTORY, null, "manual"));
+            selected.id(), "DIRECT_DIRECTORY", null, "manual"));
 
         assertThat(resolved.outputDirectory())
             .isEqualTo(fixture.dataRoot().resolve("workspace/agent-1/manual"));

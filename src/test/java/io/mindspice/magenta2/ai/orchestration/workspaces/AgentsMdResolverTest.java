@@ -117,35 +117,29 @@ class AgentsMdResolverTest {
 
     @Test
     void resolvesProjectBoundRootWithSelectedWorkAreaAsNestedContext() throws Exception {
-        Path projectRoot = Files.createDirectories(tempDir.resolve("projects/project-1"));
-        Path selectedWorkArea = Files.createDirectories(projectRoot.resolve("workareas/area-1"));
-        writeAgents(projectRoot, "project-root");
-        writeAgents(selectedWorkArea, "work-area");
+        Path agentRoot = Files.createDirectories(tempDir.resolve("workspace/agent-1"));
+        Path nestedDir = Files.createDirectories(agentRoot.resolve("nested"));
+        writeAgents(agentRoot, "agent-root");
+        writeAgents(nestedDir, "nested-layer");
         OrchestrationTaskContext context = new OrchestrationTaskContext(
             "agent-1",
             "Agent One",
             null,
-            "project-1",
+            null,
             null,
             "TASK_RUN",
-            selectedWorkArea.toString(),
-            selectedWorkArea.resolve("outputs").toString(),
-            selectedWorkArea.toString(),
-            selectedWorkArea.resolve("runs/run-1").toString(),
-            null,
-            projectRoot.toString(),
-            "area-1",
-            null,
-            null,
-            null
+            agentRoot.toString(),
+            agentRoot.resolve("outputs").toString(),
+            agentRoot.toString(),
+            agentRoot.resolve("runs/run-1").toString()
         );
 
-        Optional<AgentsMdResolution> result = new AgentsMdResolver().resolveForContext(context, "workspace/notes.txt");
+        Optional<AgentsMdResolution> result = new AgentsMdResolver().resolveForContext(context, "workspace/nested/file.txt");
 
         assertThat(result).isPresent();
-        assertThat(result.orElseThrow().boundRoot()).isEqualTo(projectRoot.toRealPath());
+        assertThat(result.orElseThrow().boundRoot()).isEqualTo(agentRoot.toRealPath());
         assertThat(result.orElseThrow().layers()).extracting(AgentsMdLayer::relativeDirectory)
-            .containsExactly("", "workareas/area-1");
+            .containsExactly("", "nested");
     }
 
     @Test
@@ -164,13 +158,7 @@ class AgentsMdResolverTest {
             workspaceRoot.toString(),
             workspaceRoot.resolve("runs/run-1/outputs").toString(),
             workspaceRoot.toString(),
-            workspaceRoot.resolve("runs/run-1").toString(),
-            null,
-            null,
-            null,
-            null,
-            null,
-            null
+            workspaceRoot.resolve("runs/run-1").toString()
         );
 
         Optional<AgentsMdResolution> result = new AgentsMdResolver().resolveForContext(context, "workspace/docs/file.txt");

@@ -296,9 +296,16 @@ class AgentFileToolServiceTest {
         Files.writeString(unrelatedRuntime.resolve("secret.txt"), "other run\n");
 
         AgentFileToolService service = serviceWithWorkspaceDirectory();
-        OrchestrationTaskContextHolder.set(new OrchestrationTaskContext(
-            "agent-1", "TestAgent", null, null, null, "TASK_RUN",
-            runWorkspace.toString(), outputDir.toString()));
+        OrchestrationTaskContextHolder.set(new OrchestrationTaskContext("agent-1",
+            "TestAgent",
+            null,
+            null,
+            "agent",
+            "agent-1",
+            "agent/agent-1",
+            "TASK_RUN",
+            runWorkspace.toString(),
+            outputDir.toString()));
 
         AgentFileToolService.FileReadResult result = service.read("notes.txt", 1, 10);
 
@@ -317,9 +324,16 @@ class AgentFileToolServiceTest {
         Files.writeString(otherAgent.resolve("secret.txt"), "other agent\n");
 
         AgentFileToolService service = serviceWithWorkspaceDirectory();
-        OrchestrationTaskContextHolder.set(new OrchestrationTaskContext(
-            "agent-1", "TestAgent", null, null, null, "TASK_RUN",
-            runWorkspace.toString(), outputDir.toString()));
+        OrchestrationTaskContextHolder.set(new OrchestrationTaskContext("agent-1",
+            "TestAgent",
+            null,
+            null,
+            "agent",
+            "agent-1",
+            "agent/agent-1",
+            "TASK_RUN",
+            runWorkspace.toString(),
+            outputDir.toString()));
 
         AgentFileToolService.FileWriteResult written = service.write("outputs/result.txt", "done\n", false);
 
@@ -345,9 +359,10 @@ class AgentFileToolServiceTest {
 
         AgentFileToolService service = serviceWithWorkspaceDirectory();
         OrchestrationTaskContextHolder.set(new OrchestrationTaskContext(
-            "agent-1", "TestAgent", null, "project-1", "workspace-1", "TASK_RUN",
-            runWorkspace.toString(), outputDir.toString(), selectedWorkArea.toString(), runWorkspace.toString(),
-            null, durableWorkspace.toString(), "work-area-1", "DEFAULT", null, null));
+            "agent-1", "TestAgent", null, null, null, "project-1",
+            null, "workspace-1", "workspace-1", "TASK_RUN", null,
+            selectedWorkArea.toString(), outputDir.toString(),
+            runWorkspace.toString(), durableWorkspace.toString(), null));
         try {
             assertThat(service.read("workspace/selected.txt", 1, 10).lines().getFirst()).endsWith("|selected root");
             assertThat(service.read("root/root.txt", 1, 10).lines().getFirst()).endsWith("|owner root");
@@ -370,9 +385,10 @@ class AgentFileToolServiceTest {
 
         AgentFileToolService service = serviceWithWorkspaceDirectory();
         OrchestrationTaskContextHolder.set(new OrchestrationTaskContext(
-            "agent-1", "TestAgent", null, null, null, "TASK_RUN",
-            durableWorkspace.toString(), outputDir.toString(), durableWorkspace.toString(),
-            durableWorkspace.resolve("runs/run-1").toString()));
+            "agent-1", "TestAgent", null, null, null, null,
+            null, "workspace-1", "workspace-1", "TASK_RUN", null,
+            durableWorkspace.toString(), outputDir.toString(),
+            durableWorkspace.resolve("runs/run-1").toString(), durableWorkspace.toString(), null));
 
         service.read("workspace/a/file.txt", 1, 10);
         assertThat(OrchestrationTaskContextHolder.current().activeRuntimePath())
@@ -407,9 +423,16 @@ class AgentFileToolServiceTest {
         dirService.materializeAssignmentProjectLink(runWorkspace.toString(), "project-1");
 
         AgentFileToolService service = new AgentFileToolService(tempDir, dirService);
-        OrchestrationTaskContextHolder.set(new OrchestrationTaskContext(
-            "agent-1", "TestAgent", null, "project-1", null, "TASK_RUN",
-            runWorkspace.toString(), outputDir.toString()));
+        OrchestrationTaskContextHolder.set(new OrchestrationTaskContext("agent-1",
+            "TestAgent",
+            null,
+            "project-1",
+            "agent",
+            "agent-1",
+            "agent/agent-1",
+            "TASK_RUN",
+            runWorkspace.toString(),
+            outputDir.toString()));
 
         AgentFileToolService.FileReadResult result = service.read("projects/project-1/shared.txt", 1, 10);
 
@@ -427,8 +450,16 @@ class AgentFileToolServiceTest {
         Files.writeString(agentWorkspace.resolve("profile.txt"), "agent workspace\n");
 
         AgentFileToolService service = new AgentFileToolService(tempDir, dirService);
-        OrchestrationTaskContextHolder.set(new OrchestrationTaskContext(
-            "agent-1", "TestAgent", null, null, null, "TASK_RUN", null, null));
+        OrchestrationTaskContextHolder.set(new OrchestrationTaskContext("agent-1",
+            "TestAgent",
+            null,
+            null,
+            "agent",
+            "agent-1",
+            "agent/agent-1",
+            "TASK_RUN",
+            null,
+            null));
 
         AgentFileToolService.FileReadResult result = service.read("workspace/profile.txt", 1, 10);
 
@@ -449,9 +480,16 @@ class AgentFileToolServiceTest {
         }
 
         AgentFileToolService service = serviceWithWorkspaceDirectory();
-        OrchestrationTaskContextHolder.set(new OrchestrationTaskContext(
-            "agent-1", "TestAgent", null, null, null, "TASK_RUN",
-            runWorkspace.toString(), outputDir.toString()));
+        OrchestrationTaskContextHolder.set(new OrchestrationTaskContext("agent-1",
+            "TestAgent",
+            null,
+            null,
+            "agent",
+            "agent-1",
+            "agent/agent-1",
+            "TASK_RUN",
+            runWorkspace.toString(),
+            outputDir.toString()));
 
         assertThatThrownBy(() -> service.read("../run-2/secret.txt", 1, 10))
             .isInstanceOf(IllegalArgumentException.class)

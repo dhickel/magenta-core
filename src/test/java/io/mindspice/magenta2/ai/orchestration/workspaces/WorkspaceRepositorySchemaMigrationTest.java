@@ -43,25 +43,31 @@ class WorkspaceRepositorySchemaMigrationTest {
         List<String> planRunColumns = columns(jdbc, "plan_runs");
         List<String> artifactColumns = columns(jdbc, "run_output_artifacts");
 
-        assertThat(planRunColumns).contains("temp_workspace_path");
-        assertThat(artifactColumns).contains(
-            "agent_id", "job_id", "job_assignment_id", "job_run_id", "project_id", "workspace_id", "run_type");
+        assertThat(planRunColumns)
+            .contains("run_display_name", "workspace_type", "workspace_key", "workspace_identity")
+            .doesNotContain("workspace_id", "output_directory", "temp_workspace_path");
+        assertThat(artifactColumns)
+            .contains("agent_id", "job_id", "job_assignment_id", "job_run_id", "project_id",
+                "workspace_type", "workspace_key", "workspace_identity", "run_type")
+            .doesNotContain("workspace_id");
         assertThat(foreignKeyTargets(jdbc, "run_output_artifacts")).doesNotContain("plan_runs");
         assertThat(indexes(jdbc, "run_output_artifacts"))
             .contains(
                 "idx_run_output_artifacts_run",
                 "idx_run_output_artifacts_agent",
                 "idx_run_output_artifacts_job",
-                "idx_run_output_artifacts_project",
-                "idx_run_output_artifacts_workspace"
+                "idx_run_output_artifacts_project"
             );
 
         new PlanRepository(jdbc, new ObjectMapper());
         new WorkspaceRepository(jdbc);
+        new OutputArtifactRepository(jdbc);
 
         assertThat(columns(jdbc, "plan_runs")).containsAll(planRunColumns);
         assertThat(columns(jdbc, "plan_runs")).contains("run_display_name");
         assertThat(columns(jdbc, "run_output_artifacts")).isEqualTo(artifactColumns);
+        assertThat(indexes(jdbc, "run_output_artifacts"))
+            .contains("idx_run_output_artifacts_workspace_identity");
         assertThat(foreignKeyTargets(jdbc, "run_output_artifacts")).doesNotContain("plan_runs");
     }
 
@@ -162,9 +168,9 @@ class WorkspaceRepositorySchemaMigrationTest {
 
         applySchema(jdbc);
 
-        assertThat(columns(jdbc, "work_assignments")).doesNotContain("run_display_name");
-        assertThat(columns(jdbc, "plan_runs")).doesNotContain("run_display_name");
-        assertThat(columns(jdbc, "workflow_runs")).doesNotContain("run_display_name");
+        assertThat(columns(jdbc, "work_assignments")).contains("run_display_name");
+        assertThat(columns(jdbc, "plan_runs")).contains("run_display_name");
+        assertThat(columns(jdbc, "workflow_runs")).contains("run_display_name");
 
         new OrchestrationRuntimeRepository(jdbc, mapper);
         new PlanRepository(jdbc, mapper);
@@ -185,8 +191,12 @@ class WorkspaceRepositorySchemaMigrationTest {
         assertThat(tableExists(jdbc, "orchestration_job_items")).isTrue();
         assertThat(tableExists(jdbc, "job_definitions")).isTrue();
         assertThat(tableExists(jdbc, "job_runs")).isTrue();
-        assertThat(columns(jdbc, "job_definitions")).contains("persistent_workspace_enabled");
-        assertThat(columns(jdbc, "job_runs")).contains("job_assignment_id", "workspace_id");
+        assertThat(columns(jdbc, "job_definitions"))
+            .contains("workspace_type", "workspace_key", "workspace_identity")
+            .doesNotContain("workspace_id", "persistent_workspace_enabled");
+        assertThat(columns(jdbc, "job_runs"))
+            .contains("job_assignment_id", "workspace_type", "workspace_key", "workspace_identity")
+            .doesNotContain("workspace_id", "workspace_path", "output_dir");
     }
 
     @Test

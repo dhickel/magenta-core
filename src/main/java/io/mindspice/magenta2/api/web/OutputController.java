@@ -43,7 +43,9 @@ public class OutputController {
                                          @RequestParam(required = false) String jobAssignmentId,
                                          @RequestParam(required = false) String jobRunId,
                                          @RequestParam(required = false) String projectId,
-                                         @RequestParam(required = false) String workspaceId,
+                                         @RequestParam(required = false) String workspaceType,
+                                         @RequestParam(required = false) String workspaceKey,
+                                         @RequestParam(required = false) String workspaceIdentity,
                                          @RequestParam(required = false) String runId,
                                          @RequestParam(required = false) String planId,
                                          @RequestParam(required = false) String runType,
@@ -55,7 +57,9 @@ public class OutputController {
             jobAssignmentId,
             jobRunId,
             projectId,
-            workspaceId,
+            workspaceType,
+            workspaceKey,
+            workspaceIdentity,
             runId,
             planId,
             runType,
@@ -66,7 +70,9 @@ public class OutputController {
         if (!direct.isEmpty()
             || StringUtils.hasText(runId)
             || StringUtils.hasText(planId)
-            || StringUtils.hasText(workspaceId)
+            || StringUtils.hasText(workspaceType)
+            || StringUtils.hasText(workspaceKey)
+            || StringUtils.hasText(workspaceIdentity)
             || StringUtils.hasText(jobAssignmentId)
             || StringUtils.hasText(jobRunId)
             || StringUtils.hasText(runType)) {
@@ -102,7 +108,9 @@ public class OutputController {
             result.put("jobAssignmentId", artifact.jobAssignmentId());
             result.put("jobRunId", artifact.jobRunId());
             result.put("projectId", artifact.projectId());
-            result.put("workspaceId", artifact.workspaceId());
+            result.put("workspaceType", artifact.workspaceType());
+            result.put("workspaceKey", artifact.workspaceKey());
+            result.put("workspaceIdentity", artifact.workspaceIdentity());
             result.put("runType", artifact.runType());
 
             // Load text content where safe (text, json, markdown)

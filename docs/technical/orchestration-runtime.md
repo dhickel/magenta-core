@@ -23,16 +23,16 @@ Core fields:
 
 - `agent_id`, optional `job_id` and `job_item_id`.
 - `assignment_type`: task, workflow, job, or other runtime work type.
-- `priority`, `status`, `model_override`, first-class `project_id`, compatibility `workspace_id`, `effective_workspace_id`, and `effective_workspace_kind`.
+- `priority`, `status`, `model_override`, first-class `project_id`, `workspace_type`, `workspace_key`, and internally derived `workspace_identity`.
 - `current_item_index`, `checkpoint_json`, input/output/evidence JSON.
 - `error_text`, lease owner/expires, progress/heartbeat timestamps.
 - Created, updated, started, completed timestamps.
 
 `AssignmentService` owns creation, queue reads, retained history reads, lifecycle transitions, deletion, purge, diagnostics, transcript lookup, and assignment-to-conversation links.
 
-`projectId` selects project-scoped execution and the project workspace. `workspaceId` remains compatibility metadata for older callers and UI references; it is not interpreted as project context. New assignments persist first-class project/effective workspace fields and still keep `input.projectId` for compatibility with older records and consumers.
+`projectId` is membership and attribution metadata only. Execution selection uses the nullable-together `workspaceType`/`workspaceKey` pair; omission selects the bound agent. Canonical identity is derived internally.
 
-`AssignmentService.AssignmentSummary` is the UI-facing read model for queue/history/project context. It exposes assignment id, agent/job ids, status, `projectId`, compatibility `workspaceId`, effective workspace id/kind/display path, workspace blocker details, linked run ids, and lifecycle timestamps.
+`AssignmentService.AssignmentSummary` is the UI-facing read model for queue/history/project context. It exposes assignment id, agent/job ids, status, `projectId`, typed workspace selection and identity, linked run ids, and lifecycle timestamps.
 
 ## Queue Lifecycle
 
@@ -47,13 +47,13 @@ Status values are represented by `OrchestrationStatus`. Lifecycle controls inclu
 
 The runtime stores retained terminal history separately from active queue reads. History can be purged by age through assignment history APIs and settings.
 
-Assignments waiting on project workspace leases can be requeued after the blocking lease clears through assignment service/operator actions. The UI should show the blocker rather than implying lease release is immediate.
+Assignment queue leases coordinate runner ownership. Filesystem workspace lease blocking and workspace-blocked requeue behavior are not part of active execution.
 
 ## Leases and Progress
 
 Assignment queue leasing is DB-backed and independent from filesystem workspace leases. Assignment lease fields (`lease_owner`, `lease_expires_at`, progress and heartbeat timestamps) allow runner ownership and stale-run diagnostics.
 
-Workspace writable leases are a separate concept in `workspace_leases`; see [Workspaces, Tools, and Outputs](workspaces-tools-outputs.md).
+Obsolete filesystem lease tables may remain in existing databases but are inert for active execution.
 
 ## Execution Boundaries
 
@@ -65,7 +65,7 @@ Workspace writable leases are a separate concept in `workspace_leases`; see [Wor
 
 The runtime does not attempt token-level or partial model response resume. Durable recovery is at task, workflow, and job item boundaries using assignment checkpoints and run records.
 
-Every assignment resolves one effective durable workspace before execution: project workspace when `projectId` is present, otherwise the executing agent workspace. Run staging remains separate from final promoted outputs.
+Every execution attempt resolves one descriptor from its persisted `workspaceType`/`workspaceKey` selection. The descriptor flows through tools, prompts, workflow/job children, and direct output publication. No project or run staging root is allocated.
 
 ## Jobs
 
@@ -76,9 +76,9 @@ There are two job-related schemas:
 
 Current public job APIs use `JobDefinition` and `JobWorkItem`. Public job execution submits `AssignmentType.JOB_RUN`. Job items can reference tasks or workflows, include model override and priority, and persist retry count plus continue-on-failure policy. Empty job submissions are valid no-op executions: the assignment-owned `job_runs` row moves to `COMPLETED` with an empty item-run list.
 
-User-facing jobs are task-like executable work bound to an agent, project, and Work Area. Jobs do not own directories, persistent workspaces, or multi-task container filesystem state. During execution, model-facing `outputs/` resolves to the current run-local output staging directory; backend completion, validation, or promotion writes final outputs to the bound Work Area or project output destination. The compatibility `workspaceId` field remains available on definitions and submissions.
+User-facing jobs are task-like executable work bound to an agent and optional project metadata. Definitions and runs persist workspace type, key, and canonical identity. Jobs own no directory and create no eager output tree.
 
-`JobExecutionSummary` is the stable read model for operator views. It bridges job definition, assignment id/status, agent/project labels, compatibility workspace id, effective workspace id/kind/path, Work Area/output context, job run id/status, child run ids, output count, and lifecycle timestamps. Legacy rows may still expose compatibility job workspace/path fields. It covers both the pending gap after assignment creation and the later state after a `job_runs` row exists.
+`JobExecutionSummary` bridges the definition, assignment, agent/project attribution, typed workspace selection, job run status, child run ids, output count, and lifecycle timestamps. It exposes no compatibility workspace id or host path.
 
 Job recurrence/start behavior is assignment-routed. Recurrence firing enqueues `JOB_RUN` assignments and advances recurrence timestamps; direct job run allocation is reserved for assignment-owned runner execution.
 
@@ -111,7 +111,7 @@ Reactions match event type and optional filter JSON, then apply an action type s
 
 `ProjectService` owns projects, memberships, events, and project workspace summaries.
 
-Projects are durable shared workspace, membership, and visibility abstractions. They are not executable work units and no longer require a permanent owner agent. `ownerAgentId` remains a nullable legacy compatibility field on project records and create payloads. Work executes through an agent with optional `projectId`; project-scoped work uses the project workspace as the effective durable workspace.
+Projects are durable membership, tracking, and visibility abstractions. They are not executable work units and do not select or allocate execution filesystems. `ownerAgentId` remains nullable legacy project metadata.
 
 ## Runtime Settings
 

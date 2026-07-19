@@ -31,16 +31,14 @@ import io.mindspice.magenta2.ai.orchestration.workflow.WorkflowService;
 import io.mindspice.magenta2.ai.orchestration.workspaces.OutputArtifactContext;
 import io.mindspice.magenta2.ai.orchestration.workspaces.OutputArtifactService;
 import io.mindspice.magenta2.ai.orchestration.workspaces.RootRelativePathService;
-import io.mindspice.magenta2.ai.orchestration.workspaces.Workspace;
-import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceLease;
-import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceLeaseService;
-import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceService;
+import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceDescriptor;
 import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceDirectoryService;
+import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceKind;
+import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceResolutionException;
 import jakarta.annotation.PreDestroy;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.event.EventListener;
@@ -64,8 +62,6 @@ public class OrchestrationRunnerService {
     private final OrchestrationEventService eventService;
     private final OutputArtifactService outputArtifactService;
     private final ProjectService projectService;
-    private final WorkspaceService workspaceService;
-    private final WorkspaceLeaseService workspaceLeaseService;
     private final WorkspaceDirectoryService workspaceDirectoryService;
     private final RootRelativePathService rootRelativePathService;
     private final AgentProfileService agentProfileService;
@@ -91,11 +87,29 @@ public class OrchestrationRunnerService {
         OrchestrationEventService eventService,
         MagentaWorkExecutor executor
     ) {
-        this(
-            repository, assignmentService, jobService, taskService, workflowService, null, inboxService,
-            eventService, null, null, null, null, null, null, null, executor,
-            DEFAULT_LEASE_DURATION.toSeconds(), DEFAULT_HEARTBEAT_INTERVAL.toSeconds()
-        );
+        this(repository, assignmentService, jobService, taskService, workflowService, null, inboxService,
+            eventService, null, null, null, null, null, executor,
+            DEFAULT_LEASE_DURATION.toSeconds(), DEFAULT_HEARTBEAT_INTERVAL.toSeconds());
+    }
+
+    /**
+     * Backward-compatible constructor for tests that don't pass task/workflow/inbox/event services.
+     * @deprecated Use the full @Autowired constructor.
+     */
+    @Deprecated
+    public OrchestrationRunnerService(
+        OrchestrationRuntimeRepository repository,
+        AssignmentService assignmentService,
+        JobService jobService,
+        ChatService chatService,
+        AgentProfileService agentProfileService,
+        WorkspaceDirectoryService workspaceDirectoryService,
+        ProjectService projectService,
+        MagentaWorkExecutor executor
+    ) {
+        this(repository, assignmentService, jobService, null, null, chatService, null, null,
+            agentProfileService, null, projectService, workspaceDirectoryService, null,
+            executor, DEFAULT_LEASE_DURATION.toSeconds(), DEFAULT_HEARTBEAT_INTERVAL.toSeconds());
     }
 
     @Autowired
@@ -111,8 +125,6 @@ public class OrchestrationRunnerService {
         @Autowired(required = false) AgentProfileService agentProfileService,
         @Autowired(required = false) OutputArtifactService outputArtifactService,
         @Autowired(required = false) ProjectService projectService,
-        @Autowired(required = false) WorkspaceService workspaceService,
-        @Autowired(required = false) WorkspaceLeaseService workspaceLeaseService,
         @Autowired(required = false) WorkspaceDirectoryService workspaceDirectoryService,
         @Autowired(required = false) RootRelativePathService rootRelativePathService,
         MagentaWorkExecutor executor,
@@ -130,60 +142,14 @@ public class OrchestrationRunnerService {
         this.agentProfileService = agentProfileService;
         this.outputArtifactService = outputArtifactService;
         this.projectService = projectService;
-        this.workspaceService = workspaceService;
-        this.workspaceLeaseService = workspaceLeaseService;
         this.workspaceDirectoryService = workspaceDirectoryService;
-        this.rootRelativePathService = rootRelativePathService != null
-            ? rootRelativePathService
-            : workspaceDirectoryService == null ? null : new RootRelativePathService(workspaceDirectoryService);
+        this.rootRelativePathService = workspaceDirectoryService != null
+            ? new RootRelativePathService(workspaceDirectoryService)
+            : null;
         this.executor = executor;
         this.leaseDuration = secondsOrDefault(leaseSeconds, DEFAULT_LEASE_DURATION);
         this.heartbeatInterval = secondsOrDefault(heartbeatSeconds, DEFAULT_HEARTBEAT_INTERVAL);
         this.assignmentService.registerLocalInterruptHandler(this::cancelLocalAssignment);
-    }
-
-    public OrchestrationRunnerService(
-        OrchestrationRuntimeRepository repository,
-        AssignmentService assignmentService,
-        JobService jobService,
-        TaskService taskService,
-        WorkflowService workflowService,
-        ChatService chatService,
-        InboxService inboxService,
-        OrchestrationEventService eventService,
-        AgentProfileService agentProfileService,
-        OutputArtifactService outputArtifactService,
-        ProjectService projectService,
-        WorkspaceService workspaceService,
-        WorkspaceLeaseService workspaceLeaseService,
-        WorkspaceDirectoryService workspaceDirectoryService,
-        MagentaWorkExecutor executor,
-        long leaseSeconds,
-        long heartbeatSeconds
-    ) {
-        this(
-            repository, assignmentService, jobService, taskService, workflowService, chatService, inboxService,
-            eventService, agentProfileService, outputArtifactService, projectService, workspaceService,
-            workspaceLeaseService, workspaceDirectoryService, null, executor, leaseSeconds, heartbeatSeconds
-        );
-    }
-
-    public OrchestrationRunnerService(
-        OrchestrationRuntimeRepository repository,
-        AssignmentService assignmentService,
-        JobService jobService,
-        TaskService taskService,
-        WorkflowService workflowService,
-        ChatService chatService,
-        InboxService inboxService,
-        OrchestrationEventService eventService,
-        MagentaWorkExecutor executor
-    ) {
-        this(
-            repository, assignmentService, jobService, taskService, workflowService, chatService, inboxService,
-            eventService, null, null, null, null, null, null, null, executor,
-            DEFAULT_LEASE_DURATION.toSeconds(), DEFAULT_HEARTBEAT_INTERVAL.toSeconds()
-        );
     }
 
     @Scheduled(fixedDelayString = "${magenta.orchestration.runner-delay-ms:2000}")
@@ -191,9 +157,7 @@ public class OrchestrationRunnerService {
         recoverStaleLeases();
         for (WorkAssignment queued : repository.findRecoverableAssignments(4)) {
             var leased = repository.acquireLease(queued.id(), leaseOwner, Instant.now().plus(leaseDuration));
-            if (leased.isEmpty()) {
-                continue;
-            }
+            if (leased.isEmpty()) continue;
             WorkAssignment assignment = leased.get();
             try {
                 CompletableFuture<?> future = executor.submitBackground(assignment.id(), assignment.priority(),
@@ -239,12 +203,6 @@ public class OrchestrationRunnerService {
 
     private WorkAssignment executeWithLease(WorkAssignment leased) {
         ScheduledFuture<?> heartbeat = startLeaseHeartbeat(leased.id());
-        try {
-            leased = assignmentService.repairEffectiveWorkspaceContext(leased);
-        } catch (RuntimeException exception) {
-            heartbeat.cancel(false);
-            return fail(assignmentService.get(leased.id()), exception.getMessage());
-        }
         AgentProfile profile = null;
         if (agentProfileService != null) {
             profile = agentProfileService.get(leased.agentId());
@@ -254,65 +212,37 @@ public class OrchestrationRunnerService {
                     "Agent " + leased.agentId() + " is disabled and cannot execute assignments.");
             }
         }
-        // Build orchestration task context for the execution
+
+        // Resolve workspace descriptor from persisted type/key
+        WorkspaceDescriptor workspaceDescriptor = resolveWorkspaceDescriptor(leased);
+        if (workspaceDescriptor == null) {
+            heartbeat.cancel(false);
+            return fail(assignmentService.get(leased.id()), "Workspace selection cannot be resolved");
+        }
+        String durablePath = workspaceDescriptor.root().toString();
+
+        OrchestrationTaskContext taskContext = new OrchestrationTaskContext(
+            leased.agentId(),
+            profile != null ? profile.name() : null,
+            leased.jobId(),
+            resolveProjectId(leased), // projectId for attribution only
+            leased.workspaceType(),
+            leased.workspaceKey(),
+            leased.workspaceIdentity(),
+            leased.assignmentType().name(), // runType
+            durablePath, // hostWorkspacePath (also hostDurableWorkspacePath in convenience ctor)
+            null // hostOutputPath — resolved by PlanService during startRun
+        );
+
+        // Validate project membership (projectId is metadata only)
         String projectId = resolveProjectId(leased);
-        WorkspaceLease projectLease = null;
-        Workspace projectWorkspace = null;
-        if (StringUtils.hasText(projectId)) {
-            if (projectService == null || workspaceService == null || workspaceLeaseService == null
-                || workspaceDirectoryService == null) {
-                heartbeat.cancel(false);
-                return fail(assignmentService.get(leased.id()), "Project workspace lease management is unavailable.");
-            }
+        if (StringUtils.hasText(projectId) && projectService != null) {
             if (!projectService.isMember(projectId, leased.agentId())) {
                 heartbeat.cancel(false);
                 return fail(assignmentService.get(leased.id()),
                     "Agent " + leased.agentId() + " is not a member of project " + projectId);
             }
-            projectWorkspace = workspaceService.projectWorkspace(projectId, projectService.getProject(projectId).name());
-            try {
-                projectLease = workspaceLeaseService.acquireWritable(
-                    projectWorkspace.id(), "ASSIGNMENT", leased.id(), leaseDuration
-                );
-            } catch (IllegalStateException conflict) {
-                Map<String, Object> checkpoint = new LinkedHashMap<>(leased.checkpoint());
-                checkpoint.put("workspaceBlocker", conflict.getMessage());
-                checkpoint.put("projectId", projectId);
-                checkpoint.put("projectWorkspaceId", projectWorkspace.id());
-                heartbeat.cancel(false);
-                return assignmentService.save(assignmentService.copy(
-                    leased, OrchestrationStatus.WAITING, leased.currentItemIndex(), checkpoint,
-                    leased.output(), leased.evidence(), conflict.getMessage(), null, null, null
-                ));
-            }
         }
-        final WorkspaceLease acquiredProjectLease = projectLease;
-        final String assignmentLeaseHolderId = leased.id();
-        ScheduledFuture<?> projectHeartbeat = acquiredProjectLease == null ? null : heartbeatExecutor.scheduleAtFixedRate(
-            () -> workspaceLeaseService.extendLease(acquiredProjectLease.id(), assignmentLeaseHolderId, leaseDuration),
-            Math.max(1, heartbeatInterval.toMillis()),
-            Math.max(1, heartbeatInterval.toMillis()),
-            TimeUnit.MILLISECONDS
-        );
-        OrchestrationTaskContext taskContext = new OrchestrationTaskContext(
-            leased.agentId(),
-            profile != null ? profile.name() : null,
-            leased.jobId(),
-            projectId,
-            firstText(leased.effectiveWorkspaceId(), leased.workspaceId()),
-            leased.assignmentType().name(),
-            leased.runDisplayName(),
-            null, // hostWorkspacePath — resolved by PlanService during startRun
-            null, // hostOutputPath — resolved by PlanService during startRun
-            null,
-            null,
-            null,
-            null,
-            leased.selectedWorkAreaId(),
-            leased.outputRouteType(),
-            leased.outputWorkAreaId(),
-            leased.outputDirectRelativePath()
-        );
 
         try {
             OrchestrationTaskContextHolder.set(taskContext);
@@ -333,43 +263,41 @@ public class OrchestrationRunnerService {
             }
             return fail(current, exception.getMessage());
         } finally {
-            OrchestrationTaskContext finalContext = OrchestrationTaskContextHolder.current();
-            removeMaterializedProjectLink(finalContext);
             OrchestrationTaskContextHolder.clear();
-            if (projectLease != null) {
-                workspaceLeaseService.release(projectLease.id(), leased.id());
-            }
             heartbeat.cancel(false);
-            if (projectHeartbeat != null) {
-                projectHeartbeat.cancel(false);
-            }
         }
     }
 
-    private void removeMaterializedProjectLink(OrchestrationTaskContext context) {
-        if (context == null
-            || workspaceDirectoryService == null
-            || !StringUtils.hasText(context.hostWorkspacePath())
-            || !StringUtils.hasText(context.projectId())) {
-            return;
+    private WorkspaceDescriptor resolveWorkspaceDescriptor(WorkAssignment assignment) {
+        if (workspaceDirectoryService == null) return null;
+        if (!StringUtils.hasText(assignment.workspaceType())) {
+            // Default to agent
+            try {
+                return workspaceDirectoryService.resolveForWrite(
+                    WorkspaceKind.AGENT, assignment.agentId());
+            } catch (WorkspaceResolutionException e) {
+                return null;
+            }
         }
         try {
-            workspaceDirectoryService.removeAssignmentProjectLink(context.hostWorkspacePath(), context.projectId());
-        } catch (RuntimeException e) {
-            logger.warn("Failed to remove materialized project workspace link for assignment project={}: {}",
-                context.projectId(), e.getMessage());
+            WorkspaceKind kind = WorkspaceKind.fromToken(assignment.workspaceType());
+            if (kind == WorkspaceKind.CHAT) {
+                logger.warn("Chat workspace selection is not supported for execution");
+                return null;
+            }
+            return workspaceDirectoryService.resolveForWrite(kind, assignment.workspaceKey());
+        } catch (Exception e) {
+            logger.warn("Failed to resolve workspace descriptor for assignment {}: {}",
+                assignment.id(), e.getMessage());
+            return null;
         }
     }
 
     private String resolveProjectId(WorkAssignment assignment) {
         String assignmentProjectId = assignment.projectId();
-        if (StringUtils.hasText(assignmentProjectId)) {
-            return assignmentProjectId;
-        }
+        if (StringUtils.hasText(assignmentProjectId)) return assignmentProjectId;
         String projectId = text(assignment.input().get("projectId"), null);
-        if (StringUtils.hasText(projectId)) {
-            return projectId;
-        }
+        if (StringUtils.hasText(projectId)) return projectId;
         String jobId = assignment.jobId();
         if (!StringUtils.hasText(jobId)) {
             jobId = text(assignment.input().get("jobId"), null);
@@ -377,18 +305,14 @@ public class OrchestrationRunnerService {
         if (StringUtils.hasText(jobId)) {
             try {
                 return jobService.getDefinition(jobId).projectId();
-            } catch (RuntimeException ignored) {
-                // project may not exist
-            }
+            } catch (RuntimeException ignored) {}
         }
         return null;
     }
 
     private void cancelLocalAssignment(String assignmentId) {
         CompletableFuture<?> future = activeAssignmentFutures.remove(assignmentId);
-        if (future != null) {
-            future.cancel(true);
-        }
+        if (future != null) future.cancel(true);
     }
 
     @PreDestroy
@@ -408,16 +332,19 @@ public class OrchestrationRunnerService {
 
     private WorkAssignment runTask(WorkAssignment assignment) {
         String taskId = text(assignment.input().get("taskId"), null);
-        TaskExecution taskExecution = runTaskThroughModel(taskId, mapValue(assignment.input().get("inputValues")), assignment,
+        TaskExecution taskExecution = runTaskThroughModel(taskId,
+            mapValue(assignment.input().get("inputValues")), assignment,
             assignmentService.resolveModel(assignment, null));
         TaskRun taskRun = taskExecution.run();
         backfillTaskRunAttribution(taskRun.id(), assignment, assignment.assignmentType().name());
-        Map<String, Object> checkpoint = mergeConversationCheckpoint(assignment.checkpoint(), taskExecution.conversationId(),
+        Map<String, Object> checkpoint = mergeConversationCheckpoint(assignment.checkpoint(),
+            taskExecution.conversationId(),
             Map.of("taskRunId", taskRun.id(), "status", taskRun.status().name()));
         Map<String, Object> output = mergeConversationOutput(
             Map.of("taskRunId", taskRun.id(), "outputValues", taskRun.outputValues()),
             taskExecution.conversationId());
-        return complete(checkpointed(assignment, assignment.currentItemIndex(), checkpoint, output, evidence(taskRun)), output, evidence(taskRun));
+        return complete(checkpointed(assignment, assignment.currentItemIndex(), checkpoint, output, evidence(taskRun)),
+            output, evidence(taskRun));
     }
 
     private WorkAssignment runWorkflow(WorkAssignment assignment) {
@@ -426,9 +353,7 @@ public class OrchestrationRunnerService {
         WorkflowRun workflowRun = resumeOrStartWorkflow(assignment, workflowId, model);
         backfillWorkflowRunAttribution(workflowRun, assignment, "WORKFLOW_RUN");
         WorkAssignment current = assignmentService.get(assignment.id());
-        if (current.status() == OrchestrationStatus.CANCEL_REQUESTED) {
-            return cancel(current);
-        }
+        if (current.status() == OrchestrationStatus.CANCEL_REQUESTED) return cancel(current);
         Map<String, Object> checkpoint = mergeCheckpoint(current.checkpoint(),
             Map.of("workflowRunId", workflowRun.id(), "status", workflowRun.status().name()));
         Map<String, Object> output = mergeConversationOutput(
@@ -448,7 +373,8 @@ public class OrchestrationRunnerService {
         if (StringUtils.hasText(existingRunId)) {
             WorkflowRun existing = workflowService.getRun(existingRunId);
             if (existing.status() == WorkflowRunStatus.WAITING) {
-                return workflowService.resumeRunSynchronously(existingRunId, model, assignmentConversationObserver(assignment));
+                return workflowService.resumeRunSynchronously(existingRunId, model,
+                    assignmentConversationObserver(assignment));
             }
             return existing;
         }
@@ -456,7 +382,8 @@ public class OrchestrationRunnerService {
     }
 
     private WorkAssignment runJob(WorkAssignment assignment) {
-        String jobId = StringUtils.hasText(assignment.jobId()) ? assignment.jobId() : text(assignment.input().get("jobId"), null);
+        String jobId = StringUtils.hasText(assignment.jobId())
+            ? assignment.jobId() : text(assignment.input().get("jobId"), null);
         JobDefinition job = jobService.getDefinition(jobId);
         jobService.updateDefinitionStatus(job.id(), "RUNNING");
         String projectId = resolveProjectId(assignment);
@@ -465,25 +392,24 @@ public class OrchestrationRunnerService {
         List<JobWorkItem> items = job.items();
         Map<String, Object> outputs = new LinkedHashMap<>(assignment.output());
         Map<String, Object> evidence = new LinkedHashMap<>(assignment.evidence());
-        WorkAssignment current = checkpointed(assignment, assignment.currentItemIndex(), mergeCheckpoint(assignment.checkpoint(), Map.of(
-            "jobId", job.id(),
-            "jobRunId", jobRun.id(),
-            "jobAssignmentId", jobRun.jobAssignmentId(),
-            "jobOutputDir", nullableText(jobRun.outputDir()),
-            "workspaceId", nullableText(jobRun.workspaceId())
-        )), outputs, evidence);
+        WorkAssignment current = checkpointed(assignment, assignment.currentItemIndex(),
+            mergeCheckpoint(assignment.checkpoint(), Map.of(
+                "jobId", job.id(),
+                "jobRunId", jobRun.id(),
+                "jobAssignmentId", jobRun.jobAssignmentId(),
+                "workspaceIdentity", nullableText(jobRun.workspaceIdentity())
+            )), outputs, evidence);
         current = assignmentService.saveIfLeaseOwner(current, leaseOwner);
         if (current.status() == OrchestrationStatus.CANCEL_REQUESTED) {
             jobService.cancelRunFromAssignment(jobRun.id());
             jobService.updateDefinitionStatus(job.id(), "CANCELLED");
             return assignmentService.saveStatus(current, OrchestrationStatus.CANCELLED);
         }
-        int start = Math.max(assignment.currentItemIndex(), integer(assignment.checkpoint().get("nextItemIndex"), 0));
+        int start = Math.max(assignment.currentItemIndex(),
+            integer(assignment.checkpoint().get("nextItemIndex"), 0));
         for (int i = start; i < items.size(); i++) {
             current = assignmentService.get(current.id());
-            if (current.status() == OrchestrationStatus.INTERRUPTED) {
-                return current;
-            }
+            if (current.status() == OrchestrationStatus.INTERRUPTED) return current;
             if (current.status() == OrchestrationStatus.CANCEL_REQUESTED) {
                 jobService.cancelRunFromAssignment(jobRun.id());
                 jobService.updateDefinitionStatus(job.id(), "CANCELLED");
@@ -495,45 +421,30 @@ public class OrchestrationRunnerService {
             outputs.put(item.key(), itemResult.output());
             evidence.put(item.key(), itemResult.evidence());
             if (!itemResult.succeeded()) {
-                jobService.updateWorkItemRun(
-                    jobRun.id(),
-                    item.key(),
-                    "FAILED",
-                    itemResult.childRunId(),
-                    mapValue(itemResult.output()),
-                    itemResult.errorText()
-                );
+                jobService.updateWorkItemRun(jobRun.id(), item.key(), "FAILED",
+                    itemResult.childRunId(), mapValue(itemResult.output()), itemResult.errorText());
                 jobService.updateDefinitionStatus(job.id(), "FAILED");
                 String errorText = itemResult.errorText();
                 current = checkpointed(current, i + 1, mergeCheckpoint(current.checkpoint(), Map.of(
-                    "jobId", job.id(),
-                    "jobRunId", jobRun.id(),
-                    "nextItemIndex", i + 1,
-                    "failedItemKey", item.key(),
+                    "jobId", job.id(), "jobRunId", jobRun.id(),
+                    "nextItemIndex", i + 1, "failedItemKey", item.key(),
                     "model", assignmentService.resolveModel(current, item)
                 )), outputs, evidence);
                 return fail(current, errorText);
             }
-            jobRun = jobService.updateWorkItemRun(
-                jobRun.id(),
-                item.key(),
-                "COMPLETED",
-                itemResult.childRunId(),
-                mapValue(itemResult.output()),
-                null
-            );
+            jobRun = jobService.updateWorkItemRun(jobRun.id(), item.key(), "COMPLETED",
+                itemResult.childRunId(), mapValue(itemResult.output()), null);
             current = checkpointed(current, i + 1, mergeCheckpoint(current.checkpoint(), Map.of(
-                "jobId", job.id(),
-                "jobRunId", jobRun.id(),
-                "nextItemIndex", i + 1,
-                "completedItemKey", item.key(),
+                "jobId", job.id(), "jobRunId", jobRun.id(),
+                "nextItemIndex", i + 1, "completedItemKey", item.key(),
                 "model", assignmentService.resolveModel(current, item)
             )), outputs, evidence);
             current = assignmentService.saveIfLeaseOwner(current, leaseOwner);
         }
         jobRun = jobService.completeRun(jobRun.id(), "Job run completed");
         jobService.updateDefinitionStatus(job.id(), "COMPLETED");
-        eventService.publish(EventType.JOB_STATUS_CHANGED, "JOB", job.id(), Map.of("jobId", job.id(), "status", "COMPLETED"));
+        eventService.publish(EventType.JOB_STATUS_CHANGED, "JOB", job.id(),
+            Map.of("jobId", job.id(), "status", "COMPLETED"));
         return complete(current, outputs, evidence);
     }
 
@@ -542,30 +453,16 @@ public class OrchestrationRunnerService {
         if (StringUtils.hasText(existingRunId)) {
             JobRun existing = jobService.getRun(existingRunId);
             return existing.status() == JobRunStatus.QUEUED
-                ? jobService.markRunning(existing.id())
-                : existing;
+                ? jobService.markRunning(existing.id()) : existing;
         }
-        JobRun run = jobService.startRun(
-            job.id(), assignment.agentId(), projectId, assignment.id(),
-            assignment.selectedWorkAreaId(), assignment.outputRouteType(), assignment.outputWorkAreaId(),
-            assignment.outputDirectRelativePath()
-        );
+        JobRun run = jobService.startRun(job.id(), assignment.agentId(), projectId, assignment.id());
         return run.status() == JobRunStatus.QUEUED ? jobService.markRunning(run.id()) : run;
     }
 
     void installJobWorkspaceContext(JobRun jobRun) {
         OrchestrationTaskContext context = OrchestrationTaskContextHolder.current();
-        if (context == null || jobRun == null) {
-            return;
-        }
+        if (context == null || jobRun == null) return;
         OrchestrationTaskContextHolder.set(context.withJobRun(jobRun.jobAssignmentId(), jobRun.id()));
-    }
-
-    private String resolveStoredPath(String storedPath) {
-        if (rootRelativePathService != null) {
-            return rootRelativePathService.resolve(storedPath).toString();
-        }
-        return java.nio.file.Path.of(storedPath).normalize().toString();
     }
 
     private JobItemResult runJobItem(WorkAssignment assignment, WorkAssignment current, JobWorkItem item, String jobRunId) {
@@ -575,8 +472,8 @@ public class OrchestrationRunnerService {
                     if (!StringUtils.hasText(item.planId())) {
                         throw new IllegalArgumentException("PLAN work item '" + item.key() + "' has no planId");
                     }
-                    TaskExecution taskExecution = runTaskThroughModel(item.planId(), item.inputBindings(), assignment,
-                        assignmentService.resolveModel(current, item));
+                    TaskExecution taskExecution = runTaskThroughModel(item.planId(), item.inputBindings(),
+                        assignment, assignmentService.resolveModel(current, item));
                     TaskRun run = taskExecution.run();
                     backfillTaskRunAttribution(run.id(), assignment, "JOB_PLAN_ITEM", jobRunId);
                     yield new JobItemOutput(run.id(), mergeConversationOutput(
@@ -601,38 +498,26 @@ public class OrchestrationRunnerService {
                 }
             };
             return new JobItemResult(true, output.payload(), Map.of(
-                "itemType", item.type().name(),
-                "itemKey", item.key(),
-                "completedAt", Instant.now().toString()
-            ), null, output.runId());
+                "itemType", item.type().name(), "itemKey", item.key(),
+                "completedAt", Instant.now().toString()), null, output.runId());
         } catch (RuntimeException exception) {
             String error = exception.getMessage();
             return new JobItemResult(false, Map.of("failed", true, "error", error), Map.of(
-                "itemType", item.type().name(),
-                "itemKey", item.key(),
-                "failedAt", Instant.now().toString(),
-                "error", error
-            ), error, null);
+                "itemType", item.type().name(), "itemKey", item.key(),
+                "failedAt", Instant.now().toString(), "error", error), error, null);
         }
     }
 
     private TaskExecution runTaskThroughModel(
-        String taskId,
-        Map<String, Object> inputValues,
-        WorkAssignment assignment,
-        String modelOverride
+        String taskId, Map<String, Object> inputValues,
+        WorkAssignment assignment, String modelOverride
     ) {
         if (chatService == null) {
             throw new IllegalStateException("Task execution requires model-backed chat execution");
         }
         String conversationId = UUID.randomUUID().toString();
         checkpointActiveConversation(assignment, conversationId);
-        TaskRun run = chatService.executeTaskBlocking(
-            taskId,
-            inputValues,
-            conversationId,
-            modelOverride
-        ).run();
+        TaskRun run = chatService.executeTaskBlocking(taskId, inputValues, conversationId, modelOverride).run();
         WorkAssignment current = assignmentService.get(assignment.id());
         if (current.status() == OrchestrationStatus.CANCEL_REQUESTED) {
             throw new IllegalStateException("Assignment cancellation was requested");
@@ -647,53 +532,44 @@ public class OrchestrationRunnerService {
     private WorkAssignment runAgentMessage(WorkAssignment assignment) {
         String toAgentId = text(assignment.input().get("toAgentId"), assignment.agentId());
         InboxMessage message = inboxService.send(toAgentId, new InboxMessage(
-            null, toAgentId, assignment.agentId(), text(assignment.input().get("messageType"), "assignment_message"),
+            null, toAgentId, assignment.agentId(),
+            text(assignment.input().get("messageType"), "assignment_message"),
             text(assignment.input().get("body"), ""), mapValue(assignment.input().get("metadata")),
-            false, false, null, null
-        ));
-        return complete(assignment, Map.of("messageId", message.id()), Map.of("messageId", message.id()));
+            false, false, null, null));
+        return complete(assignment,
+            Map.of("messageId", message.id()), Map.of("messageId", message.id()));
     }
 
-    private WorkAssignment checkpointed(
-        WorkAssignment assignment,
-        int currentItemIndex,
-        Map<String, Object> checkpoint,
-        Map<String, Object> output,
-        Map<String, Object> evidence
-    ) {
-        return assignmentService.copy(
-            assignment, OrchestrationStatus.RUNNING, currentItemIndex, checkpoint, output, evidence, null,
-            leaseOwner, Instant.now().plus(leaseDuration), null
-        );
+    private WorkAssignment checkpointed(WorkAssignment assignment, int currentItemIndex,
+                                        Map<String, Object> checkpoint, Map<String, Object> output,
+                                        Map<String, Object> evidence) {
+        return assignmentService.copy(assignment, OrchestrationStatus.RUNNING, currentItemIndex,
+            checkpoint, output, evidence, null, leaseOwner, Instant.now().plus(leaseDuration), null);
     }
 
     private void checkpointActiveConversation(WorkAssignment assignment, String conversationId) {
         repository.saveAssignmentConversationLink(assignment.id(), conversationId);
         WorkAssignment current = assignmentService.get(assignment.id());
-        Map<String, Object> checkpoint = mergeConversationCheckpoint(current.checkpoint(), conversationId, Map.of());
-        assignmentService.saveIfLeaseOwner(checkpointed(current, current.currentItemIndex(), checkpoint,
-            current.output(), current.evidence()), leaseOwner);
+        Map<String, Object> checkpoint = mergeConversationCheckpoint(
+            current.checkpoint(), conversationId, Map.of());
+        assignmentService.saveIfLeaseOwner(checkpointed(current, current.currentItemIndex(),
+            checkpoint, current.output(), current.evidence()), leaseOwner);
     }
 
     private WorkflowExecutionObserver assignmentConversationObserver(WorkAssignment assignment) {
         return (workflowRunId, nodeKey, conversationId) -> {
             repository.saveAssignmentConversationLink(assignment.id(), conversationId);
             WorkAssignment current = assignmentService.get(assignment.id());
-            Map<String, Object> checkpoint = mergeConversationCheckpoint(
-                current.checkpoint(),
+            Map<String, Object> checkpoint = mergeConversationCheckpoint(current.checkpoint(),
                 conversationId,
-                Map.of("workflowRunId", workflowRunId, "activeWorkflowNodeKey", nodeKey)
-            );
-            assignmentService.saveIfLeaseOwner(checkpointed(current, current.currentItemIndex(), checkpoint,
-                current.output(), current.evidence()), leaseOwner);
+                Map.of("workflowRunId", workflowRunId, "activeWorkflowNodeKey", nodeKey));
+            assignmentService.saveIfLeaseOwner(checkpointed(current, current.currentItemIndex(),
+                checkpoint, current.output(), current.evidence()), leaseOwner);
         };
     }
 
     private Map<String, Object> mergeConversationCheckpoint(
-        Map<String, Object> existing,
-        String conversationId,
-        Map<String, Object> extra
-    ) {
+        Map<String, Object> existing, String conversationId, Map<String, Object> extra) {
         Map<String, Object> merged = mergeCheckpoint(existing, extra);
         if (StringUtils.hasText(conversationId)) {
             merged.put("activeConversationId", conversationId);
@@ -705,14 +581,13 @@ public class OrchestrationRunnerService {
 
     private Map<String, Object> mergeCheckpoint(Map<String, Object> existing, Map<String, Object> extra) {
         Map<String, Object> merged = new LinkedHashMap<>(existing == null ? Map.of() : existing);
-        if (extra != null) {
-            merged.putAll(extra);
-        }
+        if (extra != null) merged.putAll(extra);
         return merged;
     }
 
     private Map<String, Object> mergeConversationOutput(Map<String, Object> output, String conversationId) {
-        return mergeConversationOutput(output, StringUtils.hasText(conversationId) ? List.of(conversationId) : List.of());
+        return mergeConversationOutput(output,
+            StringUtils.hasText(conversationId) ? List.of(conversationId) : List.of());
     }
 
     private Map<String, Object> mergeConversationOutput(Map<String, Object> output, List<String> conversationIds) {
@@ -726,46 +601,40 @@ public class OrchestrationRunnerService {
     }
 
     private List<String> appendConversationId(List<String> existing, String conversationId) {
-        return appendConversationIds(existing, StringUtils.hasText(conversationId) ? List.of(conversationId) : List.of());
+        return appendConversationIds(existing,
+            StringUtils.hasText(conversationId) ? List.of(conversationId) : List.of());
     }
 
     private List<String> appendConversationIds(List<String> existing, List<String> additions) {
         java.util.LinkedHashSet<String> ids = new java.util.LinkedHashSet<>();
-        if (existing != null) {
-            existing.stream().filter(StringUtils::hasText).forEach(ids::add);
-        }
-        if (additions != null) {
-            additions.stream().filter(StringUtils::hasText).forEach(ids::add);
-        }
+        if (existing != null) existing.stream().filter(StringUtils::hasText).forEach(ids::add);
+        if (additions != null) additions.stream().filter(StringUtils::hasText).forEach(ids::add);
         return List.copyOf(ids);
     }
 
-    private WorkAssignment complete(WorkAssignment assignment, Map<String, Object> output, Map<String, Object> evidence) {
-        return assignmentService.saveIfLeaseOwner(assignmentService.copy(
-            assignment, OrchestrationStatus.COMPLETED, assignment.currentItemIndex(), assignment.checkpoint(), output,
-            evidence, null, null, null, Instant.now()
-        ), leaseOwner);
+    private WorkAssignment complete(WorkAssignment assignment, Map<String, Object> output,
+                                    Map<String, Object> evidence) {
+        return assignmentService.saveIfLeaseOwner(assignmentService.copy(assignment,
+            OrchestrationStatus.COMPLETED, assignment.currentItemIndex(), assignment.checkpoint(),
+            output, evidence, null, null, null, Instant.now()), leaseOwner);
     }
 
     private WorkAssignment fail(WorkAssignment assignment, String errorText) {
-        return assignmentService.saveIfLeaseOwner(assignmentService.copy(
-            assignment, OrchestrationStatus.FAILED, assignment.currentItemIndex(), assignment.checkpoint(),
-            assignment.output(), assignment.evidence(), errorText, null, null, Instant.now()
-        ), leaseOwner);
+        return assignmentService.saveIfLeaseOwner(assignmentService.copy(assignment,
+            OrchestrationStatus.FAILED, assignment.currentItemIndex(), assignment.checkpoint(),
+            assignment.output(), assignment.evidence(), errorText, null, null, Instant.now()), leaseOwner);
     }
 
     private WorkAssignment waiting(WorkAssignment assignment) {
-        return assignmentService.saveIfLeaseOwner(assignmentService.copy(
-            assignment, OrchestrationStatus.WAITING, assignment.currentItemIndex(), assignment.checkpoint(),
-            assignment.output(), assignment.evidence(), null, null, null, null
-        ), leaseOwner);
+        return assignmentService.saveIfLeaseOwner(assignmentService.copy(assignment,
+            OrchestrationStatus.WAITING, assignment.currentItemIndex(), assignment.checkpoint(),
+            assignment.output(), assignment.evidence(), null, null, null, null), leaseOwner);
     }
 
     private WorkAssignment cancel(WorkAssignment assignment) {
-        return assignmentService.saveIfLeaseOwner(assignmentService.copy(
-            assignment, OrchestrationStatus.CANCELLED, assignment.currentItemIndex(), assignment.checkpoint(),
-            assignment.output(), assignment.evidence(), "Cancelled", null, null, Instant.now()
-        ), leaseOwner);
+        return assignmentService.saveIfLeaseOwner(assignmentService.copy(assignment,
+            OrchestrationStatus.CANCELLED, assignment.currentItemIndex(), assignment.checkpoint(),
+            assignment.output(), assignment.evidence(), "Cancelled", null, null, Instant.now()), leaseOwner);
     }
 
     private Map<String, Object> evidence(TaskRun taskRun) {
@@ -783,9 +652,7 @@ public class OrchestrationRunnerService {
             List<String> result = new java.util.ArrayList<>();
             for (Object value : iterable) {
                 String id = text(value, null);
-                if (StringUtils.hasText(id)) {
-                    result.add(id);
-                }
+                if (StringUtils.hasText(id)) result.add(id);
             }
             return result;
         }
@@ -794,28 +661,20 @@ public class OrchestrationRunnerService {
     }
 
     private int integer(Object value, int fallback) {
-        if (value == null) {
-            return fallback;
-        }
+        if (value == null) return fallback;
         return value instanceof Number number ? number.intValue() : Integer.parseInt(value.toString());
     }
 
     private String text(Object value, String fallback) {
-        if (value == null) {
-            return fallback;
-        }
+        if (value == null) return fallback;
         String text = value.toString();
         return StringUtils.hasText(text) ? text : fallback;
     }
 
     private String firstText(String... values) {
-        if (values == null) {
-            return null;
-        }
+        if (values == null) return null;
         for (String value : values) {
-            if (StringUtils.hasText(value)) {
-                return value.trim();
-            }
+            if (StringUtils.hasText(value)) return value.trim();
         }
         return null;
     }
@@ -832,10 +691,9 @@ public class OrchestrationRunnerService {
         backfillTaskRunAttribution(taskRunId, assignment, runType, null);
     }
 
-    private void backfillTaskRunAttribution(String taskRunId, WorkAssignment assignment, String runType, String jobRunId) {
-        if (outputArtifactService == null || !StringUtils.hasText(taskRunId)) {
-            return;
-        }
+    private void backfillTaskRunAttribution(String taskRunId, WorkAssignment assignment, String runType,
+                                            String jobRunId) {
+        if (outputArtifactService == null || !StringUtils.hasText(taskRunId)) return;
         outputArtifactService.backfillAttribution(taskRunId, outputContextFor(assignment, runType, jobRunId));
     }
 
@@ -843,10 +701,9 @@ public class OrchestrationRunnerService {
         backfillWorkflowRunAttribution(workflowRun, assignment, runType, null);
     }
 
-    private void backfillWorkflowRunAttribution(WorkflowRun workflowRun, WorkAssignment assignment, String runType, String jobRunId) {
-        if (outputArtifactService == null || workflowRun == null) {
-            return;
-        }
+    private void backfillWorkflowRunAttribution(WorkflowRun workflowRun, WorkAssignment assignment,
+                                                 String runType, String jobRunId) {
+        if (outputArtifactService == null || workflowRun == null) return;
         OutputArtifactContext context = outputContextFor(assignment, runType, jobRunId);
         outputArtifactService.backfillAttribution(workflowRun.id(), context);
         for (WorkflowNodeRun nodeRun : workflowRun.nodeRuns()) {
@@ -860,9 +717,7 @@ public class OrchestrationRunnerService {
     private Map<String, Object> finalOutputs(WorkflowRun workflowRun) {
         Map<String, Object> outputs = new LinkedHashMap<>();
         for (WorkflowNodeRun nodeRun : workflowRun.nodeRuns()) {
-            if (nodeRun.outputValues().isEmpty()) {
-                continue;
-            }
+            if (nodeRun.outputValues().isEmpty()) continue;
             outputs.put(nodeRun.nodeKey(), nodeRun.outputValues());
         }
         return outputs;
@@ -873,35 +728,25 @@ public class OrchestrationRunnerService {
     }
 
     private OutputArtifactContext outputContextFor(WorkAssignment assignment, String runType, String jobRunId) {
-        String projectId = firstText(assignment.projectId(), text(assignment.input().get("projectId"), null));
+        String projectId = firstText(assignment.projectId(),
+            text(assignment.input().get("projectId"), null));
         String jobId = assignment.jobId();
         if (!StringUtils.hasText(jobId)) {
             jobId = text(assignment.input().get("jobId"), null);
         }
         if (!StringUtils.hasText(projectId) && StringUtils.hasText(jobId)) {
-            try {
-                projectId = jobService.getDefinition(jobId).projectId();
-            } catch (RuntimeException ignored) {
-                projectId = null;
-            }
+            try { projectId = jobService.getDefinition(jobId).projectId(); }
+            catch (RuntimeException ignored) { projectId = null; }
         }
         return new OutputArtifactContext(
-            assignment.agentId(),
-            jobId,
-            StringUtils.hasText(jobId) ? assignment.id() : null,
-            jobRunId,
-            projectId,
-            firstText(assignment.effectiveWorkspaceId(), assignment.workspaceId()),
-            runType
+            assignment.agentId(), jobId,
+            StringUtils.hasText(jobId) ? assignment.id() : null, jobRunId, projectId,
+            assignment.workspaceType(), assignment.workspaceKey(), assignment.workspaceIdentity(), runType
         );
     }
 
-    private record JobItemResult(boolean succeeded, Object output, Map<String, Object> evidence, String errorText, String childRunId) {
-    }
-
-    private record JobItemOutput(String runId, Map<String, Object> payload) {
-    }
-
-    private record TaskExecution(TaskRun run, String conversationId) {
-    }
+    private record JobItemResult(boolean succeeded, Object output, Map<String, Object> evidence,
+                                  String errorText, String childRunId) {}
+    private record JobItemOutput(String runId, Map<String, Object> payload) {}
+    private record TaskExecution(TaskRun run, String conversationId) {}
 }

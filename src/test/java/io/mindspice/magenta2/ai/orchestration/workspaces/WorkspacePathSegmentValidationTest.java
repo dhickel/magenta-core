@@ -164,20 +164,20 @@ class WorkspacePathSegmentValidationTest {
 
         EffectiveWorkspace effective = resolver.resolve("agent-1", "project-1");
 
-        assertThat(effective.ownerType()).isEqualTo(WorkspaceOwnerType.PROJECT);
-        assertThat(effective.ownerId()).isEqualTo("project-1");
+        assertThat(effective.ownerType()).isEqualTo(WorkspaceOwnerType.AGENT);
+        assertThat(effective.ownerId()).isEqualTo("agent-1");
         assertThat(effective.agentId()).isEqualTo("agent-1");
         assertThat(effective.projectId()).isEqualTo("project-1");
         assertThat(effective.workspaceId()).isNotBlank();
-        assertThat(effective.root()).isEqualTo(tempDir.resolve("projects/project-1").toRealPath());
+        assertThat(effective.root()).isEqualTo(tempDir.resolve("workspace/agent-1").toRealPath());
         assertThat(effective.workDir()).isEqualTo(effective.root().resolve("work"));
         assertThat(effective.outputsDir()).isEqualTo(effective.root().resolve("outputs"));
         assertThat(effective.runsDir()).isEqualTo(effective.root().resolve("runs"));
         assertThat(effective.scratchDir()).isEqualTo(effective.root().resolve("scratch"));
 
         Workspace workspace = workspaceService.get(effective.workspaceId());
-        assertThat(workspace.ownerType()).isEqualTo(WorkspaceOwnerType.PROJECT);
-        assertThat(workspace.ownerId()).isEqualTo("project-1");
+        assertThat(workspace.ownerType()).isEqualTo(WorkspaceOwnerType.AGENT);
+        assertThat(workspace.ownerId()).isEqualTo("agent-1");
     }
 
     @Test

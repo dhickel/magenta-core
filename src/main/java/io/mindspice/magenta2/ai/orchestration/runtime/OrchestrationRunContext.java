@@ -6,31 +6,33 @@ public record OrchestrationRunContext(
     String agentId,
     String jobId,
     String projectId,
-    String workspaceId,
+    String workspaceType,
+    String workspaceKey,
     String modelOverride,
     Integer priority
 ) {
     public OrchestrationRunContext(
         String agentId,
         String jobId,
-        String workspaceId,
+        String projectId,
         String modelOverride,
         Integer priority
     ) {
-        this(agentId, jobId, null, workspaceId, modelOverride, priority);
+        this(agentId, jobId, projectId, null, null, modelOverride, priority);
     }
 
     public OrchestrationRunContext {
         agentId = normalize(agentId);
         jobId = normalize(jobId);
         projectId = normalize(projectId);
-        workspaceId = normalize(workspaceId);
+        workspaceType = normalize(workspaceType);
+        workspaceKey = normalize(workspaceKey);
         modelOverride = normalize(modelOverride);
     }
 
     public boolean hasContext() {
         return StringUtils.hasText(agentId) || StringUtils.hasText(jobId) || StringUtils.hasText(projectId)
-            || StringUtils.hasText(workspaceId) || StringUtils.hasText(modelOverride) || priority != null;
+            || StringUtils.hasText(workspaceType) || StringUtils.hasText(modelOverride) || priority != null;
     }
 
     private static String normalize(String value) {

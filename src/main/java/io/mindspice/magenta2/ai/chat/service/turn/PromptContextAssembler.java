@@ -196,15 +196,13 @@ public class PromptContextAssembler {
         if (StringUtils.hasText(context.activeRuntimePath())) {
             return context.activeRuntimePath();
         }
-        String workspaceRootText = StringUtils.hasText(context.hostDurableWorkspacePath())
-            ? context.hostDurableWorkspacePath()
-            : context.hostWorkspacePath();
-        if (!StringUtils.hasText(workspaceRootText) || !StringUtils.hasText(context.hostWorkspacePath())) {
+        String workspaceRootText = context.hostDurableWorkspacePath();
+        if (!StringUtils.hasText(workspaceRootText)) {
             return WorkspacePathLayout.WORKSPACE;
         }
         try {
             Path workspaceRoot = Path.of(workspaceRootText).normalize();
-            Path activeWorkspacePath = Path.of(context.hostWorkspacePath()).normalize();
+            Path activeWorkspacePath = workspaceRoot;
             if (!activeWorkspacePath.startsWith(workspaceRoot)) {
                 return WorkspacePathLayout.WORKSPACE;
             }

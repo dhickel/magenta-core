@@ -8,16 +8,15 @@ import java.util.Map;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.mindspice.magenta2.ai.chat.plan.PlanFieldType;
-import io.mindspice.magenta2.ai.config.user.AiConfig;
 import io.mindspice.magenta2.ai.orchestration.runtime.JobDefinition;
 import io.mindspice.magenta2.ai.orchestration.runtime.JobRepository;
 import io.mindspice.magenta2.ai.orchestration.runtime.JobRun;
 import io.mindspice.magenta2.ai.orchestration.runtime.JobService;
 import io.mindspice.magenta2.ai.orchestration.workspaces.OutputArtifactContext;
+import io.mindspice.magenta2.ai.orchestration.workspaces.OutputArtifactRepository;
 import io.mindspice.magenta2.ai.orchestration.workspaces.OutputArtifactService;
 import io.mindspice.magenta2.ai.orchestration.workspaces.RunOutputArtifact;
 import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceDirectoryService;
-import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceRepository;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.springframework.http.ResponseEntity;
@@ -46,24 +45,24 @@ class OutputControllerTest {
             outputDir,
             new OutputArtifactContext(
                 "agent-1", "job-1", "assignment-1", "job-run-1",
-                "project-1", "workspace-1", "JOB_WORKFLOW_ITEM")
+                "project-1", null, null, "workspace-1", "JOB_WORKFLOW_ITEM")
         );
         assertThat(artifact.filePath()).isEqualTo("outputs-direct/summary.txt");
         assertThat(Path.of(artifact.filePath()).isAbsolute()).isFalse();
 
-        assertThat(controller.query(null, null, "assignment-1", null, null, null, null, null, null, null, 20))
+        assertThat(controller.query(null, null, "assignment-1", null, null, null, null, null, null, null, null, null, 20))
             .extracting(RunOutputArtifact::id)
             .containsExactly(artifact.id());
-        assertThat(controller.query(null, null, null, "job-run-1", null, null, null, null, null, null, 20))
+        assertThat(controller.query(null, null, null, "job-run-1", null, null, null, null, null, null, null, null, 20))
             .extracting(RunOutputArtifact::id)
             .containsExactly(artifact.id());
-        assertThat(controller.query(null, null, null, null, null, "workspace-1", null, null, null, null, 20))
+        assertThat(controller.query(null, null, null, null, null, null, null, "workspace-1", null, null, null, null, 20))
             .extracting(RunOutputArtifact::id)
             .containsExactly(artifact.id());
-        assertThat(controller.query(null, null, null, null, null, null, null, "plan-1", null, null, 20))
+        assertThat(controller.query(null, null, null, null, null, null, null, null, null, "plan-1", null, null, 20))
             .extracting(RunOutputArtifact::id)
             .containsExactly(artifact.id());
-        assertThat(controller.query(null, null, null, null, null, null, null, null, "JOB_WORKFLOW_ITEM", null, 20))
+        assertThat(controller.query(null, null, null, null, null, null, null, null, null, null, "JOB_WORKFLOW_ITEM", null, 20))
             .extracting(RunOutputArtifact::id)
             .containsExactly(artifact.id());
 
@@ -75,7 +74,7 @@ class OutputControllerTest {
         assertThat(body)
             .containsEntry("jobAssignmentId", "assignment-1")
             .containsEntry("jobRunId", "job-run-1")
-            .containsEntry("workspaceId", "workspace-1")
+            .containsEntry("workspaceIdentity", "workspace-1")
             .containsEntry("runType", "JOB_WORKFLOW_ITEM")
             .containsEntry("content", "done");
     }
@@ -110,10 +109,12 @@ class OutputControllerTest {
             Files.createDirectories(services.dataRoot().resolve("legacy")).resolve("current.txt"),
             "legacy download"
         );
-        RunOutputArtifact artifact = services.workspaceRepository().saveArtifact(new RunOutputArtifact(
+        RunOutputArtifact artifact = services.outputArtifactRepository().saveArtifact(new RunOutputArtifact(
             "legacy-download",
             "run-legacy-download",
             "plan-legacy-download",
+            null,
+            null,
             null,
             null,
             null,
@@ -141,10 +142,12 @@ class OutputControllerTest {
         Services services = services();
         OutputController controller = new OutputController(services.outputArtifactService(), services.jobService());
         Path oldRoot = tempDir.resolve("old-root/root");
-        RunOutputArtifact artifact = services.workspaceRepository().saveArtifact(new RunOutputArtifact(
+        RunOutputArtifact artifact = services.outputArtifactRepository().saveArtifact(new RunOutputArtifact(
             "stale-download",
             "run-stale-download",
             "plan-stale-download",
+            null,
+            null,
             null,
             null,
             null,
@@ -175,7 +178,7 @@ class OutputControllerTest {
         Services services = services();
         OutputController controller = new OutputController(services.outputArtifactService(), services.jobService());
         JobDefinition job = services.jobService().saveDefinition(new JobDefinition(
-            null, "agent-1", null, null, false, "ACTIVE", "Legacy Job", "", List.of(),
+            null, "agent-1", null, "agent", "agent-1", null, "ACTIVE", "Legacy Job", "", List.of(),
             null, null, null, null, null
         ));
         JobRun run = services.jobService().startRun(job.id(), "agent-1", null, "assignment-1");
@@ -185,14 +188,14 @@ class OutputControllerTest {
             "legacy",
             PlanFieldType.STRING,
             "legacy output",
-            services.dataRoot().resolve(run.outputDir()),
+            Files.createDirectories(services.dataRoot().resolve("workspace/agent/agent-1/outputs")),
             OutputArtifactContext.EMPTY
         );
 
-        assertThat(controller.query(null, job.id(), null, null, null, null, null, null, null, null, 20))
+        assertThat(controller.query(null, job.id(), null, null, null, null, null, null, null, null, null, null, 20))
             .extracting(RunOutputArtifact::id)
             .containsExactly(legacyArtifact.id());
-        assertThat(controller.query(null, null, "assignment-1", null, null, null, null, null, null, null, 20))
+        assertThat(controller.query(null, null, "assignment-1", null, null, null, null, null, null, null, null, null, 20))
             .isEmpty();
     }
 
@@ -203,18 +206,18 @@ class OutputControllerTest {
         );
         Path dataRoot = Files.createDirectories(tempDir.resolve("data"));
         WorkspaceDirectoryService directoryService = WorkspaceDirectoryServiceTestSupport.directoryService(dataRoot);
-        WorkspaceRepository workspaceRepository = new WorkspaceRepository(jdbcTemplate);
+        OutputArtifactRepository outputArtifactRepository = new OutputArtifactRepository(jdbcTemplate);
         OutputArtifactService outputArtifactService = new OutputArtifactService(
-            workspaceRepository, directoryService, mapper);
+            outputArtifactRepository, directoryService, mapper);
         JobService jobService = new JobService(
             new JobRepository(jdbcTemplate, mapper), directoryService, null, null);
-        return new Services(jobService, outputArtifactService, workspaceRepository, dataRoot);
+        return new Services(jobService, outputArtifactService, outputArtifactRepository, dataRoot);
     }
 
     private record Services(
         JobService jobService,
         OutputArtifactService outputArtifactService,
-        WorkspaceRepository workspaceRepository,
+        OutputArtifactRepository outputArtifactRepository,
         Path dataRoot
     ) {
     }

@@ -20,6 +20,11 @@ public class WorkspaceRepository {
         ensureSchema();
     }
 
+    /** @return the underlying JdbcTemplate for backward-compatible component construction */
+    public JdbcTemplate jdbcTemplate() {
+        return jdbcTemplate;
+    }
+
     public Optional<Workspace> findById(String id) {
         if (!StringUtils.hasText(id)) {
             return Optional.empty();
@@ -103,11 +108,6 @@ public class WorkspaceRepository {
         for (String workspaceId : workspaceIds) {
             jdbcTemplate.update("delete from workspace_links where workspace_id = ?", workspaceId);
         }
-        jdbcTemplate.update(
-            "delete from run_output_artifacts where workspace_id in (select id from workspaces where owner_type = ? and owner_id = ?)",
-            ownerType.name(),
-            ownerId
-        );
         jdbcTemplate.update("delete from workspaces where owner_type = ? and owner_id = ?", ownerType.name(), ownerId);
     }
 
@@ -359,162 +359,8 @@ public class WorkspaceRepository {
         );
     }
 
-    // ── RunOutputArtifact ──
-
-    public RunOutputArtifact saveArtifact(RunOutputArtifact artifact) {
-        Instant now = Instant.now();
-        Instant createdAt = artifact.createdAt() == null ? now : artifact.createdAt();
-        jdbcTemplate.update(
-            """
-                insert into run_output_artifacts (
-                    id, run_id, plan_id, agent_id, job_id, job_assignment_id, job_run_id,
-                    project_id, workspace_id, run_type,
-                    output_name, artifact_type,
-                    file_name, file_path, content_json, created_at
-                )
-                values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                on conflict(id) do update set
-                    agent_id = excluded.agent_id,
-                    job_id = excluded.job_id,
-                    job_assignment_id = excluded.job_assignment_id,
-                    job_run_id = excluded.job_run_id,
-                    project_id = excluded.project_id,
-                    workspace_id = excluded.workspace_id,
-                    run_type = excluded.run_type,
-                    output_name = excluded.output_name,
-                    artifact_type = excluded.artifact_type,
-                    file_name = excluded.file_name,
-                    file_path = excluded.file_path,
-                    content_json = excluded.content_json
-                """,
-            artifact.id(),
-            artifact.runId(),
-            artifact.planId(),
-            artifact.agentId(),
-            artifact.jobId(),
-            artifact.jobAssignmentId(),
-            artifact.jobRunId(),
-            artifact.projectId(),
-            artifact.workspaceId(),
-            artifact.runType(),
-            artifact.outputName(),
-            artifact.artifactType(),
-            artifact.fileName(),
-            artifact.filePath(),
-            artifact.contentJson(),
-            createdAt.toString()
-        );
-        return artifact;
-    }
-
-    public List<RunOutputArtifact> findArtifactsByRunId(String runId) {
-        return jdbcTemplate.query(
-            "select * from run_output_artifacts where run_id = ? order by output_name",
-            (rs, rowNum) -> toArtifact(rs),
-            runId
-        );
-    }
-
-    public Optional<RunOutputArtifact> findArtifactById(String artifactId) {
-        if (!StringUtils.hasText(artifactId)) return Optional.empty();
-        return jdbcTemplate.query(
-            "select * from run_output_artifacts where id = ?",
-            rs -> rs.next() ? Optional.of(toArtifact(rs)) : Optional.empty(),
-            artifactId
-        );
-    }
-
-    public List<RunOutputArtifact> findArtifactsByPlanId(String planId) {
-        return jdbcTemplate.query(
-            "select * from run_output_artifacts where plan_id = ? order by created_at desc",
-            (rs, rowNum) -> toArtifact(rs),
-            planId
-        );
-    }
-
-    public List<RunOutputArtifact> findArtifacts(String runId, String planId, String artifactType, int limit) {
-        return findArtifacts(OutputArtifactQuery.of(
-            null, null, null, null, runId, planId, artifactType, limit
-        ));
-    }
-
-    public List<RunOutputArtifact> findArtifacts(OutputArtifactQuery query) {
-        OutputArtifactQuery effectiveQuery = query == null
-            ? OutputArtifactQuery.of(null, null, null, null, null, null, null, 50)
-            : query;
-        StringBuilder sql = new StringBuilder("select * from run_output_artifacts where 1 = 1");
-        List<Object> args = new ArrayList<>();
-        if (StringUtils.hasText(effectiveQuery.agentId())) {
-            sql.append(" and agent_id = ?");
-            args.add(effectiveQuery.agentId());
-        }
-        if (StringUtils.hasText(effectiveQuery.jobId())) {
-            sql.append(" and job_id = ?");
-            args.add(effectiveQuery.jobId());
-        }
-        if (StringUtils.hasText(effectiveQuery.jobAssignmentId())) {
-            sql.append(" and job_assignment_id = ?");
-            args.add(effectiveQuery.jobAssignmentId());
-        }
-        if (StringUtils.hasText(effectiveQuery.jobRunId())) {
-            sql.append(" and job_run_id = ?");
-            args.add(effectiveQuery.jobRunId());
-        }
-        if (StringUtils.hasText(effectiveQuery.projectId())) {
-            sql.append(" and project_id = ?");
-            args.add(effectiveQuery.projectId());
-        }
-        if (StringUtils.hasText(effectiveQuery.workspaceId())) {
-            sql.append(" and workspace_id = ?");
-            args.add(effectiveQuery.workspaceId());
-        }
-        if (StringUtils.hasText(effectiveQuery.runId())) {
-            sql.append(" and run_id = ?");
-            args.add(effectiveQuery.runId());
-        }
-        if (StringUtils.hasText(effectiveQuery.planId())) {
-            sql.append(" and plan_id = ?");
-            args.add(effectiveQuery.planId());
-        }
-        if (StringUtils.hasText(effectiveQuery.runType())) {
-            sql.append(" and run_type = ?");
-            args.add(effectiveQuery.runType());
-        }
-        if (StringUtils.hasText(effectiveQuery.artifactType())) {
-            sql.append(" and artifact_type = ?");
-            args.add(effectiveQuery.artifactType());
-        }
-        sql.append(" order by created_at desc limit ?");
-        args.add(effectiveQuery.limit());
-        return jdbcTemplate.query(sql.toString(), (rs, rowNum) -> toArtifact(rs), args.toArray());
-    }
-
-    public int backfillArtifactAttribution(String runId, OutputArtifactContext context) {
-        if (!StringUtils.hasText(runId) || context == null || context.isEmpty()) {
-            return 0;
-        }
-        return jdbcTemplate.update(
-            """
-                update run_output_artifacts
-                set
-                    agent_id = coalesce(agent_id, ?),
-                    job_id = coalesce(job_id, ?),
-                    job_assignment_id = coalesce(job_assignment_id, ?),
-                    job_run_id = coalesce(job_run_id, ?),
-                    project_id = coalesce(project_id, ?),
-                    workspace_id = coalesce(workspace_id, ?),
-                    run_type = coalesce(run_type, ?)
-                where run_id = ?
-                """,
-            context.agentId(),
-            context.jobId(),
-            context.jobAssignmentId(),
-            context.jobRunId(),
-            context.projectId(),
-            context.workspaceId(),
-            context.runType(),
-            runId
-        );
+    private Instant instant(String value) {
+        return StringUtils.hasText(value) ? Instant.parse(value) : null;
     }
 
     private Workspace toWorkspace(ResultSet rs) throws SQLException {
@@ -544,10 +390,6 @@ public class WorkspaceRepository {
         );
     }
 
-    private Instant instant(String value) {
-        return StringUtils.hasText(value) ? Instant.parse(value) : null;
-    }
-
     private WorkspaceRoot toRoot(ResultSet rs) throws SQLException {
         return new WorkspaceRoot(
             rs.getString("id"),
@@ -574,35 +416,6 @@ public class WorkspaceRepository {
             instant(rs.getString("created_at")),
             instant(rs.getString("updated_at"))
         );
-    }
-
-    private RunOutputArtifact toArtifact(ResultSet rs) throws SQLException {
-        return new RunOutputArtifact(
-            rs.getString("id"),
-            rs.getString("run_id"),
-            rs.getString("plan_id"),
-            rs.getString("agent_id"),
-            rs.getString("job_id"),
-            getNullable(rs, "job_assignment_id"),
-            getNullable(rs, "job_run_id"),
-            rs.getString("project_id"),
-            rs.getString("workspace_id"),
-            rs.getString("run_type"),
-            rs.getString("output_name"),
-            rs.getString("artifact_type"),
-            rs.getString("file_name"),
-            rs.getString("file_path"),
-            rs.getString("content_json"),
-            instant(rs.getString("created_at"))
-        );
-    }
-
-    private String getNullable(ResultSet rs, String column) throws SQLException {
-        try {
-            return rs.getString(column);
-        } catch (SQLException ignored) {
-            return null;
-        }
     }
 
     private void ensureSchema() {
@@ -666,58 +479,6 @@ public class WorkspaceRepository {
                 on workspace_leases(holder_type, holder_id)
                 where released_at is null
             """);
-        jdbcTemplate.execute("""
-            create table if not exists run_output_artifacts (
-                id text primary key,
-                run_id text not null,
-                plan_id text not null,
-                agent_id text,
-                job_id text,
-                job_assignment_id text,
-                job_run_id text,
-                project_id text,
-                workspace_id text,
-                run_type text,
-                output_name text not null,
-                artifact_type text not null,
-                file_name text not null,
-                file_path text not null,
-                content_json text,
-                created_at text not null
-            )
-            """);
-        addColumnIfMissing("run_output_artifacts", "agent_id", "alter table run_output_artifacts add column agent_id text");
-        addColumnIfMissing("run_output_artifacts", "job_id", "alter table run_output_artifacts add column job_id text");
-        addColumnIfMissing("run_output_artifacts", "job_assignment_id", "alter table run_output_artifacts add column job_assignment_id text");
-        addColumnIfMissing("run_output_artifacts", "job_run_id", "alter table run_output_artifacts add column job_run_id text");
-        addColumnIfMissing("run_output_artifacts", "project_id", "alter table run_output_artifacts add column project_id text");
-        addColumnIfMissing("workspace_leases", "release_requested",
-            "alter table workspace_leases add column release_requested integer not null default 0");
-        addColumnIfMissing("run_output_artifacts", "workspace_id", "alter table run_output_artifacts add column workspace_id text");
-        addColumnIfMissing("run_output_artifacts", "run_type", "alter table run_output_artifacts add column run_type text");
-        if (runOutputArtifactsReferencePlanRuns()) {
-            recreateRunOutputArtifactsWithoutPlanRunFk();
-        }
-        jdbcTemplate.execute("""
-            create index if not exists idx_run_output_artifacts_run
-                on run_output_artifacts(run_id)
-            """);
-        jdbcTemplate.execute("""
-            create index if not exists idx_run_output_artifacts_agent
-                on run_output_artifacts(agent_id)
-            """);
-        jdbcTemplate.execute("""
-            create index if not exists idx_run_output_artifacts_job
-                on run_output_artifacts(job_id)
-            """);
-        jdbcTemplate.execute("""
-            create index if not exists idx_run_output_artifacts_project
-                on run_output_artifacts(project_id)
-            """);
-        jdbcTemplate.execute("""
-            create index if not exists idx_run_output_artifacts_workspace
-                on run_output_artifacts(workspace_id)
-            """);
     }
 
     private void migrateWorkspaceRootsToWorkspaces() {
@@ -772,43 +533,6 @@ public class WorkspaceRepository {
         jdbcTemplate.execute("alter table workspace_leases_migrated rename to workspace_leases");
     }
 
-    private void recreateRunOutputArtifactsWithoutPlanRunFk() {
-        jdbcTemplate.execute("drop table if exists run_output_artifacts_migrated");
-        jdbcTemplate.execute("""
-            create table run_output_artifacts_migrated (
-                id text primary key,
-                run_id text not null,
-                plan_id text not null,
-                agent_id text,
-                job_id text,
-                job_assignment_id text,
-                job_run_id text,
-                project_id text,
-                workspace_id text,
-                run_type text,
-                output_name text not null,
-                artifact_type text not null,
-                file_name text not null,
-                file_path text not null,
-                content_json text,
-                created_at text not null
-            )
-            """);
-        jdbcTemplate.execute("""
-            insert into run_output_artifacts_migrated (
-                id, run_id, plan_id, agent_id, job_id, job_assignment_id, job_run_id,
-                project_id, workspace_id, run_type, output_name, artifact_type, file_name, file_path,
-                content_json, created_at
-            )
-            select id, run_id, plan_id, agent_id, job_id, null, null, project_id, workspace_id,
-                run_type, output_name, artifact_type, file_name, file_path,
-                content_json, created_at
-            from run_output_artifacts
-            """);
-        jdbcTemplate.execute("drop table run_output_artifacts");
-        jdbcTemplate.execute("alter table run_output_artifacts_migrated rename to run_output_artifacts");
-    }
-
     private void addColumnIfMissing(String table, String column, String ddl) {
         if (!table.matches("[a-zA-Z0-9_]+") || !column.matches("[a-zA-Z0-9_]+")) {
             throw new IllegalArgumentException("Unsupported table/column identifier");
@@ -853,13 +577,30 @@ public class WorkspaceRepository {
         ).stream().anyMatch("workspace_roots"::equals);
     }
 
-    private boolean runOutputArtifactsReferencePlanRuns() {
-        if (!tableExists("run_output_artifacts")) {
-            return false;
-        }
-        return jdbcTemplate.query(
-            "select \"table\" from pragma_foreign_key_list('run_output_artifacts') where \"from\" = 'run_id'",
-            (rs, rowNum) -> rs.getString(1)
-        ).stream().anyMatch("plan_runs"::equals);
+    /**
+     * Backward-compatible delegate to OutputArtifactRepository.
+     * @deprecated Use {@link OutputArtifactRepository#findArtifactsByRunId(String)}.
+     */
+    @Deprecated
+    public java.util.List<RunOutputArtifact> findArtifactsByRunId(String runId) {
+        return new OutputArtifactRepository(jdbcTemplate).findArtifactsByRunId(runId);
+    }
+
+    /**
+     * Backward-compatible delegate to OutputArtifactRepository.
+     * @deprecated Use {@link OutputArtifactRepository#saveArtifact(RunOutputArtifact)}.
+     */
+    @Deprecated
+    public RunOutputArtifact saveArtifact(RunOutputArtifact artifact) {
+        return new OutputArtifactRepository(jdbcTemplate).saveArtifact(artifact);
+    }
+
+    /**
+     * Backward-compatible delegate to OutputArtifactRepository.
+     * @deprecated Use {@link OutputArtifactRepository#findArtifacts(OutputArtifactQuery)}.
+     */
+    @Deprecated
+    public java.util.List<RunOutputArtifact> findArtifacts(OutputArtifactQuery query) {
+        return new OutputArtifactRepository(jdbcTemplate).findArtifacts(query);
     }
 }

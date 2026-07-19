@@ -54,6 +54,7 @@ import io.mindspice.magenta2.ai.orchestration.workflow.WorkflowRouteType;
 import io.mindspice.magenta2.ai.orchestration.workflow.WorkflowService;
 import io.mindspice.magenta2.ai.orchestration.workflow.WorkflowValidator;
 import io.mindspice.magenta2.ai.orchestration.workspaces.LeaseMode;
+import io.mindspice.magenta2.ai.orchestration.workspaces.OutputArtifactRepository;
 import io.mindspice.magenta2.ai.orchestration.workspaces.OutputArtifactService;
 import io.mindspice.magenta2.ai.orchestration.workspaces.RootRelativePathService;
 import io.mindspice.magenta2.ai.orchestration.workspaces.AgentWorkspaceStatus;
@@ -567,9 +568,6 @@ class OrchestrationControllerTest {
         assertThat(html).contains("agentId");
         assertThat(html).contains("modelOverride");
         assertThat(html).contains("priority");
-        assertThat(html).contains("data-selector-kind=\"work-area\"");
-        assertThat(html).contains("name=\"selectedWorkAreaId\"");
-        assertThat(html).contains("name=\"outputWorkAreaId\"");
     }
 
     @Test
@@ -868,9 +866,7 @@ class OrchestrationControllerTest {
         assertThat(html).contains("Saved project:");
         assertThat(html).doesNotContain("Persistent").doesNotContain("job" + " workspace:");
         assertThat(html).contains("Project Override");
-        assertThat(html).contains("Compatibility Workspace");
         assertThat(html).contains("name=\"projectId\"");
-        assertThat(html).contains("name=\"workspaceId\"");
         assertThat(html).contains("name=\"selectorContext.agentId\"");
     }
 
@@ -906,7 +902,7 @@ class OrchestrationControllerTest {
         assertThat(html).contains("hx-get=\"/projects/_list\"");
         assertThat(html).contains("hx-get=\"/projects/_editor/_new\"");
         assertThat(html).contains("project-editor-container");
-        assertThat(html).contains("Shared project workspaces for durable context, membership, and cross-agent visibility.");
+        assertThat(html).contains("Projects group durable context, membership, attribution, and cross-agent visibility.");
         assertThat(html).doesNotContain("Top-level tracking and data-space wrappers with owner agents.");
 
         // No JS data-action handlers
@@ -935,18 +931,19 @@ class OrchestrationControllerTest {
         assertThat(html).contains("Git Repo URL");
         assertThat(html).contains("Manager Type");
 
-        // Has workspace, agents, jobs, outputs sections
-        assertThat(html).contains("Workspace");
+        // Has membership, jobs, and attribution-only outputs sections
         assertThat(html).contains("Agents");
         assertThat(html).contains("Active Jobs");
         assertThat(html).contains("Recent Outputs");
-        assertThat(html).contains("Project Directory");
+        assertThat(html).doesNotContain("Project Directory");
+        assertThat(html).doesNotContain("Project workspace directory");
+        assertThat(html).doesNotContain("Request release after current turn");
         assertThat(html).contains("hx-target=\"#project-network-section\"");
         assertThat(html).contains("hx-target=\"#project-agents-section\"");
         assertThat(html).contains("hx-target=\"#project-jobs-section\"");
         assertThat(html).contains("hx-target=\"#project-outputs-section\"");
-        assertThat(html).contains("hx-get=\"/projects/_detail/proj-xyz/files\"");
-        assertThat(html).contains("hx-target=\"#project-files-section\"");
+        assertThat(html).doesNotContain("hx-get=\"/projects/_detail/proj-xyz/files\"");
+        assertThat(html).doesNotContain("hx-target=\"#project-files-section\"");
 
         // Has delete button
         assertThat(html).contains("Delete");
@@ -1040,7 +1037,7 @@ class OrchestrationControllerTest {
         assertThat(html).contains("hx-get=\"/projects/_editor/proj-xyz\"");
         assertThat(html).contains("hx-get=\"/projects/_list\"");
         assertThat(html).contains("project-editor-container");
-        assertThat(html).contains("Shared project workspaces for durable context, membership, and cross-agent visibility.");
+        assertThat(html).contains("Projects group durable context, membership, attribution, and cross-agent visibility.");
         assertThat(html).doesNotContain("Top-level tracking and data-space wrappers with owner agents.");
 
         // No JS data-action handlers
@@ -1253,19 +1250,15 @@ class OrchestrationControllerTest {
     }
 
     @Test
-    void agentWorkspaceTabRendersMetadataLinksAndLeases() {
+    void agentWorkspaceTabRendersTypedDescriptorWithoutLegacyRegistryDetails() {
         String html = controller().agentWorkspaceTab("agent-1");
 
         assertThat(html).contains("Workspace");
-        assertThat(html).contains("Workspace ID:");
-        assertThat(html).contains("Owner: AGENT:agent-1");
-        assertThat(html).contains("Display Name: Test Agent");
-        assertThat(html).contains("Diagnostic Path: workspace/agent-1");
-        assertThat(html).contains("Final Output Target: workspace/agent-1/outputs");
-        assertThat(html).contains("Active Leases");
-        assertThat(html).contains("TASK_RUN:run-1");
-        assertThat(html).contains("Workspace Links");
-        assertThat(html).contains("Home");
+        assertThat(html).contains("Workspace: agent/agent-1");
+        assertThat(html).contains("Output Target: workspace/agent/agent-1/outputs (lazy)");
+        assertThat(html).doesNotContain("Workspace ID:");
+        assertThat(html).doesNotContain("Active Leases");
+        assertThat(html).doesNotContain("Workspace Links");
     }
 
     @Test
@@ -1644,10 +1637,6 @@ class OrchestrationControllerTest {
         assertThat(html).contains("modelOverride");
         assertThat(html).contains("runDisplayName");
         assertThat(html).contains("projectId");
-        assertThat(html).contains("Compatibility Workspace");
-        assertThat(html).contains("data-selector-kind=\"work-area\"");
-        assertThat(html).contains("selectorContext.ownerType");
-        assertThat(html).contains("selectorContext.ownerId");
     }
 
     @Test
@@ -1663,14 +1652,13 @@ class OrchestrationControllerTest {
         );
 
         String html = ctrl.submitToAgent("agent-1", "TASK_RUN", "plan-abc", 5, "local-qwen", "proj-xyz", "",
-            "", "", "", "", "Projected task run");
+            "", "Projected task run");
 
         assertThat(html).contains("Assignment created");
         assertThat(html).contains("Project: proj-xyz");
-        assertThat(html).contains("Effective workspace: PROJECT proj-xyz");
         assertThat(assignmentService.lastRequest.projectId()).isEqualTo("proj-xyz");
         assertThat(assignmentService.lastRequest.runDisplayName()).isEqualTo("Projected task run");
-        assertThat(assignmentService.lastRequest.workspaceId()).isBlank();
+        assertThat(assignmentService.lastRequest.workspaceKey()).isBlank();
     }
 
     @Test
@@ -1686,7 +1674,7 @@ class OrchestrationControllerTest {
         );
 
         String html = ctrl.submitToAgent("agent-1", "TASK_RUN", "plan-abc", 5, "local-qwen", "proj-xyz", "",
-            "", "", "", "", "");
+            "", "");
 
         assertThat(html).contains("Run name is required for task/workflow submissions.");
         assertThat(assignmentService.lastRequest).isNull();
@@ -2093,8 +2081,8 @@ class OrchestrationControllerTest {
         StubAssignmentService stubAsgn = new StubAssignmentService();
         WorkAssignment running = new WorkAssignment(
             "asgn-stuck", "agent-1", null, null,
-            AssignmentType.TASK_RUN, 9, OrchestrationStatus.RUNNING,
-            null, null, 0, Map.of("taskRunId", "run-1"),
+            AssignmentType.TASK_RUN, null, 9, OrchestrationStatus.RUNNING,
+            null, null, null, null, null, 0, Map.of("taskRunId", "run-1"),
             Map.of("taskId", "task-1"), Map.of(), Map.of(), null,
             "owner-1", Instant.now().plusSeconds(300),
             Instant.now().minusSeconds(1200), Instant.now(), Instant.now().minusSeconds(1200),
@@ -2303,8 +2291,8 @@ class OrchestrationControllerTest {
         StubAssignmentService stubAsgn = new StubAssignmentService();
         WorkAssignment running = new WorkAssignment(
             "asgn-diag", "agent-1", null, null,
-            AssignmentType.TASK_RUN, 9, OrchestrationStatus.RUNNING,
-            null, null, 0, Map.of("taskRunId", "run-1"),
+            AssignmentType.TASK_RUN, null, 9, OrchestrationStatus.RUNNING,
+            null, null, null, null, null, 0, Map.of("taskRunId", "run-1"),
             Map.of("taskId", "task-1"), Map.of(), Map.of(), null,
             "owner-1", Instant.now().plusSeconds(300),
             Instant.now().minusSeconds(1200), Instant.now(), Instant.now().minusSeconds(1200),
@@ -2351,8 +2339,8 @@ class OrchestrationControllerTest {
         Map<String, Object> checkpoint
     ) {
         return new WorkAssignment(
-            id, agentId, null, null, AssignmentType.TASK_RUN, 1, status,
-            null, null, 0, checkpoint, Map.of("taskId", "task-1"), Map.of(), Map.of(),
+            id, agentId, null, null, AssignmentType.TASK_RUN, null, 1, status,
+            null, null, null, null, null, 0, checkpoint, Map.of("taskId", "task-1"), Map.of(), Map.of(),
             null, status == OrchestrationStatus.RUNNING ? "owner-1" : null,
             status == OrchestrationStatus.RUNNING ? Instant.now().plusSeconds(300) : null,
             Instant.now().minusSeconds(60), Instant.now(), status == OrchestrationStatus.RUNNING ? Instant.now() : null,
@@ -2610,7 +2598,7 @@ class OrchestrationControllerTest {
         private int startRunCalls;
 
         private static final JobDefinition STUB_JOB = new JobDefinition(
-            "job-abc", "agent-1", null, null, false, "DRAFT",
+            "job-abc", "agent-1", null, "agent", "agent-1", null, "DRAFT",
             "Test Job", "A test job", List.of(),
             "CODING_CENTRIC", null, null, null, null
         );
@@ -2687,7 +2675,7 @@ class OrchestrationControllerTest {
 
         @Override public io.mindspice.magenta2.ai.orchestration.workspaces.RunOutputArtifact getArtifact(String artifactId) {
             return new io.mindspice.magenta2.ai.orchestration.workspaces.RunOutputArtifact(
-                artifactId, "run-1", "plan-abc", "agent-1", "job-abc", null, null, "TASK_RUN",
+                artifactId, "run-1", "plan-abc", "agent-1", "job-abc", null, null, null, null, null, null, "TASK_RUN",
                 "test-output", "text", "test.txt", "/tmp/test.txt", null, Instant.now()
             );
         }
@@ -2704,7 +2692,7 @@ class OrchestrationControllerTest {
         try {
             Path dataRoot = Files.createTempDirectory("orch-controller-output");
             WorkspaceDirectoryService directories = WorkspaceDirectoryServiceTestSupport.directoryService(dataRoot);
-            WorkspaceRepository repository = new WorkspaceRepository(new JdbcTemplate(
+            OutputArtifactRepository repository = new OutputArtifactRepository(new JdbcTemplate(
                 new SingleConnectionDataSource("jdbc:sqlite::memory:?foreign_keys=true", true)
             ));
             return new OutputArtifactDeps(repository, directories, new ObjectMapper());
@@ -2714,7 +2702,7 @@ class OrchestrationControllerTest {
     }
 
     private record OutputArtifactDeps(
-        WorkspaceRepository repository,
+        OutputArtifactRepository repository,
         WorkspaceDirectoryService directoryService,
         ObjectMapper objectMapper
     ) {
@@ -2797,16 +2785,12 @@ class OrchestrationControllerTest {
         @Override public WorkAssignment create(AssignmentRequest request) {
             lastRequest = request;
             return new WorkAssignment("asgn-1", request.agentId(), request.jobId(), request.jobItemId(),
-                request.assignmentType(), request.priority() != null ? request.priority() : 0,
+                request.assignmentType(), request.runDisplayName(), request.priority() != null ? request.priority() : 0,
                 io.mindspice.magenta2.ai.orchestration.runtime.OrchestrationStatus.QUEUED,
-                request.modelOverride(), request.workspaceId(), request.projectId(),
-                request.projectId() != null && !request.projectId().isBlank() ? request.projectId() : "workspace-agent-1",
-                request.projectId() != null && !request.projectId().isBlank() ? "PROJECT" : "AGENT",
-                request.selectedWorkAreaId(), request.outputRouteType(), request.outputWorkAreaId(),
-                request.outputDirectRelativePath(),
+                request.modelOverride(), request.workspaceType(), request.workspaceKey(), request.workspaceKey(), request.projectId(),
                 0, Map.<String, Object>of(), request.input() != null ? request.input() : Map.<String, Object>of(),
                 Map.<String, Object>of(), Map.<String, Object>of(), null, null, null,
-                Instant.now(), Instant.now(), null, null);
+                Instant.now(), Instant.now(), null, null, null, null);
         }
 
         @Override public java.util.List<WorkAssignment> assignments(String agentId) {
@@ -2919,8 +2903,8 @@ class OrchestrationControllerTest {
         private WorkAssignment replace(WorkAssignment assignment, OrchestrationStatus status, String errorText) {
             WorkAssignment updated = new WorkAssignment(
                 assignment.id(), assignment.agentId(), assignment.jobId(), assignment.jobItemId(),
-                assignment.assignmentType(), assignment.priority(), status,
-                assignment.modelOverride(), assignment.workspaceId(), assignment.currentItemIndex(),
+                assignment.assignmentType(), assignment.runDisplayName(), assignment.priority(), status,
+                assignment.modelOverride(), assignment.workspaceType(), assignment.workspaceKey(), assignment.workspaceIdentity(), assignment.projectId(), assignment.currentItemIndex(),
                 assignment.checkpoint(), assignment.input(), assignment.output(), assignment.evidence(),
                 errorText, null, null, assignment.createdAt(), assignment.updatedAt(),
                 assignment.startedAt(), status.isTerminal() ? Instant.now() : assignment.completedAt(),

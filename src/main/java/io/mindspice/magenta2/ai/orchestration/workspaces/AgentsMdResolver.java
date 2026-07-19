@@ -209,15 +209,13 @@ public class AgentsMdResolver {
     }
 
     private String contextWorkspacePath(OrchestrationTaskContext context) {
-        return StringUtils.hasText(context.hostDurableWorkspacePath())
-            ? context.hostDurableWorkspacePath()
-            : context.hostWorkspacePath();
+        return context.hostDurableWorkspacePath();
     }
 
     private String contextRunPath(OrchestrationTaskContext context) {
         return StringUtils.hasText(context.hostRunPath())
             ? context.hostRunPath()
-            : context.hostWorkspacePath();
+            : context.hostDurableWorkspacePath();
     }
 
     private String contextRootPath(OrchestrationTaskContext context) {
@@ -230,10 +228,7 @@ public class AgentsMdResolver {
         if (StringUtils.hasText(context.hostRootPath())) {
             return context.hostRootPath();
         }
-        if (StringUtils.hasText(context.hostDurableWorkspacePath())) {
-            return context.hostDurableWorkspacePath();
-        }
-        return context.hostWorkspacePath();
+        return context.hostDurableWorkspacePath();
     }
 
     private String normalizeRequest(String requested) {

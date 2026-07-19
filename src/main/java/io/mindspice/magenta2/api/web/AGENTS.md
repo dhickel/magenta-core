@@ -7,7 +7,7 @@ This package owns HTTP and web-facing entry points.
 - Expose chat plan state, queued planning questions/actions, approval/continue actions, validation criteria, deliverables, validation feedback, and execution evidence.
 - Treat `/chat` planning routes as anonymous, session-local, non-saved planning. They must not create saved `/plans` definitions or submit anonymous plans to agents.
 - Treat `/api/plans/*planning-chat*` as saved plan chat routes. These routes are plan-scoped and must not use `/api/chat`, `ai_chat_session_metadata`, or chat session list architecture.
-- Expose runtime settings, agent profile, workspace-link, Work Area/file explorer, job, assignment, inbox, schedule, event-reaction, and agent side-panel chat APIs as thin orchestration entry points.
+- Expose runtime settings, agent profile, typed workspace/file explorer, job, assignment, inbox, schedule, event-reaction, and agent side-panel chat APIs as thin orchestration entry points.
 - Expose assignment lifecycle controls, including guarded queue cleanup, retained terminal history, history purge, and read-only audit transcript fragments, through thin orchestration entry points.
 - Expose operational dashboard summary and output artifact query APIs as thin read models for orchestration UI pages.
 - Expose Agent Skills management and agent-assignment endpoints as thin service adapters when that surface is implemented.
@@ -18,8 +18,8 @@ This package owns HTTP and web-facing entry points.
 
 ### Change guidance
 - Treat controller request and response changes as public API changes.
-- For workspace, Work Area, run, output, project, task/workflow, or job request/response changes, keep controllers thin and route path/layout policy through workspace/runtime services and centralized layout helpers.
-- MVP browser UX should expose Work Area and project browsing/editing, not internal agent workspace roots, run staging, or structural root management except through explicitly diagnostic/read-only future surfaces.
+- For workspace, output, project, task/workflow, or job request/response changes, keep controllers thin and route selection/path policy through workspace/runtime services and centralized layout helpers.
+- Execution submission forms default to the bound agent by omitting workspace type/key. Do not expose retired generic workspace, Work Area, output-route, direct-output, run-root, or filesystem-lease controls.
 - Agent Skills MVP browser UX should manage the root `skills/` repository and agent assignment only. Do not imply project-local/user scope loading, layered assignment, or browser-driven script execution before those deferred capabilities are accepted and implemented.
 - Public plan/task/workflow run controls submit saved definitions to agent assignments; direct model-backed execution stays internal/test-only when needed.
 - Public task and workflow run stream routes acknowledge queued assignment submission instead of streaming inline model execution.

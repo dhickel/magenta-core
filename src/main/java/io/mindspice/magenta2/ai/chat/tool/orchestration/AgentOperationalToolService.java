@@ -156,7 +156,7 @@ public class AgentOperationalToolService {
     public ToolResult agentAssignmentRequeueWorkspaceBlocked(String assignmentId) {
         AgentProfile agent = authorization.requireCurrentAgent();
         authorization.requireAssignmentOwner(agent.id(), assignmentId);
-        return ok("assignment requeued", assignmentItem(assignmentService.requeueWorkspaceBlockedAssignment(assignmentId)));
+        return ok("assignment requeued", assignmentItem(assignmentService.resume(agent.id(), assignmentId)));
     }
 
     public ToolResult agentAssignmentDiagnostics(String assignmentId) {
@@ -267,7 +267,7 @@ public class AgentOperationalToolService {
             input.put("instructions", instructions.trim());
         }
         WorkAssignment assignment = assignmentService.create(new AssignmentRequest(
-            agent.id(), jobId, null, AssignmentType.JOB_RUN, priority, modelOverride, effectiveProjectId, job.workspaceId(), input));
+            agent.id(), jobId, null, AssignmentType.JOB_RUN, priority, modelOverride, effectiveProjectId, null, null, input));
         return ok("job assignment submitted", assignmentItem(assignment));
     }
 
@@ -289,7 +289,7 @@ public class AgentOperationalToolService {
         AgentProfile agent = authorization.requireCurrentAgent();
         authorization.requireJobAccess(agent.id(), jobId);
         int bounded = authorization.boundLimit(limit);
-        return list(outputArtifactService.query(OutputArtifactQuery.of(null, jobId, null, null, null, null, null, bounded))
+        return list(outputArtifactService.query(OutputArtifactQuery.of(null, jobId, null, null, null, null, null, null, null, bounded))
             .stream()
             .filter(artifact -> canAccessArtifact(agent.id(), artifact))
             .limit(bounded)
@@ -337,7 +337,7 @@ public class AgentOperationalToolService {
         int bounded = authorization.boundLimit(limit);
         if (StringUtils.hasText(projectId)) {
             authorization.requireProjectAccess(agent.id(), projectId);
-            return list(outputArtifactService.query(OutputArtifactQuery.of(null, null, projectId, null, null, null, artifactType, bounded))
+            return list(outputArtifactService.query(OutputArtifactQuery.of(null, null, projectId, null, null, null, null, null, artifactType, bounded))
                 .stream().limit(bounded).map(this::outputItem).toList(), bounded);
         }
         if (StringUtils.hasText(jobId)) {
@@ -345,10 +345,10 @@ public class AgentOperationalToolService {
             return agentJobOutputs(jobId, bounded);
         }
         Map<String, RunOutputArtifact> artifacts = new LinkedHashMap<>();
-        outputArtifactService.query(OutputArtifactQuery.of(agent.id(), null, null, null, null, null, artifactType, bounded))
+        outputArtifactService.query(OutputArtifactQuery.of(agent.id(), null, null, null, null, null, null, null, artifactType, bounded))
             .forEach(artifact -> artifacts.putIfAbsent(artifact.id(), artifact));
         for (String membershipProjectId : projectService.listAgentProjects(agent.id())) {
-            outputArtifactService.query(OutputArtifactQuery.of(null, null, membershipProjectId, null, null, null, artifactType, bounded))
+            outputArtifactService.query(OutputArtifactQuery.of(null, null, membershipProjectId, null, null, null, null, null, artifactType, bounded))
                 .forEach(artifact -> artifacts.putIfAbsent(artifact.id(), artifact));
         }
         return list(artifacts.values().stream().limit(bounded).map(this::outputItem).toList(), bounded);
@@ -403,8 +403,8 @@ public class AgentOperationalToolService {
     private AssignmentItem assignmentItem(WorkAssignment assignment) {
         return new AssignmentItem(
             assignment.id(), assignment.agentId(), assignment.jobId(), assignment.jobItemId(), assignment.assignmentType(),
-            assignment.status(), assignment.priority(), assignment.modelOverride(), assignment.workspaceId(),
-            assignment.projectId(), assignment.effectiveWorkspaceId(), assignment.effectiveWorkspaceKind(),
+            assignment.status(), assignment.priority(), assignment.modelOverride(), assignment.workspaceIdentity(),
+            assignment.projectId(), assignment.workspaceKey(), assignment.workspaceType(),
             assignment.updatedAt() == null ? null : assignment.updatedAt().toString()
         );
     }
@@ -464,16 +464,15 @@ public class AgentOperationalToolService {
 
     private JobItem jobItem(JobDefinition job) {
         return new JobItem(
-            job.id(), job.title(), job.ownerAgentId(), job.projectId(), job.workspaceId(), job.status(),
-            Boolean.TRUE.equals(job.persistentWorkspaceEnabled()), job.items() == null ? 0 : job.items().size(),
-            job.updatedAt()
+            job.id(), job.title(), job.ownerAgentId(), job.projectId(), job.workspaceType(), job.workspaceKey(),
+            job.workspaceIdentity(), job.status(), job.items().size(), job.updatedAt()
         );
     }
 
     private JobRunItem jobRunItem(JobRun run) {
         return new JobRunItem(
-            run.id(), run.jobId(), run.jobAssignmentId(), run.workspaceId(), run.status(), run.workspacePath(),
-            run.outputDir(), run.startedAt(), run.completedAt(), run.updatedAt()
+            run.id(), run.jobId(), run.jobAssignmentId(), run.workspaceType(), run.workspaceKey(),
+            run.workspaceIdentity(), run.status(), run.startedAt(), run.completedAt(), run.updatedAt()
         );
     }
 
@@ -499,7 +498,7 @@ public class AgentOperationalToolService {
     private OutputItem outputItem(RunOutputArtifact artifact) {
         return new OutputItem(
             artifact.id(), artifact.runId(), artifact.planId(), artifact.agentId(), artifact.jobId(),
-            artifact.jobAssignmentId(), artifact.jobRunId(), artifact.projectId(), artifact.workspaceId(),
+            artifact.jobAssignmentId(), artifact.jobRunId(), artifact.projectId(), artifact.workspaceIdentity(),
             artifact.runType(), artifact.artifactType(), artifact.fileName(), artifact.createdAt()
         );
     }

@@ -19,13 +19,10 @@ import io.mindspice.magenta2.ai.orchestration.agents.AgentProfileService;
 import io.mindspice.magenta2.ai.orchestration.settings.RuntimeSettingsService;
 import io.mindspice.magenta2.ai.orchestration.workflow.WorkflowRun;
 import io.mindspice.magenta2.ai.orchestration.workflow.WorkflowService;
-import io.mindspice.magenta2.ai.orchestration.workspaces.EffectiveWorkspace;
-import io.mindspice.magenta2.ai.orchestration.workspaces.EffectiveWorkspaceResolver;
-import io.mindspice.magenta2.ai.orchestration.workspaces.WorkAreaService;
-import io.mindspice.magenta2.ai.orchestration.workspaces.Workspace;
-import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceLeaseService;
-import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceOwnerType;
-import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceService;
+import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceDescriptor;
+import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceDirectoryService;
+import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceKind;
+import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceResolutionException;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
@@ -40,10 +37,7 @@ public class AssignmentService {
     private final AuditRepository auditRepository;
     private final PlanService planService;
     private final WorkflowService workflowService;
-    private final EffectiveWorkspaceResolver effectiveWorkspaceResolver;
-    private final WorkspaceService workspaceService;
-    private final WorkspaceLeaseService workspaceLeaseService;
-    private final WorkAreaService workAreaService;
+    private final WorkspaceDirectoryService workspaceDirectoryService;
     private volatile Consumer<String> localInterruptHandler = ignored -> { };
 
     public AssignmentService(
@@ -52,22 +46,14 @@ public class AssignmentService {
         RuntimeSettingsService runtimeSettingsService,
         JobService jobService
     ) {
-        this(repository, agentProfileService, runtimeSettingsService, jobService, null, null, null);
+        this(repository, agentProfileService, runtimeSettingsService, jobService, null, null, null, null);
     }
 
-    public AssignmentService(
-        OrchestrationRuntimeRepository repository,
-        AgentProfileService agentProfileService,
-        RuntimeSettingsService runtimeSettingsService,
-        JobService jobService,
-        @Autowired(required = false) AuditRepository auditRepository,
-        @Autowired(required = false) PlanService planService,
-        @Autowired(required = false) WorkflowService workflowService
-    ) {
-        this(repository, agentProfileService, runtimeSettingsService, jobService, auditRepository, planService,
-            workflowService, null, null, null, null);
-    }
-
+    /**
+     * Backward-compatible constructor for tests that pass AuditRepository and optional services.
+     * @deprecated Use the @Autowired constructor with explicit workspaceDirectoryService.
+     */
+    @Deprecated
     public AssignmentService(
         OrchestrationRuntimeRepository repository,
         AgentProfileService agentProfileService,
@@ -75,13 +61,10 @@ public class AssignmentService {
         JobService jobService,
         AuditRepository auditRepository,
         PlanService planService,
-        WorkflowService workflowService,
-        EffectiveWorkspaceResolver effectiveWorkspaceResolver,
-        WorkspaceService workspaceService,
-        WorkspaceLeaseService workspaceLeaseService
+        WorkflowService workflowService
     ) {
-        this(repository, agentProfileService, runtimeSettingsService, jobService, auditRepository, planService,
-            workflowService, effectiveWorkspaceResolver, workspaceService, workspaceLeaseService, null);
+        this(repository, agentProfileService, runtimeSettingsService, jobService,
+            auditRepository, planService, workflowService, null);
     }
 
     @Autowired
@@ -93,10 +76,7 @@ public class AssignmentService {
         @Autowired(required = false) AuditRepository auditRepository,
         @Autowired(required = false) PlanService planService,
         @Autowired(required = false) WorkflowService workflowService,
-        @Autowired(required = false) EffectiveWorkspaceResolver effectiveWorkspaceResolver,
-        @Autowired(required = false) WorkspaceService workspaceService,
-        @Autowired(required = false) WorkspaceLeaseService workspaceLeaseService,
-        @Autowired(required = false) WorkAreaService workAreaService
+        @Autowired(required = false) WorkspaceDirectoryService workspaceDirectoryService
     ) {
         this.repository = repository;
         this.agentProfileService = agentProfileService;
@@ -105,10 +85,7 @@ public class AssignmentService {
         this.auditRepository = auditRepository;
         this.planService = planService;
         this.workflowService = workflowService;
-        this.effectiveWorkspaceResolver = effectiveWorkspaceResolver;
-        this.workspaceService = workspaceService;
-        this.workspaceLeaseService = workspaceLeaseService;
-        this.workAreaService = workAreaService;
+        this.workspaceDirectoryService = workspaceDirectoryService;
     }
 
     public WorkAssignment create(AssignmentRequest request) {
@@ -131,13 +108,11 @@ public class AssignmentService {
         }
         Map<String, Object> input = inputWithProjectContext(request);
         String projectId = normalize(firstText(request.projectId(), text(input.get("projectId"))));
-        validateWorkspaceCompatibility(projectId, request.workspaceId());
-        EffectiveWorkspace effectiveWorkspace = resolveEffectiveWorkspace(request.agentId(), projectId);
-        WorkspaceOwnerType effectiveOwnerType = StringUtils.hasText(projectId)
-            ? WorkspaceOwnerType.PROJECT
-            : WorkspaceOwnerType.AGENT;
-        String effectiveOwnerId = StringUtils.hasText(projectId) ? projectId : request.agentId();
-        WorkAreaRouting workAreaRouting = resolveWorkAreaRouting(request, effectiveOwnerType, effectiveOwnerId);
+
+        // Resolve workspace selection: type/key both absent or both present
+        ResolvedSelection selection = resolveWorkspaceSelection(
+            request.agentId(), request.workspaceType(), request.workspaceKey());
+
         AssignmentTemplateParser.validate(new AssignmentRequest(
             request.agentId(),
             request.jobId(),
@@ -147,11 +122,8 @@ public class AssignmentService {
             request.priority(),
             request.modelOverride(),
             projectId,
-            request.workspaceId(),
-            workAreaRouting.selectedWorkAreaId(),
-            workAreaRouting.outputRouteType(),
-            workAreaRouting.outputWorkAreaId(),
-            workAreaRouting.outputDirectRelativePath(),
+            selection.workspaceType(),
+            selection.workspaceKey(),
             input
         ));
         return repository.saveAssignment(new WorkAssignment(
@@ -164,14 +136,10 @@ public class AssignmentService {
             request.priority() == null ? 0 : request.priority(),
             OrchestrationStatus.QUEUED,
             normalize(request.modelOverride()),
-            normalize(request.workspaceId()),
+            selection.workspaceType(),
+            selection.workspaceKey(),
+            selection.workspaceIdentity(),
             projectId,
-            effectiveWorkspace == null ? null : effectiveWorkspace.workspaceId(),
-            effectiveWorkspace == null ? null : effectiveWorkspace.ownerType().name(),
-            workAreaRouting.selectedWorkAreaId(),
-            workAreaRouting.outputRouteType(),
-            workAreaRouting.outputWorkAreaId(),
-            workAreaRouting.outputDirectRelativePath(),
             0,
             Map.of(),
             input,
@@ -188,6 +156,58 @@ public class AssignmentService {
             null
         ));
     }
+
+    // ── Centralized workspace selection ──
+
+    private ResolvedSelection resolveWorkspaceSelection(
+        String agentId, String workspaceType, String workspaceKey
+    ) {
+        boolean hasType = StringUtils.hasText(workspaceType);
+        boolean hasKey = StringUtils.hasText(workspaceKey);
+
+        // Both absent → default to agent
+        if (!hasType && !hasKey) {
+            return new ResolvedSelection(
+                WorkspaceKind.AGENT.token(), agentId, WorkspaceKind.AGENT.token() + "/" + agentId);
+        }
+        // One field only → reject
+        if (hasType != hasKey) {
+            throw new IllegalArgumentException(
+                "workspaceType and workspaceKey must both be present or both absent");
+        }
+        WorkspaceKind kind;
+        try {
+            kind = WorkspaceKind.fromToken(workspaceType);
+        } catch (IllegalArgumentException e) {
+            throw new IllegalArgumentException("Invalid workspaceType: " + workspaceType);
+        }
+        return switch (kind) {
+            case AGENT -> {
+                if (!agentId.equals(workspaceKey)) {
+                    throw new IllegalArgumentException(
+                        "Agent workspace key must match bound agent: " + agentId);
+                }
+                yield new ResolvedSelection(kind.token(), workspaceKey, kind.token() + "/" + workspaceKey);
+            }
+            case USER -> {
+                if (workspaceDirectoryService == null) {
+                    throw new IllegalStateException("Workspace directory service is unavailable");
+                }
+                try {
+                    WorkspaceDescriptor descriptor = workspaceDirectoryService.resolveForRead(
+                        WorkspaceKind.USER, workspaceKey);
+                    yield new ResolvedSelection(kind.token(), workspaceKey, descriptor.identity());
+                } catch (WorkspaceResolutionException e) {
+                    throw new IllegalArgumentException("User workspace not found: " + workspaceKey);
+                }
+            }
+            case CHAT -> throw new IllegalArgumentException("Chat workspace selection is not supported");
+        };
+    }
+
+    private record ResolvedSelection(String workspaceType, String workspaceKey, String workspaceIdentity) {}
+
+    // ── CRUD ──
 
     public WorkAssignment get(String assignmentId) {
         return repository.findAssignment(assignmentId)
@@ -242,6 +262,8 @@ public class AssignmentService {
         }
         repository.purgeTerminalAssignmentHistory(Instant.now().minus(Duration.ofDays(settings.assignmentHistoryAutoPurgeDays())));
     }
+
+    // ── Lifecycle ──
 
     WorkAssignment cancel(String assignmentId) {
         return cancel(get(assignmentId));
@@ -323,6 +345,8 @@ public class AssignmentService {
         this.localInterruptHandler = handler == null ? ignored -> { } : handler;
     }
 
+    // ── Diagnostics ──
+
     public AssignmentDiagnostics diagnostics(String assignmentId) {
         WorkAssignment assignment = get(assignmentId);
         Instant now = Instant.now();
@@ -399,36 +423,6 @@ public class AssignmentService {
             .orElseGet(() -> repository.findAssignment(assignment.id()).orElse(assignment));
     }
 
-    public WorkAssignment repairEffectiveWorkspaceContext(WorkAssignment assignment) {
-        if (assignment == null) {
-            return null;
-        }
-        String projectId = normalize(firstText(assignment.projectId(), text(assignment.input().get("projectId"))));
-        if (StringUtils.hasText(projectId)) {
-            validateWorkspaceCompatibility(projectId, assignment.workspaceId());
-        }
-        if (StringUtils.hasText(assignment.effectiveWorkspaceId())
-            && StringUtils.hasText(assignment.effectiveWorkspaceKind())
-            && safeEquals(projectId, assignment.projectId())) {
-            return assignment;
-        }
-        EffectiveWorkspace effectiveWorkspace = resolveEffectiveWorkspace(assignment.agentId(), projectId);
-        if (effectiveWorkspace == null) {
-            return assignment;
-        }
-        return repository.saveAssignment(new WorkAssignment(
-            assignment.id(), assignment.agentId(), assignment.jobId(), assignment.jobItemId(),
-            assignment.assignmentType(), assignment.runDisplayName(), assignment.priority(), assignment.status(), assignment.modelOverride(),
-            assignment.workspaceId(), projectId, effectiveWorkspace.workspaceId(), effectiveWorkspace.ownerType().name(),
-            assignment.selectedWorkAreaId(), assignment.outputRouteType(), assignment.outputWorkAreaId(),
-            assignment.outputDirectRelativePath(),
-            assignment.currentItemIndex(), assignment.checkpoint(), assignment.input(), assignment.output(), assignment.evidence(),
-            assignment.errorText(), assignment.leaseOwner(), assignment.leaseExpiresAt(), assignment.createdAt(),
-            assignment.updatedAt(), assignment.startedAt(), assignment.completedAt(), assignment.lastProgressAt(),
-            assignment.lastHeartbeatAt()
-        ));
-    }
-
     public AssignmentSummary summary(String assignmentId) {
         return summary(get(assignmentId));
     }
@@ -441,8 +435,8 @@ public class AssignmentService {
         return repository.findActiveAssignmentsForProject(projectId).stream().map(this::summary).toList();
     }
 
-    public List<AssignmentSummary> activeSummariesForEffectiveWorkspace(String workspaceId) {
-        return repository.findActiveAssignmentsForEffectiveWorkspace(workspaceId).stream().map(this::summary).toList();
+    public List<AssignmentSummary> activeSummariesForWorkspaceIdentity(String workspaceIdentity) {
+        return repository.findActiveAssignmentsForWorkspaceIdentity(workspaceIdentity).stream().map(this::summary).toList();
     }
 
     public boolean hasActiveAssignmentsForProject(String projectId) {
@@ -453,55 +447,8 @@ public class AssignmentService {
         return repository.countActiveAssignmentsForJob(jobId) > 0;
     }
 
-    public boolean hasActiveAssignmentsForEffectiveWorkspace(String workspaceId) {
-        return repository.countActiveAssignmentsForEffectiveWorkspace(workspaceId) > 0;
-    }
-
-    public WorkAssignment requeueWorkspaceBlockedAssignment(String assignmentId) {
-        WorkAssignment assignment = get(assignmentId);
-        if (assignment.status() != OrchestrationStatus.WAITING || !assignment.checkpoint().containsKey("workspaceBlocker")) {
-            throw new IllegalStateException("Assignment is not waiting on a workspace lease: " + assignmentId);
-        }
-        String workspaceId = firstText(
-            assignment.effectiveWorkspaceId(),
-            text(assignment.checkpoint().get("projectWorkspaceId")),
-            text(assignment.checkpoint().get("effectiveWorkspaceId"))
-        );
-        if (!StringUtils.hasText(workspaceId)) {
-            throw new IllegalStateException("Workspace-blocked assignment has no effective workspace id: " + assignmentId);
-        }
-        if (workspaceLeaseService == null) {
-            throw new IllegalStateException("Workspace lease service is unavailable");
-        }
-        if (workspaceLeaseService.activeWritableLease(workspaceId).isPresent()) {
-            throw new IllegalStateException("Workspace still has an active writable lease: " + workspaceId);
-        }
-        Map<String, Object> checkpoint = new LinkedHashMap<>(assignment.checkpoint());
-        Object blocker = checkpoint.remove("workspaceBlocker");
-        if (blocker != null) {
-            checkpoint.put("lastWorkspaceBlocker", blocker);
-        }
-        return repository.saveAssignment(copy(
-            assignment, OrchestrationStatus.QUEUED, assignment.currentItemIndex(), checkpoint,
-            assignment.output(), assignment.evidence(), null, null, null, assignment.completedAt()
-        ));
-    }
-
-    public int requeueWorkspaceBlockedAssignments(int limit) {
-        int boundedLimit = limit <= 0 ? 50 : Math.min(limit, 200);
-        int requeued = 0;
-        for (WorkAssignment assignment : repository.findWaitingAssignments(boundedLimit)) {
-            if (!assignment.checkpoint().containsKey("workspaceBlocker")) {
-                continue;
-            }
-            try {
-                requeueWorkspaceBlockedAssignment(assignment.id());
-                requeued++;
-            } catch (IllegalStateException ignored) {
-                // Still blocked or not enough context; leave it WAITING for a later operator pass.
-            }
-        }
-        return requeued;
+    public boolean hasActiveAssignmentsForWorkspaceIdentity(String workspaceIdentity) {
+        return repository.countActiveAssignmentsForWorkspaceIdentity(workspaceIdentity) > 0;
     }
 
     WorkAssignment saveStatus(WorkAssignment assignment, OrchestrationStatus status) {
@@ -534,14 +481,13 @@ public class AssignmentService {
     ) {
         return new WorkAssignment(
             assignment.id(), assignment.agentId(), assignment.jobId(), assignment.jobItemId(),
-            assignment.assignmentType(), assignment.runDisplayName(), assignment.priority(), status, assignment.modelOverride(), assignment.workspaceId(),
-            assignment.projectId(), assignment.effectiveWorkspaceId(), assignment.effectiveWorkspaceKind(),
-            assignment.selectedWorkAreaId(), assignment.outputRouteType(), assignment.outputWorkAreaId(),
-            assignment.outputDirectRelativePath(),
+            assignment.assignmentType(), assignment.runDisplayName(), assignment.priority(), status,
+            assignment.modelOverride(), assignment.workspaceType(), assignment.workspaceKey(),
+            assignment.workspaceIdentity(), assignment.projectId(),
             currentItemIndex, checkpoint == null ? Map.of() : checkpoint, assignment.input(),
             output == null ? Map.of() : output, evidence == null ? Map.of() : evidence, errorText,
-            leaseOwner, leaseExpiresAt, assignment.createdAt(), assignment.updatedAt(), assignment.startedAt(), completedAt,
-            assignment.lastProgressAt(), assignment.lastHeartbeatAt()
+            leaseOwner, leaseExpiresAt, assignment.createdAt(), assignment.updatedAt(), assignment.startedAt(),
+            completedAt, assignment.lastProgressAt(), assignment.lastHeartbeatAt()
         );
     }
 
@@ -565,9 +511,7 @@ public class AssignmentService {
     }
 
     private void addTaskRun(List<LinkedRunStatus> runs, String runId) {
-        if (!StringUtils.hasText(runId)) {
-            return;
-        }
+        if (!StringUtils.hasText(runId)) return;
         try {
             PlanRun planRun = planService == null ? null : planService.getRun(runId);
             if (planRun != null) {
@@ -579,9 +523,7 @@ public class AssignmentService {
     }
 
     private void addWorkflowRun(List<LinkedRunStatus> runs, String runId) {
-        if (!StringUtils.hasText(runId)) {
-            return;
-        }
+        if (!StringUtils.hasText(runId)) return;
         try {
             WorkflowRun run = workflowService == null ? null : workflowService.getRun(runId);
             if (run != null) {
@@ -593,9 +535,7 @@ public class AssignmentService {
     }
 
     private void addJobRun(List<LinkedRunStatus> runs, String runId) {
-        if (!StringUtils.hasText(runId)) {
-            return;
-        }
+        if (!StringUtils.hasText(runId)) return;
         try {
             JobRun run = jobService == null ? null : jobService.getRun(runId);
             if (run != null) {
@@ -621,11 +561,9 @@ public class AssignmentService {
             assignment.priority(),
             assignment.status(),
             assignment.projectId(),
-            assignment.workspaceId(),
-            assignment.effectiveWorkspaceId(),
-            assignment.effectiveWorkspaceKind(),
-            effectiveWorkspaceDisplayPath(assignment.effectiveWorkspaceId()),
-            text(assignment.checkpoint().get("workspaceBlocker")),
+            assignment.workspaceType(),
+            assignment.workspaceKey(),
+            assignment.workspaceIdentity(),
             text(assignment.checkpoint().get("jobRunId")),
             text(assignment.checkpoint().get("workflowRunId")),
             firstText(text(assignment.checkpoint().get("taskRunId")), text(assignment.checkpoint().get("planRunId"))),
@@ -634,18 +572,6 @@ public class AssignmentService {
             assignment.startedAt(),
             assignment.completedAt()
         );
-    }
-
-    private String effectiveWorkspaceDisplayPath(String workspaceId) {
-        if (!StringUtils.hasText(workspaceId) || workspaceService == null) {
-            return null;
-        }
-        try {
-            Workspace workspace = workspaceService.get(workspaceId);
-            return workspace.rootRelativePath();
-        } catch (RuntimeException ignored) {
-            return null;
-        }
     }
 
     public boolean deletable(OrchestrationStatus status) {
@@ -678,9 +604,7 @@ public class AssignmentService {
 
     @SuppressWarnings("unchecked")
     private void collectConversationIds(LinkedHashSet<String> ids, Object value) {
-        if (value == null) {
-            return;
-        }
+        if (value == null) return;
         if (value instanceof Map<?, ?> map) {
             for (Map.Entry<?, ?> entry : map.entrySet()) {
                 String key = entry.getKey() == null ? "" : entry.getKey().toString();
@@ -708,16 +632,12 @@ public class AssignmentService {
 
     private void addConversationId(LinkedHashSet<String> ids, Object value) {
         String text = text(value);
-        if (StringUtils.hasText(text)) {
-            ids.add(text);
-        }
+        if (StringUtils.hasText(text)) ids.add(text);
     }
 
     private String firstText(String... values) {
         for (String value : values) {
-            if (StringUtils.hasText(value)) {
-                return value;
-            }
+            if (StringUtils.hasText(value)) return value;
         }
         return null;
     }
@@ -732,9 +652,7 @@ public class AssignmentService {
 
     private Instant firstInstant(Instant... values) {
         for (Instant value : values) {
-            if (value != null) {
-                return value;
-            }
+            if (value != null) return value;
         }
         return null;
     }
@@ -753,112 +671,16 @@ public class AssignmentService {
         return StringUtils.hasText(value) ? value.trim() : null;
     }
 
-    private boolean safeEquals(String left, String right) {
-        return java.util.Objects.equals(normalize(left), normalize(right));
-    }
-
-    private EffectiveWorkspace resolveEffectiveWorkspace(String agentId, String projectId) {
-        if (effectiveWorkspaceResolver == null) {
-            return null;
-        }
-        return effectiveWorkspaceResolver.resolve(agentId, projectId);
-    }
-
-    private WorkAreaRouting resolveWorkAreaRouting(
-        AssignmentRequest request,
-        WorkspaceOwnerType ownerType,
-        String ownerId
-    ) {
-        String selectedWorkAreaId = normalize(request.selectedWorkAreaId());
-        String routeType = normalizeOutputRouteType(request.outputRouteType());
-        String outputWorkAreaId = normalize(request.outputWorkAreaId());
-        String outputDirectRelativePath = normalize(request.outputDirectRelativePath());
-
-        if (workAreaService == null) {
-            return new WorkAreaRouting(selectedWorkAreaId, routeType, outputWorkAreaId, outputDirectRelativePath);
-        }
-
-        if (!StringUtils.hasText(selectedWorkAreaId)) {
-            selectedWorkAreaId = workAreaService.ensureHome(ownerType, ownerId, null).id();
-        } else {
-            workAreaService.requireActiveOwned(selectedWorkAreaId, ownerType, ownerId, "selected Work Area");
-        }
-
-        if (AssignmentRequest.OUTPUT_ROUTE_WORK_AREA.equals(routeType)) {
-            if (!StringUtils.hasText(outputWorkAreaId)) {
-                throw new IllegalArgumentException("outputWorkAreaId is required when outputRouteType is WORK_AREA");
-            }
-            workAreaService.requireActiveOwned(outputWorkAreaId, ownerType, ownerId, "output Work Area");
-            outputDirectRelativePath = null;
-        } else if (AssignmentRequest.OUTPUT_ROUTE_DIRECT_DIRECTORY.equals(routeType)) {
-            if (!StringUtils.hasText(outputDirectRelativePath)) {
-                throw new IllegalArgumentException(
-                    "outputDirectRelativePath is required when outputRouteType is DIRECT_DIRECTORY");
-            }
-            outputDirectRelativePath = workAreaService.requireExistingOwnerDirectory(
-                ownerType, ownerId, outputDirectRelativePath, "direct output directory");
-            outputWorkAreaId = null;
-        } else {
-            outputWorkAreaId = null;
-            outputDirectRelativePath = null;
-        }
-        return new WorkAreaRouting(selectedWorkAreaId, routeType, outputWorkAreaId, outputDirectRelativePath);
-    }
-
-    private String normalizeOutputRouteType(String routeType) {
-        String normalized = normalize(routeType);
-        if (!StringUtils.hasText(normalized)) {
-            return AssignmentRequest.OUTPUT_ROUTE_DEFAULT;
-        }
-        String upper = normalized.toUpperCase(java.util.Locale.ROOT);
-        if (AssignmentRequest.OUTPUT_ROUTE_DEFAULT.equals(upper)
-            || AssignmentRequest.OUTPUT_ROUTE_WORK_AREA.equals(upper)
-            || AssignmentRequest.OUTPUT_ROUTE_DIRECT_DIRECTORY.equals(upper)) {
-            return upper;
-        }
-        throw new IllegalArgumentException("Unsupported outputRouteType: " + routeType);
-    }
-
-    private record WorkAreaRouting(
-        String selectedWorkAreaId,
-        String outputRouteType,
-        String outputWorkAreaId,
-        String outputDirectRelativePath
-    ) {
-    }
-
-    private void validateWorkspaceCompatibility(String projectId, String workspaceId) {
-        if (!StringUtils.hasText(projectId) || !StringUtils.hasText(workspaceId) || workspaceService == null) {
-            return;
-        }
-        try {
-            Workspace workspace = workspaceService.get(workspaceId.trim());
-            if (workspace.ownerType() == WorkspaceOwnerType.PROJECT
-                && !projectId.trim().equals(workspace.ownerId())) {
-                throw new IllegalArgumentException(
-                    "workspaceId belongs to project " + workspace.ownerId()
-                    + " but projectId is " + projectId.trim()
-                    + "; projectId is the only project-scoping field"
-                );
-            }
-        } catch (IllegalStateException ignored) {
-            // Unknown compatibility workspace ids remain metadata and do not select project execution.
-        }
-    }
-
     private Map<String, Object> inputWithProjectContext(AssignmentRequest request) {
         Map<String, Object> input = request.input() == null ? Map.of() : request.input();
         String projectId = firstText(request.projectId(), text(input.get("projectId")));
-        if (!StringUtils.hasText(projectId)) {
-            return input;
-        }
+        if (!StringUtils.hasText(projectId)) return input;
         Map<String, Object> merged = new LinkedHashMap<>(input);
         merged.put("projectId", projectId.trim());
         return merged;
     }
 
-    public record LinkedRunStatus(String type, String id, String parentId, String status, String errorText) {
-    }
+    public record LinkedRunStatus(String type, String id, String parentId, String status, String errorText) {}
 
     public record AssignmentSummary(
         String id,
@@ -869,11 +691,9 @@ public class AssignmentService {
         int priority,
         OrchestrationStatus status,
         String projectId,
-        String workspaceId,
-        String effectiveWorkspaceId,
-        String effectiveWorkspaceKind,
-        String effectiveWorkspaceDisplayPath,
-        String workspaceBlocker,
+        String workspaceType,
+        String workspaceKey,
+        String workspaceIdentity,
         String jobRunId,
         String workflowRunId,
         String taskRunId,
@@ -881,8 +701,7 @@ public class AssignmentService {
         Instant updatedAt,
         Instant startedAt,
         Instant completedAt
-    ) {
-    }
+    ) {}
 
     public record AssignmentDiagnostics(
         WorkAssignment assignment,
@@ -895,13 +714,11 @@ public class AssignmentService {
         List<AuditRepository.AuditEvent> auditEvents,
         String conversationId,
         String buildCommit
-    ) {
-    }
+    ) {}
 
     public record AssignmentTranscript(
         WorkAssignment assignment,
         List<String> conversationIds,
         List<AuditRepository.AuditEvent> auditEvents
-    ) {
-    }
+    ) {}
 }
