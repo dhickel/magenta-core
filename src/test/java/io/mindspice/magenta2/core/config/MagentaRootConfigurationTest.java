@@ -5,7 +5,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.attribute.FileTime;
 import java.sql.Connection;
+import java.util.Arrays;
 
 import javax.sql.DataSource;
 
@@ -139,6 +141,8 @@ class MagentaRootConfigurationTest {
             assertThat(magentaRoot).isDirectory();
             assertThat(dataRoot).isDirectory();
             assertThat(magentaRoot.resolve("magenta.sqlite")).exists();
+            assertThat(magentaRoot.resolve("avatar.sqlite")).doesNotExist();
+            assertNoAvatarBeans(context);
             assertThat(context.getBean(AiConfig.class).dataRoot()).isEqualTo(dataRoot);
             assertThat(context.getBean(WorkspaceDirectoryService.class).dataRoot()).isEqualTo(dataRoot.toRealPath());
 
@@ -148,6 +152,48 @@ class MagentaRootConfigurationTest {
             );
             assertThat(tableCount).isEqualTo(1);
         }
+    }
+
+    @Test
+    void startupLeavesPreExistingAvatarSentinelUntouched(@TempDir Path tempDir) throws Exception {
+        Path magentaRoot = Files.createDirectories(tempDir.resolve("sentinel-root"));
+        Path sentinel = magentaRoot.resolve("avatar.sqlite");
+        byte[] original = "not a sqlite database; retained user data".getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        Files.write(sentinel, original);
+        FileTime modified = Files.getLastModifiedTime(sentinel);
+        Path aiConfig = writeAiConfig(tempDir.resolve("sentinel-config"));
+
+        try (ConfigurableApplicationContext context = new SpringApplicationBuilder(Magenta2Application.class)
+            .web(WebApplicationType.NONE)
+            .run(
+                "--server.port=0",
+                "--magenta.root.path=" + magentaRoot,
+                "--app.ai.config-path=" + aiConfig,
+                "--spring.datasource.url=jdbc:sqlite:" + magentaRoot.resolve("magenta.sqlite") + "?foreign_keys=true",
+                "--spring.datasource.driver-class-name=org.sqlite.JDBC",
+                "--magenta.features.schedules-enabled=false",
+                "--magenta.features.reactions-enabled=false",
+                "--magenta.plan.execution-stream-timeout-seconds=0"
+            )) {
+            assertThat(context.getBean(JdbcTemplate.class).queryForObject("select 1", Integer.class)).isEqualTo(1);
+            assertNoAvatarBeans(context);
+        }
+
+        assertThat(Files.readAllBytes(sentinel)).isEqualTo(original);
+        assertThat(Files.getLastModifiedTime(sentinel)).isEqualTo(modified);
+    }
+
+    private static void assertNoAvatarBeans(ConfigurableApplicationContext context) {
+        assertThat(Arrays.stream(context.getBeanDefinitionNames())
+            .filter(name -> name.toLowerCase(java.util.Locale.ROOT).contains("avatar"))
+            .toList()).isEmpty();
+        assertThat(Arrays.stream(context.getBeanDefinitionNames())
+            .map(context::getType)
+            .filter(java.util.Objects::nonNull)
+            .map(Class::getName)
+            .filter(name -> name.startsWith("io.mindspice.magenta2.avatar.")
+                || name.contains("AvatarDashboard") || name.contains("AvatarAssistantTool"))
+            .toList()).isEmpty();
     }
 
     private static DataSourceProperties sqliteProperties(String url) {

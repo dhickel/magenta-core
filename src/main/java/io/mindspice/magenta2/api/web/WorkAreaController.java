@@ -1,8 +1,5 @@
 package io.mindspice.magenta2.api.web;
 
-import java.io.IOException;
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -14,7 +11,6 @@ import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceFileActionReco
 import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceFileLabel;
 import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceFileLabelAssignment;
 import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceOwnerType;
-import org.springframework.core.io.InputStreamResource;
 import org.springframework.http.ContentDisposition;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
@@ -110,19 +106,17 @@ public class WorkAreaController {
                 return ResponseEntity.status(HttpStatus.BAD_REQUEST)
                     .body(Map.of("code", "UNSUPPORTED_VIEW", "error", "inline view only supports image files"));
             }
-            Path file = explorerService.download(workAreaId, path);
-            long size = Files.size(file);
-            MediaType mediaType = imageMediaType(file.getFileName().toString().toLowerCase(Locale.ROOT));
+            WorkAreaExplorerService.DownloadContent file = explorerService.download(workAreaId, path);
+            byte[] bytes = file.bytes();
+            MediaType mediaType = imageMediaType(file.fileName().toLowerCase(Locale.ROOT));
             return ResponseEntity.ok()
                 .header(HttpHeaders.CONTENT_DISPOSITION,
-                    ContentDisposition.inline().filename(file.getFileName().toString()).build().toString())
+                    ContentDisposition.inline().filename(file.fileName()).build().toString())
                 .contentType(mediaType)
-                .contentLength(size)
-                .body(new InputStreamResource(Files.newInputStream(file)));
+                .contentLength(bytes.length)
+                .body(bytes);
         } catch (IllegalArgumentException exception) {
             throw mapExplorerError(exception);
-        } catch (IOException exception) {
-            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "file cannot be read");
         }
     }
 
@@ -132,23 +126,20 @@ public class WorkAreaController {
         @RequestParam String path
     ) {
         try {
-            Path file = explorerService.download(workAreaId, path);
-            long size = Files.size(file);
-            if (size > MAX_DOWNLOAD_BYTES) {
+            WorkAreaExplorerService.DownloadContent file = explorerService.download(workAreaId, path);
+            byte[] bytes = file.bytes();
+            if (bytes.length > MAX_DOWNLOAD_BYTES) {
                 return ResponseEntity.status(HttpStatus.BAD_REQUEST)
-                    .body(Map.of("error", "file too large: " + size + " bytes"));
+                    .body(Map.of("error", "file too large: " + bytes.length + " bytes"));
             }
-            String fileName = file.getFileName().toString();
             return ResponseEntity.ok()
                 .header(HttpHeaders.CONTENT_DISPOSITION,
-                    ContentDisposition.attachment().filename(fileName).build().toString())
+                    ContentDisposition.attachment().filename(file.fileName()).build().toString())
                 .contentType(MediaType.APPLICATION_OCTET_STREAM)
-                .contentLength(size)
-                .body(new InputStreamResource(Files.newInputStream(file)));
+                .contentLength(bytes.length)
+                .body(bytes);
         } catch (IllegalArgumentException exception) {
             return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(Map.of("error", exception.getMessage()));
-        } catch (IOException exception) {
-            return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("error", exception.getMessage()));
         }
     }
 

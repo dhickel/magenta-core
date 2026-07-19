@@ -115,10 +115,10 @@ class WorkAreaControllerTest {
 
     @Test
     void imageViewStreamsSupportedImageInline() throws Exception {
-        Path image = Files.write(tempDir.resolve("pic.png"), new byte[] {1, 2, 3});
         when(explorerService.preview("wa-1", "pic.png"))
             .thenReturn(new WorkAreaExplorerService.FilePreview("pic.png", 3, false, null, false, "image"));
-        when(explorerService.download("wa-1", "pic.png")).thenReturn(image);
+        when(explorerService.download("wa-1", "pic.png"))
+            .thenReturn(new WorkAreaExplorerService.DownloadContent("pic.png", new byte[] {1, 2, 3}));
 
         ResponseEntity<?> response = controller.imageView("wa-1", "pic.png");
 

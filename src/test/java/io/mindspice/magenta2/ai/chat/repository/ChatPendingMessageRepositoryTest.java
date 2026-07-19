@@ -75,6 +75,34 @@ class ChatPendingMessageRepositoryTest {
             .containsExactly("keep me");
     }
 
+    @Test
+    void historicalUnknownSurfaceIsNonFatalAndNotRewritten() {
+        SingleConnectionDataSource dataSource = new SingleConnectionDataSource("jdbc:sqlite::memory:?foreign_keys=true", true);
+        JdbcTemplate jdbc = new JdbcTemplate(dataSource);
+        ChatPendingMessageRepository repository = new ChatPendingMessageRepository(jdbc);
+        repository.enqueue("conversation-1", "legacy", null, null, ChatSessionSurface.BROWSER);
+        jdbc.update("update ai_chat_pending_messages set surface = 'AVATAR' where conversation_id = 'conversation-1'");
+
+        assertThat(repository.findVisibleByConversationId("conversation-1").getFirst().surface()).isNull();
+        assertThat(jdbc.queryForObject(
+            "select surface from ai_chat_pending_messages where conversation_id = 'conversation-1'", String.class
+        )).isEqualTo("AVATAR");
+    }
+
+    @Test
+    void historicalUnknownSessionMetadataSurfaceIsNonFatalAndNotRewritten() {
+        SingleConnectionDataSource dataSource = new SingleConnectionDataSource("jdbc:sqlite::memory:?foreign_keys=true", true);
+        JdbcTemplate jdbc = new JdbcTemplate(dataSource);
+        ChatSessionMetadataRepository repository = new ChatSessionMetadataRepository(jdbc);
+        repository.saveSurfaceIfAbsent("conversation-1", ChatSessionSurface.BROWSER);
+        jdbc.update("update ai_chat_session_metadata set surface = 'AVATAR' where conversation_id = 'conversation-1'");
+
+        assertThat(repository.findSurface("conversation-1")).isEmpty();
+        assertThat(jdbc.queryForObject(
+            "select surface from ai_chat_session_metadata where conversation_id = 'conversation-1'", String.class
+        )).isEqualTo("AVATAR");
+    }
+
     private ChatPendingMessageRepository repository() {
         SingleConnectionDataSource dataSource = new SingleConnectionDataSource("jdbc:sqlite::memory:?foreign_keys=true", true);
         return new ChatPendingMessageRepository(new JdbcTemplate(dataSource));

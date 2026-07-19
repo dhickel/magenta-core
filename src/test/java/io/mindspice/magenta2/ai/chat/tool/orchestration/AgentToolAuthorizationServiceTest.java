@@ -34,7 +34,7 @@ class AgentToolAuthorizationServiceTest {
     private final AssignmentService assignmentService = mock(AssignmentService.class);
     private final JobService jobService = mock(JobService.class);
     private final AgentToolAuthorizationService authorization = new AgentToolAuthorizationService(
-        agentProfileService, projectService, assignmentService, jobService, "avatar");
+        agentProfileService, projectService, assignmentService, jobService);
 
     @AfterEach
     void clearContext() {
@@ -59,22 +59,11 @@ class AgentToolAuthorizationServiceTest {
     }
 
     @Test
-    void avatarSupervisorRequiresExactIdentityAndExplicitToolApproval() {
-        OrchestrationTaskContextHolder.set(context("avatar"));
-        when(agentProfileService.get("avatar")).thenReturn(profile("avatar", List.of("*"), AgentProfileStatus.ACTIVE));
-
-        assertThatThrownBy(() -> authorization.requireAvatarSupervisor("avatar_system_overview"))
-            .isInstanceOf(IllegalStateException.class)
-            .hasMessageContaining("explicit profile approval");
-
-        when(agentProfileService.get("avatar")).thenReturn(profile("avatar", List.of("avatar_system_overview"), AgentProfileStatus.ACTIVE));
-        assertThat(authorization.requireAvatarSupervisor("avatar_system_overview").id()).isEqualTo("avatar");
-
+    void rejectsUnknownSurface() {
         OrchestrationTaskContextHolder.set(context("agent-1"));
-        when(agentProfileService.get("agent-1")).thenReturn(profile("agent-1", List.of("avatar_system_overview"), AgentProfileStatus.ACTIVE));
-        assertThatThrownBy(() -> authorization.requireAvatarSupervisor("avatar_system_overview"))
-            .isInstanceOf(IllegalStateException.class)
-            .hasMessageContaining("requires agent id");
+        when(agentProfileService.get("agent-1")).thenReturn(profile("agent-1", List.of("*"), AgentProfileStatus.ACTIVE));
+
+        assertThat(authorization.requireCurrentAgent().id()).isEqualTo("agent-1");
     }
 
     @Test

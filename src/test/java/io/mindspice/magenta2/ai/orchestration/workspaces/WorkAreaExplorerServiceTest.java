@@ -21,6 +21,15 @@ class WorkAreaExplorerServiceTest {
     Path tempDir;
 
     @Test
+    void transitionalAdapterExposesNoPublicRawPathApi() {
+        assertThat(Arrays.stream(WorkAreaExplorerService.class.getMethods())
+            .filter(method -> method.getDeclaringClass() == WorkAreaExplorerService.class)
+            .filter(method -> method.getReturnType() == Path.class
+                || Arrays.asList(method.getParameterTypes()).contains(Path.class)))
+            .isEmpty();
+    }
+
+    @Test
     void listsPreviewsSavesAndCreatesDirectoriesInsideWorkArea() throws Exception {
         TestContext context = context();
         WorkArea home = context.workAreaService().ensureHome(WorkspaceOwnerType.AGENT, "agent-1", null);
@@ -254,7 +263,7 @@ class WorkAreaExplorerServiceTest {
 
         assertThatThrownBy(() -> context.explorer().list(home.id(), "../outside"))
             .isInstanceOf(IllegalArgumentException.class)
-            .hasMessageContaining("escapes Work Area");
+            .hasMessageContaining("escapes workspace");
         assertThatThrownBy(() -> context.explorer().list(home.id(), "C:\\Windows\\system32"))
             .isInstanceOf(IllegalArgumentException.class)
             .hasMessageContaining("absolute paths");
@@ -377,7 +386,7 @@ class WorkAreaExplorerServiceTest {
         return new TestContext(
             jdbc,
             workAreaService,
-            new WorkAreaExplorerService(workAreaService, metadataService, actionLogRepository),
+            new WorkAreaExplorerService(workAreaService, new WorkspaceExplorerService(), metadataService, actionLogRepository),
             metadataRepository,
             actionLogRepository
         );

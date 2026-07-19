@@ -205,14 +205,4 @@ final class AgentOperationalToolResponses {
         WorkspaceStatusItem workspace
     ) {
     }
-
-    record SystemOverviewItem(
-        int agents,
-        int activeAssignments,
-        int projects,
-        int jobs,
-        int schedules,
-        int outputs
-    ) {
-    }
 }

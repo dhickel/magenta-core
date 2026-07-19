@@ -21,8 +21,7 @@ class ToolAccessPolicyTest {
         ToolAccessPolicy policy = new ToolAccessPolicy(
             new ChatToolRegistry(List.of(
                 new NamedToolCallback("file_read"),
-                new NamedToolCallback("agent_queue_list"),
-                new NamedToolCallback("avatar_system_overview")
+                new NamedToolCallback("agent_queue_list")
             ), List.of()),
             null,
             null
@@ -40,19 +39,19 @@ class ToolAccessPolicyTest {
         ToolAccessPolicy policy = new ToolAccessPolicy(
             new ChatToolRegistry(List.of(
                 new NamedToolCallback("agent_queue_list"),
-                new NamedToolCallback("avatar_system_overview")
+                new NamedToolCallback("file_read")
             ), List.of()),
             null,
             null
         );
 
         List<String> toolNames = policy.filterToolsByMode(
-            List.of("agent_queue_list", "avatar_system_overview"), PlanMode.NORMAL
+            List.of("agent_queue_list", "file_read"), PlanMode.NORMAL
         ).stream()
             .map(callback -> callback.getToolDefinition().name())
             .toList();
 
-        assertThat(toolNames).containsExactly("agent_queue_list", "avatar_system_overview");
+        assertThat(toolNames).containsExactly("agent_queue_list", "file_read");
     }
 
     @Test

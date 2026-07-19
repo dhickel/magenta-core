@@ -5,7 +5,6 @@ import com.fasterxml.jackson.annotation.JsonValue;
 
 public enum ChatSessionSurface {
     BROWSER,
-    AVATAR,
     INTERNAL;
 
     @JsonCreator

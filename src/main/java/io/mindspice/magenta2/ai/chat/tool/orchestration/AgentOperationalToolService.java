@@ -2,13 +2,11 @@ package io.mindspice.magenta2.ai.chat.tool.orchestration;
 
 import java.io.IOException;
 import java.time.Duration;
-import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
 import io.mindspice.magenta2.ai.chat.repository.AuditRepository;
-import io.mindspice.magenta2.ai.chat.tool.orchestration.AgentOperationalToolResponses.AgentItem;
 import io.mindspice.magenta2.ai.chat.tool.orchestration.AgentOperationalToolResponses.AssignmentItem;
 import io.mindspice.magenta2.ai.chat.tool.orchestration.AgentOperationalToolResponses.AuditEventItem;
 import io.mindspice.magenta2.ai.chat.tool.orchestration.AgentOperationalToolResponses.DiagnosticsItem;
@@ -24,7 +22,6 @@ import io.mindspice.magenta2.ai.chat.tool.orchestration.AgentOperationalToolResp
 import io.mindspice.magenta2.ai.chat.tool.orchestration.AgentOperationalToolResponses.ProjectMemberItem;
 import io.mindspice.magenta2.ai.chat.tool.orchestration.AgentOperationalToolResponses.ProjectWorkspaceItem;
 import io.mindspice.magenta2.ai.chat.tool.orchestration.AgentOperationalToolResponses.ScheduleItem;
-import io.mindspice.magenta2.ai.chat.tool.orchestration.AgentOperationalToolResponses.SystemOverviewItem;
 import io.mindspice.magenta2.ai.chat.tool.orchestration.AgentOperationalToolResponses.ToolResult;
 import io.mindspice.magenta2.ai.chat.tool.orchestration.AgentOperationalToolResponses.TranscriptItem;
 import io.mindspice.magenta2.ai.chat.tool.orchestration.AgentOperationalToolResponses.WorkspaceLinkItem;
@@ -365,137 +362,6 @@ public class AgentOperationalToolService {
         return ok("output content", new OutputContentItem(outputItem(artifact), content.length(), content));
     }
 
-    public ToolResult avatarSystemOverview() {
-        authorization.requireAvatarSupervisor("avatar_system_overview");
-        int agents = agentProfileService.list().size();
-        int activeAssignments = agentProfileService.list().stream()
-            .mapToInt(agent -> (int) assignmentService.assignments(agent.id()).stream()
-                .filter(assignment -> assignment.status() != null && !assignment.status().isTerminal())
-                .count())
-            .sum();
-        int schedules = schedulesEnabled
-            ? agentProfileService.list().stream().mapToInt(agent -> scheduleService.schedules(agent.id()).size()).sum()
-            : 0;
-        int outputs = outputArtifactService.query(OutputArtifactQuery.of(null, null, null, null, null, null, null, 200)).size();
-        return ok("avatar system overview", new SystemOverviewItem(
-            agents, activeAssignments, projectService.listProjects().size(), jobService.listDefinitions().size(), schedules, outputs));
-    }
-
-    public PagedListResult avatarAgentList(Integer limit) {
-        authorization.requireAvatarSupervisor("avatar_agent_list");
-        int bounded = authorization.boundLimit(limit);
-        return list(agentProfileService.list().stream().limit(bounded).map(this::agentItem).toList(), bounded);
-    }
-
-    public ToolResult avatarAgentStatus(String agentId) {
-        authorization.requireAvatarSupervisor("avatar_agent_status");
-        authorization.requireText(agentId, "agentId");
-        return ok("agent status", statusItem(workspaceStatusService.statusFor(agentId)));
-    }
-
-    public PagedListResult avatarAssignmentList(String agentId, Integer limit) {
-        authorization.requireAvatarSupervisor("avatar_assignment_list");
-        int bounded = authorization.boundLimit(limit);
-        List<WorkAssignment> assignments = new ArrayList<>();
-        if (StringUtils.hasText(agentId)) {
-            assignments.addAll(assignmentService.assignments(agentId));
-        } else {
-            for (AgentProfile agent : agentProfileService.list()) {
-                assignments.addAll(assignmentService.assignments(agent.id()));
-            }
-        }
-        return list(assignments.stream().limit(bounded).map(this::assignmentItem).toList(), bounded);
-    }
-
-    public ToolResult avatarAssignmentCancel(String assignmentId) {
-        authorization.requireAvatarSupervisor("avatar_assignment_cancel");
-        WorkAssignment assignment = assignmentService.get(assignmentId);
-        return ok("assignment cancelled", assignmentItem(assignmentService.cancel(assignment.agentId(), assignmentId)));
-    }
-
-    public ToolResult avatarAssignmentPause(String assignmentId) {
-        authorization.requireAvatarSupervisor("avatar_assignment_pause");
-        WorkAssignment assignment = assignmentService.get(assignmentId);
-        return ok("assignment paused", assignmentItem(assignmentService.pause(assignment.agentId(), assignmentId)));
-    }
-
-    public ToolResult avatarAssignmentResume(String assignmentId) {
-        authorization.requireAvatarSupervisor("avatar_assignment_resume");
-        WorkAssignment assignment = assignmentService.get(assignmentId);
-        return ok("assignment resumed", assignmentItem(assignmentService.resume(assignment.agentId(), assignmentId)));
-    }
-
-    public ToolResult avatarAssignmentRequeueWorkspaceBlocked(String assignmentId) {
-        authorization.requireAvatarSupervisor("avatar_assignment_requeue_workspace_blocked");
-        return ok("assignment requeued", assignmentItem(assignmentService.requeueWorkspaceBlockedAssignment(assignmentId)));
-    }
-
-    public PagedListResult avatarProjectList(Integer limit) {
-        authorization.requireAvatarSupervisor("avatar_project_list");
-        int bounded = authorization.boundLimit(limit);
-        return list(projectService.listProjects().stream().limit(bounded).map(this::projectItem).toList(), bounded);
-    }
-
-    public PagedListResult avatarProjectMembers(String projectId) {
-        authorization.requireAvatarSupervisor("avatar_project_members");
-        return list(projectService.listMembers(projectId).stream().map(this::memberItem).toList(), AgentToolAuthorizationService.MAX_LIMIT);
-    }
-
-    public ToolResult avatarProjectReleaseWorkspace(String projectId, String confirmation) {
-        authorization.requireAvatarSupervisor("avatar_project_release_workspace");
-        authorization.requireConfirmation(confirmation, "REQUEST RELEASE " + projectId);
-        return ok("project workspace release requested", leaseItem(projectService.requestWorkspaceRelease(projectId)));
-    }
-
-    public PagedListResult avatarJobList(Integer limit) {
-        authorization.requireAvatarSupervisor("avatar_job_list");
-        int bounded = authorization.boundLimit(limit);
-        return list(jobService.listDefinitions().stream().limit(bounded).map(this::jobItem).toList(), bounded);
-    }
-
-    public PagedListResult avatarJobRunList(String jobId, Integer limit) {
-        authorization.requireAvatarSupervisor("avatar_job_run_list");
-        int bounded = authorization.boundLimit(limit);
-        return list(jobService.listRuns(jobId).stream().limit(bounded).map(this::jobRunItem).toList(), bounded);
-    }
-
-    public ToolResult avatarJobRunCancel(String runId, String confirmation) {
-        authorization.requireAvatarSupervisor("avatar_job_run_cancel");
-        authorization.requireConfirmation(confirmation, "CANCEL " + runId);
-        return ok("job run cancelled", jobRunItem(jobService.cancelRun(runId)));
-    }
-
-    public Object avatarScheduleList(String agentId, Integer limit) {
-        authorization.requireAvatarSupervisor("avatar_schedule_list");
-        if (!schedulesEnabled) {
-            return disabled("schedules are disabled");
-        }
-        int bounded = authorization.boundLimit(limit);
-        List<AgentSchedule> schedules = new ArrayList<>();
-        if (StringUtils.hasText(agentId)) {
-            schedules.addAll(scheduleService.schedules(agentId));
-        } else {
-            for (AgentProfile agent : agentProfileService.list()) {
-                schedules.addAll(scheduleService.schedules(agent.id()));
-            }
-        }
-        return list(schedules.stream().limit(bounded).map(this::scheduleItem).toList(), bounded);
-    }
-
-    public PagedListResult avatarOutputList(String agentId, String projectId, String jobId, String artifactType, Integer limit) {
-        authorization.requireAvatarSupervisor("avatar_output_list");
-        int bounded = authorization.boundLimit(limit);
-        return list(outputArtifactService.query(OutputArtifactQuery.of(agentId, jobId, projectId, null, null, null, artifactType, bounded))
-            .stream().limit(bounded).map(this::outputItem).toList(), bounded);
-    }
-
-    public ToolResult avatarOutputRead(String artifactId, Long maxBytes) throws IOException {
-        authorization.requireAvatarSupervisor("avatar_output_read");
-        RunOutputArtifact artifact = outputArtifactService.getArtifact(artifactId);
-        String content = outputArtifactService.loadContent(artifactId, authorization.boundReadBytes(maxBytes));
-        return ok("output content", new OutputContentItem(outputItem(artifact), content.length(), content));
-    }
-
     private InboxMessage requireInboxOwner(String agentId, String messageId) {
         return inboxService.messages(agentId).stream()
             .filter(message -> message.id().equals(messageId))
@@ -517,18 +383,6 @@ public class AgentOperationalToolService {
         } catch (RuntimeException ignored) {
             return false;
         }
-    }
-
-    private AgentItem agentItem(AgentProfile agent) {
-        return new AgentItem(
-            agent.id(),
-            agent.name(),
-            agent.status() == null ? null : agent.status().name(),
-            agent.defaultModel(),
-            agent.directLineEnabled(),
-            agent.approvedTools() == null ? 0 : agent.approvedTools().size(),
-            statusItem(workspaceStatusService.statusFor(agent.id()))
-        );
     }
 
     private WorkspaceStatusItem statusItem(AgentWorkspaceStatus status) {

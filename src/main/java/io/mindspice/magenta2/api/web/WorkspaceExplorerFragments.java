@@ -8,50 +8,45 @@ import java.util.List;
 import java.util.Locale;
 import java.util.function.Function;
 
-import io.mindspice.magenta2.ai.orchestration.workspaces.WorkAreaExplorerService;
+import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceExplorerService;
 import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceFileLabel;
 import io.mindspice.simplypages.components.Markdown;
 
-final class WorkAreaExplorerFragments {
-    static final String SHELL_ID = "avatar-workarea-explorer-shell";
-    static final String LIST_ID = "avatar-workarea-list-region";
-    static final String INSPECTOR_ID = "avatar-workarea-inspector";
-    static final String MODAL_ID = "avatar-workarea-modal";
+final class WorkspaceExplorerFragments {
+    static final String SHELL_ID = "workspace-file-explorer-shell";
+    static final String LIST_ID = "workspace-file-list-region";
+    static final String INSPECTOR_ID = "workspace-file-inspector";
+    static final String MODAL_ID = "workspace-file-modal";
 
     private static final DateTimeFormatter TIME_FORMAT = DateTimeFormatter
         .ofPattern("yyyy-MM-dd HH:mm", Locale.ROOT)
         .withZone(ZoneId.systemDefault());
 
-    private WorkAreaExplorerFragments() {
+    private WorkspaceExplorerFragments() {
     }
 
     static String shell(
-        WorkAreaExplorerService.DirectoryListing listing,
-        WorkAreaExplorerService.Entry inspected,
-        String selectedPath
+        WorkspaceExplorerService.DirectoryListing listing,
+        WorkspaceExplorerService.Entry inspected,
+        String selectedPath,
+        String type,
+        String key
     ) {
         String currentPath = pathOrRoot(listing.path());
         String selected = selectedPath == null || selectedPath.isBlank() ? inspected == null ? null : inspected.path() : selectedPath;
         return """
-            <div id="%s" class="avatar-workarea-explorer-shell">
-              <div class="avatar-edit-header">
-                <div>
-                  <h2>%s</h2>
-                  <small>%s</small>
-                </div>
-                <button type="button" class="button button-secondary small" hx-get="/avatar/_work-areas/placeholder" hx-target="#avatar-workarea-surface" hx-swap="innerHTML">Close</button>
-              </div>
-              <div class="workspace-explorer-toolbar">
+            <div id="%s" class="workspace-file-explorer-shell">
+              <div class="workspace-file-explorer-toolbar">
                 <button type="button" class="button button-secondary small" disabled aria-disabled="true">Back</button>
                 <button type="button" class="button button-secondary small" disabled aria-disabled="true">Forward</button>
                 %s
-                <button type="button" class="button button-secondary small" hx-get="/avatar/_work-areas/%s/explorer?path=%s%s" hx-target="#%s" hx-swap="outerHTML">Refresh</button>
-                <button type="button" class="button button-secondary small" hx-get="/avatar/_work-areas/%s/modal/create-folder?path=%s" hx-target="#%s" hx-swap="innerHTML">New Folder</button>
-                <button type="button" class="button button-secondary small" hx-get="/avatar/_work-areas/%s/modal/create-text?path=%s" hx-target="#%s" hx-swap="innerHTML">New Text</button>
-                <button type="button" class="button button-secondary small" hx-get="/avatar/_work-areas/%s/modal/create-markdown?path=%s" hx-target="#%s" hx-swap="innerHTML">New Markdown</button>
+                <button type="button" class="button button-secondary small" hx-get="/api/workspace/%s/%s/explorer?path=%s%s" hx-target="#%s" hx-swap="outerHTML">Refresh</button>
+                <button type="button" class="button button-secondary small" hx-get="/api/workspace/%s/%s/modal/create-folder?path=%s" hx-target="#%s" hx-swap="innerHTML">New Folder</button>
+                <button type="button" class="button button-secondary small" hx-get="/api/workspace/%s/%s/modal/create-text?path=%s" hx-target="#%s" hx-swap="innerHTML">New Text</button>
+                <button type="button" class="button button-secondary small" hx-get="/api/workspace/%s/%s/modal/create-markdown?path=%s" hx-target="#%s" hx-swap="innerHTML">New Markdown</button>
               </div>
-              <div class="workspace-explorer-pathbar">%s</div>
-              <div class="avatar-workarea-explorer-layout">
+              <div class="workspace-file-pathbar">%s</div>
+              <div class="workspace-file-explorer-layout">
                 %s
                 %s
               </div>
@@ -59,54 +54,57 @@ final class WorkAreaExplorerFragments {
             </div>
             """.formatted(
             SHELL_ID,
-            escape(listing.workArea().displayName()),
-            escape(currentPath),
-            upButton(listing),
-            urlPath(listing.workArea().id()),
+            upButton(listing, type, key),
+            urlPath(type),
+            urlPath(key),
             url(currentPath),
             selected == null ? "" : "&selected=" + url(selected),
             SHELL_ID,
-            urlPath(listing.workArea().id()),
+            urlPath(type),
+            urlPath(key),
             url(currentPath),
             MODAL_ID,
-            urlPath(listing.workArea().id()),
+            urlPath(type),
+            urlPath(key),
             url(currentPath),
             MODAL_ID,
-            urlPath(listing.workArea().id()),
+            urlPath(type),
+            urlPath(key),
             url(currentPath),
             MODAL_ID,
-            breadcrumbs(listing),
-            list(listing, selected, false),
-            inspector(listing.workArea().id(), inspected, null, false),
+            breadcrumbs(listing, type, key),
+            list(listing, selected, false, type, key),
+            inspector(type, key, inspected, null, false),
             MODAL_ID
         );
     }
 
-    static String list(WorkAreaExplorerService.DirectoryListing listing, String selectedPath, boolean oob) {
+    static String list(WorkspaceExplorerService.DirectoryListing listing, String selectedPath, boolean oob, String type, String key) {
         StringBuilder rows = new StringBuilder();
         String currentPath = pathOrRoot(listing.path());
         if (!".".equals(currentPath)) {
             rows.append("""
-                <tr data-workarea-path="%s">
-                  <td><button type="button" class="button button-link small" hx-get="/avatar/_work-areas/%s/explorer?path=%s" hx-target="#%s" hx-swap="outerHTML">..</button></td>
+                <tr data-workspace-file-path="%s">
+                  <td><button type="button" class="button button-link small" hx-get="/api/workspace/%s/%s/explorer?path=%s" hx-target="#%s" hx-swap="outerHTML">..</button></td>
                   <td>Folder</td><td>-</td><td>Unknown</td><td>Unknown</td><td></td><td></td>
                 </tr>
                 """.formatted(
                 escape(parentPath(currentPath)),
-                urlPath(listing.workArea().id()),
+                urlPath(type),
+                urlPath(key),
                 url(parentPath(currentPath)),
                 SHELL_ID
             ));
         }
-        for (WorkAreaExplorerService.Entry entry : listing.entries()) {
-            rows.append(row(listing.workArea().id(), currentPath, entry, selectedPath));
+        for (WorkspaceExplorerService.Entry entry : listing.entries()) {
+            rows.append(row(currentPath, entry, selectedPath, type, key));
         }
         if (listing.entries().isEmpty()) {
             rows.append("<tr><td colspan=\"7\">No entries available.</td></tr>");
         }
         return """
-            <div id="%s" class="workspace-explorer-table-region"%s>
-              <table class="workspace-explorer-table">
+            <div id="%s" class="workspace-file-table-region"%s>
+              <table class="workspace-file-table">
                 <thead><tr><th>Name</th><th>File Type</th><th>Size</th><th>Created</th><th>Last Modified</th><th>Tags</th><th>Actions</th></tr></thead>
                 <tbody>%s</tbody>
               </table>
@@ -114,10 +112,10 @@ final class WorkAreaExplorerFragments {
             """.formatted(LIST_ID, oob ? " hx-swap-oob=\"true\"" : "", rows);
     }
 
-    static String inspector(String workAreaId, WorkAreaExplorerService.Entry entry, String message, boolean oob) {
+    static String inspector(String type, String key, WorkspaceExplorerService.Entry entry, String message, boolean oob) {
         if (entry == null) {
             return """
-                <aside id="%s" class="file-explorer-inspector-pane"%s>
+                <aside id="%s" class="workspace-file-inspector-pane"%s>
                   <h4>Inspect</h4>
                   <p>Select a file or directory.</p>
                   %s
@@ -125,10 +123,10 @@ final class WorkAreaExplorerFragments {
                 """.formatted(INSPECTOR_ID, oob ? " hx-swap-oob=\"true\"" : "", status(message, false));
         }
         String viewAction = entry.canView()
-            ? button("View", "hx-get", "/avatar/_work-areas/" + urlPath(workAreaId) + "/viewer?path=" + url(entry.path()), "#" + MODAL_ID, "innerHTML")
-            : "<span class=\"avatar-muted\">Viewer unavailable</span>";
+            ? button("View", "hx-get", "/api/workspace/" + urlPath(type) + "/" + urlPath(key) + "/viewer?path=" + url(entry.path()), "#" + MODAL_ID, "innerHTML")
+            : "<span class=\"workspace-file-muted\">Viewer unavailable</span>";
         return """
-            <aside id="%s" class="file-explorer-inspector-pane"%s>
+            <aside id="%s" class="workspace-file-inspector-pane"%s>
               <h4>%s</h4>
               <p>%s</p>
               <dl>
@@ -137,18 +135,18 @@ final class WorkAreaExplorerFragments {
                 <dt>Created</dt><dd>%s</dd>
                 <dt>Last Modified</dt><dd>%s</dd>
               </dl>
-              <div class="file-entry-tags">%s</div>
-              <form class="avatar-inline-form" hx-post="/avatar/_work-areas/%s/files/tags" hx-target="#%s" hx-swap="innerHTML">
+              <div class="workspace-file-entry-tags">%s</div>
+              <form class="workspace-file-inline-form" hx-post="/api/workspace/%s/%s/files/labels" hx-target="#%s" hx-swap="innerHTML">
                 <input type="hidden" name="path" value="%s">
                 <input type="text" name="label" placeholder="Tag">
                 <button type="submit" class="button small">Add Tag</button>
               </form>
-              <div class="avatar-row-actions">
+              <div class="workspace-file-row-actions">
                 %s
                 %s
                 %s
               </div>
-              <div class="file-operation-stack">
+              <div class="workspace-file-operation-stack">
                 %s
                 %s
               </div>
@@ -163,162 +161,173 @@ final class WorkAreaExplorerFragments {
             escape(entry.sizeLabel()),
             time(entry.createdAt()),
             time(entry.modifiedAt()),
-            tags(workAreaId, entry.path(), entry.tags(), true),
-            urlPath(workAreaId),
+            tags(type, key, entry.path(), entry.tags(), true),
+            urlPath(type),
+            urlPath(key),
             MODAL_ID,
             escapeAttribute(entry.path()),
             viewAction,
-            modalButton("Rename", workAreaId, "rename", entry.path()),
-            modalButton("Delete", workAreaId, "delete", entry.path()),
-            inlineCopyMoveForm(workAreaId, "copy", entry.path()),
-            inlineCopyMoveForm(workAreaId, "move", entry.path()),
+            modalButton("Rename", type, key, "rename", entry.path()),
+            modalButton("Delete", type, key, "delete", entry.path()),
+            inlineCopyMoveForm(type, key, "copy", entry.path()),
+            inlineCopyMoveForm(type, key, "move", entry.path()),
             status(message, false)
         );
     }
 
-    static String viewer(String workAreaId, WorkAreaExplorerService.FilePreview preview) {
+    // ── Viewer ──
+
+    static String viewer(String type, String key, WorkspaceExplorerService.FilePreview preview) {
         String title = "View " + fileName(preview.path());
         String body;
         if ("image".equals(preview.kind())) {
             body = """
-                <div class="avatar-workarea-image-frame">
-                  <img class="avatar-workarea-image" src="/api/work-areas/%s/files/view?path=%s" alt="%s">
+                <div class="workspace-file-image-frame">
+                  <img class="workspace-file-image" src="/api/workspace/%s/%s/files/view?path=%s" alt="%s">
                 </div>
-                <dl class="avatar-workarea-viewer-meta">
+                <dl class="workspace-file-viewer-meta">
                   <dt>Path</dt><dd>%s</dd>
                   <dt>Size</dt><dd>%s</dd>
                 </dl>
-                <a class="button button-secondary small" href="/api/work-areas/%s/files/download?path=%s">Download</a>
+                <a class="button button-secondary small" href="/api/workspace/%s/%s/files/download?path=%s">Download</a>
                 """.formatted(
-                urlPath(workAreaId),
+                urlPath(type),
+                urlPath(key),
                 url(preview.path()),
                 escapeAttribute(fileName(preview.path())),
                 escape(preview.path()),
                 escape(sizeLabel(preview.size())),
-                urlPath(workAreaId),
+                urlPath(type),
+                urlPath(key),
                 url(preview.path())
             );
         } else if ("markdown".equals(preview.kind()) && preview.text()) {
             body = """
-                <div class="avatar-workarea-viewer" data-viewer-kind="markdown" data-active-tab="rendered">
-                  <div class="avatar-workarea-tabs"><span class="avatar-tab-active">Rendered</span><button type="button" class="button button-secondary small" hx-get="/avatar/_work-areas/%s/viewer/text?path=%s&tab=text" hx-target="#%s" hx-swap="innerHTML">Text</button></div>
-                  <div class="avatar-workarea-rendered">%s</div>
+                <div class="workspace-file-viewer" data-viewer-kind="markdown" data-active-tab="rendered">
+                  <div class="workspace-file-tabs"><span class="workspace-file-tab-active">Rendered</span><button type="button" class="button button-secondary small" hx-get="/api/workspace/%s/%s/viewer/text?path=%s&tab=text" hx-target="#%s" hx-swap="innerHTML">Text</button></div>
+                  <div class="workspace-file-rendered">%s</div>
                 </div>
-                """.formatted(urlPath(workAreaId), url(preview.path()), MODAL_ID, safeMarkdown(preview.content()));
+                """.formatted(urlPath(type), urlPath(key), url(preview.path()), MODAL_ID, safeMarkdown(preview.content()));
         } else if ("text".equals(preview.kind()) && preview.text()) {
-            body = textEditor(workAreaId, preview, false);
+            body = textEditor(type, key, preview, false);
         } else {
             body = unsupportedViewerBody(preview);
         }
-        return modal(title, body, false);
+        return modal(type, key, title, body, false);
     }
 
-    static String textViewer(String workAreaId, WorkAreaExplorerService.FilePreview preview, String tab) {
+    static String textViewer(String type, String key, WorkspaceExplorerService.FilePreview preview, String tab) {
         if (!preview.text()) {
-            return modal("Viewer unavailable", "<p>This file cannot be opened as editable text.</p>", false);
+            return modal(type, key, "Viewer unavailable", "<p>This file cannot be opened as editable text.</p>", false);
         }
         boolean markdown = "markdown".equals(preview.kind());
         boolean rendered = markdown && !"text".equalsIgnoreCase(tab);
         String body;
         if (rendered) {
             body = """
-                <div class="avatar-workarea-viewer" data-viewer-kind="markdown" data-active-tab="rendered">
-                  <div class="avatar-workarea-tabs"><span class="avatar-tab-active">Rendered</span><button type="button" class="button button-secondary small" hx-get="/avatar/_work-areas/%s/viewer/text?path=%s&tab=text" hx-target="#%s" hx-swap="innerHTML">Text</button></div>
-                  <div class="avatar-workarea-rendered">%s</div>
+                <div class="workspace-file-viewer" data-viewer-kind="markdown" data-active-tab="rendered">
+                  <div class="workspace-file-tabs"><span class="workspace-file-tab-active">Rendered</span><button type="button" class="button button-secondary small" hx-get="/api/workspace/%s/%s/viewer/text?path=%s&tab=text" hx-target="#%s" hx-swap="innerHTML">Text</button></div>
+                  <div class="workspace-file-rendered">%s</div>
                 </div>
-                """.formatted(urlPath(workAreaId), url(preview.path()), MODAL_ID, safeMarkdown(preview.content()));
+                """.formatted(urlPath(type), urlPath(key), url(preview.path()), MODAL_ID, safeMarkdown(preview.content()));
         } else {
-            body = textEditor(workAreaId, preview, markdown);
+            body = textEditor(type, key, preview, markdown);
         }
-        return modal("View " + fileName(preview.path()), body, false);
+        return modal(type, key, "View " + fileName(preview.path()), body, false);
     }
 
+    // ── Mutation responses (OOB) ──
+
     static String textSaveResponse(
-        String workAreaId,
-        WorkAreaExplorerService.FilePreview preview,
-        WorkAreaExplorerService.DirectoryListing listing,
-        WorkAreaExplorerService.Entry inspected,
+        String type, String key,
+        WorkspaceExplorerService.FilePreview preview,
+        WorkspaceExplorerService.DirectoryListing listing,
+        WorkspaceExplorerService.Entry inspected,
         String selectedPath,
         String message
     ) {
-        return textViewer(workAreaId, preview, "rendered")
-            + list(listing, selectedPath, true)
-            + inspector(listing.workArea().id(), inspected, message, true);
+        return textViewer(type, key, preview, "rendered")
+            + list(listing, selectedPath, true, type, key)
+            + inspector(type, key, inspected, message, true);
     }
 
     static String textCreateResponse(
-        String workAreaId,
-        WorkAreaExplorerService.FilePreview preview,
-        WorkAreaExplorerService.DirectoryListing listing,
-        WorkAreaExplorerService.Entry inspected,
+        String type, String key,
+        WorkspaceExplorerService.FilePreview preview,
+        WorkspaceExplorerService.DirectoryListing listing,
+        WorkspaceExplorerService.Entry inspected,
         String selectedPath,
         String message
     ) {
-        return textViewer(workAreaId, preview, "text")
-            + list(listing, selectedPath, true)
-            + inspector(listing.workArea().id(), inspected, message, true);
+        return textViewer(type, key, preview, "text")
+            + list(listing, selectedPath, true, type, key)
+            + inspector(type, key, inspected, message, true);
     }
 
-    static String actionModal(String workAreaId, String action, String path, WorkAreaExplorerService.DeletePreflight preflight) {
+    static String actionModal(String type, String key, String action, String path, WorkspaceExplorerService.DeletePreflight preflight) {
         String body = switch (action) {
-            case "create-folder" -> createFolderForm(workAreaId, path);
-            case "create-text", "create-markdown" -> createTextForm(workAreaId, action, path);
-            case "rename" -> form(workAreaId, "/files/rename", path, "name", "New name", "Rename");
-            case "copy", "move" -> copyMoveForm(workAreaId, action, path);
-            case "tag" -> form(workAreaId, "/files/tags", path, "label", "Tag", "Add Tag");
-            case "delete", "delete-recursive" -> deleteForm(workAreaId, action, path, preflight);
+            case "create-folder" -> createFolderForm(type, key, path);
+            case "create-text", "create-markdown" -> createTextForm(type, key, action, path);
+            case "rename" -> form(type, key, "/files/rename", path, "name", "New name", "Rename");
+            case "copy", "move" -> copyMoveForm(type, key, action, path);
+            case "tag" -> form(type, key, "/files/labels", path, "label", "Tag", "Add Tag");
+            case "delete", "delete-recursive" -> deleteForm(type, key, action, path, preflight);
             default -> "<p>Unknown file action.</p>";
         };
-        return modal(title(action), body, false);
+        return modal(type, key, title(action), body, false);
     }
 
     static String mutationResponse(
-        WorkAreaExplorerService.DirectoryListing listing,
-        WorkAreaExplorerService.Entry inspected,
+        WorkspaceExplorerService.DirectoryListing listing,
+        WorkspaceExplorerService.Entry inspected,
         String selectedPath,
-        String message
+        String message,
+        String type,
+        String key
     ) {
-        return modal("", "", true)
-            + list(listing, selectedPath, true)
-            + inspector(listing.workArea().id(), inspected, message, true);
+        return modal(type, key, "", "", true)
+            + list(listing, selectedPath, true, type, key)
+            + inspector(type, key, inspected, message, true);
     }
 
-    static String modalError(String title, String message) {
-        return modal(title, "<div class=\"avatar-status-error\">" + escape(message) + "</div>", false);
+    static String modalError(String type, String key, String title, String message) {
+        return modal(type, key, title, "<div class=\"workspace-file-status-error\">" + escape(message) + "</div>", false);
     }
 
-    static String modalMessage(String title, String message) {
-        return modal(title, "<div class=\"avatar-status\">" + escape(message) + "</div>", false);
+    static String modalMessage(String type, String key, String title, String message) {
+        return modal(type, key, title, "<div class=\"workspace-file-status\">" + escape(message) + "</div>", false);
     }
 
     static String inspectorError(String message) {
-        return inspector(null, null, message, false);
+        return inspector(null, null, null, message, false);
     }
 
     static String listError(String message) {
         return """
-            <div id="%s" class="workspace-explorer-table-region">
-              <div class="avatar-status-error">%s</div>
+            <div id="%s" class="workspace-file-table-region">
+              <div class="workspace-file-status-error">%s</div>
             </div>
             """.formatted(LIST_ID, escape(message));
     }
 
-    private static String row(String workAreaId, String currentPath, WorkAreaExplorerService.Entry entry, String selectedPath) {
+    // ── Private helpers ──
+
+    private static String row(String currentPath, WorkspaceExplorerService.Entry entry, String selectedPath, String type, String key) {
         String selected = entry.path().equals(selectedPath) ? " selected" : "";
         String nameAction = entry.directory()
-            ? button("Open " + entry.name(), "hx-get", "/avatar/_work-areas/" + urlPath(workAreaId) + "/explorer?path=" + url(entry.path()), "#" + SHELL_ID, "outerHTML")
-            : button(entry.name(), "hx-get", "/avatar/_work-areas/" + urlPath(workAreaId) + "/explorer?path=" + url(currentPath)
+            ? button("Open " + entry.name(), "hx-get", "/api/workspace/" + urlPath(type) + "/" + urlPath(key) + "/explorer?path=" + url(entry.path()), "#" + SHELL_ID, "outerHTML")
+            : button(entry.name(), "hx-get", "/api/workspace/" + urlPath(type) + "/" + urlPath(key) + "/explorer?path=" + url(currentPath)
                 + "&selected=" + url(entry.path()), "#" + SHELL_ID, "outerHTML");
         String open = entry.directory()
-            ? button("Open", "hx-get", "/avatar/_work-areas/" + urlPath(workAreaId) + "/explorer?path=" + url(entry.path()), "#" + SHELL_ID, "outerHTML")
+            ? button("Open", "hx-get", "/api/workspace/" + urlPath(type) + "/" + urlPath(key) + "/explorer?path=" + url(entry.path()), "#" + SHELL_ID, "outerHTML")
             : entry.canView()
-                ? button("View", "hx-get", "/avatar/_work-areas/" + urlPath(workAreaId) + "/viewer?path=" + url(entry.path()), "#" + MODAL_ID, "innerHTML")
+                ? button("View", "hx-get", "/api/workspace/" + urlPath(type) + "/" + urlPath(key) + "/viewer?path=" + url(entry.path()), "#" + MODAL_ID, "innerHTML")
                 : "";
         return """
-            <tr class="workspace-explorer-row%s" data-workarea-path="%s">
-              <td class="workspace-explorer-name">%s</td>
+            <tr class="workspace-file-row%s" data-workspace-file-path="%s">
+              <td class="workspace-file-name">%s</td>
               <td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td>
-              <td class="avatar-row-actions">%s%s%s</td>
+              <td class="workspace-file-row-actions">%s%s%s</td>
             </tr>
             """.formatted(
             selected,
@@ -328,50 +337,50 @@ final class WorkAreaExplorerFragments {
             escape(entry.sizeLabel()),
             time(entry.createdAt()),
             time(entry.modifiedAt()),
-            tags(workAreaId, entry.path(), entry.tags(), false),
+            tags(type, key, entry.path(), entry.tags(), false),
             open,
-            modalButton("Rename", workAreaId, "rename", entry.path()),
-            modalButton("Delete", workAreaId, "delete", entry.path())
+            modalButton("Rename", type, key, "rename", entry.path()),
+            modalButton("Delete", type, key, "delete", entry.path())
         );
     }
 
-    private static String createFolderForm(String workAreaId, String path) {
+    private static String createFolderForm(String type, String key, String path) {
         return """
-            <form class="avatar-stack-form" hx-post="/avatar/_work-areas/%s/directories" hx-target="#%s" hx-swap="innerHTML">
+            <form class="workspace-file-stack-form" hx-post="/api/workspace/%s/%s/directories" hx-target="#%s" hx-swap="innerHTML">
               <input type="hidden" name="path" value="%s">
               <input type="text" name="name" placeholder="Folder name">
               <button type="submit" class="button">Create Folder</button>
             </form>
-            """.formatted(urlPath(workAreaId), MODAL_ID, escapeAttribute(path));
+            """.formatted(urlPath(type), urlPath(key), MODAL_ID, escapeAttribute(path));
     }
 
-    private static String createTextForm(String workAreaId, String action, String path) {
+    private static String createTextForm(String type, String key, String action, String path) {
         String kind = "create-markdown".equals(action) ? "markdown" : "text";
         String label = "markdown".equals(kind) ? "Create Markdown" : "Create Text File";
         return """
-            <form class="avatar-stack-form" hx-post="/avatar/_work-areas/%s/text?kind=%s" hx-target="#%s" hx-swap="innerHTML">
-              <input type="hidden" name="path" value="%s">
-              <input type="text" name="name" placeholder="File name">
+            <form class="workspace-file-stack-form" hx-post="/api/workspace/%s/%s/files/%s" hx-target="#%s" hx-swap="innerHTML">
+              <input type="hidden" name="parentPath" value="%s">
+              <input type="text" name="fileName" placeholder="File name">
               <button type="submit" class="button">%s</button>
             </form>
-            """.formatted(urlPath(workAreaId), urlPath(kind), MODAL_ID, escapeAttribute(path), escape(label));
+            """.formatted(urlPath(type), urlPath(key), urlPath(kind), MODAL_ID, escapeAttribute(path), escape(label));
     }
 
-    private static String form(String workAreaId, String route, String path, String field, String placeholder, String label) {
+    private static String form(String type, String key, String route, String path, String field, String placeholder, String label) {
         return """
-            <form class="avatar-stack-form" hx-post="/avatar/_work-areas/%s%s" hx-target="#%s" hx-swap="innerHTML">
+            <form class="workspace-file-stack-form" hx-post="/api/workspace/%s/%s%s" hx-target="#%s" hx-swap="innerHTML">
               <input type="hidden" name="path" value="%s">
               <input type="text" name="%s" placeholder="%s">
               <button type="submit" class="button">%s</button>
             </form>
-            """.formatted(urlPath(workAreaId), route, MODAL_ID, escapeAttribute(path), escapeAttribute(field), escapeAttribute(placeholder), escape(label));
+            """.formatted(urlPath(type), urlPath(key), route, MODAL_ID, escapeAttribute(path), escapeAttribute(field), escapeAttribute(placeholder), escape(label));
     }
 
-    private static String copyMoveForm(String workAreaId, String action, String path) {
+    private static String copyMoveForm(String type, String key, String action, String path) {
         String label = "copy".equals(action) ? "Copy" : "Move";
         String prefix = "modal-" + action;
         return """
-            <form class="avatar-stack-form" data-file-action="%s" hx-post="/avatar/_work-areas/%s/files/action/%s" hx-target="#%s" hx-swap="innerHTML">
+            <form class="workspace-file-stack-form" data-file-action="%s" hx-post="/api/workspace/%s/%s/files/%s" hx-target="#%s" hx-swap="innerHTML">
               <input type="hidden" name="path" value="%s">
               <label for="%s-destination">%s destination directory</label>
               <input id="%s-destination" type="text" name="destination" placeholder="%s destination directory" aria-label="%s destination directory" required>
@@ -381,7 +390,8 @@ final class WorkAreaExplorerFragments {
             </form>
             """.formatted(
             escapeAttribute(action),
-            urlPath(workAreaId),
+            urlPath(type),
+            urlPath(key),
             urlPath(action),
             MODAL_ID,
             escapeAttribute(path),
@@ -398,13 +408,13 @@ final class WorkAreaExplorerFragments {
         );
     }
 
-    private static String inlineCopyMoveForm(String workAreaId, String action, String path) {
+    private static String inlineCopyMoveForm(String type, String key, String action, String path) {
         String label = "copy".equals(action) ? "Copy" : "Move";
         String prefix = "inspect-" + action;
         return """
-            <details class="file-operation-group" open>
+            <details class="workspace-file-operation-group" open>
               <summary>%s</summary>
-              <form class="avatar-stack-form" data-file-action="%s" hx-post="/avatar/_work-areas/%s/files/action/%s" hx-target="#%s" hx-swap="innerHTML">
+              <form class="workspace-file-stack-form" data-file-action="%s" hx-post="/api/workspace/%s/%s/files/%s" hx-target="#%s" hx-swap="innerHTML">
                 <input type="hidden" name="path" value="%s">
                 <label for="%s-destination">%s destination directory</label>
                 <input id="%s-destination" type="text" name="destination" placeholder="%s destination directory" aria-label="%s destination directory" required>
@@ -416,7 +426,8 @@ final class WorkAreaExplorerFragments {
             """.formatted(
             escape(label),
             escapeAttribute(action),
-            urlPath(workAreaId),
+            urlPath(type),
+            urlPath(key),
             urlPath(action),
             MODAL_ID,
             escapeAttribute(path),
@@ -433,49 +444,49 @@ final class WorkAreaExplorerFragments {
         );
     }
 
-    private static String deleteForm(String workAreaId, String action, String path, WorkAreaExplorerService.DeletePreflight preflight) {
+    private static String deleteForm(String type, String key, String action, String path, WorkspaceExplorerService.DeletePreflight preflight) {
         if ("delete-recursive".equals(action)
-            || (preflight != null && preflight.requiredStep() == WorkAreaExplorerService.DeleteStep.FILE_CONFIRM)) {
+            || (preflight != null && preflight.requiredStep() == WorkspaceExplorerService.DeleteStep.FILE_CONFIRM)) {
             String step = "delete-recursive".equals(action) ? "DIRECTORY_RECURSIVE_CONFIRM" : "FILE_CONFIRM";
             return """
                 <p>Delete %s?</p>
-                <form class="avatar-stack-form" hx-post="/avatar/_work-areas/%s/files/delete" hx-target="#%s" hx-swap="innerHTML">
+                <form class="workspace-file-stack-form" hx-post="/api/workspace/%s/%s/files/delete" hx-target="#%s" hx-swap="innerHTML">
                   <input type="hidden" name="path" value="%s">
                   <input type="hidden" name="step" value="%s">
                   <button type="submit" class="button">Confirm Delete</button>
                 </form>
-                """.formatted(escape(fileName(path)), urlPath(workAreaId), MODAL_ID, escapeAttribute(path), step);
+                """.formatted(escape(fileName(path)), urlPath(type), urlPath(key), MODAL_ID, escapeAttribute(path), step);
         }
-        if (preflight != null && preflight.requiredStep() == WorkAreaExplorerService.DeleteStep.DIRECTORY_RECURSIVE_CONFIRM) {
+        if (preflight != null && preflight.requiredStep() == WorkspaceExplorerService.DeleteStep.DIRECTORY_RECURSIVE_CONFIRM) {
             return """
                 <p>This directory contains %d entries.</p>
-                <button type="button" class="button" hx-get="/avatar/_work-areas/%s/modal/delete-recursive?path=%s" hx-target="#%s" hx-swap="innerHTML">Confirm Recursive Delete</button>
-                """.formatted(preflight.candidateCount(), urlPath(workAreaId), url(path), MODAL_ID);
+                <button type="button" class="button" hx-get="/api/workspace/%s/%s/modal/delete-recursive?path=%s" hx-target="#%s" hx-swap="innerHTML">Confirm Recursive Delete</button>
+                """.formatted(preflight.candidateCount(), urlPath(type), urlPath(key), url(path), MODAL_ID);
         }
         return "<p>Delete is unavailable for this path.</p>";
     }
 
-    private static String textEditor(String workAreaId, WorkAreaExplorerService.FilePreview preview, boolean markdown) {
+    private static String textEditor(String type, String key, WorkspaceExplorerService.FilePreview preview, boolean markdown) {
         String tabs = markdown
-            ? "<button type=\"button\" class=\"button button-secondary small\" hx-get=\"/avatar/_work-areas/" + urlPath(workAreaId)
+            ? "<button type=\"button\" class=\"button button-secondary small\" hx-get=\"/api/workspace/" + urlPath(type) + "/" + urlPath(key)
                 + "/viewer/text?path=" + url(preview.path()) + "&tab=rendered\" hx-target=\"#" + MODAL_ID
-                + "\" hx-swap=\"innerHTML\">Rendered</button><span class=\"avatar-tab-active\">Text</span>"
-            : "<span class=\"avatar-tab-active\">Text</span>";
+                + "\" hx-swap=\"innerHTML\">Rendered</button><span class=\"workspace-file-tab-active\">Text</span>"
+            : "<span class=\"workspace-file-tab-active\">Text</span>";
         return """
-            <div class="avatar-workarea-viewer" data-viewer-kind="%s" data-active-tab="text">
-              <div class="avatar-workarea-tabs">%s</div>
-              <form class="avatar-stack-form" hx-put="/avatar/_work-areas/%s/text?path=%s" hx-target="#%s" hx-swap="innerHTML">
+            <div class="workspace-file-viewer" data-viewer-kind="%s" data-active-tab="text">
+              <div class="workspace-file-tabs">%s</div>
+              <form class="workspace-file-stack-form" hx-put="/api/workspace/%s/%s/files/text?path=%s" hx-target="#%s" hx-swap="innerHTML">
                 <textarea name="content" rows="14">%s</textarea>
                 <button type="submit" class="button">Save File</button>
               </form>
             </div>
-            """.formatted(markdown ? "markdown" : "text", tabs, urlPath(workAreaId), url(preview.path()), MODAL_ID, escape(preview.content() == null ? "" : preview.content()));
+            """.formatted(markdown ? "markdown" : "text", tabs, urlPath(type), urlPath(key), url(preview.path()), MODAL_ID, escape(preview.content() == null ? "" : preview.content()));
     }
 
-    private static String unsupportedViewerBody(WorkAreaExplorerService.FilePreview preview) {
+    private static String unsupportedViewerBody(WorkspaceExplorerService.FilePreview preview) {
         return """
-            <div class="avatar-status">Viewer unavailable for this file type or size.</div>
-            <dl class="avatar-workarea-viewer-meta">
+            <div class="workspace-file-status">Viewer unavailable for this file type or size.</div>
+            <dl class="workspace-file-viewer-meta">
               <dt>Path</dt><dd>%s</dd>
               <dt>Size</dt><dd>%s</dd>
               <dt>Reason</dt><dd>%s</dd>
@@ -487,34 +498,36 @@ final class WorkAreaExplorerFragments {
         );
     }
 
-    private static String modal(String title, String body, boolean clear) {
+    private static String modal(String type, String key, String title, String body, boolean clear) {
         if (clear) {
             return "<div id=\"" + MODAL_ID + "\" hx-swap-oob=\"true\"></div>";
         }
         return """
-            <div class="avatar-modal" role="dialog" aria-modal="true">
-              <div class="avatar-edit-panel avatar-workarea-panel">
-                <div class="avatar-edit-header"><h2>%s</h2><button type="button" class="button button-secondary small" hx-get="/avatar/_edit?close=true" hx-target="#%s" hx-swap="innerHTML">Close</button></div>
+            <div class="workspace-file-modal" role="dialog" aria-modal="true">
+              <div class="workspace-file-modal-panel">
+                <div class="workspace-file-modal-header"><h2>%s</h2><button type="button" class="button button-secondary small" hx-get="/api/workspace/%s/%s/modal/close" hx-target="#%s" hx-swap="innerHTML">Close</button></div>
                 %s
               </div>
             </div>
-            """.formatted(escape(title), MODAL_ID, body);
+            """.formatted(escape(title), urlPath(type), urlPath(key), MODAL_ID, body);
     }
 
-    private static String upButton(WorkAreaExplorerService.DirectoryListing listing) {
+    private static String upButton(WorkspaceExplorerService.DirectoryListing listing, String type, String key) {
         String path = pathOrRoot(listing.path());
         if (".".equals(path)) {
             return "";
         }
-        return button("Up", "hx-get", "/avatar/_work-areas/" + urlPath(listing.workArea().id())
+        return button("Up", "hx-get", "/api/workspace/" + urlPath(type) + "/" + urlPath(key)
             + "/explorer?path=" + url(parentPath(path)), "#" + SHELL_ID, "outerHTML");
     }
 
-    private static String breadcrumbs(WorkAreaExplorerService.DirectoryListing listing) {
+    private static String breadcrumbs(WorkspaceExplorerService.DirectoryListing listing, String type, String key) {
         String path = pathOrRoot(listing.path());
         StringBuilder out = new StringBuilder();
-        out.append("<button type=\"button\" class=\"button button-link small\" hx-get=\"/avatar/_work-areas/")
-            .append(urlPath(listing.workArea().id()))
+        out.append("<button type=\"button\" class=\"button button-link small\" hx-get=\"/api/workspace/")
+            .append(urlPath(type))
+            .append("/")
+            .append(urlPath(key))
             .append("/explorer?path=.\" hx-target=\"#")
             .append(SHELL_ID)
             .append("\" hx-swap=\"outerHTML\">.</button>");
@@ -530,8 +543,10 @@ final class WorkAreaExplorerFragments {
                 current.append('/');
             }
             current.append(part);
-            out.append(" / <button type=\"button\" class=\"button button-link small\" hx-get=\"/avatar/_work-areas/")
-                .append(urlPath(listing.workArea().id()))
+            out.append(" / <button type=\"button\" class=\"button button-link small\" hx-get=\"/api/workspace/")
+                .append(urlPath(type))
+                .append("/")
+                .append(urlPath(key))
                 .append("/explorer?path=")
                 .append(url(current.toString()))
                 .append("\" hx-target=\"#")
@@ -549,12 +564,12 @@ final class WorkAreaExplorerFragments {
             """.formatted(hxVerb, route, target, swap, escape(label));
     }
 
-    private static String modalButton(String label, String workAreaId, String action, String path) {
-        return button(label, "hx-get", "/avatar/_work-areas/" + urlPath(workAreaId) + "/modal/" + urlPath(action)
+    private static String modalButton(String label, String type, String key, String action, String path) {
+        return button(label, "hx-get", "/api/workspace/" + urlPath(type) + "/" + urlPath(key) + "/modal/" + urlPath(action)
             + "?path=" + url(path), "#" + MODAL_ID, "innerHTML");
     }
 
-    private static String tags(String workAreaId, String path, List<WorkspaceFileLabel> tags, boolean removable) {
+    private static String tags(String type, String key, String path, List<WorkspaceFileLabel> tags, boolean removable) {
         if (tags == null || tags.isEmpty()) {
             return "<span class=\"tag tag-muted\">No tags</span>";
         }
@@ -562,10 +577,12 @@ final class WorkAreaExplorerFragments {
         int visible = removable ? tags.size() : Math.min(tags.size(), 3);
         for (WorkspaceFileLabel tag : tags.stream().limit(visible).toList()) {
             out.append("<span class=\"tag\">").append(escape(tag.slug()));
-            if (removable && workAreaId != null) {
-                out.append(" <button type=\"button\" class=\"button button-link small\" hx-delete=\"/avatar/_work-areas/")
-                    .append(urlPath(workAreaId))
-                    .append("/files/tags?path=")
+            if (removable && type != null) {
+                out.append(" <button type=\"button\" class=\"button button-link small\" hx-delete=\"/api/workspace/")
+                    .append(urlPath(type))
+                    .append("/")
+                    .append(urlPath(key))
+                    .append("/files/labels?path=")
                     .append(url(path))
                     .append("&amp;label=")
                     .append(url(tag.slug()))
@@ -594,8 +611,8 @@ final class WorkAreaExplorerFragments {
             return renderer.apply(content == null ? "" : content);
         } catch (RuntimeException exception) {
             return """
-                <div class="avatar-workarea-render-fallback">%s</div>
-                <div class="avatar-status-error avatar-workarea-render-error">Markdown render failed. Raw text is still available.</div>
+                <div class="workspace-file-render-fallback">%s</div>
+                <div class="workspace-file-status-error workspace-file-render-error">Markdown render failed. Raw text is still available.</div>
                 """.formatted(escape(content == null ? "" : content));
         }
     }
@@ -626,7 +643,7 @@ final class WorkAreaExplorerFragments {
         if (message == null || message.isBlank()) {
             return "";
         }
-        return "<div class=\"" + (error ? "avatar-status-error" : "avatar-status") + "\">" + escape(message) + "</div>";
+        return "<div class=\"" + (error ? "workspace-file-status-error" : "workspace-file-status") + "\">" + escape(message) + "</div>";
     }
 
     private static String title(String action) {

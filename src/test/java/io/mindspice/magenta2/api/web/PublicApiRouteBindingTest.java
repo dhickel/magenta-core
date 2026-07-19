@@ -75,6 +75,15 @@ class PublicApiRouteBindingTest {
     }
 
     @Test
+    void avatarRoutesAreUnmappedWithoutRedirectOrFallbackContent() throws Exception {
+        for (String route : new String[] {"/avatar", "/avatar/chat", "/avatar/widgets/example"}) {
+            mockMvc.perform(get(route))
+                .andExpect(status().isNotFound())
+                .andExpect(header().doesNotExist("Location"));
+        }
+    }
+
+    @Test
     void chatRoutesBindWithoutCallingModelBackedExecution() throws Exception {
         mockMvc.perform(get("/api/chat/sessions"))
             .andExpect(status().isOk())

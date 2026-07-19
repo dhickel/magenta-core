@@ -458,15 +458,15 @@ class ChatServiceTest {
         );
 
         String browserConversationId = "00000000-0000-0000-0000-000000000010";
-        String avatarConversationId = "00000000-0000-0000-0000-000000000011";
+        String internalConversationId = "00000000-0000-0000-0000-000000000011";
         String agentConversationId = "00000000-0000-0000-0000-000000000012";
         String planningConversationId = "00000000-0000-0000-0000-000000000013";
 
         memoryRepository.saveAll(browserConversationId, List.of(new UserMessage("browser")));
         metadataRepository.saveSurfaceIfAbsent(browserConversationId, ChatSessionSurface.BROWSER);
 
-        memoryRepository.saveAll(avatarConversationId, List.of(new UserMessage("avatar")));
-        metadataRepository.saveSurfaceIfAbsent(avatarConversationId, ChatSessionSurface.AVATAR);
+        memoryRepository.saveAll(internalConversationId, List.of(new UserMessage("internal")));
+        metadataRepository.saveSurfaceIfAbsent(internalConversationId, ChatSessionSurface.INTERNAL);
 
         memoryRepository.saveAll(agentConversationId, List.of(new UserMessage("agent")));
         metadataRepository.saveOriginIfAbsent(agentConversationId, io.mindspice.magenta2.ai.chat.model.ChatSessionOrigin.AGENT_CHAT, "agent-1");

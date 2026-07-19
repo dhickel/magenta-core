@@ -1,7 +1,5 @@
 package io.mindspice.magenta2.ai.chat.tool.orchestration;
 
-import java.util.List;
-
 import io.mindspice.magenta2.ai.orchestration.agents.AgentProfile;
 import io.mindspice.magenta2.ai.orchestration.agents.AgentProfileService;
 import io.mindspice.magenta2.ai.orchestration.agents.AgentProfileStatus;
@@ -14,7 +12,6 @@ import io.mindspice.magenta2.ai.orchestration.runtime.OrchestrationTaskContextHo
 import io.mindspice.magenta2.ai.orchestration.runtime.ProjectService;
 import io.mindspice.magenta2.ai.orchestration.runtime.WorkAssignment;
 import io.mindspice.magenta2.ai.orchestration.workspaces.RunOutputArtifact;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
@@ -27,20 +24,17 @@ public class AgentToolAuthorizationService {
     private final ProjectService projectService;
     private final AssignmentService assignmentService;
     private final JobService jobService;
-    private final String supervisorAgentId;
 
     public AgentToolAuthorizationService(
         AgentProfileService agentProfileService,
         @Lazy ProjectService projectService,
         @Lazy AssignmentService assignmentService,
-        @Lazy JobService jobService,
-        @Value("${magenta.avatar.supervisor-agent-id:avatar}") String supervisorAgentId
+        @Lazy JobService jobService
     ) {
         this.agentProfileService = agentProfileService;
         this.projectService = projectService;
         this.assignmentService = assignmentService;
         this.jobService = jobService;
-        this.supervisorAgentId = StringUtils.hasText(supervisorAgentId) ? supervisorAgentId.trim() : "avatar";
     }
 
     AgentProfile requireCurrentAgent() {
@@ -51,18 +45,6 @@ public class AgentToolAuthorizationService {
         AgentProfile profile = agentProfileService.get(context.agentId());
         if (profile.status() == AgentProfileStatus.DISABLED) {
             throw new IllegalStateException("Agent is disabled and cannot use operational tools: " + profile.id());
-        }
-        return profile;
-    }
-
-    AgentProfile requireAvatarSupervisor(String toolName) {
-        AgentProfile profile = requireCurrentAgent();
-        if (!supervisorAgentId.equals(profile.id())) {
-            throw new IllegalStateException("Avatar supervisor tool requires agent id: " + supervisorAgentId);
-        }
-        List<String> approvedTools = profile.approvedTools() == null ? List.of() : profile.approvedTools();
-        if (!approvedTools.contains(toolName)) {
-            throw new IllegalStateException("Avatar supervisor tool requires explicit profile approval: " + toolName);
         }
         return profile;
     }

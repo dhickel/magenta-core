@@ -172,13 +172,11 @@ class ChatControllerTest {
             "{\"message\":\"ping\",\"surface\":\"browser\"}",
             ChatRequest.MsgRequest.class
         );
-        ChatRequest.MsgRequest avatar = objectMapper.readValue(
+        assertThat(browser.surface()).isEqualTo(ChatSessionSurface.BROWSER);
+        assertThatThrownBy(() -> objectMapper.readValue(
             "{\"message\":\"ping\",\"surface\":\"AvAtAr\"}",
             ChatRequest.MsgRequest.class
-        );
-
-        assertThat(browser.surface()).isEqualTo(ChatSessionSurface.BROWSER);
-        assertThat(avatar.surface()).isEqualTo(ChatSessionSurface.AVATAR);
+        )).hasMessageContaining("Unknown chat session surface");
         assertThatThrownBy(() -> objectMapper.readValue(
             "{\"message\":\"ping\",\"surface\":\"external\"}",
             ChatRequest.MsgRequest.class

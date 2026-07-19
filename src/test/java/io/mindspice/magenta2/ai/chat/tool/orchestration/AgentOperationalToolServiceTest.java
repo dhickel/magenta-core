@@ -51,7 +51,7 @@ class AgentOperationalToolServiceTest {
     private final AgentWorkspaceStatusService workspaceStatusService = mock(AgentWorkspaceStatusService.class);
     private final OutputArtifactService outputArtifactService = mock(OutputArtifactService.class);
     private final AgentToolAuthorizationService authorization = new AgentToolAuthorizationService(
-        agentProfileService, projectService, assignmentService, jobService, "avatar");
+        agentProfileService, projectService, assignmentService, jobService);
 
     @AfterEach
     void clearContext() {
@@ -119,23 +119,6 @@ class AgentOperationalToolServiceTest {
 
         assertThat(result.ok()).isFalse();
         assertThat(result.message()).contains("disabled");
-    }
-
-    @Test
-    void avatarAgentListRequiresSupervisorApprovalAndReturnsWorkspaceStatus() {
-        AgentOperationalToolService service = service(true);
-        OrchestrationTaskContextHolder.set(context("avatar"));
-        AgentProfile avatar = profile("avatar", List.of("avatar_agent_list"), AgentProfileStatus.ACTIVE);
-        when(agentProfileService.get("avatar")).thenReturn(avatar);
-        when(agentProfileService.list()).thenReturn(List.of(avatar));
-        when(workspaceStatusService.statusFor("avatar")).thenReturn(new AgentWorkspaceStatus(
-            "avatar", "agents/avatar/workspace", AgentWorkspaceStatus.WorkspaceHealth.READY,
-            true, true, 0, 0, List.of(), 0, 0, null, "Workspace ready"));
-
-        PagedListResult result = service.avatarAgentList(10);
-
-        assertThat(result.items()).hasSize(1);
-        assertThat(((AgentItem) result.items().getFirst()).id()).isEqualTo("avatar");
     }
 
     private AgentOperationalToolService service(boolean schedulesEnabled) {
