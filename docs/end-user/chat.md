@@ -23,7 +23,7 @@ The sidebar only shows browser-surface `/chat` conversations. Avatar chat, agent
 
 Use **Send** to submit a message. Enter sends the message; Shift+Enter inserts a newline.
 
-The model dropdowns show configured alias names, such as `deepseek-v4-pro` and `deepseek-v4-flash`, rather than provider-specific model names. Magenta resolves the alias to the configured provider model when it sends the request.
+The model dropdowns show configured alias names, such as `deepseek-v4-pro-high`, `deepseek-v4-pro-max`, `deepseek-v4-flash-high`, and `deepseek-v4-flash-max`, rather than provider-specific model names. Magenta resolves the alias and its thinking level to the configured provider model when it sends the request.
 
 If you send a normal message while the assistant is still responding, Magenta queues it above the composer and sends it automatically after the active response finishes. Queued cards show their order and survive a page reload or session switch; after a reload, Magenta keeps retrying until the active response is no longer blocking the conversation. Slash commands are not queued mid-turn; wait for the active response to finish before using commands.
 

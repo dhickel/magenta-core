@@ -26,7 +26,9 @@ Use task-specific validation when a plan provides a stricter runtime path.
 
 `app.ai.config-path` defaults to `./config/ai-config.example.json`.
 
-The local startup file is intentionally ignored because it contains provider credentials. The standard DeepSeek-only setup uses `deepseek-v4-pro` as the default/planning model and `deepseek-v4-flash` for summaries and context compaction. Replace `REPLACE_WITH_DEEPSEEK_API_KEY` in both model entries with the same DeepSeek API key before making model-backed requests.
+The local AI config is intentionally ignored because it contains provider credentials. The standard DeepSeek-only setup defines High and Max aliases for both `deepseek-v4-pro` and `deepseek-v4-flash`. It uses `deepseek-v4-pro-max` as the default/planning model, `deepseek-v4-flash-high` for summaries, and `deepseek-v4-flash-max` for context compaction. Add the same DeepSeek API key to all four model entries before making model-backed requests.
+
+Run `./start.sh` to install the DeepSeek module from the sibling `spring-ai-dhickel` fork and start Magenta. Set `SPRING_AI_FORK_DIR` when the fork is checked out elsewhere. On a fresh clone, the script creates the ignored local config from `config/ai-config.deepseek-template.json` and asks you to add the API key before continuing.
 
 `AiConfig.dataRoot` is resolved after the file is loaded:
 
@@ -54,7 +56,7 @@ Model endpoint definitions are read from file config. Durable agent profiles and
 
 - `OLLAMA` uses the Ollama integration.
 - `OPENAI_COMPATIBLE` uses the OpenAI integration and may apply configured OpenAI reasoning effort.
-- `DEEPSEEK` uses the dedicated DeepSeek integration. Choose reasoning behavior through the configured remote DeepSeek model; no local patched Spring AI artifact is required.
+- `DEEPSEEK` uses the dedicated DeepSeek integration from the maintained `dhickel/spring-ai` fork. `thinkLevel` values 1 through 3 select `high` reasoning effort, while level 4 selects `max`; zero or an omitted value leaves the DeepSeek API default unchanged.
 
 Keep DeepSeek endpoints classified as `DEEPSEEK`, even when their HTTP API resembles OpenAI. The dedicated provider retains DeepSeek `reasoning_content` when Magenta replays assistant tool-call messages.
 

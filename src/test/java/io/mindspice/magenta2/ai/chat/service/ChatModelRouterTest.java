@@ -193,24 +193,42 @@ class ChatModelRouterTest {
     }
 
     @Test
-    void deepSeekThinkingIsSelectedByModelRatherThanReasoningEffort() {
+    void mapsDeepSeekLevelThreeToHighReasoningEffort() {
         AiConfig config = new AiConfig(
             "magenta",
             "magenta",
             10,
             null,
-            Map.of("ds", new ModelConfig("deepseek-v4-pro", "https://api.deepseek.com", EndpointType.DEEPSEEK, 128000, 0, "sk-test")),
+            Map.of("ds", new ModelConfig("deepseek-v4-pro", "https://api.deepseek.com", EndpointType.DEEPSEEK, 128000, 3, "sk-test")),
             Map.of("magenta", new AgentConfig("ds", "Prompt.", List.of()))
         );
         ChatModelRouter router = new ChatModelRouter(config, null, ObservationRegistry.NOOP);
         var options = (org.springframework.ai.deepseek.DeepSeekChatOptions) router.toolCallingOptions("ds");
 
-        assertThat(options.getModel()).isEqualTo("deepseek-v4-pro");
+        assertThat(options.getThinking()).isEqualTo(DeepSeekApi.Thinking.enabled());
+        assertThat(options.getReasoningEffort()).isEqualTo("high");
+    }
+
+    @Test
+    void mapsDeepSeekLevelFourToMaxReasoningEffort() {
+        AiConfig config = new AiConfig(
+            "magenta",
+            "magenta",
+            10,
+            null,
+            Map.of("ds", new ModelConfig("deepseek-v4-flash", "https://api.deepseek.com", EndpointType.DEEPSEEK, 128000, 4, "sk-test")),
+            Map.of("magenta", new AgentConfig("ds", "Prompt.", List.of()))
+        );
+        ChatModelRouter router = new ChatModelRouter(config, null, ObservationRegistry.NOOP);
+        var options = (org.springframework.ai.deepseek.DeepSeekChatOptions) router.toolCallingOptions("ds");
+
+        assertThat(options.getThinking()).isEqualTo(DeepSeekApi.Thinking.enabled());
+        assertThat(options.getReasoningEffort()).isEqualTo("max");
     }
 
     @Test
     void overflowThinkLevelClampsToMax() {
-        // DeepSeek uses model selection rather than reasoning-effort levels.
+        // DeepSeek overflow (100 -> max)
         AiConfig dsConfig = new AiConfig(
             "magenta", "magenta", 10, null,
             Map.of("ds", new ModelConfig("deepseek-v4-pro", "https://api.deepseek.com", EndpointType.DEEPSEEK, 128000, 100, "sk-test")),
@@ -218,7 +236,7 @@ class ChatModelRouterTest {
         );
         ChatModelRouter dsRouter = new ChatModelRouter(dsConfig, null, ObservationRegistry.NOOP);
         var dsOptions = (org.springframework.ai.deepseek.DeepSeekChatOptions) dsRouter.toolCallingOptions("ds");
-        assertThat(dsOptions.getModel()).isEqualTo("deepseek-v4-pro");
+        assertThat(dsOptions.getReasoningEffort()).isEqualTo("max");
 
         // OpenAI overflow (100 → high)
         AiConfig oaiConfig = new AiConfig(

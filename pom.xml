@@ -20,6 +20,7 @@
     <properties>
         <java.version>25</java.version>
         <spring-ai.version>2.0.0</spring-ai.version>
+        <spring-ai-deepseek.version>2.0.1-SNAPSHOT</spring-ai-deepseek.version>
     </properties>
 
     <dependencyManagement>
@@ -68,6 +69,7 @@
         <dependency>
             <groupId>org.springframework.ai</groupId>
             <artifactId>spring-ai-deepseek</artifactId>
+            <version>${spring-ai-deepseek.version}</version>
         </dependency>
         <dependency>
             <groupId>org.xerial</groupId>

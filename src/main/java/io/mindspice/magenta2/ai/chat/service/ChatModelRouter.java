@@ -111,9 +111,10 @@ public class ChatModelRouter {
                 yield builder.build();
             }
             case DEEPSEEK -> {
-                yield DeepSeekChatOptions.builder()
-                    .model(config.remoteModelName())
-                    .build();
+                DeepSeekChatOptions.Builder builder = DeepSeekChatOptions.builder()
+                    .model(config.remoteModelName());
+                applyDeepSeekReasoningEffort(builder, effectiveThinkLevel(config));
+                yield builder.build();
             }
         };
     }
@@ -172,6 +173,12 @@ public class ChatModelRouter {
         builder.reasoningEffort(effort);
     }
 
+    private static void applyDeepSeekReasoningEffort(DeepSeekChatOptions.Builder builder, int level) {
+        if (level <= 0) return;
+        builder.enableThinking()
+            .reasoningEffort(level >= 4 ? "max" : "high");
+    }
+
     private ChatModel buildModel(ModelConfig modelConfig) {
         if (!StringUtils.hasText(modelConfig.remoteEndpoint())) {
             throw new IllegalStateException("Model must define remoteEndpoint: " + modelConfig.remoteModelName());
@@ -214,9 +221,10 @@ public class ChatModelRouter {
             throw new IllegalStateException(
                 "DeepSeek model must define apiKey: " + modelConfig.remoteModelName());
         }
-        DeepSeekChatOptions options = DeepSeekChatOptions.builder()
-            .model(modelConfig.remoteModelName())
-            .build();
+        DeepSeekChatOptions.Builder optionsBuilder = DeepSeekChatOptions.builder()
+            .model(modelConfig.remoteModelName());
+        applyDeepSeekReasoningEffort(optionsBuilder, effectiveThinkLevel(modelConfig));
+        DeepSeekChatOptions options = optionsBuilder.build();
         HttpClient httpClient = HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(30))
             .build();
