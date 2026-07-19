@@ -128,7 +128,7 @@ Plan runs and task runs preserve execution history:
 - `PlanRun` stores input values, output values, definition snapshot, workspace/output paths, evidence, validation feedback, deliverable evidence, final/error messages, status, and timestamps.
 - `TaskRun` stores task-specific run state and is used by task execution paths.
 
-Runs snapshot their definitions so edits after execution do not rewrite historical meaning. During execution, agent-facing `outputs/` resolves to run-local staging at `runs/<runId>/outputs/` under the effective agent workspace. Agents write declared and transient deliverables there; after run completion, backend validation/promotion copies declared final outputs to the effective final destination and indexes the promoted artifacts in `run_output_artifacts`.
+Runs snapshot their definitions so edits after execution do not rewrite historical meaning. During execution, outputs publish directly beneath the effective workspace's `outputs/` directory with collision-safe normalized names. No `runs/<runId>` hierarchy is created. Durable task, job, run, project, agent, and canonical workspace attribution is preserved in `run_output_artifacts` through `OutputArtifactRepository`.
 
 ## Submit-To-Agent Semantics
 
@@ -140,7 +140,7 @@ Public plan/task run routes now submit durable assignments:
 
 The controller resolves an active agent when no `agentId` is supplied, defaults priority to `9`, builds `AssignmentRequest`, and calls `AssignmentService.create` with `AssignmentType.TASK_RUN`. The SSE stream returns `submitted` or `failed` and then completes.
 
-Submission payloads can carry explicit `projectId`, compatibility `workspaceId`, `selectedWorkAreaId`, `outputRouteType`, `outputWorkAreaId`, and `outputDirectRelativePath`. `projectId` controls effective durable workspace selection; `workspaceId` is retained for compatibility metadata. Anonymous plan-chat execution does not expose Work Area controls.
+Submission payloads carry `projectId` for attribution metadata and `workspaceType`/`workspaceKey` together for workspace selection. Omission defaults to the bound agent. `projectId` is metadata only and does not select or create a filesystem root. Anonymous plan-chat execution does not expose workspace selection controls.
 
 Actual execution is handled later by orchestration runner services. This keeps HTTP request handling short and makes queued work observable/cancellable.
 

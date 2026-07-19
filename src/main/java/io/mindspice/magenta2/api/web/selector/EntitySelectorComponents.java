@@ -15,6 +15,7 @@ import org.springframework.util.StringUtils;
 @Service
 public class EntitySelectorComponents {
     static final String CONTEXT_PARAM_PREFIX = "selectorContext.";
+    private static final String WORKSPACE_SELECTION_CONTEXT = "workspaceSelectionContext";
 
     public Component selector(EntitySelectorConfig config, EntityOption current) {
         String rootId = rootId(config.kind(), config.name());
@@ -98,6 +99,10 @@ public class EntitySelectorComponents {
                 if (StringUtils.hasText(entry.getValue())) {
                     url += "&" + enc(contextParamName(entry.getKey())) + "=" + enc(entry.getValue());
                 }
+            }
+            String workspaceContext = contextParams.get(WORKSPACE_SELECTION_CONTEXT);
+            if (kind == EntityKind.AGENT && StringUtils.hasText(workspaceContext)) {
+                url = url.replace("/selectors/agent/selected", "/selectors/workspace/agent-selected");
             }
             HtmlTag row = new HtmlTag("button")
                 .withAttribute("type", "button")

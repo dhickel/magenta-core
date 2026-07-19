@@ -22,7 +22,7 @@ This package owns filesystem-first workspace identity, descriptor resolution, co
 - Validate traversal, symlink components, real-path confinement, regular-file sources, destination parents, and collisions before publication.
 - Reads and failed validation must create nothing. Publication is the only writer beneath `outputs/`.
 - Do not synthesize run, job, task, project, Work Area, scratch, staging, or discovery directory layers.
-- Obsolete generic workspace, link, lease, Work Area, and output-directory definitions may remain until their deletion phase, but active code must not call or extend them.
+- Obsolete generic workspace, link, lease, Work Area, and output-directory definitions are removed. Do not recreate or replace them.
 - Do not migrate, alias, rewrite, or delete legacy filesystem trees during normal startup.
 
 ### Validation

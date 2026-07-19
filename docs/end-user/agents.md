@@ -7,7 +7,7 @@ Use `/agents` to manage execution agents, inspect queues and histories, operate 
 The agents page has:
 
 - A sidebar with **Create Agent**, **Reload**, filter, and agent cards.
-- Agent detail tabs: dashboard, profile, queue, inbox, jobs, schedules, reactions, workspace, outputs, exec, history, and submit.
+- Agent detail tabs: dashboard, profile, queue, inbox, jobs, schedules, reactions, workspace (Files), outputs, exec, history, and submit.
 - A collapsible **Chat with Agent** panel.
 
 ## Create And Select An Agent
@@ -44,13 +44,12 @@ Approved tools and shell commands are comma-separated. Avoid broad wildcard acce
 
 ## Queue Tab
 
-The queue tab lists active assignments with type, status, priority, project/effective workspace context, compatibility workspace metadata, progress, lease, job, created time, and actions.
+The queue tab lists active assignments with type, status, priority, project metadata, typed workspace selection, progress, assignment-queue lease state, job, created time, and actions.
 
 Available actions depend on assignment status:
 
 - **Pause** queued or running work.
 - **Resume** waiting or paused work.
-- **Requeue Workspace** for assignments waiting on a workspace lease after the blocking lease has cleared.
 - **Cancel** non-terminal work.
 - **Diagnostics** to inspect runtime details.
 - **Transcript** from diagnostics/history views.
@@ -73,46 +72,21 @@ Event reactions can enqueue assignments when matching runtime events occur, when
 
 If schedules or reactions are disabled, the tab shows the required feature flag.
 
-## Avatar Assistant Organizer Tools
+## Workspace (Files Tab)
 
-The reserved `Avatar` agent profile can be configured as the personal assistant surface for local organizer state. When the Avatar profile is active and explicitly approves the tool names, Avatar chat can manage:
+The **Files** tab shows the agent's workspace file explorer, bound to `workspace/agent/<agentId>/`. This is a neutral file browser providing:
 
-- Todos: `avatar_todo_list`, `avatar_todo_upsert`, `avatar_todo_complete`.
-- Daily tasks: `avatar_daily_task_list`, `avatar_daily_task_upsert`, `avatar_daily_task_complete`.
-- Local calendar items: `avatar_calendar_list`, `avatar_calendar_upsert`, `avatar_calendar_delete`.
-- Notes: `avatar_note_append`, `avatar_note_search`.
-- Task assignment: `avatar_submit_task`, `avatar_submit_research_assignment`.
-- Output inspection: `avatar_list_outputs`, `avatar_read_output`.
+- Confined folder navigation.
+- File and directory create, rename, move, copy, and delete.
+- Text and Markdown viewing and editing.
+- Image preview and download.
+- Labels, tags, and recent action history.
 
-These tools return compact JSON records and store organizer data in Avatar persistence. They do not grant shell access, poll email, expose a public email-ingress endpoint, connect to external calendars, or create plugin-runtime behavior.
+All operations stay confined to the agent's workspace root. The reserved `outputs/` subtree is read-only through the explorer (output publication is the only writer). The explorer uses HTMX for standard CRUD operations with OOB list, inspector, and modal refreshes.
 
-Email processing is intentionally deferred. Future mail handling should enter through the scripting API, internal messaging, or agents using approved tools to add messages; it should not use an open external Avatar endpoint.
+## Runtime AGENTS.md Guidance
 
-## Workspace Tab
-
-The workspace tab shows:
-
-- Workspace ID.
-- Owner type and owner ID.
-- Display name.
-- Root relative path.
-- Output directory hint.
-- Metadata.
-- Active leases.
-- Workspace links and access flags.
-
-Use this tab to verify where agent work is mounted and whether a lease is active. A lease is a runtime hold on workspace use; it is not a Docker container by itself.
-
-## Workspace AGENTS.md Guidance
-
-When Magenta creates a brand-new agent execution workspace root, it can seed one starter `AGENTS.md` file at that workspace root.
-
-- The starter file is created once on first workspace-root creation.
-- Existing `AGENTS.md` files are never overwritten, regenerated, or normalized.
-- Starter guidance explains workspace-root expectations, `home/` persistence, run staging under `runs/`, and output staging under `<runId>/outputs`.
-- During model-backed assignment/agent execution with a bound project/workspace root, runtime guidance uses layered `AGENTS.md` context from ancestor to closest path. Closest guidance wins on conflicts, while non-conflicting ancestor guidance remains active. This ancestor retention is Magenta runtime behavior; the external AGENTS.md site only states nearest-file precedence and explicit prompt override.
-- File and shell tools update the active path from the confined path they actually touch, so nested guidance follows the current tool target when work moves between sibling directories.
-- Explicit user prompts and assignment instructions override all `AGENTS.md` guidance.
+Magenta resolves layered `AGENTS.md` files from the effective workspace descriptor root down to the active confined tool path during execution. Files that exist beneath the descriptor root are ordered root-to-leaf. Closest guidance wins only on conflicts; non-conflicting ancestor guidance remains active. No starter `AGENTS.md` content is generated. Explicit user prompts and assignment instructions override all `AGENTS.md` guidance.
 
 ## Outputs Tab
 
@@ -125,7 +99,7 @@ The exec tab runs a bounded shell command in the agent workspace when the shell 
 Fields:
 
 - **Command**: executable and arguments.
-- **Working Directory**: defaults to `workspace`.
+- **Working Directory**: defaults to the agent workspace root.
 
 Use exec for small diagnostics. If the service is unavailable or the command is outside the allowlist, the UI returns an error.
 
@@ -143,11 +117,11 @@ Use submit to send saved work directly to this agent:
 2. Use the searchable **Plan/Workflow/Job ID** selector to choose the target.
 3. Set priority.
 4. Choose optional model override.
-5. Choose optional project context. When set, the project workspace is the effective durable workspace for the assignment.
-6. Choose optional **Compatibility Workspace** metadata only when you need to preserve an older workspace reference.
+5. Choose optional project context. Project association is metadata and membership context only.
+6. Keep the bound agent workspace default or choose an existing declared user workspace.
 7. Submit.
 
-The submit result shows assignment ID, project, effective workspace kind/id, effective workspace path when available, and compatibility workspace metadata.
+The submit result shows assignment ID, project metadata, and the effective workspace type, key, and canonical identity.
 
 The target selector searches across tasks, workflows, and jobs. Choose a result instead of copying an opaque ID when the selector is visible.
 
@@ -157,7 +131,7 @@ Agent lifecycle controls include:
 
 - Enable.
 - Disable.
-- Archive workspace and disable.
+- Archive and disable.
 - Hard delete after typing the exact confirmation text shown by the UI.
 
 Prefer disabling before destructive deletion. Hard delete is intentionally guarded because it can remove runtime state tied to the agent.

@@ -9,7 +9,6 @@ The app is a Spring Boot service with:
 - HTTP port default `8080`.
 - Magenta root default `${user.home}/.magenta`, configurable with `magenta.root.path`.
 - SQLite datasource default `jdbc:sqlite:${magenta.root.path}/magenta.sqlite?foreign_keys=true`, which places the default database at `<magenta.root.path>/magenta.sqlite`.
-- Avatar personal data uses a second SQLite database at `<magenta.root.path>/avatar.sqlite`, exposed as named beans `avatarDataSource` and `avatarJdbcTemplate`.
 - SQL init always enabled against `classpath:schema.sql`.
 - Spring AI provider auto-config is disabled where applicable; model clients are assembled from user AI config.
 - Ollama base URL and default chat option present in Spring config, but application model routing primarily uses configured model definitions.
@@ -103,17 +102,16 @@ Current alpha access is open at the application layer (no built-in Basic auth or
 
 ## Data and Schema Operations
 
-Primary Magenta SQLite schema is initialized from `schema.sql` on startup. Avatar user-centric schema is initialized separately from `avatar-schema.sql` against `avatar.sqlite`. Repositories also self-bootstrap tables and add compatibility columns for existing local databases.
+Primary Magenta SQLite schema is initialized from `schema.sql` on startup. Repositories also self-bootstrap tables and add compatibility columns for existing local databases.
 
 Operational implications:
 
 - Treat `schema.sql` as the primary runtime table inventory for fresh `magenta.sqlite` databases.
-- Treat `avatar-schema.sql` as the Avatar personal-data table inventory for fresh `avatar.sqlite` databases.
 - Before changing a column assumption, inspect the owning repository for compatibility migrations.
 - Keep foreign key behavior in mind; the SQLite URL enables `foreign_keys=true`.
-- Warm data roots may have legacy workspace directories and older tables that repositories migrate forward.
+- Warm data roots may have legacy workspace directories and older tables that repositories tolerate but do not migrate.
 - Operators can still override `spring.datasource.url`; the root-owned SQLite path is the product default, not a forced migration of custom datasource settings.
-- Avatar's separate datasource is always resolved from `magenta.root.path`; it is not the primary application datasource and should not be used for orchestration/runtime tables.
+- `avatar.sqlite`, `avatar-schema.sql`, Avatar tables, and the Avatar datasource beans are removed. Legacy `avatar.sqlite` files remain untouched on disk but are inactive.
 
 ## Root Carry-Forward
 
@@ -130,9 +128,9 @@ Future migration work is intentionally not implemented in this cleanup. Candidat
 
 ## Filesystem Workspaces
 
-Agent execution uses filesystem-backed workspaces and host shell tools. `application.yml` explicitly notes that agent execution uses filesystem-backed workspaces.
+Agent execution uses filesystem-first workspaces in the closed three-kind model (`AGENT`, `CHAT`, `USER`). `application.yml` explicitly notes that agent execution uses filesystem-backed workspaces.
 
-Workspace directories are confined under the configured data root by `WorkspaceDirectoryService`. Output downloads and artifact materialization also enforce data-root confinement.
+Workspace directories are confined under the configured data root by `WorkspaceDirectoryService`. Output downloads and artifact materialization also enforce data-root confinement. The active layout is `workspace/agent/<id>/`, `workspace/chat/<id>/`, and `workspace/user/<name>/`, with a reserved lazy `outputs/` subtree beneath each.
 
 New Magenta-owned persisted path columns store data-root-relative values. Legacy absolute values under the current configured data root are read for compatibility and may be displayed as data-root-relative values. Stale absolute values from an old root are not rewritten and fail, or are omitted from listings, when an operation tries to use that path.
 

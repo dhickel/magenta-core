@@ -78,12 +78,12 @@ Finalize changes the plan status from draft to approved. It does not execute the
 1. Open an existing plan.
 2. Select **Submit to Agent**.
 3. Choose an agent.
-4. Optionally choose a project, model override, and compatibility workspace.
+4. Optionally choose project metadata, a model override, and an existing declared user workspace override.
 5. Set priority.
 6. Fill runtime inputs generated from the plan's input definitions.
 7. Submit.
 
-The project field controls where durable files and outputs belong. If a project is selected, the run uses the project workspace. If no project is selected, it uses the executing agent workspace. The workspace field remains for compatibility and uses a searchable selector where available. The agent field in the plan submit panel may still be a plain dropdown.
+The workspace selector controls which workspace receives output files. By default the bound agent's workspace is used. Declared user workspaces are available as overrides. Project association is metadata only. The agent field in the plan submit panel may still be a plain dropdown.
 
 After submit, Magenta creates an assignment. Open the linked agent page and use the queue, diagnostics, transcript, history, workspace, and outputs tabs to follow execution.
 
@@ -96,7 +96,7 @@ Plan submissions create agent assignments and may create task run records. The p
 - `/outputs` for artifacts.
 - `/jobs` when the plan runs as part of a job.
 
-During execution, model-facing `outputs/` is the run-local staging area. After backend completion, validation, or promotion, task output artifacts are promoted to the selected agent, project, or Work Area output destination. Ordinary chat files remain separate from these output artifacts.
+During execution, outputs publish directly beneath the effective workspace's `outputs/` directory with collision-safe normalized names. Ordinary chat files remain separate from these output artifacts. Durable attribution is queryable through `/api/outputs`.
 
 ## Anonymous Chat Plan Execution
 

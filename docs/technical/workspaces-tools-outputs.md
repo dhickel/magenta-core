@@ -50,4 +50,4 @@ No run, job, task, project, Work Area, scratch, staging, or discovery directory 
 
 ## Legacy isolation
 
-Obsolete generic workspace, link, lease, Work Area, project-root, and output-directory definitions may remain until their deletion phase. Existing database columns, rows, and filesystem trees remain untouched. Active execution and artifact paths do not read, write, recreate, alias, migrate, or fall back through them.
+Obsolete generic workspace, link, lease, database-backed filesystem identity, project-root, and output-directory definitions are removed from active code and fresh schema. Existing database columns, rows, and filesystem trees remain untouched. Active execution and artifact paths do not read, write, recreate, alias, migrate, or fall back through them.

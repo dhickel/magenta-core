@@ -274,10 +274,10 @@ class AgentShellToolServiceTest {
     }
 
     @Test
-    void rejectsRetiredWorkspaceAliasInAgentContext() throws Exception {
-        Files.createDirectories(tempDir.resolve("workspace/agent-1"));
+    void allowsWorkspaceNamedDirectoryInAgentContext() throws Exception {
+        Path workspace = Files.createDirectories(tempDir.resolve("workspace/agent/agent-1"));
+        Path ordinaryDirectory = Files.createDirectories(workspace.resolve("workspace"));
 
-        AiConfig aiConfig = new AiConfig(null, null, null, null, null, null, tempDir, null, null, null);
         WorkspaceDirectoryService dirService = WorkspaceDirectoryServiceTestSupport.directoryService(tempDir);
         AgentShellToolService service = new AgentShellToolService(tempDir, List.of("pwd"), dirService);
 
@@ -296,9 +296,8 @@ class AgentShellToolServiceTest {
             null));
 
         try {
-            assertThatThrownBy(() -> service.exec("pwd", "workspace", 5))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("retired or reserved");
+            assertThat(service.exec("pwd", "workspace", 5).stdout().trim())
+                .isEqualTo(ordinaryDirectory.toRealPath().toString());
         } finally {
             OrchestrationTaskContextHolder.clear();
         }
@@ -330,17 +329,17 @@ class AgentShellToolServiceTest {
         try {
             assertThatThrownBy(() -> service.exec("pwd", "outputs", 5))
                 .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("retired or reserved");
+                .hasMessageContaining("reserved for output publication");
         } finally {
             OrchestrationTaskContextHolder.clear();
         }
     }
 
     @Test
-    void rejectsLegacyScratchAliasInAgentContext() throws Exception {
-        Files.createDirectories(tempDir.resolve("workspace/agent-1"));
+    void allowsScratchNamedDirectoryInAgentContext() throws Exception {
+        Path workspace = Files.createDirectories(tempDir.resolve("workspace/agent/agent-1"));
+        Path ordinaryDirectory = Files.createDirectories(workspace.resolve("scratch"));
 
-        AiConfig aiConfig = new AiConfig(null, null, null, null, null, null, tempDir, null, null, null);
         WorkspaceDirectoryService dirService = WorkspaceDirectoryServiceTestSupport.directoryService(tempDir);
         AgentShellToolService service = new AgentShellToolService(tempDir, List.of("pwd"), dirService);
 
@@ -359,9 +358,8 @@ class AgentShellToolServiceTest {
             null));
 
         try {
-            assertThatThrownBy(() -> service.exec("pwd", "scratch", 5))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("retired or reserved");
+            assertThat(service.exec("pwd", "scratch", 5).stdout().trim())
+                .isEqualTo(ordinaryDirectory.toRealPath().toString());
         } finally {
             OrchestrationTaskContextHolder.clear();
         }
@@ -427,18 +425,20 @@ class AgentShellToolServiceTest {
         try {
             assertThatThrownBy(() -> service.exec("pwd", "outputs", 5))
                 .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("retired or reserved");
+                .hasMessageContaining("reserved for output publication");
         } finally {
             OrchestrationTaskContextHolder.clear();
         }
     }
 
     @Test
-    void activeTaskContextRejectsRetiredAndReservedPrefixes() throws Exception {
-        Path durableWorkspace = Files.createDirectories(tempDir.resolve("projects/project-1/workspace"));
-        Files.createDirectories(durableWorkspace.resolve("nested"));
+    void activeTaskContextAllowsOrdinaryFormerAliasNamesButRejectsOutputs() throws Exception {
+        Path workspace = Files.createDirectories(tempDir.resolve("workspace/agent/agent-1"));
+        for (String directory : List.of("workspace", "root", "run", "work", "projects/project-1")) {
+            Files.createDirectories(workspace.resolve(directory));
+        }
+        Files.createDirectories(workspace.resolve("outputs"));
 
-        AiConfig aiConfig = new AiConfig(null, null, null, null, null, null, tempDir, null, null, null);
         WorkspaceDirectoryService dirService = WorkspaceDirectoryServiceTestSupport.directoryService(tempDir);
         AgentShellToolService service = new AgentShellToolService(tempDir, List.of("pwd"), dirService);
 
@@ -448,22 +448,22 @@ class AgentShellToolServiceTest {
             null,
             null,
             "project-1",
-            null,
-            "workspace-1",
-            "workspace-1",
+            "agent",
+            "agent-1",
+            "agent/agent-1",
             "TASK_RUN",
             null,
-            durableWorkspace.toString(),
+            workspace.toString(),
             null));
 
         try {
-            assertThat(service.exec("pwd", "nested", 5).stdout().trim())
-                .isEqualTo(durableWorkspace.resolve("nested").toRealPath().toString());
-            for (String prefix : List.of("workspace", "root", "run", "work", "projects/project-1", "outputs")) {
-                assertThatThrownBy(() -> service.exec("pwd", prefix, 5))
-                    .isInstanceOf(IllegalArgumentException.class)
-                    .hasMessageContaining("retired or reserved");
+            for (String directory : List.of("workspace", "root", "run", "work", "projects/project-1")) {
+                assertThat(service.exec("pwd", directory, 5).stdout().trim())
+                    .isEqualTo(workspace.resolve(directory).toRealPath().toString());
             }
+            assertThatThrownBy(() -> service.exec("pwd", "outputs", 5))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("reserved for output publication");
         } finally {
             OrchestrationTaskContextHolder.clear();
         }
@@ -506,11 +506,10 @@ class AgentShellToolServiceTest {
     }
 
     @Test
-    void rejectsProjectPrefixInAssignmentContext() throws Exception {
-        Path runWorkspace = Files.createDirectories(tempDir.resolve("workspace/agent-1/runs/run-1"));
-        Path outputDir = Files.createDirectories(runWorkspace.resolve("outputs"));
+    void allowsProjectNamedDirectoryInAssignmentContext() throws Exception {
+        Path workspace = Files.createDirectories(tempDir.resolve("workspace/agent/agent-1"));
+        Path projectDirectory = Files.createDirectories(workspace.resolve("projects/project-1"));
 
-        AiConfig aiConfig = new AiConfig(null, null, null, null, null, null, tempDir, null, null, null);
         WorkspaceDirectoryService dirService = WorkspaceDirectoryServiceTestSupport.directoryService(tempDir);
         AgentShellToolService service = new AgentShellToolService(tempDir, List.of("pwd"), dirService);
 
@@ -525,13 +524,12 @@ class AgentShellToolServiceTest {
             "agent/agent-1",
             "TASK_RUN",
             null,
-            runWorkspace.toString(),
+            workspace.toString(),
             null));
 
         try {
-            assertThatThrownBy(() -> service.exec("pwd", "projects/project-1", 5))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("retired or reserved");
+            assertThat(service.exec("pwd", "projects/project-1", 5).stdout().trim())
+                .isEqualTo(projectDirectory.toRealPath().toString());
         } finally {
             OrchestrationTaskContextHolder.clear();
         }

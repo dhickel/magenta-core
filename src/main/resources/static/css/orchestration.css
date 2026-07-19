@@ -2766,3 +2766,108 @@
         grid-template-columns: 1fr;
     }
 }
+
+/* ── Workspace selection controls ── */
+
+.workspace-selection {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    border: 1px solid #d9e0ea;
+    border-radius: 6px;
+    background: #fbfcfe;
+    padding: 0.65rem;
+}
+
+.workspace-selection-current {
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+    font-size: 0.84rem;
+}
+
+.workspace-selection-options {
+    display: flex;
+    flex-direction: column;
+    gap: 0.3rem;
+    max-height: 14rem;
+    overflow-y: auto;
+}
+
+.workspace-selection-option {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    align-items: center;
+    gap: 0.5rem;
+    border: 1px solid #dde5ef;
+    border-radius: 4px;
+    background: #ffffff;
+    padding: 0.35rem 0.5rem;
+    font-size: 0.82rem;
+    cursor: pointer;
+    text-align: left;
+    width: 100%;
+    transition: border-color 0.15s;
+}
+
+.workspace-selection-option:hover {
+    border-color: #315d91;
+    background: #f5f8fc;
+}
+
+.workspace-selection-option.active {
+    border-color: #315d91;
+    background: #e8f0f9;
+    color: #1f4979;
+}
+
+.workspace-selection-option-label {
+    overflow-wrap: anywhere;
+    font-weight: 600;
+}
+
+.workspace-selection-option code {
+    font-size: 0.75rem;
+    color: #5c6675;
+}
+
+.workspace-selection-create {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.4rem;
+    padding-top: 0.35rem;
+}
+
+.workspace-selection-create-label {
+    font-size: 0.8rem;
+    color: #5c6675;
+    white-space: nowrap;
+}
+
+.workspace-selection-create input {
+    min-height: 2rem;
+    border: 1px solid #c9d3df;
+    border-radius: 4px;
+    padding: 0.28rem 0.4rem;
+    font-size: 0.82rem;
+    width: auto;
+    flex: 1;
+    min-width: 6rem;
+}
+
+.workspace-selection-divider {
+    border: none;
+    border-top: 1px solid #e5eaf1;
+    margin: 0.2rem 0;
+}
+
+/* ── Agent files tab specific overrides ── */
+
+#agent-files-explorer .workspace-file-explorer-toolbar {
+    padding: 0.35rem 0;
+}
+
+#agent-files-explorer .workspace-file-table {
+    width: 100%;
+}

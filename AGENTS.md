@@ -87,11 +87,10 @@ This is the style we want to take with our UI.
 - For dashboard/module editing, the SimplyPages demo pattern is the baseline: real module cards first, small top-corner decorators, centered add-module controls, and low-emphasis insert-row separators. Do not approve large text-heavy row/widget editor blocks that push content down or make the actual page look like an editor form.
 - When a scratch page is useful for planning or visual experiments, create it as an internal/dev-only surface, keep it out of normal navigation, and use it only to validate ideas with Playwright. Never treat scratch pages as source-of-truth documentation; extract stable examples and lessons into production components, docs, `.internal-dev/knowledge/`, or `.internal-dev/specifications/`.
 
-#### Avatar Dashboard Style Reference
-- Before redesigning `/avatar` or adding Avatar dashboard-like surfaces, read `.internal-dev/specifications/web.md` and `.internal-dev/specifications/simplypages.md`.
-- Keep Avatar styling aligned with the existing `/dashboard` and per-agent dashboard operational console: dense panels, compact controls, thin blue-gray borders, small radii, semantic chips, and HTMX-first fragments.
-- For Avatar layout/editing work, also read `.internal-dev/knowledge/simplypages-avatar-layout-and-editing.md`.
-- For Avatar Work Area boundary and persistence decisions, read `.internal-dev/knowledge/avatar-work-area-ui-refactor.md`.
+#### Agent Files Tab Style Reference
+- Before designing agent Files tab or workspace browser surfaces, read `.internal-dev/specifications/web.md` and `.internal-dev/specifications/simplypages.md`.
+- Keep workspace browser styling aligned with the existing `/dashboard` and per-agent dashboard operational console: dense panels, compact controls, thin blue-gray borders, small radii, semantic chips, and HTMX-first fragments.
+- For workspace layout/editing work, also read `.internal-dev/knowledge/filesystem-first-workspaces.md` and `.internal-dev/knowledge/root-relative-workspace-storage.md`.
 
 *Always use the libraries coding style and practices, do not try to shoehorn functionality or use raw html strings, raw html is a fallback for advanced cases most functionality from css, js, htmx
 can be done via functions. The library has a vast set of components and ways to make your own, search the well formated documentation for your operation and read it before any edits, if
@@ -125,8 +124,8 @@ If you find a bug pull the recent version of the library and directly implement 
 - Repositories should own persistence details and keep schema assumptions localized.
 - Request/response payloads and internal data carriers should use Java records where practical.
 - For workspace, output, project, job, task/plan, and workflow architecture work, read `.internal-dev/specifications/architecture.md`, `.internal-dev/specifications/service-graph.md`, `.internal-dev/specifications/services.md`, and `.internal-dev/specifications/api.md` as the current intended direction before planning or editing. In current code and docs, `task` and `plan` may be used interchangeably; prefer `task` for user-facing executable work while preserving existing compatibility until a deliberate rename is planned.
-- Workspace filesystem contracts use centralized application-owned layout helpers for static structural paths and aliases. Do not hand-concatenate root/workspace/run/output/job paths in services, tools, controllers, prompts, tests, or docs.
-- Current workspace semantics: data root contains `workspace/`, `chats/`, `agents/`, and `projects/`; agent execution roots live under `workspace/<agentWorkspaceId>/`; Work Areas use stable DB ids under `workareas/<workAreaId>/`; model-facing `outputs/` during execution resolves to run-local `runs/<runId>/outputs/`; backend completion/validation/promotion writes final outputs. Jobs bind to an agent, project, and Work Area but do not own workspace directories.
+- Workspace filesystem contracts use centralized application-owned layout helpers. `WorkspacePathLayout` is the sole structural path authority; `WorkspaceDirectoryService` alone constructs trusted `WorkspaceDescriptor` values for the closed three-kind model (`AGENT`, `CHAT`, `USER`). Do not hand-concatenate root/workspace paths or reconstruct identity from `Path` in services, tools, controllers, prompts, tests, or docs.
+- Current workspace semantics: the data root contains `workspace/agent/<id>/`, `workspace/chat/<id>/`, and `workspace/user/<name>/`. Agent and chat roots are lazy and may read empty when the entity exists but no physical directory has been created. User roots require explicit creation. Execution carries `workspaceType` and `workspaceKey` together; omission defaults to the bound agent; `chat` selection is rejected; `projectId` is metadata and membership context only. Outputs publish directly beneath the effective workspace's reserved lazy `outputs/` directory. The agent Files tab is the mounted browser surface. Avatar, DB-backed Work Areas, generic filesystem workspace identity, project roots, filesystem leases, run staging, old aliases, and starter files are removed.
 
 ### Agent and tool direction
 - Treat Magenta as an operational assistant, not a generic framework.

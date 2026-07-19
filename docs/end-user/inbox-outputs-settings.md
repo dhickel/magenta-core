@@ -57,7 +57,7 @@ Output rows show output name, artifact type, run, provenance context, creation t
 
 The inline content pane loads up to the configured content limit and also offers download.
 
-Output filters are discovery and debugging controls in the current alpha posture. They do not enforce project or agent permissions by themselves. During execution, model-facing `outputs/` is run-local staging; this page shows promoted output artifacts and metadata. Chat conversation files remain separate from orchestration output artifacts and are listed from the chat page instead.
+Output filters are discovery and debugging controls in the current alpha posture. They do not enforce project or agent permissions by themselves. During execution, publication writes directly beneath the effective workspace's reserved `outputs/` subtree; this page shows those output artifacts and their attribution metadata. Chat conversation files remain separate from orchestration output artifacts and are listed from the chat page instead.
 
 ## Settings
 

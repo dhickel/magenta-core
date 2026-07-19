@@ -116,7 +116,7 @@ class AgentsMdResolverTest {
     }
 
     @Test
-    void resolvesProjectBoundRootWithSelectedWorkAreaAsNestedContext() throws Exception {
+    void resolvesDescriptorBoundRootWithNestedContext() throws Exception {
         Path agentRoot = Files.createDirectories(tempDir.resolve("workspace/agent/agent-1"));
         Path nestedDir = Files.createDirectories(agentRoot.resolve("nested"));
         writeAgents(agentRoot, "agent-root");

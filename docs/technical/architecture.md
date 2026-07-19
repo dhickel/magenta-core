@@ -10,7 +10,7 @@ Source anchors:
 - Chat core: [`ai/chat`](../../src/main/java/io/mindspice/magenta2/ai/chat)
 - Runtime orchestration: [`ai/orchestration/runtime`](../../src/main/java/io/mindspice/magenta2/ai/orchestration/runtime)
 - Workflow engine: [`ai/orchestration/workflow`](../../src/main/java/io/mindspice/magenta2/ai/orchestration/workflow)
-- Workspaces and outputs: [`ai/orchestration/workspaces`](../../src/main/java/io/mindspice/magenta2/ai/orchestration/workspaces)
+- Workspaces and outputs: [`ai/orchestration/workspaces`](../../src/main/java/io/mindspice/magenta2/ai/orchestration/workspaces) — `WorkspaceDirectoryService` constructs trusted `WorkspaceDescriptor` values; `WorkspacePathLayout` owns structural paths; explorer, metadata, action logging, execution, tools, and output services consume descriptors.
 - AI configuration: [`ai/config/user`](../../src/main/java/io/mindspice/magenta2/ai/config/user)
 - Schema: [`schema.sql`](../../src/main/resources/schema.sql)
 
@@ -21,7 +21,7 @@ Browser and API callers enter through `io.mindspice.magenta2.api.web`.
 1. Public shell pages and HTMX fragments are rendered by `FrontendController`, `FrontendFragmentController`, and `OrchestrationController`.
 2. JSON and SSE API calls are handled by focused REST controllers such as `ChatController`, `PlanController`, `TaskController`, `WorkflowController`, `JobController`, `AgentProfileController`, `AgentOrchestrationController`, `ProjectController`, `WorkspaceController`, `OutputController`, and settings/model/dashboard controllers.
 3. Controllers normalize path/query/body input and translate known domain exceptions into HTTP status codes. They should not own chat, persistence, workflow, or runtime business rules.
-4. Services execute use cases: chat turns, plan/task definition lifecycle, assignment queue operations, job submission, workflow validation/execution, workspace leases, output materialization, runtime settings, and agent profile management.
+4. Services execute use cases: chat turns, plan/task definition lifecycle, assignment queue operations, job submission, workflow validation/execution, typed workspace resolution, output publication, runtime settings, and agent profile management.
 5. Repositories localize SQLite table knowledge and compatibility bootstrapping. `schema.sql` is the canonical startup schema, but several repositories also add compatibility columns for warm data roots.
 
 Typical flows:
@@ -52,7 +52,7 @@ Typical flows:
 
 `ai.orchestration.workflow` owns workflow definitions, v2 routed node graphs, validation, workflow run state, node runs, workflow-owned inbox approvals, and workflow execution.
 
-`ai.orchestration.workspaces` owns data-root-confined workspace directories, workspace records, links, leases, agent workspace status, and output artifacts.
+`ai.orchestration.workspaces` owns filesystem-first workspace identity (three closed kinds: `AGENT`, `CHAT`, `USER`), trusted descriptor resolution through `WorkspaceDirectoryService`, structural paths through `WorkspacePathLayout`, confined file explorer behavior, workspace-scoped `AGENTS.md` resolution, output artifact persistence through `OutputArtifactRepository`, and output publication.
 
 `ai.orchestration.settings` owns persisted runtime defaults such as default agent/model, chat models, tool policy, context limits, and assignment history purge settings.
 
@@ -66,7 +66,7 @@ The schema groups into these domains:
 - Plan/task and runs: `plan_definitions`, `plan_runs`.
 - Workflows: `workflow_definitions`, `workflow_runs`, `workflow_node_runs`, workflow-owned `inbox_messages`.
 - Runtime agents and assignments: `agent_profiles`, `orchestration_jobs`, `orchestration_job_items`, `work_assignments`, `assignment_conversation_links`, `agent_inbox_messages`, schedules, reactions, and events.
-- Jobs/projects/workspaces/outputs/settings: `job_definitions`, `job_runs`, `job_recurrences`, `projects`, `project_agent_memberships`, `project_events`, `workspaces`, `workspace_links`, `workspace_leases`, `run_output_artifacts`, and `runtime_settings`.
+- Jobs/projects/workspaces/outputs/settings: `job_definitions`, `job_runs`, `job_recurrences`, `projects`, `project_agent_memberships`, `project_events`, `workspace_file_labels`, `workspace_file_label_assignments`, `workspace_file_actions`, `run_output_artifacts`, and `runtime_settings`.
 
 ## Streaming Model
 

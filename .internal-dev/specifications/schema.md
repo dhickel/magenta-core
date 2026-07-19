@@ -23,43 +23,43 @@ Required schema anchors: specification entry, architecture entry, service entry,
 
 | id | area | status | intended_contract | observed_anchors | drift_gaps | validation | related_decisions | related_knowledge |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| ARCH-20260523-01 | Avatar Work Areas | active | Work Areas are runtime-owned metadata around confined agent/project directories. | `WorkspaceDirectoryService`, Avatar Work Areas UI | None currently recorded. | Service tests, startup, focused browser checks for UI-affecting work. | `DECISION-20260524-03` | `avatar-work-area-ui-refactor.md` |
+| ARCH-20260719-01 | Filesystem-first workspace identity | active | Workspace identity is closed to agent, chat, and explicitly declared user roots. | `WorkspaceDirectoryService`, `WorkspacePathLayout` | None currently recorded. | Service tests, startup, and focused browser checks for UI-affecting work. | `DECISION-20260719-02` | `2026-07-19-filesystem-first-workspaces.md` |
 
 ## Service Entry
 
 | id | service_area | status | intended_contract | observed_anchors | ownership_boundary | drift_gaps | validation | related_decisions | related_knowledge |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| SVC-20260525-01 | Workspace file explorer | active | Service layer owns confined path validation and filesystem mutation. | `WorkAreaExplorerService` | Controllers map requests and responses only. | Typed error mapping is deferred. | Focused service/controller tests. | `DECISION-20260524-03` | `workspace-file-explorer-details-list-rewrite.md` |
+| SVC-20260719-02 | Workspace file explorer | active | Service layer owns descriptor-confined path validation and filesystem mutation. | `WorkspaceExplorerService` | Controllers map requests and responses only. | Typed error mapping is deferred. | Focused service/controller tests. | `DECISION-20260719-02` | `workspace-file-explorer-details-list-rewrite.md` |
 
 ## Service Graph Entry
 
 | id | from | to | status | allowed_interaction | boundary_rule | validation | related_decisions |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| SVC-20260525-02 | Avatar UI | Existing runtime services | active | Avatar delegates chat, tools, workspace, schedule, reaction, and output behavior. | Avatar must not create a parallel runtime. | Focused service/controller/browser checks. | `DECISION-20260522-05` |
+| SVC-20260719-03 | Agent Files tab | Workspace directory and explorer services | active | The agent Files tab delegates identity and confined file behavior to workspace services. | The web layer never constructs roots or canonical identity. | Focused service/controller/browser checks. | `DECISION-20260719-02` |
 
 ## API Entry
 
 | id | route_or_surface | status | intended_contract | payload_or_status | compatibility_rule | validation | related_decisions | related_knowledge |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| API-20260525-01 | Work Area file routes | active | Return controlled status codes for validation, missing paths, and conflicts. | `400`/`404`/`409` where distinguishable. | Keep compatibility delete route until deliberate removal. | Controller tests and API docs updates. | `DECISION-20260524-03` | `workspace-api-list-and-agent-tab-operational-pattern.md` |
+| API-20260719-01 | Typed workspace file routes | active | Return controlled status codes for validation, missing paths, and conflicts. | `400`/`404`/`409` where distinguishable. | Accept only type/key identity and confined file-relative paths. | Controller tests and API docs updates. | `DECISION-20260719-02` | `2026-07-19-filesystem-first-workspaces.md` |
 
 ## Web Entry
 
 | id | page_or_fragment | status | intended_contract | observed_anchors | interaction_rule | validation | related_decisions | related_knowledge |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| WEB-20260525-01 | `/avatar` | active | Tabbed operational shell with dense dashboard, persistent chat rail, and dashboard-only layout editing. | `AvatarDashboardController`, `AvatarDashboardComponents` | HTMX-first fragments; narrow JS only for streaming/resizing/local convenience. | Focused Playwright with screenshots for UI changes. | `DECISION-20260524-01` | `simplypages-avatar-layout-and-editing.md` |
+| WEB-20260719-01 | `/agents/{agentId}` Files tab | active | The operational agent shell mounts a dense descriptor-bound file explorer. | `OrchestrationController`, `WorkspaceExplorerFragments` | HTMX-first fragments; narrow JS only where it is clearly simpler. | Focused Playwright with screenshots for UI changes. | `DECISION-20260719-02` | `2026-07-19-filesystem-first-workspaces.md` |
 
 ## SimplyPages Component/Module Entry
 
 | id | component_or_module | status | intended_contract | observed_anchors | reuse_boundary | validation | related_decisions | related_knowledge |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| SP-20260525-01 | Avatar layout editing | active | Use real rendered modules with compact decorators and insertion controls. | SimplyPages editing demo, Avatar dashboard components | Layout placement stays in-place; module-specific deep editing may use modal/drawer flows. | Browser visual critique and HTMX behavior checks. | `DECISION-20260523-03` | `simplypages-avatar-layout-and-editing.md` |
+| SP-20260719-01 | Neutral workspace explorer | active | Use reusable list, inspector, modal, and OOB fragments with stable workspace-neutral targets. | `WorkspaceExplorerFragments`, SimplyPages components | CRUD and partial refreshes remain HTMX-first. | Browser visual critique and HTMX behavior checks. | `DECISION-20260719-02` | `2026-07-19-filesystem-first-workspaces.md` |
 
 ## Decision Row
 
 | id | decision | status | owner | source | decided_on | justification | alternatives_or_tradeoffs | caveats | affected_specs | knowledge_ref | review_after |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| DECISION-20260524-03 | Avatar Work Area file exploration uses Magenta-local HTMX details/list fragments. | active | unassigned | changelog | 2026-05-24 | Familiar details/list UX fit the feature better than reusable card modules. | Reusable explorer was superseded. | Preserve service-owned path validation. | `web.md`, `services.md`, `simplypages.md` | `workspace-file-explorer-details-list-rewrite.md` | 2026-06-23 |
+| DECISION-20260719-02 | Filesystem-first workspace identity replaces database-backed filesystem identity. | active | architecture | corrected handoff | 2026-07-19 | A closed three-kind model matches concrete product workflows. | Generic persistence and compatibility aliases were rejected. | Preserve descriptor construction and path confinement boundaries. | `architecture.md`, `services.md`, `api.md`, `web.md`, `simplypages.md` | `2026-07-19-filesystem-first-workspaces.md` | 2026-10-19 |
 
 ## Deferred-Feature Row
 

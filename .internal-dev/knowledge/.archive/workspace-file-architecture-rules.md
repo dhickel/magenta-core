@@ -1,3 +1,5 @@
+# SUPERSEDED — This knowledge file is archived and no longer reflects the current codebase.
+
 # Topic
 
 Filesystem-first workspace and execution rules after the Phase 05 cutover.

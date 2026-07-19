@@ -9,7 +9,7 @@ In current alpha posture, routes are open at the application layer. Use controll
 Source: [`ChatController`](../../src/main/java/io/mindspice/magenta2/api/web/ChatController.java), [`ChatFileController`](../../src/main/java/io/mindspice/magenta2/api/web/ChatFileController.java), [`ChatRequest`](../../src/main/java/io/mindspice/magenta2/ai/chat/model/ChatRequest.java), [`ChatResponse`](../../src/main/java/io/mindspice/magenta2/ai/chat/model/ChatResponse.java), [`ChatStreamEvent`](../../src/main/java/io/mindspice/magenta2/ai/chat/model/ChatStreamEvent.java), [`ChatService`](../../src/main/java/io/mindspice/magenta2/ai/chat/service/ChatService.java), [`ChatFileService`](../../src/main/java/io/mindspice/magenta2/ai/chat/service/ChatFileService.java).
 
 - `POST /api/chat`: non-streaming chat turn from `ChatRequest.MsgRequest`.
-- `POST /api/chat/stream`: SSE chat turn. `ChatRequest.MsgRequest` accepts an optional `surface` field so the browser chat page can tag sessions separately from Avatar or other internal chat surfaces. Known surface values (`BROWSER`, `AVATAR`, `INTERNAL`) are accepted case-insensitively; blank or unknown values are rejected.
+- `POST /api/chat/stream`: SSE chat turn. `ChatRequest.MsgRequest` accepts an optional `surface` field so the browser chat page can tag sessions separately from internal assistant use. Known surface values (`BROWSER`, `INTERNAL`) are accepted case-insensitively; blank or unknown values are rejected.
 - `GET /api/chat/{conversationId}/pending-messages`: list visible browser pending-message rows ordered FIFO.
 - `POST /api/chat/{conversationId}/pending-messages`: enqueue a normal browser message for later delivery. Payload is `PendingMessageRequest(message, model, planningModel, surface)` and returns the refreshed queue list.
 - `POST /api/chat/{conversationId}/pending-messages/claim`: atomically claim the oldest pending row and return `ClaimedPendingChatMessage(message, claimToken)`, or `null` when empty.
@@ -61,9 +61,9 @@ Source: [`PlanController`](../../src/main/java/io/mindspice/magenta2/api/web/Pla
 - `POST /api/plans/{planId}/planning-chat/messages`: append a saved plan chat message and run the saved-plan model turn.
 - `GET /api/plans/{planId}/planning-chat`: read saved plan chat state and messages.
 
-Create/update payloads include title, summary, goal, notes, deliverables, inputs, outputs, assumptions, steps, validation criteria, work type/prompt profile, planning model, and execution model. `PlanRunRequest` accepts input values, conversation id, agent id, job id, explicit `projectId`, compatibility `workspaceId`, Work Area/output routing fields, `runDisplayName` for non-job runs, model override, and priority. `SubmitRequest` accepts agent id, model override, priority, `projectId`, `workspaceId`, Work Area/output routing fields, and `runDisplayName` for non-job submissions. Browser submit forms use the shared entity selector for selected/output Work Areas, with direct output directories still entered as existing owner-root-relative paths. Saved plan chat input/output questions collect initial user context; the saved-plan model synthesizes typed field definitions with name, type, required flag, array flag, description, examples, and optional schema through plan-scoped tools.
+Create/update payloads include title, summary, goal, notes, deliverables, inputs, outputs, assumptions, steps, validation criteria, work type/prompt profile, planning model, and execution model. `PlanRunRequest` accepts input values, conversation id, agent id, job id, `projectId`, `workspaceType`/`workspaceKey` pair, `runDisplayName` for non-job runs, model override, and priority. `SubmitRequest` accepts agent id, model override, priority, `projectId`, `workspaceType`/`workspaceKey` pair, and `runDisplayName` for non-job submissions. Saved plan chat input/output questions collect initial user context; the saved-plan model synthesizes typed field definitions with name, type, required flag, array flag, description, examples, and optional schema through plan-scoped tools.
 
-`runs/stream` emits `submitted` with assignment metadata or `failed`. It does not stream inline model output. Assignment responses include first-class project/effective workspace fields where the route returns `WorkAssignment`; `projectId` controls effective workspace selection and `workspaceId` remains compatibility metadata.
+`runs/stream` emits `submitted` with assignment metadata or `failed`. It does not stream inline model output. Assignment responses include first-class project metadata plus workspace type, key, and internally derived canonical identity where the route returns `WorkAssignment`; `projectId` never selects a filesystem root.
 
 ## Tasks: `/api/tasks`
 
@@ -76,7 +76,7 @@ Source: [`TaskController`](../../src/main/java/io/mindspice/magenta2/api/web/Tas
 - `GET /api/tasks/{taskId}/runs`, `GET /api/tasks/runs/{runId}`: run reads.
 - `POST /api/tasks/{taskId}/runs/stream`: SSE submit-to-agent path.
 
-Task create/update payloads carry title, summary, goal, notes, input/output descriptions, structured fields, assumptions, steps, and validation criteria. `TaskRunRequest` accepts input values, conversation id, agent id, job id, explicit `projectId`, compatibility `workspaceId`, Work Area/output routing fields, `runDisplayName` for non-job runs, model override, and priority. `runs/stream` emits `submitted` or `failed` with assignment metadata when accepted.
+Task create/update payloads carry title, summary, goal, notes, input/output descriptions, structured fields, assumptions, steps, and validation criteria. `TaskRunRequest` accepts input values, conversation id, agent id, job id, explicit `projectId`, paired `workspaceType`/`workspaceKey` selection, `runDisplayName` for non-job runs, model override, and priority. Omitting both workspace fields defaults to the bound agent; partial pairs and chat selection are rejected. `runs/stream` emits `submitted` or `failed` with assignment metadata when accepted.
 
 ## Workflows: `/api/workflows`, `/api/workflow-runs`, `/api/users/inbox`
 
@@ -91,7 +91,7 @@ Source: [`WorkflowController`](../../src/main/java/io/mindspice/magenta2/api/web
 - `POST /api/workflow-runs/{runId}/resume`: resume paused approval/waiting runs through `WorkflowService`.
 - `GET /api/users/inbox`, `POST /api/users/inbox/{messageId}/respond`: workflow-owned user approval inbox.
 
-Workflow definitions include schema version, title, summary, max concurrency, nodes, routes, and UI layout. `WorkflowRunRequest` accepts agent id, job id, explicit `projectId`, compatibility `workspaceId`, Work Area/output routing fields, `runDisplayName` for non-job runs, model override, and priority. Waiting workflow assignments remain `WAITING` and resumable instead of being treated as failed only because the workflow run is nonterminal. Workflow run records carry nullable agent/job/job-assignment/job-run/project/workspace/run-type attribution for output and context views.
+Workflow definitions include schema version, title, summary, max concurrency, nodes, routes, and UI layout. `WorkflowRunRequest` accepts agent id, job id, `projectId`, `workspaceType`/`workspaceKey` pair, `runDisplayName` for non-job runs, model override, and priority. Waiting workflow assignments remain `WAITING` and resumable instead of being treated as failed only because the workflow run is nonterminal. Workflow run records carry nullable agent/job/job-assignment/job-run/project/workspace/run-type attribution for output and context views.
 
 ## Jobs: `/api/jobs`, `/api/job-runs`
 
@@ -105,9 +105,9 @@ Source: [`JobController`](../../src/main/java/io/mindspice/magenta2/api/web/JobC
 - `GET /api/jobs/{jobId}/outputs`, `GET /api/jobs/{jobId}/events`: derived output/event views.
 - `POST /api/jobs/{jobId}/recurrence`, `GET /api/jobs/{jobId}/recurrence`: recurrence configuration.
 
-Job definitions include owner agent, optional project, compatibility workspace id, legacy `persistentWorkspaceEnabled`, status, title, summary, items, prompt profile, model, and settings override JSON. `JobRunRequest` accepts agent id, model override, explicit `projectId`, compatibility `workspaceId`, Work Area/output routing fields, and priority. Job item payloads reference task or workflow ids, model override, priority, retry count, continue-on-failure, and config JSON.
+Job definitions include owner agent, optional project, status, title, summary, items, prompt profile, model, and settings override JSON. `JobRunRequest` accepts agent id, model override, `projectId`, `workspaceType`/`workspaceKey` pair, and priority. Job item payloads reference task or workflow ids, model override, priority, retry count, continue-on-failure, and config JSON.
 
-Job run reads are summary-backed where operator context is needed. The summary includes job definition id/title/status, assignment id/status/type/priority, agent and project labels, compatibility workspace id, effective workspace id/kind/path, selected Work Area/output context, job run id/status, child run ids, output count, and lifecycle timestamps. Legacy rows may still expose compatibility job workspace/path fields. Cancellation keeps assignment-owned job run lifecycle state synchronized.
+Job run reads are summary-backed where operator context is needed. The summary includes job definition id/title/status, assignment id/status/type/priority, agent and project labels, workspace type/key/identity, job run id/status, child run ids, output count, and lifecycle timestamps. Cancellation keeps assignment-owned job run lifecycle state synchronized.
 
 ## Agents: `/api/agents` and `/api/agents/{agentId}`
 
@@ -128,7 +128,7 @@ Agent runtime routes:
 
 Agent chat emits `start`, `done`, and `error` events as assembled by `AgentOrchestrationController` from `ChatService` responses.
 
-Assignment create/read payloads expose `projectId`, compatibility `workspaceId`, `effectiveWorkspaceId`, `effectiveWorkspaceKind`, `selectedWorkAreaId`, `outputRouteType`, `outputWorkAreaId`, and `outputDirectRelativePath` on `WorkAssignment`. Operational assignment summary fragments also expose display path, workspace blocker, and linked run ids for diagnostics. Agent submit forms can pass `projectId`, `workspaceId`, and Work Area/output routing fields; only `projectId` selects the project workspace.
+Assignment create/read payloads expose `projectId`, `workspaceType`, `workspaceKey`, and internally derived `workspaceIdentity` on `WorkAssignment`. `projectId` is metadata and membership context only; it does not select or create a filesystem root. Operational assignment summary fragments also expose linked run ids for diagnostics.
 
 ## Projects: `/api/projects`
 
@@ -141,46 +141,41 @@ Source: [`ProjectController`](../../src/main/java/io/mindspice/magenta2/api/web/
 
 Create accepts `name`/`description` or legacy-compatible `title`/`summary`, plus nullable legacy `ownerAgentId` and git repo URL. Projects are shared workspace and visibility records, not executable work units. Membership add/remove controls are available through project routes. Deletion and membership removal can return `409` when active assignments, leases, jobs, or runs still reference the project/member. Workspace release can return `409` when a lease cannot be released immediately.
 
-## Workspaces: `/api/workspaces`
+## Workspaces: `/api/workspace/{type}/{id}` and `/api/workspace/user`
 
-Source: [`WorkspaceController`](../../src/main/java/io/mindspice/magenta2/api/web/WorkspaceController.java), [`WorkspaceService`](../../src/main/java/io/mindspice/magenta2/ai/orchestration/workspaces/WorkspaceService.java).
+Source: [`WorkspaceController`](../../src/main/java/io/mindspice/magenta2/api/web/WorkspaceController.java), [`WorkspaceDirectoryService`](../../src/main/java/io/mindspice/magenta2/ai/orchestration/workspaces/WorkspaceDirectoryService.java), [`WorkspaceExplorerService`](../../src/main/java/io/mindspice/magenta2/ai/orchestration/workspaces/WorkspaceExplorerService.java).
 
-- `GET /api/workspaces?ownerType=&ownerId=&limit=`: list workspace records.
-- `GET /api/workspaces/{workspaceId}`.
-- `GET /api/workspaces/{workspaceId}/leases`.
-- `GET /api/workspaces/{workspaceId}/links`.
-- `POST /api/workspaces/{workspaceId}/links`.
-- `DELETE /api/workspaces/{workspaceId}/links/{linkId}`.
+The workspace API uses typed routes under `/api/workspace/{type}/{id}` where `{type}` is `agent`, `chat`, or `user` and `{id}` is a single validated decoded path segment. Encoded separators and traversal syntax are rejected at the web boundary.
 
-`ownerType` is parsed as `WorkspaceOwnerType`; invalid values return `400`.
+**User workspace collection:**
 
-## Work Areas: `/api/work-areas`
+- `GET /api/workspace/user`: list valid, confined, direct non-symlink user workspace directories under `workspace/user/`. Returns `200` with array (may be empty).
+- `POST /api/workspace/user`: create a named user workspace. Payload: `{"name": "string"}`. Returns `201` created, `400` invalid name, `409` collision.
 
-Source: [`WorkAreaController`](../../src/main/java/io/mindspice/magenta2/api/web/WorkAreaController.java), [`WorkAreaService`](../../src/main/java/io/mindspice/magenta2/ai/orchestration/workspaces/WorkAreaService.java), [`WorkAreaExplorerService`](../../src/main/java/io/mindspice/magenta2/ai/orchestration/workspaces/WorkAreaExplorerService.java).
+**Typed workspace file operations:**
 
-- `GET /api/work-areas?ownerType=&ownerId=&includeInactive=`: list agent/project Work Areas and create Home on demand.
-- `POST /api/work-areas/home`: ensure an owner Home Work Area.
-- `POST /api/work-areas`: mark an existing owner-root-relative directory as a Work Area.
-- `DELETE /api/work-areas/{workAreaId}`: unmark a non-system Work Area.
-- `GET /api/work-areas/{workAreaId}/files?path=`: list a confined Work Area directory.
-- `GET /api/work-areas/{workAreaId}/files/preview?path=`: return bounded safe text content or binary/large-file metadata.
-- `GET /api/work-areas/{workAreaId}/files/view?path=`: inline-view safe image types (png/jpg/jpeg/gif/webp) inside confined roots.
-- `GET /api/work-areas/{workAreaId}/files/download?path=`: download a confined file up to 10 MB.
-- `PUT /api/work-areas/{workAreaId}/files/text?path=`: save safe UTF-8 text/markdown with BOM stripping and LF/CRLF preservation, hard-capped at 25 MB.
-- `POST /api/work-areas/{workAreaId}/directories`: create a confined directory.
-- `POST /api/work-areas/{workAreaId}/files/text`: create `.txt` files in a confined directory.
-- `POST /api/work-areas/{workAreaId}/files/markdown`: create `.md` files in a confined directory.
-- `POST /api/work-areas/{workAreaId}/files/rename`: rename a path to a plain sibling name.
-- `POST /api/work-areas/{workAreaId}/files/move`: move file or directory with collision checks.
-- `POST /api/work-areas/{workAreaId}/files/copy`: copy file or directory with collision checks.
-- `GET /api/work-areas/{workAreaId}/files/delete/preflight?path=&step=`: modal-step delete preflight (`INTENT`, `FILE_CONFIRM`, `DIRECTORY_RECURSIVE_CONFIRM`).
-- `POST /api/work-areas/{workAreaId}/files/delete`: delete execute using required modal step.
-- `DELETE /api/work-areas/{workAreaId}/files?path=&confirm=`: compatibility delete route with legacy typed confirmation.
-- `GET /api/work-areas/{workAreaId}/files/labels?path=`, `POST /api/work-areas/{workAreaId}/files/labels`, `DELETE /api/work-areas/{workAreaId}/files/labels?path=&label=`: list/add/remove file labels.
-- `GET /api/work-areas/{workAreaId}/files/actions/recent?limit=`: recent mutating action log rows for future explorer visibility.
-- `POST /api/work-areas/{workAreaId}/files/mark-work-area`: mark a nested existing directory as another Work Area.
+All item operations are rooted at `/api/workspace/{type}/{id}`. Unknown workspace types, invalid keys, missing entities, missing user declarations, and invalid file-relative paths map to `400` or `404` as appropriate. Create/rename/move/copy collisions map to `409`. All explorer mutation operations reject the workspace root and `outputs/` or descendants.
 
-Explorer routes reject traversal, absolute paths, symlink paths, unsafe text-edit extensions, oversized text saves/downloads, Work Area roots, Home/system Work Areas, marked Work Area descendants, and Work Areas referenced by queued/running assignments or output targets. Where distinguishable, invalid requests map to `400`, missing paths map to `404`, and collisions map to `409`.
+- `GET /api/workspace/{type}/{id}/files?path=`: list a confined workspace directory.
+- `GET /api/workspace/{type}/{id}/files/preview?path=`: bounded text/Markdown preview.
+- `GET /api/workspace/{type}/{id}/files/view?path=`: inline image view (png/jpg/jpeg/gif/webp).
+- `GET /api/workspace/{type}/{id}/files/download?path=`: download a confined file up to 10 MB.
+- `PUT /api/workspace/{type}/{id}/files/text?path=`: save an existing text file (hard edit limit 25 MB).
+- `POST /api/workspace/{type}/{id}/files/text`: create a new `.txt` file (rejects overwrite).
+- `POST /api/workspace/{type}/{id}/files/markdown`: create a new `.md` file (rejects overwrite).
+- `POST /api/workspace/{type}/{id}/directories`: create a directory.
+- `POST /api/workspace/{type}/{id}/files/rename`: rename a file or directory.
+- `POST /api/workspace/{type}/{id}/files/move`: move with collision checks.
+- `POST /api/workspace/{type}/{id}/files/copy`: copy with collision checks.
+- `GET /api/workspace/{type}/{id}/files/delete/preflight?path=&step=`: deletion preflight (`INTENT`, `FILE_CONFIRM`, `DIRECTORY_RECURSIVE_CONFIRM`).
+- `POST /api/workspace/{type}/{id}/files/delete`: execute deletion after required confirmation stage.
+- `GET /api/workspace/{type}/{id}/files/labels?path=`, `POST`, `DELETE`: list/add/remove file labels.
+- `POST /api/workspace/{type}/{id}/tags`: create or return a reusable tag label.
+- `GET /api/workspace/{type}/{id}/files/actions/recent?limit=`: recent action log rows keyed by canonical workspace identity.
+
+Explorer routes reject traversal, absolute paths, symlink path components, symbolic recursive trees, workspace-root mutation, and mutation of `outputs/` or descendants. Agent/chat roots with missing physical directories return empty listings; missing user workspaces return `404`. File-producing mutations may lazily create agent/chat roots after descriptor resolution.
+
+The `/api/work-areas/*` and `/api/workspaces/*` (generic) route families are absent, not deprecated.
 
 ## Agent Skills: `/api/skills` and `/skills`
 
@@ -207,13 +202,13 @@ Skill file routes are confined to `<magenta-root>/skills/<skill>/...` and reject
 
 Source: [`OutputController`](../../src/main/java/io/mindspice/magenta2/api/web/OutputController.java), [`OutputArtifactService`](../../src/main/java/io/mindspice/magenta2/ai/orchestration/workspaces/OutputArtifactService.java).
 
-- `GET /api/outputs?agentId=&jobId=&jobAssignmentId=&jobRunId=&projectId=&workspaceId=&runId=&planId=&runType=&type=&limit=`: query output artifacts.
+- `GET /api/outputs?agentId=&jobId=&jobAssignmentId=&jobRunId=&projectId=&workspaceType=&workspaceKey=&workspaceIdentity=&runId=&planId=&runType=&type=&limit=`: query output artifacts.
 - `GET /api/outputs/{artifactId}/content`: return metadata plus text/json/user-message content when safe.
 - `GET /api/outputs/{artifactId}/download`: download a confined file under the data root.
 
-Output artifacts can carry agent, job, job assignment, job run, project, workspace, run type, and work-unit attribution. Direct stored attribution is used for the expanded filters; job route fallback remains a compatibility bridge only when no direct-only filters are supplied. Content/download enforce a 10 MB limit in the controller. Download resolves real paths and rejects paths outside the output service data root.
+Output artifacts carry agent, job, job assignment, job run, project, workspace type/key/identity, run type, and work-unit attribution. Content/download enforce a 10 MB limit in the controller. Download resolves real paths and rejects paths outside the data root.
 
-During execution, model-facing `outputs/` resolves to run-local staging. Output APIs expose promoted artifacts and metadata after backend completion, validation, or promotion, not arbitrary writes inside run staging.
+Outputs publish directly beneath the effective workspace's `outputs/` directory. No `runs/<runId>` hierarchy is created. Artifact records remain queryable independently of generic workspace records.
 
 ## Dashboard, Runtime, Settings, Models
 

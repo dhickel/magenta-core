@@ -39,9 +39,7 @@ public class AgentShellToolService {
     private static final Set<String> SHELL_CONTROL_TOKENS = Set.of(
         "|", "||", "&", "&&", ";", ">", ">>", "<", "<<", "<<<", "2>", "2>>"
     );
-    private static final Set<String> RETIRED_OR_RESERVED_PREFIXES = Set.of(
-        "workspace", "root", "run", "work", "projects", "scratch", "jobs", "job", "outputs"
-    );
+    private static final String OUTPUTS = "outputs";
 
     private final Path root;
     private final Set<String> allowedCommands;
@@ -125,7 +123,7 @@ public class AgentShellToolService {
         return execOnHost(command, executable, commandLine, resolved.path(), resolved.displayPath(), timeoutSeconds);
     }
 
-    /** Resolves one direct workspace-relative shell target. Retired aliases and outputs are rejected. */
+    /** Resolves one direct workspace-relative shell target. The publication-owned outputs subtree is rejected. */
     private ResolvedWorkingDirectory resolveContextWorkingDirectory(OrchestrationTaskContext ctx, String workingDirectory)
         throws IOException {
         Path workspaceRoot;
@@ -147,8 +145,8 @@ public class AgentShellToolService {
         String normalized = normalizeWorkspaceRequest(requested);
         String relative = ".".equals(normalized) ? "" : normalized;
         String firstSegment = relative.contains("/") ? relative.substring(0, relative.indexOf('/')) : relative;
-        if (RETIRED_OR_RESERVED_PREFIXES.contains(firstSegment)) {
-            throw new IllegalArgumentException("retired or reserved workspace path prefix is not allowed: " + workingDirectory);
+        if (OUTPUTS.equals(firstSegment)) {
+            throw new IllegalArgumentException("outputs is reserved for output publication: " + workingDirectory);
         }
         rejectUnsafeRelativePath(relative, "Working directory escapes active workspace: " + workingDirectory);
         Path resolved = resolveScopedDirectory(workspaceRoot, relative, workingDirectory);

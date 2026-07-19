@@ -1,26 +1,10 @@
 # Data Model
 
-Primary Magenta SQLite schema is initialized from [`schema.sql`](../../src/main/resources/schema.sql). Avatar user-centric data is initialized separately from [`avatar-schema.sql`](../../src/main/resources/avatar-schema.sql) into `avatar.sqlite`. Repositories also create tables defensively and add compatibility columns for warm local databases, so code inspection should include the relevant schema file and owning repository before changing schema assumptions.
+Primary Magenta SQLite schema is initialized from [`schema.sql`](../../src/main/resources/schema.sql). Repositories also create tables defensively and add compatibility columns for warm local databases, so code inspection should include the relevant schema file and owning repository before changing schema assumptions.
 
-## Avatar Personal Data
+## Avatar Personal Data (Removed)
 
-Source package: [`avatar`](../../src/main/java/io/mindspice/magenta2/avatar).
-
-Avatar personal dashboard and organizer state is stored in a separate `<magenta.root.path>/avatar.sqlite` database through the `avatarDataSource` and `avatarJdbcTemplate` beans. This keeps user-centric Avatar data out of the primary `magenta.sqlite` runtime database and avoids cross-database foreign keys.
-
-Tables in `avatar.sqlite`:
-
-- `avatar_profile`: singleton Avatar personal profile row.
-- `avatar_preferences`: key/value preference records with JSON values.
-- `avatar_dashboard_layout`: singleton dashboard widget layout JSON.
-- `avatar_todos`: personal todo records with status, priority, optional due time, and optional project/task/output references.
-- `avatar_daily_tasks`: date-scoped daily task rows.
-- `avatar_calendar_items`: local calendar entries.
-- `avatar_notes`: notes with tag JSON and optional source references.
-- `avatar_facts`: durable facts keyed by namespace and key.
-- `avatar_events`: append-only Avatar event records.
-
-The backing `agent_profiles` row for `Avatar` remains in the primary Magenta database because agent profiles are part of the existing orchestration/runtime surface. Phase 01 reserves that profile as disabled and direct-line-off without changing runtime defaults.
+The Avatar package, `avatar.sqlite`, `avatar-schema.sql`, and all Avatar tables (`avatar_profile`, `avatar_preferences`, `avatar_dashboard_layout`, `avatar_todos`, `avatar_daily_tasks`, `avatar_calendar_items`, `avatar_notes`, `avatar_facts`, `avatar_events`) are removed. The `avatarDataSource` and `avatarJdbcTemplate` beans are deleted. Legacy `avatar.sqlite` files remain untouched on disk but are inactive.
 
 ## Chat, Sessions, and Audit
 
@@ -124,7 +108,7 @@ Filesystem workspace identity is derived from type and key and therefore has no 
 - `run_output_artifacts`: output artifact metadata including run/plan and optional agent/job/job-assignment/job-run/project attribution, workspace type/key/identity, run type, output name, artifact type, portable data-root-relative file path, content JSON, and timestamp.
 - Artifact queries are indexed by run and major attribution fields.
 - `OutputArtifactRepository` exclusively owns artifact schema compatibility, persistence, mapping, queries, and deletion.
-- Obsolete `workspaces`, links, leases, Work Areas, and file metadata structures may remain in existing databases but are inert pending deletion; active startup does not migrate or recreate them.
+- Obsolete generic workspace, link, lease, database-backed file identity, and related structures may remain in existing databases as inert historical data; active startup does not migrate, recreate, read, or write them.
 
 ## Runtime Settings
 

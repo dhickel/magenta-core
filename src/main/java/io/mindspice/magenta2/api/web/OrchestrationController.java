@@ -1,6 +1,8 @@
 package io.mindspice.magenta2.api.web;
 
 import java.io.IOException;
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -72,8 +74,12 @@ import io.mindspice.magenta2.ai.orchestration.workspaces.OutputArtifactService;
 import io.mindspice.magenta2.ai.orchestration.workspaces.RunOutputArtifact;
 import io.mindspice.magenta2.ai.orchestration.workspaces.AgentWorkspaceStatus;
 import io.mindspice.magenta2.ai.orchestration.workspaces.AgentWorkspaceStatusService;
+import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceDescriptor;
 import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceDirectoryService;
 import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceExplorerService;
+import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceFileException;
+import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceKind;
+import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceResolutionException;
 import io.mindspice.magenta2.api.web.selector.EntityKind;
 import io.mindspice.magenta2.api.web.selector.EntityLookupService;
 import io.mindspice.magenta2.api.web.selector.EntitySelectorComponents;
@@ -2269,13 +2275,16 @@ public class OrchestrationController {
         Div panel = new Div().withClass("orch-panel");
         panel.withChild(Header.H2("Submit to Agent"));
 
+        String boundAgentId = defaultSubmissionAgentId();
         Form form = Form.create()
             .withHxPost("/plans/_submit/" + planId)
             .withHxTarget("#plan-submit-result")
             .withHxSwap("innerHTML");
 
         form.withChild(new Div().withClass("orch-form-stack")
-            .withChild(entitySelector("agentId", EntityKind.AGENT, null, "Agent", "agent", false))
+            .withChild(entitySelector("agentId", EntityKind.AGENT, boundAgentId, "Agent", "agent", false,
+                Map.of("workspaceSelectionContext", "task submission")))
+            .withChild(workspaceSelector(boundAgentId, "task submission"))
             .withChild(label("Model Override", modelSelectWithCurrent(
                 "modelOverride", null, chatService.availableModels())))
             .withChild(label("Priority", TextInput.number("priority")
@@ -3343,13 +3352,16 @@ public class OrchestrationController {
             return panel;
         }
 
+        String boundAgentId = defaultSubmissionAgentId();
         Form form = Form.create()
             .withHxPost("/workflows/_submit/" + workflowId)
             .withHxTarget("#workflow-submit-result")
             .withHxSwap("innerHTML");
 
         form.withChild(new Div().withClass("orch-form-stack")
-            .withChild(entitySelector("agentId", EntityKind.AGENT, null, "Agent", "agent", false))
+            .withChild(entitySelector("agentId", EntityKind.AGENT, boundAgentId, "Agent", "agent", false,
+                Map.of("workspaceSelectionContext", "workflow submission")))
+            .withChild(workspaceSelector(boundAgentId, "workflow submission"))
             .withChild(label("Model Override", modelSelectWithCurrent(
                 "modelOverride", null, chatService.availableModels())))
             .withChild(label("Priority", TextInput.number("priority")
@@ -3756,13 +3768,16 @@ public class OrchestrationController {
         panel.withChild(new Div().withClass("orch-meta")
             .withChild(new HtmlTag("span").withInnerText("Saved project: " + displayValue(job.projectId()))));
 
+        String boundAgentId = defaultSubmissionAgentId();
         Form form = Form.create()
             .withHxPost("/jobs/_submit/" + jobId)
             .withHxTarget("#job-submit-result")
             .withHxSwap("innerHTML");
 
         form.withChild(new Div().withClass("orch-form-stack")
-            .withChild(entitySelector("agentId", EntityKind.AGENT, null, "Agent", "agent", false))
+            .withChild(entitySelector("agentId", EntityKind.AGENT, boundAgentId, "Agent", "agent", false,
+                Map.of("workspaceSelectionContext", "job submission")))
+            .withChild(workspaceSelector(boundAgentId, "job submission"))
             .withChild(entitySelector("modelOverride", EntityKind.MODEL, null,
                 "Model Override", "optional model", false))
             .withChild(entitySelector("projectId", EntityKind.PROJECT, nn(job.projectId()),
@@ -5367,7 +5382,7 @@ public class OrchestrationController {
                 .withChild(agentChatPanel(agent.id())))
             .withChild(new Div().withClass("entity-detail-layout entity-detail-layout-full")
                 .withChild(new Div().withClass("entity-detail-main")
-                    .withChild(tabNav(agent.id(), "dashboard", "profile", "queue", "inbox", "jobs", "schedules", "reactions", "workspace", "outputs", "exec", "history", "submit"))
+                    .withChild(tabNav(agent.id(), "dashboard", "profile", "queue", "inbox", "jobs", "schedules", "reactions", "files", "outputs", "exec", "history", "submit"))
                     .withChild(new Div().withClass("agent-profile-loader-marker")
                         .withAttribute("hidden", "hidden")
                         .withAttribute("hx-get", "/agents/_editor/" + escapeAttr(agent.id())))
@@ -6271,20 +6286,454 @@ public class OrchestrationController {
         return StringUtils.hasText(value) ? value.trim() : null;
     }
 
-    @GetMapping("/agents/_detail/{agentId}/workspace")
-    @ResponseBody
-    public String agentWorkspaceTab(@PathVariable String agentId) {
-        AgentProfile agent = agentProfileService.get(agentId);
-        Div panel = new Div();
-        panel.withChild(Header.H2("Workspace"));
+    // ════════════════════════════════════════════════════════════════
+    //  Agent Files tab — neutral HTMX file explorer
+    // ════════════════════════════════════════════════════════════════
 
-        String workspaceIdentity = "agent/" + agent.id();
-        panel.withChild(new Div().withClass("orch-meta")
-            .withChild(new HtmlTag("span").withInnerText("Agent: " + (agent.name() != null ? agent.name() : agentId)))
-            .withChild(new HtmlTag("span").withInnerText("Workspace: " + workspaceIdentity))
-            .withChild(new HtmlTag("span").withInnerText(
-                "Output Target: workspace/" + workspaceIdentity + "/outputs (lazy)")));
-        return panel.render();
+    @GetMapping("/agents/_detail/{agentId}/files")
+    @ResponseBody
+    public String agentFilesTab(@PathVariable String agentId, HttpServletResponse response) {
+        WorkspaceDirectoryService dirService = workspaceDirectoryService();
+        WorkspaceExplorerService explorer = workspaceExplorerService();
+        try {
+            WorkspaceDescriptor descriptor = dirService.resolveForRead(WorkspaceKind.AGENT, agentId);
+            WorkspaceExplorerService.DirectoryListing listing = explorer.list(descriptor,
+                explorer.normalizeRelativePath("."));
+            String encodedAgentId = URLEncoder.encode(agentId, StandardCharsets.UTF_8);
+            return WorkspaceExplorerFragments.agentShell(encodedAgentId, listing, null, null);
+        } catch (WorkspaceResolutionException e) {
+            response.setStatus(HttpServletResponse.SC_NOT_FOUND);
+            return WorkspaceExplorerFragments.agentListError("Agent not found.");
+        } catch (WorkspaceFileException e) {
+            response.setStatus(fileErrorStatus(e));
+            return WorkspaceExplorerFragments.agentListError(e.getMessage());
+        }
+    }
+
+    @GetMapping("/agents/_detail/{agentId}/files/list")
+    @ResponseBody
+    public String agentFilesList(
+        @PathVariable String agentId,
+        @RequestParam(defaultValue = ".") String path,
+        @RequestParam(required = false) String selected,
+        HttpServletResponse response
+    ) {
+        WorkspaceDirectoryService dirService = workspaceDirectoryService();
+        WorkspaceExplorerService explorer = workspaceExplorerService();
+        try {
+            WorkspaceDescriptor descriptor = resolveAgentDescriptor(agentId, dirService, response);
+            if (descriptor == null) return errorText(response);
+            WorkspaceExplorerService.RelativePath relativePath = explorer.normalizeRelativePath(path);
+            WorkspaceExplorerService.DirectoryListing listing = explorer.list(descriptor, relativePath);
+            String encodedAgentId = URLEncoder.encode(agentId, StandardCharsets.UTF_8);
+            WorkspaceExplorerService.Entry inspected = selected != null && !selected.isBlank()
+                ? explorer.inspect(descriptor, explorer.normalizeRelativePath(selected)) : null;
+            return WorkspaceExplorerFragments.agentShell(encodedAgentId, listing, inspected, selected);
+        } catch (WorkspaceFileException e) {
+            response.setStatus(fileErrorStatus(e));
+            String encoded = URLEncoder.encode(agentId, StandardCharsets.UTF_8);
+            return WorkspaceExplorerFragments.agentListError(e.getMessage());
+        }
+    }
+
+    @GetMapping("/agents/_detail/{agentId}/files/inspect")
+    @ResponseBody
+    public String agentFilesInspect(
+        @PathVariable String agentId,
+        @RequestParam String path,
+        HttpServletResponse response
+    ) {
+        WorkspaceDirectoryService dirService = workspaceDirectoryService();
+        WorkspaceExplorerService explorer = workspaceExplorerService();
+        try {
+            WorkspaceDescriptor descriptor = resolveAgentDescriptor(agentId, dirService, response);
+            if (descriptor == null) return errorText(response);
+            WorkspaceExplorerService.Entry entry = explorer.inspect(descriptor, explorer.normalizeRelativePath(path));
+            String encodedAgentId = URLEncoder.encode(agentId, StandardCharsets.UTF_8);
+            return WorkspaceExplorerFragments.agentInspector(encodedAgentId, entry, null, false);
+        } catch (WorkspaceFileException e) {
+            response.setStatus(fileErrorStatus(e));
+            return WorkspaceExplorerFragments.agentInspectorError(e.getMessage());
+        }
+    }
+
+    @GetMapping("/agents/_detail/{agentId}/files/viewer")
+    @ResponseBody
+    public String agentFilesViewer(
+        @PathVariable String agentId,
+        @RequestParam String path,
+        HttpServletResponse response
+    ) {
+        WorkspaceDirectoryService dirService = workspaceDirectoryService();
+        WorkspaceExplorerService explorer = workspaceExplorerService();
+        try {
+            WorkspaceDescriptor descriptor = resolveAgentDescriptor(agentId, dirService, response);
+            if (descriptor == null) return errorText(response);
+            WorkspaceExplorerService.FilePreview preview = explorer.preview(descriptor, explorer.normalizeRelativePath(path));
+            String encodedAgentId = URLEncoder.encode(agentId, StandardCharsets.UTF_8);
+            return WorkspaceExplorerFragments.agentViewer(encodedAgentId, preview);
+        } catch (WorkspaceFileException e) {
+            response.setStatus(fileErrorStatus(e));
+            String encoded = URLEncoder.encode(agentId, StandardCharsets.UTF_8);
+            return WorkspaceExplorerFragments.agentModalError(encoded, "Viewer Error", e.getMessage());
+        }
+    }
+
+    @GetMapping("/agents/_detail/{agentId}/files/text")
+    @ResponseBody
+    public String agentFilesTextViewer(
+        @PathVariable String agentId,
+        @RequestParam String path,
+        @RequestParam(defaultValue = "text") String tab,
+        HttpServletResponse response
+    ) {
+        WorkspaceDirectoryService dirService = workspaceDirectoryService();
+        WorkspaceExplorerService explorer = workspaceExplorerService();
+        try {
+            WorkspaceDescriptor descriptor = resolveAgentDescriptor(agentId, dirService, response);
+            if (descriptor == null) return errorText(response);
+            WorkspaceExplorerService.FilePreview preview = explorer.preview(descriptor, explorer.normalizeRelativePath(path));
+            String encodedAgentId = URLEncoder.encode(agentId, StandardCharsets.UTF_8);
+            return WorkspaceExplorerFragments.agentTextViewer(encodedAgentId, preview, tab);
+        } catch (WorkspaceFileException e) {
+            response.setStatus(fileErrorStatus(e));
+            String encoded = URLEncoder.encode(agentId, StandardCharsets.UTF_8);
+            return WorkspaceExplorerFragments.agentModalError(encoded, "Viewer Error", e.getMessage());
+        }
+    }
+
+    @GetMapping("/agents/_detail/{agentId}/files/actions")
+    @ResponseBody
+    public String agentFilesRecentActions(@PathVariable String agentId, HttpServletResponse response) {
+        WorkspaceDirectoryService dirService = workspaceDirectoryService();
+        WorkspaceExplorerService explorer = workspaceExplorerService();
+        try {
+            WorkspaceDescriptor descriptor = resolveAgentDescriptor(agentId, dirService, response);
+            if (descriptor == null) return errorText(response);
+            String encodedAgentId = URLEncoder.encode(agentId, StandardCharsets.UTF_8);
+            return WorkspaceExplorerFragments.agentRecentActions(encodedAgentId, explorer.recentActions(descriptor, 20));
+        } catch (WorkspaceFileException e) {
+            response.setStatus(fileErrorStatus(e));
+            String encoded = URLEncoder.encode(agentId, StandardCharsets.UTF_8);
+            return WorkspaceExplorerFragments.agentModalError(encoded, "Recent Actions Error", e.getMessage());
+        }
+    }
+
+    @GetMapping("/agents/_detail/{agentId}/files/modal/{action}")
+    @ResponseBody
+    public String agentFilesModal(
+        @PathVariable String agentId,
+        @PathVariable String action,
+        @RequestParam(defaultValue = ".") String path,
+        HttpServletResponse response
+    ) {
+        WorkspaceDirectoryService dirService = workspaceDirectoryService();
+        WorkspaceExplorerService explorer = workspaceExplorerService();
+        try {
+            WorkspaceDescriptor descriptor = resolveAgentDescriptor(agentId, dirService, response);
+            if (descriptor == null) return errorText(response);
+            WorkspaceExplorerService.RelativePath relativePath = explorer.normalizeRelativePath(path);
+            WorkspaceExplorerService.DeletePreflight preflight = null;
+            if ("delete".equals(action) || "delete-recursive".equals(action)) {
+                try {
+                    preflight = explorer.deletePreflight(descriptor, relativePath,
+                        "delete-recursive".equals(action)
+                            ? WorkspaceExplorerService.DeleteStep.DIRECTORY_RECURSIVE_CONFIRM
+                            : WorkspaceExplorerService.DeleteStep.INTENT);
+                } catch (WorkspaceFileException e) {
+                    if (e.reason() != WorkspaceFileException.Reason.NOT_FOUND) throw e;
+                }
+            }
+            String encodedAgentId = URLEncoder.encode(agentId, StandardCharsets.UTF_8);
+            return WorkspaceExplorerFragments.agentActionModal(encodedAgentId, action, relativePath.value(), preflight);
+        } catch (WorkspaceFileException e) {
+            response.setStatus(fileErrorStatus(e));
+            String encoded = URLEncoder.encode(agentId, StandardCharsets.UTF_8);
+            return WorkspaceExplorerFragments.agentModalError(encoded, "Action Error", e.getMessage());
+        }
+    }
+
+    @GetMapping("/agents/_detail/{agentId}/files/modal/close")
+    @ResponseBody
+    public String agentFilesModalClose() {
+        return "";
+    }
+
+    // ── File mutations ──
+
+    @PostMapping("/agents/_detail/{agentId}/files/create-folder")
+    @ResponseBody
+    public String agentFilesCreateFolder(
+        @PathVariable String agentId,
+        @RequestParam(defaultValue = ".") String path,
+        @RequestParam String name,
+        HttpServletResponse response
+    ) {
+        WorkspaceDirectoryService dirService = workspaceDirectoryService();
+        WorkspaceExplorerService explorer = workspaceExplorerService();
+        try {
+            WorkspaceDescriptor descriptor = resolveAgentWriteDescriptor(agentId, dirService, response);
+            if (descriptor == null) return errorText(response);
+            String childPath = ".".equals(path) ? name : path + "/" + name;
+            explorer.createDirectory(descriptor, explorer.normalizeRelativePath(childPath));
+            WorkspaceExplorerService.DirectoryListing listing = explorer.list(descriptor, explorer.normalizeRelativePath(path));
+            String encodedAgentId = URLEncoder.encode(agentId, StandardCharsets.UTF_8);
+            return WorkspaceExplorerFragments.agentMutationResponse(encodedAgentId, listing, null, null,
+                "Created " + childPath + ".");
+        } catch (WorkspaceFileException e) {
+            response.setStatus(fileErrorStatus(e));
+            String encoded = URLEncoder.encode(agentId, StandardCharsets.UTF_8);
+            return WorkspaceExplorerFragments.agentModalError(encoded, "Error", e.getMessage());
+        }
+    }
+
+    @PostMapping("/agents/_detail/{agentId}/files/create-text")
+    @ResponseBody
+    public String agentFilesCreateText(
+        @PathVariable String agentId,
+        @RequestParam(defaultValue = ".") String path,
+        @RequestParam String fileName,
+        HttpServletResponse response
+    ) {
+        WorkspaceDirectoryService dirService = workspaceDirectoryService();
+        WorkspaceExplorerService explorer = workspaceExplorerService();
+        try {
+            WorkspaceDescriptor descriptor = resolveAgentWriteDescriptor(agentId, dirService, response);
+            if (descriptor == null) return errorText(response);
+            WorkspaceExplorerService.Entry created = explorer.createTextFile(
+                descriptor, explorer.normalizeRelativePath(path), fileName);
+            WorkspaceExplorerService.DirectoryListing listing = explorer.list(descriptor, explorer.normalizeRelativePath(path));
+            WorkspaceExplorerService.FilePreview preview = explorer.preview(descriptor, explorer.normalizeRelativePath(created.path()));
+            WorkspaceExplorerService.Entry inspected = explorer.inspect(descriptor, explorer.normalizeRelativePath(created.path()));
+            String encodedAgentId = URLEncoder.encode(agentId, StandardCharsets.UTF_8);
+            return WorkspaceExplorerFragments.agentTextCreateResponse(encodedAgentId, preview, listing, inspected, null,
+                "Created " + created.path() + ".");
+        } catch (WorkspaceFileException e) {
+            response.setStatus(fileErrorStatus(e));
+            String encoded = URLEncoder.encode(agentId, StandardCharsets.UTF_8);
+            return WorkspaceExplorerFragments.agentModalError(encoded, "Error", e.getMessage());
+        }
+    }
+
+    @PostMapping("/agents/_detail/{agentId}/files/create-markdown")
+    @ResponseBody
+    public String agentFilesCreateMarkdown(
+        @PathVariable String agentId,
+        @RequestParam(defaultValue = ".") String path,
+        @RequestParam String fileName,
+        HttpServletResponse response
+    ) {
+        WorkspaceDirectoryService dirService = workspaceDirectoryService();
+        WorkspaceExplorerService explorer = workspaceExplorerService();
+        try {
+            WorkspaceDescriptor descriptor = resolveAgentWriteDescriptor(agentId, dirService, response);
+            if (descriptor == null) return errorText(response);
+            WorkspaceExplorerService.Entry created = explorer.createMarkdownFile(
+                descriptor, explorer.normalizeRelativePath(path), fileName);
+            WorkspaceExplorerService.DirectoryListing listing = explorer.list(descriptor, explorer.normalizeRelativePath(path));
+            WorkspaceExplorerService.FilePreview preview = explorer.preview(descriptor, explorer.normalizeRelativePath(created.path()));
+            WorkspaceExplorerService.Entry inspected = explorer.inspect(descriptor, explorer.normalizeRelativePath(created.path()));
+            String encodedAgentId = URLEncoder.encode(agentId, StandardCharsets.UTF_8);
+            return WorkspaceExplorerFragments.agentTextCreateResponse(encodedAgentId, preview, listing, inspected, null,
+                "Created " + created.path() + ".");
+        } catch (WorkspaceFileException e) {
+            response.setStatus(fileErrorStatus(e));
+            String encoded = URLEncoder.encode(agentId, StandardCharsets.UTF_8);
+            return WorkspaceExplorerFragments.agentModalError(encoded, "Error", e.getMessage());
+        }
+    }
+
+    @PostMapping("/agents/_detail/{agentId}/files/rename")
+    @ResponseBody
+    public String agentFilesRename(
+        @PathVariable String agentId,
+        @RequestParam String path,
+        @RequestParam String name,
+        HttpServletResponse response
+    ) {
+        WorkspaceDirectoryService dirService = workspaceDirectoryService();
+        WorkspaceExplorerService explorer = workspaceExplorerService();
+        try {
+            WorkspaceDescriptor descriptor = resolveAgentWriteDescriptor(agentId, dirService, response);
+            if (descriptor == null) return errorText(response);
+            WorkspaceExplorerService.Entry renamed = explorer.rename(descriptor, explorer.normalizeRelativePath(path), name);
+            String parent = parentPath(path);
+            WorkspaceExplorerService.DirectoryListing listing = explorer.list(descriptor, explorer.normalizeRelativePath(parent));
+            String encodedAgentId = URLEncoder.encode(agentId, StandardCharsets.UTF_8);
+            return WorkspaceExplorerFragments.agentMutationResponse(encodedAgentId, listing, null, null,
+                "Renamed to " + renamed.name() + ".");
+        } catch (WorkspaceFileException e) {
+            response.setStatus(fileErrorStatus(e));
+            String encoded = URLEncoder.encode(agentId, StandardCharsets.UTF_8);
+            return WorkspaceExplorerFragments.agentModalError(encoded, "Error", e.getMessage());
+        }
+    }
+
+    @PostMapping("/agents/_detail/{agentId}/files/copy")
+    @ResponseBody
+    public String agentFilesCopy(
+        @PathVariable String agentId,
+        @RequestParam String path,
+        @RequestParam String destination,
+        @RequestParam(required = false) String name,
+        HttpServletResponse response
+    ) {
+        WorkspaceDirectoryService dirService = workspaceDirectoryService();
+        WorkspaceExplorerService explorer = workspaceExplorerService();
+        try {
+            WorkspaceDescriptor descriptor = resolveAgentWriteDescriptor(agentId, dirService, response);
+            if (descriptor == null) return errorText(response);
+            explorer.copy(descriptor, explorer.normalizeRelativePath(path),
+                explorer.normalizeRelativePath(destination), name);
+            String parent = parentPath(path);
+            WorkspaceExplorerService.DirectoryListing listing = explorer.list(descriptor, explorer.normalizeRelativePath(parent));
+            String encodedAgentId = URLEncoder.encode(agentId, StandardCharsets.UTF_8);
+            return WorkspaceExplorerFragments.agentMutationResponse(encodedAgentId, listing, null, null,
+                "Copied " + path + ".");
+        } catch (WorkspaceFileException e) {
+            response.setStatus(fileErrorStatus(e));
+            String encoded = URLEncoder.encode(agentId, StandardCharsets.UTF_8);
+            return WorkspaceExplorerFragments.agentModalError(encoded, "Error", e.getMessage());
+        }
+    }
+
+    @PostMapping("/agents/_detail/{agentId}/files/move")
+    @ResponseBody
+    public String agentFilesMove(
+        @PathVariable String agentId,
+        @RequestParam String path,
+        @RequestParam String destination,
+        @RequestParam(required = false) String name,
+        HttpServletResponse response
+    ) {
+        WorkspaceDirectoryService dirService = workspaceDirectoryService();
+        WorkspaceExplorerService explorer = workspaceExplorerService();
+        try {
+            WorkspaceDescriptor descriptor = resolveAgentWriteDescriptor(agentId, dirService, response);
+            if (descriptor == null) return errorText(response);
+            explorer.move(descriptor, explorer.normalizeRelativePath(path),
+                explorer.normalizeRelativePath(destination), name);
+            String parent = parentPath(path);
+            WorkspaceExplorerService.DirectoryListing listing = explorer.list(descriptor, explorer.normalizeRelativePath(parent));
+            String encodedAgentId = URLEncoder.encode(agentId, StandardCharsets.UTF_8);
+            return WorkspaceExplorerFragments.agentMutationResponse(encodedAgentId, listing, null, null,
+                "Moved " + path + ".");
+        } catch (WorkspaceFileException e) {
+            response.setStatus(fileErrorStatus(e));
+            String encoded = URLEncoder.encode(agentId, StandardCharsets.UTF_8);
+            return WorkspaceExplorerFragments.agentModalError(encoded, "Error", e.getMessage());
+        }
+    }
+
+    @PostMapping("/agents/_detail/{agentId}/files/delete")
+    @ResponseBody
+    public String agentFilesDelete(
+        @PathVariable String agentId,
+        @RequestParam String path,
+        @RequestParam String step,
+        HttpServletResponse response
+    ) {
+        WorkspaceDirectoryService dirService = workspaceDirectoryService();
+        WorkspaceExplorerService explorer = workspaceExplorerService();
+        try {
+            WorkspaceDescriptor descriptor = resolveAgentWriteDescriptor(agentId, dirService, response);
+            if (descriptor == null) return errorText(response);
+            WorkspaceExplorerService.DeleteStep deleteStep = WorkspaceExplorerService.DeleteStep.valueOf(step.trim().toUpperCase(Locale.ROOT));
+            explorer.delete(descriptor, explorer.normalizeRelativePath(path), deleteStep);
+            String parent = parentPath(path);
+            WorkspaceExplorerService.DirectoryListing listing = explorer.list(descriptor, explorer.normalizeRelativePath(parent));
+            String encodedAgentId = URLEncoder.encode(agentId, StandardCharsets.UTF_8);
+            return WorkspaceExplorerFragments.agentMutationResponse(encodedAgentId, listing, null, null,
+                "Deleted " + path + ".");
+        } catch (IllegalArgumentException e) {
+            response.setStatus(HttpServletResponse.SC_BAD_REQUEST);
+            String encoded = URLEncoder.encode(agentId, StandardCharsets.UTF_8);
+            return WorkspaceExplorerFragments.agentModalError(encoded, "Error", "Invalid delete confirmation step.");
+        } catch (WorkspaceFileException e) {
+            response.setStatus(fileErrorStatus(e));
+            String encoded = URLEncoder.encode(agentId, StandardCharsets.UTF_8);
+            return WorkspaceExplorerFragments.agentModalError(encoded, "Error", e.getMessage());
+        }
+    }
+
+    @PutMapping("/agents/_detail/{agentId}/files/save-text")
+    @ResponseBody
+    public String agentFilesSaveText(
+        @PathVariable String agentId,
+        @RequestParam String path,
+        @RequestParam String content,
+        HttpServletResponse response
+    ) {
+        WorkspaceDirectoryService dirService = workspaceDirectoryService();
+        WorkspaceExplorerService explorer = workspaceExplorerService();
+        try {
+            WorkspaceDescriptor descriptor = resolveAgentWriteDescriptor(agentId, dirService, response);
+            if (descriptor == null) return errorText(response);
+            WorkspaceExplorerService.FilePreview preview = explorer.saveText(descriptor, explorer.normalizeRelativePath(path), content);
+            String parent = parentPath(path);
+            WorkspaceExplorerService.DirectoryListing listing = explorer.list(descriptor, explorer.normalizeRelativePath(parent));
+            WorkspaceExplorerService.Entry inspected = explorer.inspect(descriptor, explorer.normalizeRelativePath(path));
+            String encodedAgentId = URLEncoder.encode(agentId, StandardCharsets.UTF_8);
+            return WorkspaceExplorerFragments.agentTextSaveResponse(encodedAgentId, preview, listing, inspected, path,
+                "Saved " + path + ".");
+        } catch (WorkspaceFileException e) {
+            response.setStatus(fileErrorStatus(e));
+            String encoded = URLEncoder.encode(agentId, StandardCharsets.UTF_8);
+            return WorkspaceExplorerFragments.agentModalError(encoded, "Error", e.getMessage());
+        }
+    }
+
+    // ── Labels ──
+
+    @PostMapping("/agents/_detail/{agentId}/files/labels")
+    @ResponseBody
+    public String agentFilesAddLabel(
+        @PathVariable String agentId,
+        @RequestParam String path,
+        @RequestParam String label,
+        HttpServletResponse response
+    ) {
+        WorkspaceDirectoryService dirService = workspaceDirectoryService();
+        WorkspaceExplorerService explorer = workspaceExplorerService();
+        try {
+            WorkspaceDescriptor descriptor = resolveAgentWriteDescriptor(agentId, dirService, response);
+            if (descriptor == null) return errorText(response);
+            explorer.ensureTag(label, label);
+            explorer.addLabel(descriptor, path, label);
+            WorkspaceExplorerService.Entry inspected = explorer.inspect(descriptor, explorer.normalizeRelativePath(path));
+            String encodedAgentId = URLEncoder.encode(agentId, StandardCharsets.UTF_8);
+            return WorkspaceExplorerFragments.agentInspector(encodedAgentId, inspected, "Tagged " + path + ".", false);
+        } catch (IllegalArgumentException e) {
+            response.setStatus(HttpServletResponse.SC_BAD_REQUEST);
+            return WorkspaceExplorerFragments.agentInspectorError(e.getMessage());
+        } catch (WorkspaceFileException e) {
+            response.setStatus(fileErrorStatus(e));
+            return WorkspaceExplorerFragments.agentInspectorError(e.getMessage());
+        }
+    }
+
+    @DeleteMapping("/agents/_detail/{agentId}/files/labels")
+    @ResponseBody
+    public String agentFilesRemoveLabel(
+        @PathVariable String agentId,
+        @RequestParam String path,
+        @RequestParam String label,
+        HttpServletResponse response
+    ) {
+        WorkspaceDirectoryService dirService = workspaceDirectoryService();
+        WorkspaceExplorerService explorer = workspaceExplorerService();
+        try {
+            WorkspaceDescriptor descriptor = resolveAgentWriteDescriptor(agentId, dirService, response);
+            if (descriptor == null) return errorText(response);
+            explorer.removeLabel(descriptor, path, label);
+            WorkspaceExplorerService.Entry inspected = explorer.inspect(descriptor, explorer.normalizeRelativePath(path));
+            String encodedAgentId = URLEncoder.encode(agentId, StandardCharsets.UTF_8);
+            return WorkspaceExplorerFragments.agentInspector(encodedAgentId, inspected, "Removed tag from " + path + ".", false);
+        } catch (WorkspaceFileException e) {
+            response.setStatus(fileErrorStatus(e));
+            String encoded = URLEncoder.encode(agentId, StandardCharsets.UTF_8);
+            return WorkspaceExplorerFragments.agentInspectorError(e.getMessage());
+        }
     }
 
     @GetMapping("/agents/_detail/{agentId}/outputs")
@@ -7096,6 +7545,8 @@ public class OrchestrationController {
         form.withChild(entitySelector("projectId", EntityKind.PROJECT, null,
             "Project", "optional project context", false, Map.of("agentId", agent.id())));
 
+        form.withChild(workspaceSelector(agent.id(), "direct agent submission"));
+
         form.withChild(new Div().withClass("orch-actions")
             .withChild(Button.create("Submit").withClass("orch-primary").withAttribute("type", "submit")));
 
@@ -7454,6 +7905,171 @@ public class OrchestrationController {
 
     private Component label(String text, Component input) {
         return new HtmlTag("label").withChild(new TextNode(text)).withChild(input);
+    }
+
+    // ── Workspace selector routes ──
+
+    @GetMapping("/selectors/workspace/agent-selected")
+    @ResponseBody
+    public String workspaceAgentSelected(@RequestParam Map<String, String> params, HttpServletResponse response) {
+        String agentId = params.getOrDefault("value", "").trim();
+        String context = params.getOrDefault("selectorContext.workspaceSelectionContext", "submission");
+        WorkspaceDirectoryService dirService = workspaceDirectoryService();
+        try {
+            dirService.resolveForRead(WorkspaceKind.AGENT, agentId);
+            Component selectedAgent = entitySelector(
+                params.getOrDefault("name", "agentId"), EntityKind.AGENT, agentId,
+                params.get("label"), params.get("placeholder"),
+                Boolean.parseBoolean(params.getOrDefault("required", "false")),
+                Map.of("workspaceSelectionContext", context));
+            Component workspace = WorkspaceSelectionComponents.selectorControlOob(
+                agentId, dirService.listUserWorkspaces(), context);
+            return selectedAgent.render() + workspace.render();
+        } catch (WorkspaceResolutionException e) {
+            response.setStatus(HttpServletResponse.SC_NOT_FOUND);
+            return new Div().withClass("orch-status orch-status-error").withInnerText("Agent not found.").render();
+        }
+    }
+
+    @GetMapping("/selectors/workspace/select")
+    @ResponseBody
+    public String workspaceSelectorSelect(
+        @RequestParam String agentId,
+        @RequestParam(required = false) String type,
+        @RequestParam(required = false) String key,
+        @RequestParam(defaultValue = "submission") String context,
+        HttpServletResponse response
+    ) {
+        WorkspaceDirectoryService dirService = workspaceDirectoryService();
+        try {
+            dirService.resolveForRead(WorkspaceKind.AGENT, agentId);
+            boolean hasType = StringUtils.hasText(type);
+            boolean hasKey = StringUtils.hasText(key);
+            if (hasType != hasKey) {
+                throw new IllegalArgumentException("Workspace type and key must be selected together.");
+            }
+            if (hasType) {
+                if ("agent".equals(type)) {
+                    if (!agentId.equals(key)) throw new IllegalArgumentException("Agent workspace must match the bound agent.");
+                } else if ("user".equals(type)) {
+                    dirService.resolveForRead(WorkspaceKind.USER, key);
+                } else {
+                    throw new IllegalArgumentException("Only agent and declared user workspaces may be selected.");
+                }
+            }
+            List<WorkspaceDescriptor> userWorkspaces = dirService.listUserWorkspaces();
+            return WorkspaceSelectionComponents.selectorControl(agentId, userWorkspaces, type, key, context).render();
+        } catch (IllegalArgumentException | WorkspaceResolutionException e) {
+            response.setStatus(e instanceof WorkspaceResolutionException ? HttpServletResponse.SC_NOT_FOUND : HttpServletResponse.SC_BAD_REQUEST);
+            return WorkspaceSelectionComponents.selectorControl(agentId, safeListUserWorkspaces(dirService), null, null, context, e.getMessage()).render();
+        }
+    }
+
+    @PostMapping("/selectors/workspace/create")
+    @ResponseBody
+    public String workspaceSelectorCreate(
+        @RequestParam String agentId,
+        @RequestParam(required = false) String name,
+        @RequestParam(defaultValue = "submission") String context,
+        HttpServletResponse response
+    ) {
+        WorkspaceDirectoryService dirService = workspaceDirectoryService();
+        if (name == null || name.isBlank()) {
+            response.setStatus(HttpServletResponse.SC_BAD_REQUEST);
+            return WorkspaceSelectionComponents.selectorControl(
+                agentId, safeListUserWorkspaces(dirService), null, null, context, "Workspace name is required.").render();
+        }
+        try {
+            dirService.resolveForRead(WorkspaceKind.AGENT, agentId);
+            WorkspaceDescriptor created = dirService.createUserWorkspace(name.trim());
+            List<WorkspaceDescriptor> userWorkspaces = safeListUserWorkspaces(dirService);
+            return WorkspaceSelectionComponents.selectorControl(agentId, userWorkspaces, "user", created.key(), context).render();
+        } catch (WorkspaceResolutionException e) {
+            response.setStatus(e.reason() == WorkspaceResolutionException.Reason.CONFLICT
+                ? HttpServletResponse.SC_CONFLICT : HttpServletResponse.SC_BAD_REQUEST);
+            return WorkspaceSelectionComponents.selectorControl(agentId, safeListUserWorkspaces(dirService), null, null, context, e.getMessage()).render();
+        }
+    }
+
+    // ── Agent file operation helpers ──
+
+    private WorkspaceDescriptor resolveAgentDescriptor(
+        String agentId, WorkspaceDirectoryService dirService, HttpServletResponse response
+    ) {
+        try {
+            return dirService.resolveForRead(WorkspaceKind.AGENT, agentId);
+        } catch (WorkspaceResolutionException e) {
+            response.setStatus(HttpServletResponse.SC_NOT_FOUND);
+            return null;
+        }
+    }
+
+    private WorkspaceDescriptor resolveAgentWriteDescriptor(
+        String agentId, WorkspaceDirectoryService dirService, HttpServletResponse response
+    ) {
+        try {
+            // resolveForWrite lazily creates missing agent root
+            return dirService.resolveForWrite(WorkspaceKind.AGENT, agentId);
+        } catch (WorkspaceResolutionException e) {
+            response.setStatus(HttpServletResponse.SC_NOT_FOUND);
+            return null;
+        }
+    }
+
+    private int fileErrorStatus(WorkspaceFileException e) {
+        return switch (e.reason()) {
+            case INVALID -> HttpServletResponse.SC_BAD_REQUEST;
+            case NOT_FOUND -> HttpServletResponse.SC_NOT_FOUND;
+            case CONFLICT -> HttpServletResponse.SC_CONFLICT;
+        };
+    }
+
+    private static String parentPath(String path) {
+        String clean = path == null || path.isBlank() ? "." : path;
+        int idx = clean.lastIndexOf('/');
+        if (idx <= 0) return ".";
+        return clean.substring(0, idx);
+    }
+
+    private String errorText(HttpServletResponse response) {
+        return new Div().withClass("workspace-file-status-error").withInnerText("Agent not found.").render();
+    }
+
+    private WorkspaceExplorerService workspaceExplorerService() {
+        WorkspaceExplorerService svc = workspaceExplorerServiceRef.getIfAvailable();
+        if (svc == null) throw new IllegalStateException("WorkspaceExplorerService is unavailable");
+        return svc;
+    }
+
+    private WorkspaceDirectoryService workspaceDirectoryService() {
+        WorkspaceDirectoryService svc = workspaceDirectoryServiceRef.getIfAvailable();
+        if (svc == null) throw new IllegalStateException("WorkspaceDirectoryService is unavailable");
+        return svc;
+    }
+
+    private List<WorkspaceDescriptor> safeListUserWorkspaces(WorkspaceDirectoryService dirService) {
+        try {
+            return dirService.listUserWorkspaces();
+        } catch (Exception e) {
+            return List.of();
+        }
+    }
+
+    private String defaultSubmissionAgentId() {
+        return agentProfileService.list().stream()
+            .filter(agent -> agent.status() != null && !"DISABLED".equals(agent.status().name()))
+            .map(AgentProfile::id)
+            .findFirst()
+            .orElse("");
+    }
+
+    private Component workspaceSelector(String boundAgentId, String context) {
+        if (!StringUtils.hasText(boundAgentId)) {
+            return new Div().withClass("orch-status").withInnerText("Select an active agent to choose a workspace.");
+        }
+        WorkspaceDirectoryService dirService = workspaceDirectoryService();
+        return WorkspaceSelectionComponents.selectorControl(
+            boundAgentId, safeListUserWorkspaces(dirService), null, null, context);
     }
 
     private Component tabNav(String agentId, String... names) {

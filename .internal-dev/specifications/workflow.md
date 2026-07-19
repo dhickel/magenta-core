@@ -31,7 +31,7 @@ When a false assumption, repeated mistake, major correction, important user corr
 
 ## Workspace Contract Gate
 
-For workspace, Work Area, run-output, project, job, task/plan, workflow, file-tool, shell-tool, or output-artifact changes, read `architecture.md`, `service-graph.md`, `services.md`, `api.md`, and the workspace knowledge files named by the active plan. Treat compatibility references to old job-owned workspace, scratch, runtime-temp, or final-output paths as legacy unless the active plan explicitly re-accepts them.
+For workspace, run-output, project, job, task/plan, workflow, file-tool, shell-tool, or output-artifact changes, read `architecture.md`, `service-graph.md`, `services.md`, `api.md`, and the workspace knowledge files named by the active plan. Treat references to removed database-backed filesystem identity, job-owned roots, scratch, runtime-temp, aliases, or staged output paths as historical unless a later accepted specification explicitly reintroduces a concrete capability.
 
 ## Closeout Gate
 

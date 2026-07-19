@@ -111,4 +111,4 @@ Planning mode records the goal, deliverables, optional inputs and outputs, assum
 
 ## Browser UI
 
-Open `http://localhost:8080/chat` for the chat UI. Operational alpha surfaces, including dashboards, plans, workflows, jobs, agents, projects, and workspaces, are documented from the indexes under `docs/` as those sections are completed.
+Open `http://localhost:8080/chat` for the chat UI. Operational alpha surfaces, including dashboards, plans, workflows, jobs, agents, projects, workspaces, outputs, settings, and skills, are documented from the indexes under `docs/` as those sections are completed.

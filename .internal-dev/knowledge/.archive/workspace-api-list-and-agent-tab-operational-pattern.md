@@ -1,3 +1,5 @@
+# SUPERSEDED — This knowledge file is archived and no longer reflects the current codebase.
+
 # Workspace API List/Lease + Agent Tab Operational Pattern
 
 ## Topic

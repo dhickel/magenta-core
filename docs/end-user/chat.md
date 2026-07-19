@@ -19,7 +19,7 @@ The chat page has:
 
 Open `/chat` for a new or existing chat session. Select a prior session from the sidebar to continue it. The session list supports favorites, archives, deletion, and bulk actions.
 
-The sidebar only shows browser-surface `/chat` conversations. Avatar chat, agent chats, planning-only turns, and other internal assistant use do not appear there.
+The sidebar only shows browser-surface `/chat` conversations. Agent chats, planning-only turns, and other internal assistant use do not appear there.
 
 Use **Send** to submit a message. Enter sends the message; Shift+Enter inserts a newline.
 

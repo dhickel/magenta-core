@@ -17,7 +17,6 @@ import java.util.Deque;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Locale;
-import java.util.Set;
 import java.util.regex.Pattern;
 import java.util.regex.PatternSyntaxException;
 import java.util.stream.Stream;
@@ -33,9 +32,6 @@ import org.springframework.util.StringUtils;
 @Service
 public class AgentFileToolService {
     private static final String OUTPUTS = "outputs";
-    private static final Set<String> RETIRED_PREFIXES = Set.of(
-        "workspace", "root", "run", "work", "projects", "scratch", "jobs", "job"
-    );
     private static final int DEFAULT_MAX_ENTRIES = 200;
     private static final int MAX_ENTRIES = 1_000;
     private static final int DEFAULT_READ_LINES = 200;
@@ -430,10 +426,6 @@ public class AgentFileToolService {
 
     private FileScope directWorkspaceScope(Path workspaceRoot, String normalized, String requested, String label) {
         String relative = normalized.isEmpty() || ".".equals(normalized) ? "" : normalized;
-        String firstSegment = relative.contains("/") ? relative.substring(0, relative.indexOf('/')) : relative;
-        if (RETIRED_PREFIXES.contains(firstSegment)) {
-            throw new IllegalArgumentException("retired workspace path prefix is not allowed: " + requested);
-        }
         rejectUnsafeRelativePath(relative, "path escapes " + label + ": " + requested);
         return new FileScope(workspaceRoot, "", label, relative);
     }

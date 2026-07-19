@@ -1,3 +1,5 @@
+# SUPERSEDED — This knowledge file is archived and no longer reflects the current codebase.
+
 ---
 schema_version: 1
 document_type: knowledge

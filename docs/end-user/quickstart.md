@@ -23,7 +23,6 @@ Start at `/`.
 The home page links to:
 
 - `/chat`: conversation and anonymous ad hoc planning surface.
-- `/avatar`: personal assistant shell with chat, dashboard widgets, Work Areas, outputs, queue, history, and profile tabs.
 - `/dashboard`: operational overview for jobs, agents, inbox messages, outputs, and recent events.
 - `/plans`: saved plan and task definitions.
 - `/workflows`: graph-based workflow definitions.
@@ -53,7 +52,7 @@ If no models appear, check `/settings` for runtime defaults and confirm the unde
 5. Select **Submit to Agent**.
 6. Choose an agent. If a searchable selector is visible, type part of the agent, workspace, or model name and choose a match instead of copying IDs.
 7. Submit the assignment.
-8. Open the agent detail page and use **Queue**, **History**, **Workspace**, and **Outputs** to track progress.
+8. Open the agent detail page and use **Queue**, **History**, **Files**, and **Outputs** to track progress.
 
 ## Common First-Run Errors
 

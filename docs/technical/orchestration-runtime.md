@@ -109,7 +109,7 @@ Reactions match event type and optional filter JSON, then apply an action type s
 
 ## Projects
 
-`ProjectService` owns projects, memberships, events, and project workspace summaries.
+`ProjectService` owns projects, memberships, events, and project-network gating.
 
 Projects are durable membership, tracking, and visibility abstractions. They are not executable work units and do not select or allocate execution filesystems. `ownerAgentId` remains nullable legacy project metadata.
 

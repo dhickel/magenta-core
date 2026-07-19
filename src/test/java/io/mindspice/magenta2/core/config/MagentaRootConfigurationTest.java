@@ -142,7 +142,7 @@ class MagentaRootConfigurationTest {
             assertThat(dataRoot).isDirectory();
             assertThat(magentaRoot.resolve("magenta.sqlite")).exists();
             assertThat(magentaRoot.resolve("avatar.sqlite")).doesNotExist();
-            assertNoAvatarBeans(context);
+            assertNoRetiredWorkspaceBeans(context);
             assertThat(context.getBean(AiConfig.class).dataRoot()).isEqualTo(dataRoot);
             assertThat(context.getBean(WorkspaceDirectoryService.class).dataRoot()).isEqualTo(dataRoot.toRealPath());
 
@@ -176,14 +176,14 @@ class MagentaRootConfigurationTest {
                 "--magenta.plan.execution-stream-timeout-seconds=0"
             )) {
             assertThat(context.getBean(JdbcTemplate.class).queryForObject("select 1", Integer.class)).isEqualTo(1);
-            assertNoAvatarBeans(context);
+            assertNoRetiredWorkspaceBeans(context);
         }
 
         assertThat(Files.readAllBytes(sentinel)).isEqualTo(original);
         assertThat(Files.getLastModifiedTime(sentinel)).isEqualTo(modified);
     }
 
-    private static void assertNoAvatarBeans(ConfigurableApplicationContext context) {
+    private static void assertNoRetiredWorkspaceBeans(ConfigurableApplicationContext context) {
         assertThat(Arrays.stream(context.getBeanDefinitionNames())
             .filter(name -> name.toLowerCase(java.util.Locale.ROOT).contains("avatar"))
             .toList()).isEmpty();
@@ -192,7 +192,10 @@ class MagentaRootConfigurationTest {
             .filter(java.util.Objects::nonNull)
             .map(Class::getName)
             .filter(name -> name.startsWith("io.mindspice.magenta2.avatar.")
-                || name.contains("AvatarDashboard") || name.contains("AvatarAssistantTool"))
+                || name.contains("AvatarDashboard") || name.contains("AvatarAssistantTool")
+                || name.endsWith(".WorkAreaService") || name.endsWith(".WorkAreaRepository")
+                || name.endsWith(".WorkspaceService") || name.endsWith(".WorkspaceRepository")
+                || name.endsWith(".WorkspaceLeaseService"))
             .toList()).isEmpty();
     }
 

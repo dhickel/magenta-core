@@ -42,7 +42,7 @@ Use HTMX for:
 
 HTMX routes should return server-rendered HTML fragments and preserve consistent status/markup behavior for failed requests so operational panels show actionable errors instead of silent failures.
 
-For modal hosts, keep one stable target element in the page and return modal content for `innerHTML` swaps, or return the full target with `outerHTML`. Do not return a second element with the same id inside an `innerHTML` target. The Avatar Work Area explorer uses `#avatar-workarea-modal` as a stable host and returns modal content without duplicating that id.
+For modal hosts, keep one stable target element in the page and return modal content for `innerHTML` swaps, or return the full target with `outerHTML`. Do not return a second element with the same id inside an `innerHTML` target. The workspace explorer uses `#workspace-file-modal` as its stable host and returns modal content without duplicating that id.
 
 ## JavaScript Islands
 
@@ -98,4 +98,4 @@ For UI changes, validate against a running app with focused Playwright checks on
 
 For project/job/output/assignment UX changes, Playwright validation should inspect the changed `/projects`, `/jobs`, `/outputs`, plan submit, workflow submit, and agent submit/history surfaces with screenshots. Use isolated runtime data when possible, capture console/network diagnostics, and treat blocked browser validation as an explicit blocker unless the user approves a fallback.
 
-During UI review, explicitly check that JavaScript use is justified, standard CRUD remains HTMX-first, labels distinguish `projectId` from compatibility `workspaceId`, and provenance fields fit without hiding primary actions.
+During UI review, explicitly check that JavaScript use is justified, standard CRUD remains HTMX-first, labels distinguish `workspaceType`/`workspaceKey` from `projectId`, and provenance fields fit without hiding primary actions.

@@ -62,9 +62,9 @@ Controllers: `AgentProfileController`, agent editor fragments in `OrchestrationC
 Sources: [`ai/orchestration/runtime`](../../src/main/java/io/mindspice/magenta2/ai/orchestration/runtime).
 
 - `AssignmentService` owns durable assignment creation, queue reads, history reads, lifecycle transitions, history purge, assignment diagnostics, transcript lookup, conversation links, and lease/progress fields.
-- Assignment creation persists first-class `projectId`, effective workspace id/kind, and compatibility `workspaceId`; `AssignmentService.AssignmentSummary` exposes that context for UI/API consumers.
-- Assignment service helpers own active project/job mutation checks and workspace-blocked requeue operations so controllers do not reason over raw queue rows.
-- `OrchestrationRunnerService` executes queued assignment boundaries for task, workflow, and job work. It resolves project-scoped work through the effective workspace rule, preserves waiting workflow assignments for resume, and does not attempt token-level resume; durable state resumes at task/workflow/job item boundaries.
+- Assignment creation persists first-class `projectId` metadata plus `workspaceType`, `workspaceKey`, and internally derived canonical workspace identity; `AssignmentService.AssignmentSummary` exposes that context for UI/API consumers.
+- Assignment service helpers own active project/job mutation checks and requeue operations so controllers do not reason over raw queue rows.
+- `OrchestrationRunnerService` executes queued assignment boundaries for task, workflow, and job work against one resolved `WorkspaceDescriptor`, preserves waiting workflow assignments for resume, and does not attempt token-level resume; durable state resumes at task/workflow/job item boundaries.
 - `OrchestrationRunService` provides run-facing helpers for assignment execution paths.
 - `OrchestrationRuntimeRepository` owns runtime queue, schedules, reactions, direct-line inbox, events, legacy orchestration jobs, and compatibility columns.
 - `InboxService` in `runtime` owns direct-line agent/operator inbox messages in `agent_inbox_messages`.
@@ -80,9 +80,9 @@ Sources: [`JobService`](../../src/main/java/io/mindspice/magenta2/ai/orchestrati
 
 - `JobService` owns user-facing job definitions, ordered work items, run records, recurrence, cancellation, and output run id lookup.
 - Public job run routes submit `JOB_RUN` assignments through `AssignmentService`; job execution is coordinated by `OrchestrationRunnerService`.
-- `JobExecutionSummary` is the read model for job run/operator context. It ties job definition, assignment, run, agent/project, effective workspace, compatibility workspace metadata, Work Area/output context, child runs, and output counts together. Legacy rows may still expose compatibility job workspace/path fields.
+- `JobExecutionSummary` is the read model for job run/operator context. It ties job definition, assignment, run, agent/project attribution, selected workspace type/key/identity, child runs, and output counts together.
 - Recurrence/start paths enqueue assignments; direct run allocation is guarded for assignment-owned execution.
-- Jobs bind to an agent, project, and Work Area and do not own workspace directories. During execution, model-facing `outputs/` is run-local staging; backend promotion writes final job outputs to the bound Work Area or project output destination and artifacts carry assignment/run attribution.
+- Jobs bind to an agent and optional project metadata but do not own workspace directories. Execution uses the assignment's resolved agent or user workspace; publication writes directly beneath that workspace's reserved lazy `outputs/` subtree and artifacts retain assignment/run/project attribution.
 - Jobs can be empty `DRAFT` definitions so the UI can save metadata before items are added. If an empty job is submitted, the assignment-owned run completes as a no-op instead of leaving `job_runs` in `RUNNING`.
 
 Tables: `job_definitions`, `job_runs`, `job_recurrences`, `run_output_artifacts`, plus assignment tables when submitted.
@@ -93,12 +93,12 @@ Controllers: `JobController` and `/jobs` fragments in `OrchestrationController`.
 
 Sources: [`ProjectService`](../../src/main/java/io/mindspice/magenta2/ai/orchestration/runtime/ProjectService.java), [`ProjectRepository`](../../src/main/java/io/mindspice/magenta2/ai/orchestration/runtime/ProjectRepository.java).
 
-- `ProjectService` owns durable project CRUD, project membership, project events, project workspace summary, and release requests for project workspace leases.
-- Projects are shared workspace and visibility records, not executable work units. `ownerAgentId` is nullable legacy compatibility metadata.
-- Project membership controls are service-guarded. Removing a member or deleting a project can fail when active assignments or leases still reference that project/member context.
-- Project workspaces and links are delegated to workspace services.
+- `ProjectService` owns durable project CRUD, project membership, project events, and project-network gating.
+- Projects are metadata, membership, visibility, and attribution records, not filesystem roots or executable work units. `ownerAgentId` is nullable legacy compatibility metadata.
+- Project membership controls are service-guarded. Removing a member or deleting a project can fail while active assignments or jobs still reference that project/member context.
+- Project operations never select, allocate, link, lease, or delete a filesystem root.
 
-Tables: `projects`, `project_agent_memberships`, `project_events`, `workspaces`, `workspace_leases`.
+Tables: `projects`, `project_agent_memberships`, `project_events`.
 
 Controllers: `ProjectController` and `/projects` fragments in `OrchestrationController`.
 
@@ -120,20 +120,21 @@ Controllers: `WorkflowController` and `/workflows` fragments in `OrchestrationCo
 
 Sources: [`ai/orchestration/workspaces`](../../src/main/java/io/mindspice/magenta2/ai/orchestration/workspaces).
 
-- `WorkspaceService` owns workspace records and links.
-- `WorkspaceDirectoryService` owns data-root-confined path creation and legacy agent directory migration.
-- `WorkspacePathLayout` owns static application structural segments and aliases for data-root children, agent workspace roots, Work Areas, run staging, run-local outputs, final output destinations, chat files, and project roots.
-- `WorkAreaService` owns confined Work Area metadata, Home creation, mark/unmark behavior, and active assignment/output target guards.
-- `WorkAreaExplorerService` owns confined Work Area browsing, preview/edit/download policy, file mutations, labels, recent action rows, and nested Work Area marking.
-- `WorkspaceFileMetadataService` and related repositories own reusable file labels, file label assignments, and file action records.
-- `EffectiveWorkspaceResolver` chooses the project workspace when `projectId` is present, otherwise the executing agent workspace.
-- `WorkspaceLeaseService` owns exclusive writable lease acquisition, extension, release request, expiry reconciliation, and release completion.
-- `AgentWorkspaceStatusService` builds agent workspace health/status views.
-- `OutputArtifactService` materializes explicit run outputs into final promoted output destinations, records artifact metadata, queries artifacts, loads content, and keeps loose discovery behind compatibility gating and confinement.
+- `WorkspaceDirectoryService` is the sole constructor of trusted `WorkspaceDescriptor` values. It resolves agent, chat, and user descriptors from a closed `WorkspaceKind` enum, validates keys with `PlainPathSegmentValidator`, checks agent/chat existence through low-level repositories without service cycles, enforces explicit user-workspace declaration, and resolves roots through `WorkspacePathLayout`.
+- `WorkspacePathLayout` is the sole structural path authority. Its retained public names are `WORKSPACE` and `OUTPUTS`; its retained factories produce `workspace/agent/<id>`, `workspace/chat/<id>`, and `workspace/user/<name>` roots.
+- `WorkspaceExplorerService` owns confined list, inspect, preview, image view, bounded download, text/Markdown create/save, directory create, rename, move, copy, delete preflight/execute, labels, tags, and recent actions. All operations accept a `WorkspaceDescriptor` and normalized file-relative path. It rejects absolute/traversing paths, symlink escape, symbolic recursive trees, workspace-root mutation, and mutation of `outputs/` or descendants.
+- `WorkspaceFileMetadataService` and `WorkspaceFileMetadataRepository` own file labels, file label assignments, and file action records keyed by canonical workspace identity plus normalized file-relative path.
+- `WorkspaceFileActionLogRepository` owns file action logging keyed by canonical workspace identity.
+- `AgentsMdResolver` resolves layered `AGENTS.md` files from the descriptor root to the active confined tool path during execution. No starter `AGENTS.md` content is generated.
+- `OutputArtifactRepository` independently owns `run_output_artifacts` schema compatibility, writes, reads, updates, deletion, mapping, and attribution.
+- `OutputArtifactService` publishes declared output values or same-workspace source files directly beneath the effective descriptor's lazy `outputs/` directory with collision-safe normalized names. No run-owned directory hierarchy is created. Durable task, job, run, project, agent, and canonical workspace attribution is queryable.
+- `RootRelativePathService` is retained only for portable artifact-relative paths. It does not determine workspace identity or authorize roots.
 
-Tables: `workspaces`, `workspace_links`, `workspace_leases`, `work_areas`, `workspace_file_labels`, `workspace_file_label_assignments`, `workspace_file_actions`, `run_output_artifacts`.
+The `/api/work-areas`, `/api/workspaces` (generic), and `/avatar` route families are absent. Workspace file operations use typed routes under `/api/workspace/{type}/{id}` and user workspace collection uses `GET|POST /api/workspace/user`.
 
-Controllers: `WorkspaceController`, `WorkAreaController`, `OutputController`, Avatar Work Area fragments, and project/agent workspace fragments in `OrchestrationController`.
+Tables: `workspace_file_labels`, `workspace_file_annotations`, `workspace_file_action_log`, `run_output_artifacts`.
+
+Controllers: `WorkspaceController`, `OutputController`, and workspace explorer fragments in `WorkspaceExplorerFragments`.
 
 ## Runtime Settings and Operations
 

@@ -320,10 +320,10 @@ class AgentFileToolServiceTest {
     }
 
     @Test
-    void activeAssignmentContextRejectsReservedOutputsAndRetiredPrefixes() throws Exception {
-        Path runWorkspace = Files.createDirectories(tempDir.resolve("workspace/agent-1/runs/run-1"));
-        Path otherAgent = Files.createDirectories(tempDir.resolve("agents/agent-2/workspace"));
-        Files.writeString(otherAgent.resolve("secret.txt"), "other agent\n");
+    void activeAssignmentContextRejectsReservedOutputsButAllowsOrdinaryDirectoryNames() throws Exception {
+        Path workspace = Files.createDirectories(tempDir.resolve("workspace/agent/agent-1"));
+        Path ordinaryDirectory = Files.createDirectories(workspace.resolve("workspace"));
+        Files.writeString(ordinaryDirectory.resolve("notes.txt"), "ordinary directory\n");
 
         AgentFileToolService service = serviceWithWorkspaceDirectory();
         OrchestrationTaskContextHolder.set(new OrchestrationTaskContext("agent-1",
@@ -337,27 +337,24 @@ class AgentFileToolServiceTest {
             "agent/agent-1",
             "TASK_RUN",
             null,
-            runWorkspace.toString(),
+            workspace.toString(),
             null));
 
         assertThatThrownBy(() -> service.write("outputs/result.txt", "done\n", false))
             .isInstanceOf(IllegalArgumentException.class)
             .hasMessageContaining("reserved for output publication");
-        assertThatThrownBy(() -> service.read("workspace/secret.txt", 1, 10))
-            .isInstanceOf(IllegalArgumentException.class)
-            .hasMessageContaining("retired workspace path prefix");
+        assertThat(service.read("workspace/notes.txt", 1, 10).lines().getFirst())
+            .endsWith("|ordinary directory");
     }
 
     @Test
-    void activeTaskContextUsesDirectPathsAndRejectsRetiredAliases() throws Exception {
-        Path durableWorkspace = Files.createDirectories(tempDir.resolve("projects/project-1/workspace"));
-        Path selectedWorkArea = Files.createDirectories(durableWorkspace.resolve("home"));
-        Path workDir = Files.createDirectories(selectedWorkArea.resolve("work"));
-        Files.writeString(selectedWorkArea.resolve("root.txt"), "root alias\n");
-        Files.writeString(selectedWorkArea.resolve("selected.txt"), "selected root\n");
-        Files.writeString(workDir.resolve("notes.txt"), "durable work\n");
-        Files.writeString(selectedWorkArea.resolve("run.txt"), "run alias\n");
-        Path outputs = Files.createDirectories(selectedWorkArea.resolve("outputs"));
+    void activeTaskContextTreatsFormerAliasNamesAsDirectWorkspacePaths() throws Exception {
+        Path workspace = Files.createDirectories(tempDir.resolve("workspace/agent/agent-1"));
+        for (String directory : List.of("workspace", "root", "work", "run", "projects")) {
+            Path child = Files.createDirectories(workspace.resolve(directory));
+            Files.writeString(child.resolve("notes.txt"), directory + " directory\n");
+        }
+        Path outputs = Files.createDirectories(workspace.resolve("outputs"));
         Files.writeString(outputs.resolve("output.txt"), "published output\n");
 
         AgentFileToolService service = serviceWithWorkspaceDirectory();
@@ -367,21 +364,19 @@ class AgentFileToolServiceTest {
             null,
             null,
             "project-1",
-            null,
-            "workspace-1",
-            "workspace-1",
+            "agent",
+            "agent-1",
+            "agent/agent-1",
             "TASK_RUN",
             null,
-            selectedWorkArea.toString(),
+            workspace.toString(),
             null));
         try {
-            assertThat(service.read("selected.txt", 1, 10).lines().getFirst()).endsWith("|selected root");
-            assertThat(service.read("outputs/output.txt", 1, 10).lines().getFirst()).endsWith("|published output");
-            for (String path : List.of("workspace/selected.txt", "root/root.txt", "work/notes.txt", "run/run.txt", "projects/project-1/file.txt")) {
-                assertThatThrownBy(() -> service.read(path, 1, 10))
-                    .isInstanceOf(IllegalArgumentException.class)
-                    .hasMessageContaining("retired workspace path prefix");
+            for (String directory : List.of("workspace", "root", "work", "run", "projects")) {
+                assertThat(service.read(directory + "/notes.txt", 1, 10).lines().getFirst())
+                    .endsWith("|" + directory + " directory");
             }
+            assertThat(service.read("outputs/output.txt", 1, 10).lines().getFirst()).endsWith("|published output");
         } finally {
             OrchestrationTaskContextHolder.clear();
         }
@@ -433,11 +428,11 @@ class AgentFileToolServiceTest {
     }
 
     @Test
-    void activeAssignmentContextRejectsProjectPrefix() throws Exception {
-        Path runWorkspace = Files.createDirectories(tempDir.resolve("workspace/agent-1/runs/run-1"));
-        Path outputDir = Files.createDirectories(runWorkspace.resolve("outputs"));
+    void activeAssignmentContextAllowsProjectNamedDirectoryInsideSelectedWorkspace() throws Exception {
+        Path workspace = Files.createDirectories(tempDir.resolve("workspace/agent/agent-1"));
+        Path projectDirectory = Files.createDirectories(workspace.resolve("projects/project-1"));
         WorkspaceDirectoryService dirService = workspaceDirectoryService();
-        Files.writeString(runWorkspace.resolve("shared.txt"), "current project\n");
+        Files.writeString(projectDirectory.resolve("shared.txt"), "ordinary project directory\n");
 
         AgentFileToolService service = new AgentFileToolService(tempDir, dirService);
         OrchestrationTaskContextHolder.set(new OrchestrationTaskContext("agent-1",
@@ -451,12 +446,11 @@ class AgentFileToolServiceTest {
             "agent/agent-1",
             "TASK_RUN",
             null,
-            runWorkspace.toString(),
+            workspace.toString(),
             null));
 
-        assertThatThrownBy(() -> service.read("projects/project-1/shared.txt", 1, 10))
-            .isInstanceOf(IllegalArgumentException.class)
-            .hasMessageContaining("retired workspace path prefix");
+        assertThat(service.read("projects/project-1/shared.txt", 1, 10).lines().getFirst())
+            .endsWith("|ordinary project directory");
     }
 
     @Test

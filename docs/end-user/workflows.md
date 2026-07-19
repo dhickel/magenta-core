@@ -61,16 +61,16 @@ Validation catches structural graph errors and type compatibility issues. A grap
 1. Open a saved workflow.
 2. Select **Submit to Agent**.
 3. Choose an active agent.
-4. Optionally choose a project, model override, and compatibility workspace.
+4. Optionally choose project metadata, a model override, and an existing declared user workspace override.
 5. Submit.
 
-The project field controls the durable workspace for workflow outputs. If a project is selected, outputs belong to the project workspace. If no project is selected, outputs belong to the executing agent workspace. The workspace field remains for compatibility and is selector-backed where available. The agent choice may still be a plain dropdown in this form. If no agent is selected, the UI may fall back to the first active agent; choose explicitly when the result matters.
+The workspace selector controls which workspace receives output files. By default the bound agent's workspace is used. Declared user workspaces are available as overrides. Project association is metadata only. The agent choice may still be a plain dropdown in this form. If no agent is selected, the UI may fall back to the first active agent; choose explicitly when the result matters.
 
 ## Runs And Waiting Work
 
 The **Recent Runs** table shows workflow run ID, status, current node, start time, and action. Runs in `WAITING` state can be resumed from the table when the workflow runtime allows it. Approval and wait messages may also appear in `/inbox`.
 
-Workflow run staging is kept while a run is waiting so resume can continue the same run. During execution, model-facing `outputs/` is run-local staging. After backend completion, validation, or promotion, workflow outputs are promoted to the selected agent, project, or Work Area output destination.
+Workflow run state is kept while a run is waiting so resume can continue the same run. During execution, outputs publish directly beneath the effective workspace's `outputs/` directory with collision-safe normalized names.
 
 ## Common Errors
 

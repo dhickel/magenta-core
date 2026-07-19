@@ -1,3 +1,5 @@
+# SUPERSEDED — This knowledge file is archived and no longer reflects the current codebase.
+
 # Topic
 
 Avatar shell resizable rail geometry.
