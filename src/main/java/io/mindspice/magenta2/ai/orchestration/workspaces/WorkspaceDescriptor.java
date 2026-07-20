@@ -17,7 +17,7 @@ public final class WorkspaceDescriptor {
     private final String identity;
     private final Path root;
 
-    WorkspaceDescriptor(WorkspaceKind kind, String key, Path root) {
+    public WorkspaceDescriptor(WorkspaceKind kind, String key, Path root) {
         this.kind = Objects.requireNonNull(kind, "kind");
         this.key = Objects.requireNonNull(key, "key");
         this.identity = kind.token() + "/" + key;

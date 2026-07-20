@@ -46,18 +46,11 @@ Phase 01 establishes these locations but does not route execution or publication
 
 ## Output publication
 
-`OutputArtifactRepository` independently owns `run_output_artifacts` schema compatibility, writes, reads, updates, deletion, mapping, and attribution. `OutputArtifactService` has no `WorkspaceRepository` dependency.
+`SchemaMigrationRunner` exclusively owns publication DDL. `OutputArtifactRepository` owns publication and legacy artifact persistence operations and contains no local schema bootstrap.
 
-Declared outputs publish directly beneath the selected descriptor's lazy `outputs/` subtree. Publication:
+Task-run publication accepts only a trusted `RunOutputLocation` plus a current `TaskRunWriteCapability`. It reserves a data-root-relative final path transactionally, records the staging path before writing, verifies the writer before each task mutation and the guarded `STAGED → PUBLISHED` CAS, and promotes create-only. Chat publication uses the separate typed chat operation beneath `workspace/chat/<id>/outputs/`. Standalone workflow execution without a trusted writer completes without publishing rather than falling back to arbitrary paths.
 
-- normalizes non-empty relative output names;
-- rejects absolute, dot-only, traversing, escaping, or symlinked destinations;
-- never overwrites collisions;
-- accepts file sources only when their real regular-file path remains beneath the same descriptor root;
-- stores portable data-root-relative artifact paths;
-- retains run, task/plan, workflow, job, assignment, project, agent, workspace type/key/identity, and run-type attribution.
-
-Current execution remains on the legacy/non-task publication path until the later lifecycle, confinement, and publication phases cut over. Reads and failed validation create no workspace, `tasks/`, `.skills/`, run, output, or staging directory.
+Names use deterministic collision suffixes and existing filesystem entries are collisions. Byte reads use a confined read and verify the digest and size of the exact bytes returned; mismatch moves the row to `INTEGRITY_FAILED`. Reconciliation never promotes or cleans task-owned staging without the opaque live writer capability. Migration 003 preserves legacy rows without inventing task attribution or copying absolute paths into publication records.
 
 `GET /api/outputs` supports attribution filters including `agentId`, `jobId`, `jobAssignmentId`, `jobRunId`, `projectId`, `workspaceType`, `workspaceKey`, `workspaceIdentity`, `runId`, `planId`, `runType`, `type`, and `limit`. Filters query metadata and never authorize or select a filesystem root.
 

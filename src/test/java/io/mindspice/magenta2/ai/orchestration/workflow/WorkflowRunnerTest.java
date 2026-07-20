@@ -8,6 +8,7 @@ import io.mindspice.magenta2.ai.orchestration.runtime.OrchestrationTaskContext;
 import io.mindspice.magenta2.ai.orchestration.runtime.OrchestrationTaskContextHolder;
 import io.mindspice.magenta2.ai.orchestration.workspaces.OutputArtifactRepository;
 import io.mindspice.magenta2.ai.orchestration.workspaces.OutputArtifactService;
+import io.mindspice.magenta2.ai.orchestration.workspaces.OutputArtifactTestSchema;
 import io.mindspice.magenta2.ai.orchestration.workspaces.RootRelativePathService;
 import io.mindspice.magenta2.ai.orchestration.workspaces.RunOutputArtifact;
 import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceDirectoryService;
@@ -48,6 +49,7 @@ class WorkflowRunnerTest {
     void setUp() throws Exception {
         ObjectMapper mapper = new ObjectMapper().findAndRegisterModules();
         jdbcTemplate = new JdbcTemplate(new SingleConnectionDataSource("jdbc:sqlite::memory:?foreign_keys=true", true));
+        OutputArtifactTestSchema.initialize(jdbcTemplate);
 
         PlanRepository planRepository = new PlanRepository(jdbcTemplate, mapper);
         ChatMemoryRepository memoryRepository = new ChatMemoryRepository(jdbcTemplate, mapper);
@@ -354,7 +356,8 @@ class WorkflowRunnerTest {
         assertThat(finished.status()).isEqualTo(WorkflowRunStatus.COMPLETED);
         assertThat(elapsedMs).isLessThan(900); // source + parallel workers + final
         assertThat(finished.finalOutputs()).containsKeys("a", "b", "c", "d");
-        assertThat(finished.artifactIds()).hasSizeGreaterThanOrEqualTo(4);
+        assertThat(finished.artifactIds()).isEmpty();
+        // Standalone runs have no live TaskRunWriteCapability and cannot publish.
     }
 
     @Test
@@ -385,17 +388,8 @@ class WorkflowRunnerTest {
         assertThat(finished.workspaceIdentity()).isEqualTo("agent/system");
         Path resolvedWorkspace = workspaceDirectoryService.dataRoot().resolve("workspace/agent/system");
         Path resolvedOutput = resolvedWorkspace.resolve("outputs");
-        assertThat(finished.artifactIds()).hasSize(1);
-        List<RunOutputArtifact> artifacts = finished.artifactIds().stream()
-            .map(outputArtifactService::getArtifact)
-            .toList();
-        assertThat(artifacts)
-            .extracting(RunOutputArtifact::filePath)
-            .allSatisfy(path -> assertStoredRelative(path, "workspace/agent/system/outputs/"));
-        assertThat(Files.exists(resolvedWorkspace)).isTrue();
-        assertThat(Files.isDirectory(resolvedOutput)).isTrue();
-        assertThat(artifacts)
-            .allSatisfy(artifact -> assertThat(Files.isRegularFile(resolveStored(artifact.filePath()))).isTrue());
+        assertThat(finished.artifactIds()).isEmpty();
+        assertThat(Files.exists(resolvedOutput)).isFalse();
     }
 
     @Test
@@ -445,14 +439,8 @@ class WorkflowRunnerTest {
             assertThat(finished.workspaceIdentity()).isEqualTo("agent/agent-1");
             assertThat(finished.runType()).isEqualTo("JOB_WORKFLOW_ITEM");
 
-            RunOutputArtifact artifact = outputArtifactService.getArtifact(finished.artifactIds().getFirst());
-            assertThat(artifact.agentId()).isEqualTo("agent-1");
-            assertThat(artifact.jobId()).isEqualTo("job-1");
-            assertThat(artifact.jobAssignmentId()).isEqualTo("assignment-1");
-            assertThat(artifact.jobRunId()).isEqualTo("job-run-1");
-            assertThat(artifact.projectId()).isEqualTo("project-1");
-            assertThat(artifact.workspaceIdentity()).isEqualTo("agent/agent-1");
-            assertThat(artifact.runType()).isEqualTo("JOB_WORKFLOW_ITEM");
+            assertThat(finished.artifactIds()).isEmpty();
+            // Attribution alone is not publication authority; no writer capability was supplied.
         } finally {
             OrchestrationTaskContextHolder.clear();
         }

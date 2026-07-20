@@ -15,6 +15,7 @@ import com.sun.jna.Library;
 import com.sun.jna.Native;
 import com.sun.jna.NativeLong;
 import com.sun.jna.Structure;
+import org.springframework.stereotype.Component;
 
 /**
  * Linux-provider mutation boundary based on {@code openat(2)} directory handles.
@@ -28,6 +29,7 @@ import com.sun.jna.Structure;
  * non-64-bit, and non-default-file providers fail closed; there is deliberately
  * no path-based fallback carrying a "confined" claim.
  */
+@Component
 public final class ConfinedPathMutationService {
     private static final int O_RDONLY = 0;
     private static final int O_WRONLY = 1;

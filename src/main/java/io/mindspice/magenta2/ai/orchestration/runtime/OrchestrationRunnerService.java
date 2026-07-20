@@ -251,36 +251,41 @@ public class OrchestrationRunnerService {
                 attemptId = taskRunId + ":" + attemptNumber;
             } catch (RuntimeException lifecycleFailure) {
                 logger.error("Lifecycle setup for assignment {} failed closed", leased.id(), lifecycleFailure);
+                if (writerCapability != null && taskRunLifecycleService != null) {
+                    try { taskRunLifecycleService.releaseWriterClaim(writerCapability); } catch (Exception ignored) { }
+                }
                 return fail(assignmentService.get(leased.id()),
                     "Task-run lifecycle setup failed: " + lifecycleFailure.getMessage());
             }
         }
 
         final TaskRunWriteCapability activeWriter = writerCapability;
-        ScheduledFuture<?> heartbeat = startLeaseHeartbeat(
-            leased.id(), leased.leaseFence(), activeWriter);
-        OrchestrationTaskContext taskContext = new OrchestrationTaskContext(
-            leased.agentId(), profile != null ? profile.name() : null, leased.jobId(),
-            leased.id(), null, resolveProjectId(leased),
-            leased.workspaceType(), leased.workspaceKey(), leased.workspaceIdentity(),
-            leased.assignmentType().name(), leased.runDisplayName(),
-            taskRunLocation != null ? taskRunLocation.confinedPath().toString() : workspaceDescriptor.root().toString(),
-            null, taskRunLocation,
-            taskRunLocation == null ? null : workspaceDirectoryService.resolveRunOutput(taskRunLocation),
-            attemptId, writerCapability, workspaceDescriptor
-        );
-
-        // Validate project membership (projectId is metadata only)
-        String projectId = resolveProjectId(leased);
-        if (StringUtils.hasText(projectId) && projectService != null) {
-            if (!projectService.isMember(projectId, leased.agentId())) {
-                heartbeat.cancel(false);
-                return fail(assignmentService.get(leased.id()),
-                    "Agent " + leased.agentId() + " is not a member of project " + projectId);
-            }
-        }
-
+        ScheduledFuture<?> heartbeat = null;
         try {
+            heartbeat = startLeaseHeartbeat(
+                leased.id(), leased.leaseFence(), activeWriter);
+            OrchestrationTaskContext taskContext = new OrchestrationTaskContext(
+                leased.agentId(), profile != null ? profile.name() : null, leased.jobId(),
+                leased.id(), null, resolveProjectId(leased),
+                leased.workspaceType(), leased.workspaceKey(), leased.workspaceIdentity(),
+                leased.assignmentType().name(), leased.runDisplayName(),
+                taskRunLocation != null ? taskRunLocation.confinedPath().toString() : workspaceDescriptor.root().toString(),
+                null, taskRunLocation,
+                taskRunLocation == null ? null : workspaceDirectoryService.resolveRunOutput(taskRunLocation),
+                attemptId, writerCapability, workspaceDescriptor
+            );
+
+            // Validate project membership (projectId is metadata only)
+            String projectId = resolveProjectId(leased);
+            if (StringUtils.hasText(projectId) && projectService != null) {
+                if (!projectService.isMember(projectId, leased.agentId())) {
+                    heartbeat.cancel(false);
+                    WorkAssignment failed = fail(assignmentService.get(leased.id()),
+                        "Agent " + leased.agentId() + " is not a member of project " + projectId);
+                    finishWriterForResult(activeWriter, failed);
+                    return failed;
+                }
+            }
             OrchestrationTaskContextHolder.set(taskContext);
             WorkAssignment result = switch (leased.assignmentType()) {
                 case TASK_RUN -> runTask(leased);
@@ -297,6 +302,9 @@ public class OrchestrationRunnerService {
         } catch (TaskRunLifecycleService.StaleWriterException
                  | AssignmentService.StaleAssignmentLeaseException stale) {
             logger.warn("Stale worker stopped for assignment {}: {}", leased.id(), stale.getMessage());
+            if (activeWriter != null && taskRunLifecycleService != null) {
+                try { taskRunLifecycleService.releaseWriterClaim(activeWriter); } catch (Exception ignored) { }
+            }
             return assignmentService.get(leased.id());
         } catch (RuntimeException exception) {
             WorkAssignment current = assignmentService.get(leased.id());
@@ -310,7 +318,7 @@ public class OrchestrationRunnerService {
             return failed;
         } finally {
             OrchestrationTaskContextHolder.clear();
-            heartbeat.cancel(false);
+            if (heartbeat != null) heartbeat.cancel(false);
         }
     }
 

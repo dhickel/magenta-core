@@ -54,30 +54,65 @@ public final class SchemaMigrationRunner {
             "task_run_locations", "task_run_attempts", "task_run_idempotent_ops",
             "task_run_native_links", "assignment_fence_generations", "writer_claim_generations",
             "task_run_links");
+    private static final List<String> FOUNDATION_TABLES_V3 = List.of(
+            "task_run_locations", "task_run_attempts", "task_run_idempotent_ops",
+            "task_run_native_links", "assignment_fence_generations", "writer_claim_generations",
+            "task_run_links", "output_publications");
+    private static final List<String> FOUNDATION_TABLES_V4 = List.of(
+            "task_run_locations", "task_run_attempts", "task_run_idempotent_ops",
+            "task_run_native_links", "assignment_fence_generations", "writer_claim_generations",
+            "task_run_links", "output_publications", "skill_candidate_versions",
+            "skill_candidate_observations", "skill_exact_assignments",
+            "skill_legacy_conversion_diagnostics");
     private static final Set<String> FOUNDATION_INDEXES_V1 = Set.of(
             "idx_task_run_locations_workspace", "idx_task_run_locations_source",
             "idx_task_run_attempts_status", "idx_task_run_native_links_assignment",
             "idx_task_run_native_links_workflow_child", "idx_task_run_native_links_job_work_item");
     private static final Set<String> FOUNDATION_INDEXES_V2 = Set.of(
             "idx_writer_claim_generations_current", "idx_task_run_links_child");
+    private static final Set<String> FOUNDATION_INDEXES_V3 = Set.of(
+            "idx_output_publications_workspace", "idx_output_publications_task_run",
+            "idx_output_publications_state", "idx_output_publications_reconciliation");
+    private static final Set<String> FOUNDATION_INDEXES_V4 = Set.of(
+            "idx_skill_candidate_versions_lookup", "idx_skill_candidate_observations_candidate",
+            "idx_skill_candidate_observations_scan", "idx_skill_exact_assignments_target",
+            "idx_skill_exact_assignments_operation_key");
 
-    private static final Map<String, List<String>> FOUNDATION_COLUMNS = Map.of(
-            "task_run_locations", List.of("task_run_id", "source_kind", "source_id", "workspace_type",
+    private static final Map<String, List<String>> FOUNDATION_COLUMNS = Map.ofEntries(
+            Map.entry("task_run_locations", List.of("task_run_id", "source_kind", "source_id", "workspace_type",
                     "workspace_key", "workspace_identity", "task_path_key", "root_relative_path",
-                    "lineage_parent_task_run_id", "lineage_mode", "created_at", "updated_at"),
-            "task_run_attempts", List.of("task_run_id", "attempt_number", "status", "started_at",
-                    "completed_at", "error_text", "created_at", "updated_at"),
-            "task_run_idempotent_ops", List.of("id", "operation_type", "operation_key", "request_digest",
-                    "operation_state", "task_run_id", "result_json", "created_at", "updated_at"),
-            "task_run_native_links", List.of("task_run_id", "native_kind", "native_run_id",
-                    "assignment_id", "workflow_child_id", "job_work_item_id", "created_at"),
-            "task_run_writer_claims", List.of("task_run_id", "attempt_number", "claim_generation",
-                    "owner_id", "fence_token", "created_at"),
-            "assignment_fence_generations", List.of("assignment_id", "generation", "owner_id", "claimed_at"),
-            "writer_claim_generations", List.of("task_run_id", "attempt_number", "generation", "owner_id",
-                    "fence_token", "is_current", "superseded_at", "created_at"),
-            "task_run_links", List.of("parent_task_run_id", "child_task_run_id", "link_type",
-                    "link_key", "created_at"));
+                    "lineage_parent_task_run_id", "lineage_mode", "created_at", "updated_at")),
+            Map.entry("task_run_attempts", List.of("task_run_id", "attempt_number", "status", "started_at",
+                    "completed_at", "error_text", "created_at", "updated_at")),
+            Map.entry("task_run_idempotent_ops", List.of("id", "operation_type", "operation_key", "request_digest",
+                    "operation_state", "task_run_id", "result_json", "created_at", "updated_at")),
+            Map.entry("task_run_native_links", List.of("task_run_id", "native_kind", "native_run_id",
+                    "assignment_id", "workflow_child_id", "job_work_item_id", "created_at")),
+            Map.entry("task_run_writer_claims", List.of("task_run_id", "attempt_number", "claim_generation",
+                    "owner_id", "fence_token", "created_at")),
+            Map.entry("assignment_fence_generations", List.of("assignment_id", "generation", "owner_id", "claimed_at")),
+            Map.entry("writer_claim_generations", List.of("task_run_id", "attempt_number", "generation", "owner_id",
+                    "fence_token", "is_current", "superseded_at", "created_at")),
+            Map.entry("task_run_links", List.of("parent_task_run_id", "child_task_run_id", "link_type",
+                    "link_key", "created_at")),
+            Map.entry("output_publications", List.of("artifact_id", "publication_origin", "workspace_kind",
+                    "workspace_key", "workspace_identity", "task_run_id", "task_path_key",
+                    "native_run_id", "attempt_number", "root_relative_path", "staging_path",
+                    "operation_key", "request_digest", "content_sha256",
+                    "publication_state", "reconciliation_state", "failure_detail",
+                    "expected_sha256", "verified_sha256", "verified_size", "media_type",
+                    "writer_owner_id", "fence_generation", "logical_name", "file_extension",
+                    "created_at", "updated_at", "staged_at", "published_at")),
+            Map.entry("skill_candidate_versions", List.of("id", "logical_key", "scope_type",
+                    "authoritative_root_id", "provenance", "format_version", "content_digest", "created_at")),
+            Map.entry("skill_candidate_observations", List.of("id", "candidate_version_id", "is_available",
+                    "diagnostics_json", "observed_at", "scan_id")),
+            Map.entry("skill_exact_assignments", List.of("id", "candidate_version_id", "logical_key",
+                    "target_type", "target_key", "enabled", "operation_key", "actor", "created_at", "updated_at")),
+            Map.entry("skill_legacy_conversion_diagnostics", List.of("id", "agent_id", "logical_key", "result",
+                    "candidate_version_id", "diagnostics_json", "converted_at"))
+    );
+
 
     private final DataSource dataSource;
     private final JdbcTemplate jdbcTemplate;
@@ -238,6 +273,7 @@ public final class SchemaMigrationRunner {
             validateOwnedSchema(connection, resources.getLast().version());
             return true;
         } catch (MigrationException incomplete) {
+            log.warn("Existing schema does not match latest migration-owned shape: {}", incomplete.getMessage());
             return false;
         }
     }
@@ -320,7 +356,9 @@ public final class SchemaMigrationRunner {
         if (latestVersion < 1) {
             return;
         }
-        List<String> expectedTables = latestVersion >= 2 ? FOUNDATION_TABLES_V2 : FOUNDATION_TABLES_V1;
+        List<String> expectedTables = latestVersion >= 4 ? FOUNDATION_TABLES_V4
+                : latestVersion >= 3 ? FOUNDATION_TABLES_V3
+                : latestVersion >= 2 ? FOUNDATION_TABLES_V2 : FOUNDATION_TABLES_V1;
         for (String table : expectedTables) {
             List<String> actual = tableColumns(connection, table);
             List<String> expectedCols = FOUNDATION_COLUMNS.get(table);
@@ -399,6 +437,45 @@ public final class SchemaMigrationRunner {
         if (latestVersion >= 2 && !allIndexes.containsAll(FOUNDATION_INDEXES_V2)) {
             throw new MigrationException("Missing migration-owned v2 indexes: "
                     + FOUNDATION_INDEXES_V2.stream().filter(index -> !allIndexes.contains(index)).toList());
+        }
+        if (latestVersion >= 3) {
+            if (!allIndexes.containsAll(FOUNDATION_INDEXES_V3)) {
+                throw new MigrationException("Missing migration-owned v3 indexes: "
+                        + FOUNDATION_INDEXES_V3.stream().filter(index -> !allIndexes.contains(index)).toList());
+            }
+            String pubs = normalized(tableSql(connection, "output_publications"));
+            if (!pubs.contains("publication_origin in ('task_run', 'chat', 'legacy')")
+                    || !pubs.contains("workspace_kind in ('agent', 'chat', 'user')")
+                    || !pubs.contains("publication_state in (")
+                    || !pubs.contains("'reserved', 'staged', 'published', 'failed', 'integrity_failed'")
+                    || !pubs.contains("unique (publication_origin, operation_key)")
+                    || !pubs.contains("unique (workspace_kind, workspace_key, root_relative_path)")
+                    || !pubs.contains("length(request_digest) = 64")
+                    || !pubs.contains("length(expected_sha256) = 64")
+                    || !pubs.contains("length(content_sha256) = 64")) {
+                throw new MigrationException("output_publications is missing required constraints");
+            }
+        }
+        if (latestVersion >= 4) {
+            if (!allIndexes.containsAll(FOUNDATION_INDEXES_V4)) {
+                throw new MigrationException("Missing migration-owned v4 indexes: "
+                        + FOUNDATION_INDEXES_V4.stream().filter(index -> !allIndexes.contains(index)).toList());
+            }
+            String candidates = normalized(tableSql(connection, "skill_candidate_versions"));
+            String observations = normalized(tableSql(connection, "skill_candidate_observations"));
+            String overlays = normalized(tableSql(connection, "skill_exact_assignments"));
+            String legacy = normalized(tableSql(connection, "skill_legacy_conversion_diagnostics"));
+            if (!candidates.contains("scope_type in ('workspace', 'bound_agent', 'project', 'global')")
+                    || !candidates.contains("provenance in ('global_package', 'workspace_flat')")
+                    || !candidates.contains("length(content_digest) = 64")
+                    || !observations.contains("is_available in (0, 1)")
+                    || !observations.contains("references skill_candidate_versions(id)")
+                    || !overlays.contains("target_type in ('agent', 'project', 'job', 'task', 'workflow', 'chat_session')")
+                    || !overlays.contains("unique (logical_key, target_type, target_key)")
+                    || !overlays.contains("references skill_candidate_versions(id)")
+                    || !legacy.contains("unique (agent_id, logical_key)")) {
+                throw new MigrationException("scoped skill tables are missing required constraints");
+            }
         }
     }
 

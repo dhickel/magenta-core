@@ -194,6 +194,39 @@ class SchemaMigrationRunnerTest {
     }
 
     @Test
+    void allOrderedMigrationsPreserveLegacyRowsWithoutInventingTaskOrAbsolutePath() throws Exception {
+        try (SingleConnectionDataSource dataSource = memoryDataSource()) {
+            JdbcTemplate jdbc = new JdbcTemplate(dataSource);
+            jdbc.execute("create table work_assignments(id text primary key)");
+            jdbc.execute("""
+                    create table run_output_artifacts(
+                        id text primary key, run_id text not null, plan_id text not null,
+                        agent_id text, job_id text, job_assignment_id text, job_run_id text,
+                        project_id text, workspace_type text, workspace_key text,
+                        workspace_identity text, run_type text, output_name text not null,
+                        artifact_type text not null, file_name text not null,
+                        file_path text not null, content_json text, created_at text not null)
+                    """);
+            jdbc.update("""
+                    insert into run_output_artifacts(id, run_id, plan_id, workspace_type,
+                        workspace_key, workspace_identity, output_name, artifact_type,
+                        file_name, file_path, created_at)
+                    values ('legacy-1', 'native-run', 'plan-1', 'agent', 'agent-1',
+                        'agent/agent-1', 'output', 'text', 'out.txt', '/old/root/out.txt', 'now')
+                    """);
+
+            run(dataSource, allMigrations());
+
+            Map<String, Object> migrated = jdbc.queryForMap(
+                    "select task_run_id, root_relative_path from output_publications where artifact_id = 'legacy-1'");
+            assertEquals(null, migrated.get("task_run_id"));
+            assertEquals("legacy/unavailable/legacy-1", migrated.get("root_relative_path"));
+            assertEquals(4, jdbc.queryForObject("select count(*) from schema_migrations", Integer.class));
+            assertTrue(tableExists(jdbc, "skill_candidate_versions"));
+        }
+    }
+
+    @Test
     void bootstrapSchemaRejectsMalformedBookkeepingAndNoResourcesStillBootstraps() throws Exception {
         try (SingleConnectionDataSource malformed = memoryDataSource()) {
             new JdbcTemplate(malformed).execute("create table schema_migrations(version integer primary key)");
@@ -253,6 +286,18 @@ class SchemaMigrationRunnerTest {
 
     private static Resource[] migrations() {
         return new Resource[] { foundation(), lifecycle() };
+    }
+
+    private static Resource publication() {
+        return new ClassPathResource("db/migrations/003-artifact-publication.sql");
+    }
+
+    private static Resource scopedSkills() {
+        return new ClassPathResource("db/migrations/004-scoped-skill-resolution.sql");
+    }
+
+    private static Resource[] allMigrations() {
+        return new Resource[] { foundation(), lifecycle(), publication(), scopedSkills() };
     }
 
     private static Resource resource(String name, String sql) {

@@ -89,6 +89,7 @@ class OutputArtifactPathSemanticsTest {
         JdbcTemplate jdbc = new JdbcTemplate(
             new SingleConnectionDataSource("jdbc:sqlite::memory:?foreign_keys=true", true)
         );
+        OutputArtifactTestSchema.initialize(jdbc);
         OutputArtifactRepository repository = new OutputArtifactRepository(jdbc);
         Path dataRoot = Files.createDirectories(tempDir.resolve(name).resolve("data"));
         WorkspaceDirectoryService directoryService = WorkspaceDirectoryServiceTestSupport.directoryService(dataRoot);

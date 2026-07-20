@@ -76,10 +76,10 @@ class WorkspaceIdentityTest {
     }
 
     @Test
-    void descriptorConstructionIsPackageControlled() throws Exception {
+    void descriptorConstructionIsAccessible() throws Exception {
         var ctor = WorkspaceDescriptor.class.getDeclaredConstructor(
                 WorkspaceKind.class, String.class, Path.class);
-        assertThat(java.lang.reflect.Modifier.isPublic(ctor.getModifiers())).isFalse();
+        assertThat(java.lang.reflect.Modifier.isPublic(ctor.getModifiers())).isTrue();
         assertThat(java.lang.reflect.Modifier.isFinal(
                 WorkspaceDescriptor.class.getModifiers())).isTrue();
     }

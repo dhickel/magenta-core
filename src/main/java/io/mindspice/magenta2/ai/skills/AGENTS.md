@@ -3,8 +3,9 @@
 This package owns Agent Skills filesystem discovery, `SKILL.md` parsing/validation, metadata persistence, agent assignment metadata, runtime catalog filtering, root-confined file management, and dedicated activation behavior for the Magenta root skill repository.
 
 ### Responsibilities
-- Resolve the Magenta-owned skill repository at `<magenta-root>/skills`.
-- Enforce confined path resolution for skill filesystem operations.
+- Resolve the Magenta-owned skill repository at `<magenta-root>/skills` and read-only flat skill roots at trusted AGENT/USER workspace `.skills/` locations.
+- Normalize scoped candidates, parser diagnostics, immutable digests, exact assignment overlays, and explicit shadow/conflict/stale outcomes without changing model-visible activation before trust snapshots.
+- Enforce confined path resolution for skill filesystem operations and reject escaping/link/non-regular package-tree entries.
 - Parse and validate `SKILL.md` frontmatter/body with stable diagnostics.
 - Discover skill directories and persist metadata, diagnostics, and optional-directory visibility flags.
 - Persist agent skill assignments separately from approved tool metadata.
@@ -16,7 +17,7 @@ This package owns Agent Skills filesystem discovery, `SKILL.md` parsing/validati
 
 ### Change guidance
 - Keep this package backend-domain only. Do not add web/controller rendering logic here.
-- Do not scan project-local `.agents/skills` in MVP.
+- Do not scan guessed project-local `.agents/skills`; project scope requires an explicit trusted authority.
 - Treat `allowed-tools` as experimental metadata only unless explicitly approved otherwise.
 - Do not store skill assignments in `agent_profiles.approved_tool_names_json`.
 - Do not eagerly load `scripts/`, `references/`, or `assets/` file content during discovery.

@@ -15,6 +15,7 @@ import io.mindspice.magenta2.ai.orchestration.runtime.JobService;
 import io.mindspice.magenta2.ai.orchestration.workspaces.OutputArtifactContext;
 import io.mindspice.magenta2.ai.orchestration.workspaces.OutputArtifactRepository;
 import io.mindspice.magenta2.ai.orchestration.workspaces.OutputArtifactService;
+import io.mindspice.magenta2.ai.orchestration.workspaces.OutputArtifactTestSchema;
 import io.mindspice.magenta2.ai.orchestration.workspaces.RootRelativePathService;
 import io.mindspice.magenta2.ai.orchestration.workspaces.RunOutputArtifact;
 import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceDirectoryService;
@@ -205,6 +206,7 @@ class OutputControllerTest {
         JdbcTemplate jdbcTemplate = new JdbcTemplate(
             new SingleConnectionDataSource("jdbc:sqlite::memory:?foreign_keys=true", true)
         );
+        OutputArtifactTestSchema.initialize(jdbcTemplate);
         Path dataRoot = Files.createDirectories(tempDir.resolve("data"));
         WorkspaceDirectoryService directoryService = WorkspaceDirectoryServiceTestSupport.directoryService(dataRoot);
         OutputArtifactRepository outputArtifactRepository = new OutputArtifactRepository(jdbcTemplate);

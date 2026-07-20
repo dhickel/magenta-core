@@ -775,9 +775,155 @@ create table if not exists task_run_links (
 
 create index if not exists idx_task_run_links_child on task_run_links(child_task_run_id);
 
+-- ════════════════════════════════════════════════════════════════
+--  Artifact Publication (migration 003 equivalent)
+-- ════════════════════════════════════════════════════════════════
+
+create table if not exists output_publications (
+    artifact_id          text primary key
+        check (length(artifact_id) between 1 and 255
+            and instr(artifact_id, '/') = 0 and instr(artifact_id, char(92)) = 0
+            and artifact_id not in ('.', '..')),
+    publication_origin   text not null check (publication_origin in ('TASK_RUN', 'CHAT', 'LEGACY')),
+    workspace_kind       text not null check (workspace_kind in ('agent', 'chat', 'user')),
+    workspace_key        text not null check (length(workspace_key) > 0
+        and workspace_key not in ('.', '..')
+        and instr(workspace_key, '/') = 0 and instr(workspace_key, char(92)) = 0),
+    workspace_identity   text not null
+        check (workspace_identity = workspace_kind || '/' || workspace_key),
+    task_run_id          text,
+    task_path_key        text,
+    native_run_id        text,
+    attempt_number       integer check (attempt_number is null or attempt_number > 0),
+    root_relative_path   text not null
+        check (length(root_relative_path) > 0
+            and substr(root_relative_path, 1, 1) <> '/'
+            and instr(root_relative_path, '\\') = 0
+            and instr(root_relative_path, char(10)) = 0),
+    staging_path         text
+        check (staging_path is null or (length(staging_path) > 0
+            and substr(staging_path, 1, 1) <> '/'
+            and instr(staging_path, '\\') = 0)),
+    operation_key        text not null check (length(operation_key) > 0),
+    request_digest       text not null check (
+        length(request_digest) = 64 and request_digest not glob '*[^0-9a-f]*'),
+    content_sha256       text not null check (
+        length(content_sha256) = 64 and content_sha256 not glob '*[^0-9a-f]*'),
+    publication_state    text not null check (publication_state in (
+        'RESERVED', 'STAGED', 'PUBLISHED', 'FAILED', 'INTEGRITY_FAILED')),
+    reconciliation_state text check (reconciliation_state is null or reconciliation_state in (
+        'RECONCILED', 'UNRESOLVED', 'CLEANUP_PENDING', 'DELETING')),
+    failure_detail       text,
+    expected_sha256      text not null check (
+        length(expected_sha256) = 64 and expected_sha256 not glob '*[^0-9a-f]*'),
+    verified_sha256      text check (
+        verified_sha256 is null or (length(verified_sha256) = 64
+            and verified_sha256 not glob '*[^0-9a-f]*')),
+    verified_size        integer check (verified_size is null or verified_size >= 0),
+    media_type           text check (media_type is null or length(media_type) > 0),
+    writer_owner_id      text,
+    fence_generation     integer check (fence_generation is null or fence_generation > 0),
+    logical_name         text not null check (length(logical_name) > 0),
+    file_extension       text,
+    created_at           text not null,
+    updated_at           text not null,
+    staged_at            text,
+    published_at         text,
+    unique (publication_origin, operation_key),
+    unique (workspace_kind, workspace_key, root_relative_path)
+);
+
+create index if not exists idx_output_publications_workspace
+    on output_publications (workspace_identity, created_at desc);
+create index if not exists idx_output_publications_task_run
+    on output_publications (task_run_id, created_at desc)
+    where task_run_id is not null;
+create index if not exists idx_output_publications_state
+    on output_publications (publication_state, workspace_identity);
+create index if not exists idx_output_publications_reconciliation
+    on output_publications (reconciliation_state, updated_at)
+    where reconciliation_state is not null;
+
 create table if not exists schema_migrations (
     version       integer primary key,
     resource_name text not null unique,
     checksum      text not null check (length(checksum) = 64),
     applied_at    text not null
+);
+
+-- ════════════════════════════════════════════════════════════════
+--  Scoped Skill Resolution (migration 004 equivalent)
+-- ════════════════════════════════════════════════════════════════
+
+create table if not exists skill_candidate_versions (
+    id                    integer primary key autoincrement,
+    logical_key           text not null check (length(logical_key) between 1 and 64
+        and logical_key not glob '*[^a-z0-9-]*' and logical_key not like '%--%'),
+    scope_type            text not null check (scope_type in ('WORKSPACE', 'BOUND_AGENT', 'PROJECT', 'GLOBAL')),
+    authoritative_root_id text not null check (length(authoritative_root_id) between 1 and 263
+        and instr(authoritative_root_id, char(92)) = 0
+        and substr(authoritative_root_id, 1, 1) <> '/'
+        and instr(authoritative_root_id, '..') = 0
+        and ((scope_type = 'GLOBAL' and authoritative_root_id = 'global')
+          or (scope_type = 'PROJECT' and authoritative_root_id like 'project/%')
+          or (scope_type in ('WORKSPACE', 'BOUND_AGENT')
+              and (authoritative_root_id like 'agent/%' or authoritative_root_id like 'user/%')))),
+    provenance            text not null check (provenance in ('GLOBAL_PACKAGE', 'WORKSPACE_FLAT')),
+    format_version        integer not null,
+    content_digest        text not null check (length(content_digest) = 64 and content_digest not glob '*[^0-9a-f]*'),
+    created_at            text not null,
+    unique (logical_key, scope_type, authoritative_root_id, provenance, format_version, content_digest)
+);
+
+create index if not exists idx_skill_candidate_versions_lookup
+    on skill_candidate_versions (logical_key, scope_type, authoritative_root_id);
+
+create table if not exists skill_candidate_observations (
+    id                    integer primary key autoincrement,
+    candidate_version_id  integer not null,
+    is_available          integer not null check (is_available in (0, 1)),
+    diagnostics_json      text not null check (length(diagnostics_json) <= 32768),
+    observed_at           text not null,
+    scan_id               text not null check (length(scan_id) between 1 and 255
+        and instr(scan_id, char(92)) = 0),
+    foreign key (candidate_version_id) references skill_candidate_versions(id)
+);
+
+create index if not exists idx_skill_candidate_observations_candidate
+    on skill_candidate_observations (candidate_version_id, observed_at desc);
+create index if not exists idx_skill_candidate_observations_scan
+    on skill_candidate_observations (scan_id);
+
+create table if not exists skill_exact_assignments (
+    id                    integer primary key autoincrement,
+    candidate_version_id  integer not null,
+    logical_key           text not null,
+    target_type           text not null check (target_type in ('AGENT', 'PROJECT', 'JOB', 'TASK', 'WORKFLOW', 'CHAT_SESSION')),
+    target_key            text not null check (length(target_key) between 1 and 255
+        and instr(target_key, '/') = 0 and instr(target_key, char(92)) = 0),
+    enabled               integer not null check (enabled in (0, 1)),
+    operation_key         text check (operation_key is null or length(operation_key) between 1 and 255),
+    actor                 text check (actor is null or (length(actor) between 1 and 255
+        and instr(actor, '/') = 0 and instr(actor, char(92)) = 0)),
+    created_at            text not null,
+    updated_at            text not null,
+    unique (logical_key, target_type, target_key),
+    foreign key (candidate_version_id) references skill_candidate_versions(id)
+);
+
+create index if not exists idx_skill_exact_assignments_target
+    on skill_exact_assignments (target_type, target_key);
+create unique index if not exists idx_skill_exact_assignments_operation_key
+    on skill_exact_assignments (operation_key) where operation_key is not null;
+
+create table if not exists skill_legacy_conversion_diagnostics (
+    id                    integer primary key autoincrement,
+    agent_id              text not null,
+    logical_key           text not null,
+    result                text not null check (result in ('CONVERTED', 'UNAMBIGUOUS', 'AMBIGUOUS', 'NO_MATCH')),
+    candidate_version_id  integer,
+    diagnostics_json      text not null check (length(diagnostics_json) <= 32768),
+    converted_at          text not null,
+    unique (agent_id, logical_key),
+    foreign key (candidate_version_id) references skill_candidate_versions(id)
 );

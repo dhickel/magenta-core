@@ -14,7 +14,7 @@ import io.mindspice.magenta2.ai.orchestration.workspaces.TaskRunLocation;
 import io.mindspice.magenta2.ai.orchestration.workspaces.TaskRunWriteCapability;
 import io.mindspice.magenta2.ai.orchestration.workspaces.TaskSourceKind;
 import io.mindspice.magenta2.ai.orchestration.workspaces.OutputArtifactService;
-import io.mindspice.magenta2.ai.orchestration.workspaces.RunOutputArtifact;
+import io.mindspice.magenta2.ai.orchestration.workspaces.PublicationRecord;
 import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceDescriptor;
 import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceDirectoryService;
 import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceKind;
@@ -636,17 +636,9 @@ public class WorkflowRunner {
 
     private Map<String, Object> executeLogNode(WorkflowNode node, Map<String, Object> inputs, WorkflowRun run) {
         try {
-            Path outputDir = outputPathFor(run);
             for (Map.Entry<String, Object> entry : inputs.entrySet()) {
-                outputArtifactService.materialize(
-                    run.id(),
-                    run.workflowId(),
-                    node.key() + "_" + entry.getKey(),
-                    PlanFieldType.STRING,
-                    entry.getValue(),
-                    outputDir,
-                    outputContext()
-                );
+                publishTypedOutput(run, "log:" + node.key() + ":" + entry.getKey(),
+                    node.key() + "_" + entry.getKey(), PlanFieldType.STRING, entry.getValue());
             }
         } catch (Exception e) {
             throw new IllegalStateException("Failed to materialize log node outputs", e);
@@ -707,26 +699,45 @@ public class WorkflowRunner {
         if (finalOutputs.isEmpty()) {
             return List.of();
         }
-        Path outputDir = outputPathFor(run);
         List<String> artifactIds = new ArrayList<>();
         for (Map.Entry<String, Object> entry : finalOutputs.entrySet()) {
             try {
-                PlanFieldType type = inferType(entry.getValue());
-                RunOutputArtifact artifact = outputArtifactService.materialize(
-                    run.id(),
-                    run.workflowId(),
-                    entry.getKey(),
-                    type,
-                    entry.getValue(),
-                    outputDir,
-                    outputContext()
-                );
-                artifactIds.add(artifact.id());
+                PublicationRecord artifact = publishTypedOutput(run, "final:" + entry.getKey(),
+                    entry.getKey(), inferType(entry.getValue()), entry.getValue());
+                if (artifact != null) artifactIds.add(artifact.artifactId());
             } catch (IOException e) {
-                throw new IllegalStateException("Failed to materialize final output '" + entry.getKey() + "'", e);
+                throw new IllegalStateException("Failed to publish final output '" + entry.getKey() + "'", e);
             }
         }
         return artifactIds;
+    }
+
+    private PublicationRecord publishTypedOutput(WorkflowRun run, String operationSuffix,
+                                                  String outputName, PlanFieldType type,
+                                                  Object value) throws IOException {
+        OrchestrationTaskContext context = OrchestrationTaskContextHolder.current();
+        if (context == null || context.runOutputLocation() == null || context.writerCapability() == null) {
+            // Standalone/control-plane execution has no authorized task writer. It may
+            // complete, but must not fall back to arbitrary-path publication.
+            return null;
+        }
+        String operationKey = "workflow-output:" + run.id() + ":" + operationSuffix;
+        if (type == PlanFieldType.FILE_PATH) {
+            Path source = Path.of(String.valueOf(value));
+            if (!source.isAbsolute()) source = context.taskRunLocation().confinedPath().resolve(source).normalize();
+            return outputArtifactService.publishTaskRunFile(context.runOutputLocation(),
+                context.writerCapability(), operationKey, outputName, null, source,
+                run.id(), context.attemptNumber());
+        }
+        byte[] bytes = switch (type) {
+            case JSON -> toJson(value).getBytes(java.nio.charset.StandardCharsets.UTF_8);
+            case USER_MESSAGE, STRING, NUMBER -> String.valueOf(value).getBytes(java.nio.charset.StandardCharsets.UTF_8);
+            case FILE_PATH -> throw new IllegalStateException("handled above");
+        };
+        String mediaType = type == PlanFieldType.JSON ? "application/json" : "text/plain";
+        return outputArtifactService.publishTaskRunBytes(context.runOutputLocation(),
+            context.writerCapability(), operationKey, outputName, mediaType, bytes,
+            run.id(), context.attemptNumber());
     }
 
     private PlanFieldType inferType(Object value) {

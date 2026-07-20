@@ -14,6 +14,9 @@ Schema data ownership validation for workspace leases, output attribution, inbox
 # Key Takeaways
 
 - Clean `schema.sql` should describe the current table shape; repository add-column paths remain guarded warm-DB compatibility, not the primary clean-startup source.
+- Migration validation must model each contiguous version separately. Treating versions 003 and 004 as one table set hid the scoped-skill foundation, while validating a latest `schema.sql` table against the version-001 shape produced the misleading `task_run_idempotent_ops` startup blocker.
+- SQL-text structural checks must tolerate formatting around multiline `IN (` lists while still checking every required value; an exact single-line substring can reject an equivalent fresh schema.
+- Once a domain table moves to ordered migration ownership, remove repository DDL and initialize unit-test databases explicitly from `schema.sql` rather than weakening production ownership.
 - `workspace_roots` is legacy. Clean schema must not create it, and warm migration should copy roots into `workspaces`, rebuild leases only when the FK still points at roots, preserve lease rows, then drop roots.
 - Workspace leases are durable orchestration state. Do not drop active, release-requested, or released lease rows during startup migration.
 - `inbox_messages` is workflow-owned for workflow/user approval and run-output delivery. `agent_inbox_messages` is runtime-owned for direct-line agent/operator inbox messages.

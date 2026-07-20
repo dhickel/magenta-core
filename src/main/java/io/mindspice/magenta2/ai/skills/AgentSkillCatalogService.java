@@ -16,6 +16,7 @@ import java.util.List;
 import java.util.Set;
 import java.util.stream.Stream;
 
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
@@ -25,6 +26,7 @@ public class AgentSkillCatalogService {
     private final AgentSkillRepositoryService repositoryService;
     private final AgentSkillParser parser;
     private final AgentSkillRepository repository;
+    private SkillResolutionService skillResolutionService;
 
     public AgentSkillCatalogService(
         AgentSkillRepositoryService repositoryService,
@@ -34,6 +36,19 @@ public class AgentSkillCatalogService {
         this.repositoryService = repositoryService;
         this.parser = parser;
         this.repository = repository;
+    }
+
+    @Autowired(required = false)
+    void setSkillResolutionService(SkillResolutionService skillResolutionService) {
+        this.skillResolutionService = skillResolutionService;
+    }
+
+    /** Normal control-plane catalog resolution, including exact overlays. */
+    public SkillResolutionService.SkillResolutionResult resolveScoped(SkillResolutionContext context) {
+        if (skillResolutionService == null) {
+            throw new IllegalStateException("Scoped skill resolution is unavailable");
+        }
+        return skillResolutionService.resolve(context);
     }
 
     public List<AgentSkill> listAll() {
@@ -313,4 +328,31 @@ public class AgentSkillCatalogService {
         int warningCount,
         int invalidCount
     ) { }
+
+    // ── Phase 06 control-plane bridge ──
+
+    /**
+     * List all catalog entries that are loadable. Preserves the existing
+     * model-visible behavior: only name and description are exposed.
+     * Phase 07 will cut over to approved snapshots.
+     */
+    public List<AgentSkillCatalogEntry> loadableCatalogEntries() {
+        List<AgentSkillCatalogEntry> entries = new ArrayList<>();
+        for (AgentSkill skill : listAll()) {
+            if (skill.status().loadable()
+                && skill.name() != null && !skill.name().isBlank()
+                && skill.description() != null && !skill.description().isBlank()) {
+                entries.add(new AgentSkillCatalogEntry(skill.name(), skill.description()));
+            }
+        }
+        return List.copyOf(entries);
+    }
+
+    /**
+     * Check whether a refresh would change any persisted candidate.
+     * Used by resolution callers to decide whether to persist observations.
+     */
+    public boolean hasCandidates() {
+        return !listAll().isEmpty();
+    }
 }

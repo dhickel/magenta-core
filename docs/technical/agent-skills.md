@@ -8,8 +8,8 @@ This document captures the implemented Agent Skills foundation from Phase 02 thr
 - **Implemented in Phase 03:** DB-backed agent skill assignments, runtime catalog filtering by assigned+enabled+loadable skills, prompt-time catalog disclosure, dedicated `activate_skill` loading with resource listing, and activation deduplication per conversation.
 - **Implemented in Phase 04:** `/api/skills` list/detail/refresh/create/diagnostics routes, root-confined file tree/view/save/create routes, assignment add/remove/list routes, and minimal `/skills` shell/fragments for phase-05 UI handoff.
 - **Implemented in Phase 05:** full `/skills` operational browser/editor with list/filter/detail, diagnostics, directory overview, file viewer/editor, add-file flow, optional top-level directory creation, guided scaffold creation, and HTMX assignment controls.
-- **Implemented in Phase 06 closeout:** full-suite validation, bounded startup proof, official-spec re-verification pass notes, browser-evidence reconciliation, and docs/spec/knowledge/changelog synchronization.
-- **Out of scope for MVP:** project-local `.agents/skills`, user-home/client-native scopes, layered assignment (project/job/task/workflow/chat/session), script trust/execution policy, and registry/package ingestion.
+- **Implemented in scoped-resolution Phase 06:** read-only flat `.skills/<name>.md` discovery for effective AGENT/USER and distinct bound-agent workspaces, normalized global-package candidates, immutable digest-qualified versions, exact AGENT/PROJECT/JOB/TASK/WORKFLOW/CHAT_SESSION overlays, and explicit malformed/stale/unavailable/disabled/conflict/shadow outcomes. Project discovery remains disabled unless a trusted authority is explicitly supplied.
+- **Out of scope:** user-home/client-native scopes, guessed project roots, trust approval/snapshots, script execution policy, registry ingestion, and model-visible activation cutover to scoped candidates.
 
 ## Repository Root
 
@@ -32,13 +32,7 @@ Persisted metadata currently includes:
 - `has_scripts`, `has_references`, `has_assets`
 - `content_hash`, `discovered_at`, `last_scanned_at`, `created_at`, `updated_at`
 
-Phase 03 adds `agent_skill_assignments` metadata:
-
-- `skill_id`, `skill_name`
-- `target_type` (`AGENT` in MVP), `target_id` (agent id)
-- `enabled`
-- `created_at`, `updated_at`
-- uniqueness on `(skill_name, target_type, target_id)` to prevent duplicate rows
+Phase 03 adds legacy `agent_skill_assignments` metadata. Migration 004 adds control-plane `skill_candidate_versions`, `skill_candidate_observations`, `skill_exact_assignments`, and bounded legacy-conversion diagnostics. Exact overlays bind a persisted immutable candidate id and support AGENT, PROJECT, JOB, TASK, WORKFLOW, and CHAT_SESSION target identifiers. Task and workflow overlays share one specificity level so contradictory applicable rows surface as a conflict.
 
 ## Service Ownership (Implemented)
 

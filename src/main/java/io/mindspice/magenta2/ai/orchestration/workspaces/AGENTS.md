@@ -17,8 +17,8 @@ This package owns filesystem-first workspace identity, descriptor resolution, co
 - Task identities use immutable definition ids and exact versioned `TaskPathKey` encoding. Display names never select or rename paths.
 - Task runs are children of `AGENT` or `USER`; `CHAT` is not task-selectable and `WorkspaceKind` remains closed.
 - Reads tolerate absent agent/chat roots and create no task, skill, run, output, or staging trees. User roots require explicit creation. Task-run provisioning creates only the canonical run hierarchy; publication remains a later owner.
-- Existing workspace-root `outputs/` data remains legacy/non-task data until later publication phases cut over.
-- Stored filesystem locations are data-root-relative and paired with workspace kind/key. Paths never authorize or reconstruct identity.
+- Existing workspace-root `outputs/` data remains legacy/non-task data. New task publication uses only trusted run-local outputs plus a current writer capability; typed chat publication remains chat-root-local.
+- Publication staging and final locations are data-root-relative, collision reservations are transactional, final placement is create-only, and published-byte reads verify the exact bytes returned. Paths never authorize or reconstruct identity.
 
 ### Change guidance
 - Pass trusted descriptors and child-location values across filesystem boundaries; never infer identity from `Path` or hand-concatenate reserved segments.

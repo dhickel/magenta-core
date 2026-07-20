@@ -23,8 +23,10 @@ public record WorkAssignment(
     Map<String, Object> output,
     Map<String, Object> evidence,
     String errorText,
+    @com.fasterxml.jackson.annotation.JsonIgnore
     String leaseOwner,
     Instant leaseExpiresAt,
+    @com.fasterxml.jackson.annotation.JsonIgnore
     long leaseFence,
     Instant createdAt,
     Instant updatedAt,
