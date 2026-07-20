@@ -30,6 +30,7 @@ This package owns shared application services and cross-domain building blocks.
 ### Responsibilities
 - Hold shared code only when more specific packages would otherwise duplicate real behavior.
 - Keep core abstractions small and justified by current callers.
+- Own ordered application-wide SQL migration execution under `core.persistence`; migration resources remain domain-specific and immutable.
 - Avoid turning this package into a catch-all.
 
 ### Change guidance
@@ -40,4 +41,5 @@ This package owns shared application services and cross-domain building blocks.
 
 ### Validation
 - Add focused tests for reusable behavior introduced here.
+- Migration changes require fresh/upgrade, checksum/bookkeeping, interruption, independent concurrency, schema-equivalence, and bounded startup checks.
 - Run tests for all packages that call changed core APIs.

@@ -11,7 +11,10 @@ The active layout beneath the configured data root is:
 - `workspace/agent/<agentId>/`
 - `workspace/chat/<conversationId>/`
 - `workspace/user/<name>/`
-- `<selected-root>/outputs/` — reserved and created lazily by publication
+- `<selected-agent-or-user>/tasks/<taskPathKey>/<taskRunId>/` — canonical task-run child, provisioned only by the task lifecycle
+- `<task-run>/outputs/` and `<task-run>/staging/` — reserved lazy children for later publication phases
+- `<selected-agent-or-user>/.skills/` — reserved lazy workspace skill root
+- `<selected-root>/outputs/` — existing legacy/non-task publication subtree
 
 Agent and chat roots may be absent on reads. A successful write or execution attempt may create the selected agent/chat root without starter files or eager children. User workspaces must be explicitly created before selection. Creating or enabling an agent profile does not allocate a filesystem root.
 
@@ -31,6 +34,14 @@ Runtime `AGENTS.md` files are user-authored only. Resolution is confined from th
 
 File and shell tools are confined to the selected descriptor root. They reject traversal, symlink escape, and mutation of `outputs/` or descendants. Tools update the active runtime path after confined operations so subsequent prompt context follows the actual target.
 
+## Canonical task-run identity
+
+Saved task, workflow, and job definitions use immutable definition ids to derive `TaskPathKey`. The exact v1 hash payload is byte `0x01`, source-kind byte `T`, `W`, or `J`, a two-byte unsigned big-endian UTF-8 id length, then the exact UTF-8 id bytes. No Unicode normalization or case folding occurs. The serialized key is `v1-<kind>-<64 lowercase SHA-256 hex characters>`.
+
+`plan_runs.id`, `workflow_runs.id`, and `job_runs.id` are canonical task-run ids for their respective families. Assignment, workflow-node, and job-work-item identities remain separate explicit linkage. `WorkspaceDirectoryService` recomputes keys and constructs trusted child values; callers cannot supply roots or reconstruct workspace identity from paths. Persisted locations contain workspace kind/key and a data-root-relative path only.
+
+Phase 01 establishes these locations but does not route execution or publication into them. Run provisioning creates no output or staging child.
+
 ## Output publication
 
 `OutputArtifactRepository` independently owns `run_output_artifacts` schema compatibility, writes, reads, updates, deletion, mapping, and attribution. `OutputArtifactService` has no `WorkspaceRepository` dependency.
@@ -44,7 +55,7 @@ Declared outputs publish directly beneath the selected descriptor's lazy `output
 - stores portable data-root-relative artifact paths;
 - retains run, task/plan, workflow, job, assignment, project, agent, workspace type/key/identity, and run-type attribution.
 
-No run, job, task, project, Work Area, scratch, staging, or discovery directory hierarchy is synthesized for active execution. Reads and failed validation do not create `outputs/`.
+Current execution remains on the legacy/non-task publication path until the later lifecycle, confinement, and publication phases cut over. Reads and failed validation create no workspace, `tasks/`, `.skills/`, run, output, or staging directory.
 
 `GET /api/outputs` supports attribution filters including `agentId`, `jobId`, `jobAssignmentId`, `jobRunId`, `projectId`, `workspaceType`, `workspaceKey`, `workspaceIdentity`, `runId`, `planId`, `runType`, `type`, and `limit`. Filters query metadata and never authorize or select a filesystem root.
 

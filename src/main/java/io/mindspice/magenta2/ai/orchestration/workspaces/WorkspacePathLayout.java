@@ -1,47 +1,89 @@
 package io.mindspice.magenta2.ai.orchestration.workspaces;
 
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
+import java.util.Locale;
+import java.util.Objects;
 
 import io.mindspice.magenta2.core.util.PlainPathSegmentValidator;
 
-/**
- * Sole structural path authority for the workspace tree.
- *
- * <pre>{@code
- * <dataRoot>/
- *   workspace/
- *     agent/<id>/
- *     chat/<id>/
- *     user/<name>/
- * }</pre>
- *
- * <p>Only {@link #WORKSPACE} and {@link #OUTPUTS} are public structural names.
- * Root factories produce relative paths beneath the configured data root.
- * No legacy alias, migration, project, job, run, scratch, work, or temp helpers remain.
- */
+/** Sole structural grammar authority for Magenta workspace paths. */
 public final class WorkspacePathLayout {
     public static final String WORKSPACE = "workspace";
     public static final String OUTPUTS = "outputs";
+    public static final String TASKS = "tasks";
+    public static final String SKILLS = ".skills";
+    public static final String STAGING = "staging";
+
+    private static final int MAX_COMPONENT_BYTES = 255;
 
     private WorkspacePathLayout() {
     }
 
-    /** {@code workspace/agent/<id>} */
     public static Path agentRoot(String agentId) {
         return Path.of(WORKSPACE, WorkspaceKind.AGENT.token(), segment(agentId, "agentId"));
     }
 
-    /** {@code workspace/chat/<id>} */
     public static Path chatRoot(String conversationId) {
         return Path.of(WORKSPACE, WorkspaceKind.CHAT.token(), segment(conversationId, "conversationId"));
     }
 
-    /** {@code workspace/user/<name>} */
     public static Path userRoot(String name) {
         return Path.of(WORKSPACE, WorkspaceKind.USER.token(), segment(name, "userName"));
     }
 
+    /** Workspace-relative reserved task root. */
+    public static Path tasksRoot() {
+        return Path.of(TASKS);
+    }
+
+    /** Workspace-relative reserved skill root. */
+    public static Path skillsRoot() {
+        return Path.of(SKILLS);
+    }
+
+    public static Path tasksDir(TaskPathKey taskPathKey) {
+        Objects.requireNonNull(taskPathKey, "taskPathKey");
+        validateComponent(taskPathKey.serialized(), "taskPathKey");
+        return Path.of(TASKS, taskPathKey.serialized());
+    }
+
+    public static Path taskRunDir(TaskPathKey taskPathKey, String taskRunId) {
+        return tasksDir(taskPathKey).resolve(validateComponent(taskRunId, "taskRunId"));
+    }
+
+    public static Path taskRunOutputsDir(TaskPathKey taskPathKey, String taskRunId) {
+        return taskRunDir(taskPathKey, taskRunId).resolve(OUTPUTS);
+    }
+
+    public static Path taskRunStagingDir(TaskPathKey taskPathKey, String taskRunId) {
+        return taskRunDir(taskPathKey, taskRunId).resolve(STAGING);
+    }
+
+    static String validateRunId(String taskRunId) {
+        return validateComponent(taskRunId, "taskRunId");
+    }
+
     private static String segment(String value, String label) {
-        return PlainPathSegmentValidator.requirePlainSegment(value, label);
+        String segment = PlainPathSegmentValidator.requirePlainSegment(value, label);
+        requireComponentByteLength(segment, label);
+        return segment;
+    }
+
+    private static String validateComponent(String value, String label) {
+        String component = PlainPathSegmentValidator.requirePlainSegment(value, label);
+        String lower = component.toLowerCase(Locale.ROOT);
+        if (OUTPUTS.equals(lower) || TASKS.equals(lower) || SKILLS.equals(lower)
+                || STAGING.equals(lower) || WORKSPACE.equals(lower)) {
+            throw new IllegalArgumentException(label + " must not use reserved name: " + value);
+        }
+        requireComponentByteLength(component, label);
+        return component;
+    }
+
+    private static void requireComponentByteLength(String value, String label) {
+        if (value.getBytes(StandardCharsets.UTF_8).length > MAX_COMPONENT_BYTES) {
+            throw new IllegalArgumentException(label + " exceeds " + MAX_COMPONENT_BYTES + " UTF-8 bytes");
+        }
     }
 }

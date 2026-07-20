@@ -65,7 +65,7 @@ Obsolete filesystem lease tables may remain in existing databases but are inert 
 
 The runtime does not attempt token-level or partial model response resume. Durable recovery is at task, workflow, and job item boundaries using assignment checkpoints and run records.
 
-Every execution attempt resolves one descriptor from its persisted `workspaceType`/`workspaceKey` selection. The descriptor flows through tools, prompts, workflow/job children, and direct output publication. No project or run staging root is allocated.
+Every execution attempt resolves one descriptor from its persisted `workspaceType`/`workspaceKey` selection. The descriptor flows through tools, prompts, workflow/job children, and current direct output publication. Phase 01 reserves canonical agent/user child grammar at `tasks/<taskPathKey>/<taskRunId>/`: saved task, workflow, and job runs reuse their immutable native run ids; assignment and child identities remain separate links. The foundation does not yet cut execution over, create output/staging children, or authorize a writer capability.
 
 ## Jobs
 

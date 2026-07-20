@@ -9,7 +9,7 @@ The app is a Spring Boot service with:
 - HTTP port default `8080`.
 - Magenta root default `${user.home}/.magenta`, configurable with `magenta.root.path`.
 - SQLite datasource default `jdbc:sqlite:${magenta.root.path}/magenta.sqlite?foreign_keys=true`, which places the default database at `<magenta.root.path>/magenta.sqlite`.
-- SQL init always enabled against `classpath:schema.sql`.
+- Spring's generic SQL initializer is disabled; `SchemaMigrationRunner` initializes an empty database from `classpath:schema.sql` and migrates existing databases from ordered resources.
 - Spring AI provider auto-config is disabled where applicable; model clients are assembled from user AI config.
 - Ollama base URL and default chat option present in Spring config, but application model routing primarily uses configured model definitions.
 
@@ -102,12 +102,14 @@ Current alpha access is open at the application layer (no built-in Basic auth or
 
 ## Data and Schema Operations
 
-Primary Magenta SQLite schema is initialized from `schema.sql` on startup. Repositories also self-bootstrap tables and add compatibility columns for existing local databases.
+`SchemaMigrationRunner` initializes an empty Magenta SQLite database from `schema.sql`, then applies immutable ordered resources from `db/migrations/` for both fresh and existing databases, recording exact resource names and SHA-256 checksums in `schema_migrations`. It uses one SQLite immediate transaction so migration SQL and bookkeeping are atomic and independent starters serialize. Repository beans initialize only after this runner. Older domain tables still retain repository-local compatibility DDL until explicit later migrations transfer their ownership.
 
 Operational implications:
 
-- Treat `schema.sql` as the primary runtime table inventory for fresh `magenta.sqlite` databases.
-- Before changing a column assumption, inspect the owning repository for compatibility migrations.
+- Treat `schema.sql` as the fresh database inventory and ordered migration resources as immutable existing-database history; their migration-owned end states must match.
+- Never edit an applied migration. Add the next contiguous `NNN-lowercase-kebab.sql` resource.
+- Startup fails closed on checksum/name drift, unknown or non-contiguous bookkeeping, malformed resources, or incompatible partial migration-owned tables.
+- Before changing an older column assumption, inspect the owning repository for remaining compatibility DDL.
 - Keep foreign key behavior in mind; the SQLite URL enables `foreign_keys=true`.
 - Warm data roots may have legacy workspace directories and older tables that repositories tolerate but do not migrate.
 - Operators can still override `spring.datasource.url`; the root-owned SQLite path is the product default, not a forced migration of custom datasource settings.
@@ -130,7 +132,7 @@ Future migration work is intentionally not implemented in this cleanup. Candidat
 
 Agent execution uses filesystem-first workspaces in the closed three-kind model (`AGENT`, `CHAT`, `USER`). `application.yml` explicitly notes that agent execution uses filesystem-backed workspaces.
 
-Workspace directories are confined under the configured data root by `WorkspaceDirectoryService`. Output downloads and artifact materialization also enforce data-root confinement. The active layout is `workspace/agent/<id>/`, `workspace/chat/<id>/`, and `workspace/user/<name>/`, with a reserved lazy `outputs/` subtree beneath each.
+Workspace directories are confined under the configured data root by `WorkspaceDirectoryService`. Output downloads and artifact materialization also enforce data-root confinement. The active roots are `workspace/agent/<id>/`, `workspace/chat/<id>/`, and `workspace/user/<name>/`. Agent/user roots may contain canonical `tasks/<taskPathKey>/<taskRunId>/` children and a lazy `.skills/` child. Run-local `outputs/` and `staging/` remain lazy. Existing workspace-root `outputs/` is legacy/non-task publication data until later phases cut execution over.
 
 New Magenta-owned persisted path columns store data-root-relative values. Legacy absolute values under the current configured data root are read for compatibility and may be displayed as data-root-relative values. Stale absolute values from an old root are not rewritten and fail, or are omitted from listings, when an operation tries to use that path.
 

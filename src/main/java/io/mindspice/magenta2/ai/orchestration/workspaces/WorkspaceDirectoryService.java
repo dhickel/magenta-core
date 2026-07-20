@@ -146,6 +146,116 @@ public class WorkspaceDirectoryService {
         return dataRoot;
     }
 
+    // ── Trusted task-run child locations ──
+
+    /** Resolve a canonical task-run path without creating any directory. */
+    public TaskRunLocation resolveTaskRunForRead(
+            WorkspaceDescriptor descriptor,
+            TaskIdentity taskIdentity,
+            TaskPathKey expectedTaskPathKey,
+            String taskRunId) {
+        validateTaskCapable(descriptor);
+        TaskPathKey canonicalKey = validateTaskIdentity(taskIdentity, expectedTaskPathKey);
+        WorkspacePathLayout.validateRunId(taskRunId);
+        Path confined = confinedRelativePath(descriptor.root(),
+                WorkspacePathLayout.taskRunDir(canonicalKey, taskRunId));
+        verifyOrAbsent(confined);
+        return taskRunLocation(descriptor, taskIdentity, canonicalKey, taskRunId, confined);
+    }
+
+    /**
+     * Provision only the canonical run hierarchy. Run-local outputs and staging
+     * remain lazy and are not created by this Phase 01 operation.
+     */
+    public TaskRunLocation provisionTaskRun(
+            WorkspaceDescriptor descriptor,
+            TaskIdentity taskIdentity,
+            TaskPathKey expectedTaskPathKey,
+            String taskRunId) {
+        validateTaskCapable(descriptor);
+        TaskPathKey canonicalKey = validateTaskIdentity(taskIdentity, expectedTaskPathKey);
+        WorkspacePathLayout.validateRunId(taskRunId);
+        Path confined = confinedRelativePath(descriptor.root(),
+                WorkspacePathLayout.taskRunDir(canonicalKey, taskRunId));
+        Path verified = ensureDirectoryChain(confined);
+        return taskRunLocation(descriptor, taskIdentity, canonicalKey, taskRunId, verified);
+    }
+
+    /** Resolve the lazy run-local output location without creating it. */
+    public RunOutputLocation resolveRunOutput(TaskRunLocation runLocation) {
+        Objects.requireNonNull(runLocation, "runLocation");
+        WorkspaceDescriptor descriptor = descriptor(
+                runLocation.workspaceKind(), runLocation.workspaceKey(),
+                confined(switch (runLocation.workspaceKind()) {
+                    case AGENT -> WorkspacePathLayout.agentRoot(runLocation.workspaceKey());
+                    case USER -> WorkspacePathLayout.userRoot(runLocation.workspaceKey());
+                    case CHAT -> throw new IllegalArgumentException(
+                            "CHAT workspaces are not task-selectable");
+                }));
+        validateTaskCapable(descriptor);
+        TaskRunLocation canonicalRun = resolveTaskRunForRead(
+                descriptor, runLocation.taskIdentity(), runLocation.taskPathKey(),
+                runLocation.taskRunId());
+        if (!canonicalRun.equals(runLocation)
+                || !canonicalRun.rootRelativePath().equals(runLocation.rootRelativePath())
+                || !canonicalRun.confinedPath().equals(runLocation.confinedPath())) {
+            throw new IllegalArgumentException("Task-run location is not canonical for its identity");
+        }
+        Path confined = canonicalRun.confinedPath().resolve(WorkspacePathLayout.OUTPUTS).normalize();
+        verifyOrAbsent(confined);
+        return new RunOutputLocation(canonicalRun,
+                canonicalRun.rootRelativePath() + "/" + WorkspacePathLayout.OUTPUTS,
+                confined);
+    }
+
+    /** Resolve a workspace-local reserved skill root without creating it. */
+    public Path resolveSkillsRoot(WorkspaceDescriptor descriptor) {
+        validateTaskCapable(descriptor);
+        Path confined = confinedRelativePath(descriptor.root(), WorkspacePathLayout.skillsRoot());
+        return verifyOrAbsent(confined);
+    }
+
+    private void validateTaskCapable(WorkspaceDescriptor descriptor) {
+        Objects.requireNonNull(descriptor, "descriptor");
+        validateDescriptor(descriptor);
+        if (descriptor.kind() == WorkspaceKind.CHAT) {
+            throw new IllegalArgumentException("CHAT workspaces are not task-selectable");
+        }
+    }
+
+    private TaskPathKey validateTaskIdentity(
+            TaskIdentity taskIdentity, TaskPathKey expectedTaskPathKey) {
+        Objects.requireNonNull(taskIdentity, "taskIdentity");
+        Objects.requireNonNull(expectedTaskPathKey, "expectedTaskPathKey");
+        TaskPathKey canonical = TaskPathKey.from(taskIdentity);
+        if (!canonical.equals(expectedTaskPathKey)) {
+            throw new IllegalArgumentException("taskPathKey does not match the canonical task identity");
+        }
+        return canonical;
+    }
+
+    private TaskRunLocation taskRunLocation(
+            WorkspaceDescriptor descriptor, TaskIdentity identity, TaskPathKey key,
+            String taskRunId, Path confined) {
+        return new TaskRunLocation(descriptor.kind(), descriptor.key(), identity, key,
+                taskRunId, dataRootRelative(confined), confined);
+    }
+
+    private Path confinedRelativePath(Path root, Path relative) {
+        if (relative.isAbsolute()) {
+            throw new IllegalArgumentException("Child path must be workspace-relative");
+        }
+        Path resolved = root.resolve(relative).normalize();
+        if (!resolved.startsWith(root) || !resolved.startsWith(dataRoot)) {
+            throw new IllegalArgumentException("Path escapes workspace root");
+        }
+        return resolved;
+    }
+
+    private String dataRootRelative(Path confined) {
+        return dataRoot.relativize(confined).normalize().toString().replace('\\', '/');
+    }
+
     // ── Canonical agent hard-delete helper ──
 
     /** Deletes only the canonical agent root and never follows symbolic links. */

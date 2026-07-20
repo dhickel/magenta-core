@@ -1,30 +1,33 @@
 ## Workspace Package
 
-This package owns filesystem-first workspace identity, descriptor resolution, confined file behavior, and output artifact publication.
+This package owns filesystem-first workspace identity, descriptor resolution, confined child locations, file behavior, and output publication.
 
 ### Active layout
 - Agent: `workspace/agent/<agentId>/`
 - Chat: `workspace/chat/<conversationId>/`
 - User: `workspace/user/<name>/`
-- Reserved publication child: `outputs/`
+- Legacy/non-task publication child: `<workspace>/outputs/`
+- Task-capable child: `<agent-or-user>/tasks/<taskPathKey>/<taskRunId>/`
+- Lazy task children: `<run>/outputs/`, `<run>/staging/`
+- Lazy workspace skill child: `<agent-or-user>/.skills/`
 
 ### Responsibilities
-- `WorkspaceDirectoryService` is the sole constructor and resolver of trusted `WorkspaceDescriptor` values.
-- `WorkspacePathLayout` is the structural path authority.
-- Agent/chat reads tolerate absent physical roots. Successful writes/execution may create only the selected root. User roots require explicit creation.
-- General file/explorer/shell mutation rejects `outputs/` and descendants.
-- `OutputArtifactRepository` independently owns `run_output_artifacts` schema compatibility, persistence, queries, deletion, mapping, and attribution.
-- Output publication writes declared values or same-workspace real files directly beneath lazy `outputs/` with normalized, collision-safe names.
-- Stored artifact paths are portable data-root-relative values and are never root authorization inputs.
+- `WorkspaceDirectoryService` alone constructs trusted `WorkspaceDescriptor`, `TaskRunLocation`, and `RunOutputLocation` values.
+- `WorkspacePathLayout` is the sole structural segment authority.
+- Task identities use immutable definition ids and exact versioned `TaskPathKey` encoding. Display names never select or rename paths.
+- Task runs are children of `AGENT` or `USER`; `CHAT` is not task-selectable and `WorkspaceKind` remains closed.
+- Reads tolerate absent agent/chat roots and create no task, skill, run, output, or staging trees. User roots require explicit creation. Task-run provisioning creates only the canonical run hierarchy; publication remains a later owner.
+- Existing workspace-root `outputs/` data remains legacy/non-task data until later publication phases cut over.
+- Stored filesystem locations are data-root-relative and paired with workspace kind/key. Paths never authorize or reconstruct identity.
 
 ### Change guidance
-- Pass `WorkspaceDescriptor` across filesystem boundaries; do not infer identity from `Path` or reconstruct roots downstream.
-- Validate traversal, symlink components, real-path confinement, regular-file sources, destination parents, and collisions before publication.
-- Reads and failed validation must create nothing. Publication is the only writer beneath `outputs/`.
-- Do not synthesize run, job, task, project, Work Area, scratch, staging, or discovery directory layers.
-- Obsolete generic workspace, link, lease, Work Area, and output-directory definitions are removed. Do not recreate or replace them.
-- Do not migrate, alias, rewrite, or delete legacy filesystem trees during normal startup.
+- Pass trusted descriptors and child-location values across filesystem boundaries; never infer identity from `Path` or hand-concatenate reserved segments.
+- Validate canonical identity/key agreement, path components, traversal, containment, existing links, and mutation-boundary parent state.
+- Do not add workspace kinds, generic workspace ids, project roots, Work Areas, aliases, leases, or eager scaffolding.
+- `TaskRunWriteCapability` is non-authorizing until lifecycle services verify persisted owner/fence facts at mutation boundaries.
+- Applied migration resources are immutable. Schema corrections use a new ordered resource.
 
 ### Validation
-- Cover descriptor resolution for all kinds, absent agent/chat roots, explicit user lifecycle, invalid keys, traversal, symlink escape, and reserved-output mutations.
-- Cover direct publication, lazy outputs, nested names, source confinement, destination symlinks, collision safety, attribution, persistence failure compensation, and repository independence.
+- Cover AGENT and USER resolution/provision, CHAT rejection, key mismatch, relocation, absent roots, idempotency, UTF-8 limits, reserved names, traversal, symlinks, and trusted constructor visibility.
+- Prove reads create no `tasks/`, `.skills/`, run, output, or staging directory.
+- Cover migration discovery, checksum/bookkeeping drift, partial legacy state, interruption/restart, independent concurrent starters, and fresh/migrated metadata equivalence.
