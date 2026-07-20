@@ -6,7 +6,7 @@
 
 ## Git Commit
 
-Base commit at implementation/review start: `69125eeae872cc0d1439d2908eaaf148bb935539`. The finalized phase commit includes this changelog and validator repairs.
+Phase commit: `98128802` (created from base `69125eeae872cc0d1439d2908eaaf148bb935539`; amended only to record this hash in the changelog).
 
 ## Change Summary
 
