@@ -68,9 +68,10 @@ Sources: [`ai/orchestration/runtime`](../../src/main/java/io/mindspice/magenta2/
 - `OrchestrationRunService` provides run-facing helpers for assignment execution paths.
 - `OrchestrationRuntimeRepository` owns runtime queue, schedules, reactions, direct-line inbox, events, legacy orchestration jobs, and compatibility columns.
 - `InboxService` in `runtime` owns direct-line agent/operator inbox messages in `agent_inbox_messages`.
-- `ScheduleService`, `EventReactionService`, and `OrchestrationEventService` own optional scheduled and event-triggered assignment creation.
+- `ScheduleService`, `EventReactionService`, and `OrchestrationEventService` own revisioned/fenced scheduled and event-triggered assignment creation, operation-key idempotency, append-only attempt audit, causation suppression, and pure simulation.
+- `RunSummaryService` and `RunMeasurementRepository` own rebuildable normalized summaries, health, exact cross-domain audit composition, and one row per model/tool invocation. Native run tables remain status authority.
 
-Tables: `work_assignments`, `assignment_conversation_links`, `agent_inbox_messages`, `agent_schedules`, `schedule_firings`, `agent_event_reactions`, `orchestration_events`, `orchestration_jobs`, `orchestration_job_items`.
+Tables include `work_assignments`, lifecycle links/attempts/claims, `agent_inbox_messages`, revisioned schedule/reaction definition/firing/dispatch/attempt tables, `orchestration_events`, `run_summaries`, `run_measurements`, `orchestration_jobs`, and `orchestration_job_items`.
 
 Controllers: `AgentOrchestrationController`, runtime queue fragments in `OrchestrationController`, `RuntimeController`.
 
@@ -82,7 +83,7 @@ Sources: [`JobService`](../../src/main/java/io/mindspice/magenta2/ai/orchestrati
 - Public job run routes submit `JOB_RUN` assignments through `AssignmentService`; job execution is coordinated by `OrchestrationRunnerService`.
 - `JobExecutionSummary` is the read model for job run/operator context. It ties job definition, assignment, run, agent/project attribution, selected workspace type/key/identity, child runs, and output counts together.
 - Recurrence/start paths enqueue assignments; direct run allocation is guarded for assignment-owned execution.
-- Jobs bind to an agent and optional project metadata but do not own workspace directories. Execution uses the assignment's resolved agent or user workspace; publication writes directly beneath that workspace's reserved lazy `outputs/` subtree and artifacts retain assignment/run/project attribution.
+- Jobs bind to an agent and optional project metadata but do not own workspace directories. Execution uses the assignment's resolved agent or user workspace; child runs publish beneath canonical run-local `outputs/` and retain assignment/run/project attribution.
 - Jobs can be empty `DRAFT` definitions so the UI can save metadata before items are added. If an empty job is submitted, the assignment-owned run completes as a no-op instead of leaving `job_runs` in `RUNNING`.
 
 Tables: `job_definitions`, `job_runs`, `job_recurrences`, `run_output_artifacts`, plus assignment tables when submitted.
@@ -126,13 +127,15 @@ Sources: [`ai/orchestration/workspaces`](../../src/main/java/io/mindspice/magent
 - `WorkspaceFileMetadataService` and `WorkspaceFileMetadataRepository` own file labels, file label assignments, and file action records keyed by canonical workspace identity plus normalized file-relative path.
 - `WorkspaceFileActionLogRepository` owns file action logging keyed by canonical workspace identity.
 - `AgentsMdResolver` resolves layered `AGENTS.md` files from the descriptor root to the active confined tool path during execution. No starter `AGENTS.md` content is generated.
-- `OutputArtifactRepository` independently owns `run_output_artifacts` schema compatibility, writes, reads, updates, deletion, mapping, and attribution.
-- `OutputArtifactService` publishes declared output values or same-workspace source files directly beneath the effective descriptor's lazy `outputs/` directory with collision-safe normalized names. No run-owned directory hierarchy is created. Durable task, job, run, project, agent, and canonical workspace attribution is queryable.
+- `OutputArtifactRepository` owns active `output_publications` persistence plus inert legacy `run_output_artifacts` compatibility; ordered migrations own its DDL.
+- `OutputArtifactService` publishes task bytes only through trusted run-local output locations and current writer capabilities, with reservation, staged write, digest/size verification, and create-only promotion. Chat publication remains separately confined.
+- `ArtifactSearchService`, `ArtifactPreviewService`, and `TaskRunRetentionService` own scope-constrained FTS5 capability, safe preview/lineage, pins, sessions, and guarded retention. Unsupported FTS5 and integrity failure are explicit unavailable states.
+- Persistence-backed run/artifact/skill/runtime/automation UI is composed by web fragments; `WorkspaceExplorerService` remains filesystem-only.
 - `RootRelativePathService` is retained only for portable artifact-relative paths. It does not determine workspace identity or authorize roots.
 
 The `/api/work-areas`, `/api/workspaces` (generic), and `/avatar` route families are absent. Workspace file operations use typed routes under `/api/workspace/{type}/{id}` and user workspace collection uses `GET|POST /api/workspace/user`.
 
-Tables: `workspace_file_labels`, `workspace_file_annotations`, `workspace_file_action_log`, `run_output_artifacts`.
+Tables include workspace metadata/actions, `output_publications`, artifact extraction/search/lineage/session/retention/pin structures, and inert compatibility `run_output_artifacts`.
 
 Controllers: `WorkspaceController`, `OutputController`, and workspace explorer fragments in `WorkspaceExplorerFragments`.
 

@@ -39,6 +39,28 @@ Magenta web surfaces are operational tools, not marketing pages. They should be 
 
 User-workspace creation and execution workspace selection controls are reusable SimplyPages fragments mounted only where a submission surface exposes workspace choice. No generic user/chat workspace browser is mounted as a page-level surface.
 
+## Files And Run Operations Composition
+
+The Files tab composes two independent columns inside `#agent-files-explorer`: the confined filesystem browser and `#agent-run-groups`. The run host loads after the filesystem shell and expands a selected row into `#agent-run-detail`. Groups are bounded and deterministic by persisted source kind; every run retains its own canonical id, so duplicate display names or renamed/deleted definitions cannot merge records.
+
+Run rows expose normalized status, summary update time, wall/active elapsed, attempt count, and model/tool measurement counts. Detail exposes source kind, status/outcome, source-supported start/completion timestamps, attempts, safe current-claim availability, retry/replay lineage links, artifact state counts, and at most five recent artifact facts with authorized preview requests for published artifacts. Empty, unavailable, active/partial, legacy-ambiguous, missing, integrity-failed, and error states remain visibly distinct. Raw failure text, absolute paths, claim owner/secret, writer fences, unauthorized counts, and direct artifact byte links are not rendered. Visible `tasks/` and `outputs/` explorer trees remain read-only.
+
+Desktop uses a dense files/run two-column console; narrower layouts stack Files above Runs. Thin blue-gray borders, five-pixel radii, compact tables/controls, semantic chips, bounded overflow, and useful first-viewport density align this surface with `/dashboard` and `/agents`. Standard loading, refresh, expansion, CRUD, filtering, and fragment replacement are HTMX-only; this composition adds no JavaScript.
+
+Focused artifact, skill trust/snapshot, runtime health/history, schedule, and reaction fragments retain their own stable hosts and domain controllers. The Files composition does not reimplement or query those domains through explorer services.
+
+## Focused Operational Surfaces
+
+| surface | hosts and composition | truthful-state contract |
+| --- | --- | --- |
+| Artifacts | `/artifacts` composes `#artifact-search-results`, `#artifact-detail`, `#artifact-preview`, `#artifact-lineage`, and `#artifact-retention`. Search, detail, preview, lineage, and retention load independently through HTMX. | FTS5 unavailable, unsupported preview, missing bytes, integrity failure, archived/expired state, blockers, and pins remain distinct. No byte action is shown as successful before integrity and scope checks pass. |
+| Skills | `/skills` retains list/detail/file/assignment hosts and adds `#skills-trust-panel` plus snapshot history. Trust mutations target only the trust host. | Pending, malformed, stale, unavailable, conflict, rejected, revoked, and approved-snapshot states remain distinct. Approval is never labelled auto-trust or executable authorization; package/executable capability remains visibly unavailable. |
+| Runtime | `#runtime-health`, `#runtime-history`, `#runtime-detail`, `#runtime-audit-region`, and `#invocation-detail` provide bounded health, history, repeated call details, and exact-link audit expansion. | Empty denominators, active runs, unavailable/legacy facts, incomplete invocations, and missing elapsed/usage/exit facts remain explicit rather than zero or success. |
+| Schedules | Schedule list, simulation preview, `#schedule-firings-panel`, and firing-attempt detail use HTMX requests to typed services/routes. | Simulation is labelled **Non-Executing**; enabled/disabled/deleted, claimed/enqueued/recovered/conflict/exhausted, and linked runtime outcome are separate facts. |
+| Reactions | Reaction list, simulation preview, and `#reaction-dispatches-panel` use bounded HTMX audit expansion. | Simulation is non-executing; matched, deduplicated, loop/depth/rate-suppressed, enqueued, and terminal linked-run states are not conflated. |
+
+All operational surfaces use compact tables/panels, thin blue-gray borders, small radii, semantic chips, bounded overflow, and mobile stacking. Standard CRUD, filtering, refresh, pagination, and expansion are HTMX-first. Phase 10 added no transport JavaScript.
+
 ## Retained Web Entries
 
 | id | page_or_fragment | status | intended_contract | observed_anchors | interaction_rule | validation | related_decisions | related_knowledge |

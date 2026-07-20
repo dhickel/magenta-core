@@ -64,6 +64,56 @@ public final class SchemaMigrationRunner {
             "task_run_links", "output_publications", "skill_candidate_versions",
             "skill_candidate_observations", "skill_exact_assignments",
             "skill_legacy_conversion_diagnostics");
+    private static final List<String> FOUNDATION_TABLES_V5 = List.of(
+            "task_run_locations", "task_run_attempts", "task_run_idempotent_ops",
+            "task_run_native_links", "assignment_fence_generations", "writer_claim_generations",
+            "task_run_links", "output_publications", "skill_candidate_versions",
+            "skill_candidate_observations", "skill_exact_assignments",
+            "skill_legacy_conversion_diagnostics",
+            "artifact_extraction_documents", "artifact_lineage_edges",
+            "task_run_retention_policies", "artifact_retention_pins",
+            "active_artifact_sessions");
+    private static final List<String> FOUNDATION_TABLES_V6 = List.of(
+            "task_run_locations", "task_run_attempts", "task_run_idempotent_ops",
+            "task_run_native_links", "assignment_fence_generations", "writer_claim_generations",
+            "task_run_links", "output_publications", "skill_candidate_versions",
+            "skill_candidate_observations", "skill_exact_assignments",
+            "skill_legacy_conversion_diagnostics",
+            "artifact_extraction_documents", "artifact_lineage_edges",
+            "task_run_retention_policies", "artifact_retention_pins",
+            "active_artifact_sessions", "skill_snapshots",
+            "skill_trust_decisions", "skill_snapshot_resources",
+            "skill_activations", "skill_executable_authorizations",
+            "skill_package_operations", "skill_resource_executions");
+    private static final List<String> FOUNDATION_TABLES_V7 = List.of(
+            "task_run_locations", "task_run_attempts", "task_run_idempotent_ops",
+            "task_run_native_links", "assignment_fence_generations", "writer_claim_generations",
+            "task_run_links", "output_publications", "skill_candidate_versions",
+            "skill_candidate_observations", "skill_exact_assignments",
+            "skill_legacy_conversion_diagnostics",
+            "artifact_extraction_documents", "artifact_lineage_edges",
+            "task_run_retention_policies", "artifact_retention_pins",
+            "active_artifact_sessions", "skill_snapshots",
+            "skill_trust_decisions", "skill_snapshot_resources",
+            "skill_activations", "skill_executable_authorizations",
+            "skill_package_operations", "skill_resource_executions",
+            "run_summaries", "run_measurements");
+    private static final List<String> FOUNDATION_TABLES_V8 = List.of(
+            "task_run_locations", "task_run_attempts", "task_run_idempotent_ops",
+            "task_run_native_links", "assignment_fence_generations", "writer_claim_generations",
+            "task_run_links", "output_publications", "skill_candidate_versions",
+            "skill_candidate_observations", "skill_exact_assignments",
+            "skill_legacy_conversion_diagnostics",
+            "artifact_extraction_documents", "artifact_lineage_edges",
+            "task_run_retention_policies", "artifact_retention_pins",
+            "active_artifact_sessions", "skill_snapshots",
+            "skill_trust_decisions", "skill_snapshot_resources",
+            "skill_activations", "skill_executable_authorizations",
+            "skill_package_operations", "skill_resource_executions",
+            "run_summaries", "run_measurements",
+            "schedule_definitions", "scheduler_claims", "schedule_firings",
+            "schedule_firing_attempts", "reaction_definitions",
+            "reaction_dispatches", "reaction_dispatch_attempts");
     private static final Set<String> FOUNDATION_INDEXES_V1 = Set.of(
             "idx_task_run_locations_workspace", "idx_task_run_locations_source",
             "idx_task_run_attempts_status", "idx_task_run_native_links_assignment",
@@ -77,6 +127,72 @@ public final class SchemaMigrationRunner {
             "idx_skill_candidate_versions_lookup", "idx_skill_candidate_observations_candidate",
             "idx_skill_candidate_observations_scan", "idx_skill_exact_assignments_target",
             "idx_skill_exact_assignments_operation_key");
+    private static final Set<String> FOUNDATION_INDEXES_V5 = Set.of(
+            "idx_skill_candidate_versions_lookup", "idx_skill_candidate_observations_candidate",
+            "idx_skill_candidate_observations_scan", "idx_skill_exact_assignments_target",
+            "idx_skill_exact_assignments_operation_key",
+            "idx_lineage_edges_parent", "idx_lineage_edges_child",
+            "idx_lineage_edges_task_run", "idx_retention_policies_workspace",
+            "idx_retention_pins_artifact", "idx_retention_pins_task_run",
+            "idx_retention_pins_kind", "idx_active_sessions_artifact",
+            "idx_active_sessions_token");
+    private static final Set<String> FOUNDATION_INDEXES_V6 = Set.of(
+            "idx_skill_candidate_versions_lookup", "idx_skill_candidate_observations_candidate",
+            "idx_skill_candidate_observations_scan", "idx_skill_exact_assignments_target",
+            "idx_skill_exact_assignments_operation_key",
+            "idx_lineage_edges_parent", "idx_lineage_edges_child",
+            "idx_lineage_edges_task_run", "idx_retention_policies_workspace",
+            "idx_retention_pins_artifact", "idx_retention_pins_task_run",
+            "idx_retention_pins_kind", "idx_active_sessions_artifact",
+            "idx_active_sessions_token", "idx_skill_snapshots_logical_key",
+            "idx_skill_trust_decisions_candidate", "idx_skill_trust_decisions_logical_key",
+            "idx_skill_snapshot_resources_snapshot", "idx_skill_activations_task_run",
+            "idx_skill_activations_agent", "idx_skill_executable_authorizations_resource",
+            "idx_skill_package_operations_state", "idx_skill_resource_executions_task_run",
+            "idx_skill_resource_executions_resource");
+    private static final Set<String> FOUNDATION_INDEXES_V7 = Set.of(
+            "idx_skill_candidate_versions_lookup", "idx_skill_candidate_observations_candidate",
+            "idx_skill_candidate_observations_scan", "idx_skill_exact_assignments_target",
+            "idx_skill_exact_assignments_operation_key",
+            "idx_lineage_edges_parent", "idx_lineage_edges_child",
+            "idx_lineage_edges_task_run", "idx_retention_policies_workspace",
+            "idx_retention_pins_artifact", "idx_retention_pins_task_run",
+            "idx_retention_pins_kind", "idx_active_sessions_artifact",
+            "idx_active_sessions_token", "idx_skill_snapshots_logical_key",
+            "idx_skill_trust_decisions_candidate", "idx_skill_trust_decisions_logical_key",
+            "idx_skill_snapshot_resources_snapshot", "idx_skill_activations_task_run",
+            "idx_skill_activations_agent", "idx_skill_executable_authorizations_resource",
+            "idx_skill_package_operations_state", "idx_skill_resource_executions_task_run",
+            "idx_skill_resource_executions_resource",
+            "idx_run_summaries_workspace", "idx_run_summaries_task_run",
+            "idx_run_measurements_task_run", "idx_run_measurements_call_id",
+            "idx_run_measurements_correlation");
+    private static final Set<String> FOUNDATION_INDEXES_V8 = Set.of(
+            "idx_skill_candidate_versions_lookup", "idx_skill_candidate_observations_candidate",
+            "idx_skill_candidate_observations_scan", "idx_skill_exact_assignments_target",
+            "idx_skill_exact_assignments_operation_key",
+            "idx_lineage_edges_parent", "idx_lineage_edges_child",
+            "idx_lineage_edges_task_run", "idx_retention_policies_workspace",
+            "idx_retention_pins_artifact", "idx_retention_pins_task_run",
+            "idx_retention_pins_kind", "idx_active_sessions_artifact",
+            "idx_active_sessions_token", "idx_skill_snapshots_logical_key",
+            "idx_skill_trust_decisions_candidate", "idx_skill_trust_decisions_logical_key",
+            "idx_skill_snapshot_resources_snapshot", "idx_skill_activations_task_run",
+            "idx_skill_activations_agent", "idx_skill_executable_authorizations_resource",
+            "idx_skill_package_operations_state", "idx_skill_resource_executions_task_run",
+            "idx_skill_resource_executions_resource",
+            "idx_run_summaries_workspace", "idx_run_summaries_task_run",
+            "idx_run_measurements_task_run", "idx_run_measurements_call_id",
+            "idx_run_measurements_correlation",
+            "idx_schedule_defs_agent", "idx_schedule_defs_enabled",
+            "idx_schedule_firings_schedule", "idx_schedule_firings_op_key",
+            "idx_schedule_firings_assignment",
+            "idx_schedule_firing_attempts_firing", "idx_schedule_firing_attempts_assignment",
+            "idx_reaction_defs_agent", "idx_reaction_defs_enabled_type",
+            "idx_reaction_dispatches_reaction", "idx_reaction_dispatches_root_event",
+            "idx_reaction_dispatches_op_key", "idx_reaction_dispatches_dedupe",
+            "idx_reaction_dispatches_assignment",
+            "idx_reaction_dispatch_attempts_dispatch", "idx_reaction_dispatch_attempts_assignment");
 
     private static final Map<String, List<String>> FOUNDATION_COLUMNS = Map.ofEntries(
             Map.entry("task_run_locations", List.of("task_run_id", "source_kind", "source_id", "workspace_type",
@@ -110,7 +226,59 @@ public final class SchemaMigrationRunner {
             Map.entry("skill_exact_assignments", List.of("id", "candidate_version_id", "logical_key",
                     "target_type", "target_key", "enabled", "operation_key", "actor", "created_at", "updated_at")),
             Map.entry("skill_legacy_conversion_diagnostics", List.of("id", "agent_id", "logical_key", "result",
-                    "candidate_version_id", "diagnostics_json", "converted_at"))
+                    "candidate_version_id", "diagnostics_json", "converted_at")),
+            Map.entry("artifact_extraction_documents", List.of("id", "artifact_id", "content_sha256",
+                    "extracted_text", "byte_count", "line_count", "language_hint",
+                    "extraction_state", "extracted_at")),
+            Map.entry("artifact_lineage_edges", List.of("id", "parent_artifact_id", "child_artifact_id",
+                    "lineage_kind", "producer_workspace_kind", "producer_workspace_key",
+                    "producer_task_run_id", "declaration_digest", "created_at")),
+            Map.entry("task_run_retention_policies", List.of("id", "workspace_kind", "workspace_key",
+                    "task_path_key", "policy_type", "retain_days", "max_artifact_count",
+                    "max_total_bytes", "enabled", "created_at", "updated_at")),
+            Map.entry("artifact_retention_pins", List.of("id", "artifact_id", "task_run_id",
+                    "pin_kind", "reason", "pinned_by", "pinned_at", "expires_at")),
+            Map.entry("active_artifact_sessions", List.of("id", "artifact_id", "session_token",
+                    "owner_identity", "bytes_read", "max_bytes", "state",
+                    "created_at", "last_activity", "completed_at")),
+            Map.entry("run_summaries", List.of("task_run_id", "normalized_status", "attempt_count",
+                    "model_call_count", "tool_call_count", "wall_elapsed_ms", "active_elapsed_ms",
+                    "completeness", "workspace_type", "workspace_key", "source_kind",
+                    "lineage_parent_task_run_id", "lineage_mode", "created_at", "updated_at")),
+            Map.entry("run_measurements", List.of("invocation_id", "task_run_id", "attempt_number",
+                    "kind", "call_id", "correlation_id", "provider", "model_name", "tool_name",
+                    "outcome", "started_at", "completed_at", "elapsed_ms",
+                    "input_token_count", "output_token_count", "total_token_count",
+                    "timeout_ms", "exit_code", "truncation_kind", "interruption_kind",
+                    "rejection_reason", "failure_detail", "completeness", "created_at", "updated_at")),
+            Map.entry("schedule_definitions", List.of("id", "agent_id", "revision",
+                    "cron_expression", "timezone", "dialect_version", "policy_version",
+                    "enabled", "deleted", "job_id", "assignment_template_json",
+                    "created_at", "updated_at")),
+            Map.entry("scheduler_claims", List.of("id", "owner_id", "fence",
+                    "heartbeat_at", "expires_at", "claimed_at", "created_at", "updated_at")),
+            Map.entry("schedule_firings", List.of("firing_id", "schedule_id", "revision",
+                    "slot_instant", "timezone", "offset_policy", "firing_state",
+                    "operation_key", "request_digest", "template_snapshot_json",
+                    "assignment_id", "task_run_id", "native_run_id", "correlation_id",
+                    "error_class", "created_at", "updated_at")),
+            Map.entry("schedule_firing_attempts", List.of("attempt_id", "firing_id", "attempt_number",
+                    "eligible_at", "attempted_at", "claim_owner", "claim_fence",
+                    "outcome", "error_class", "assignment_id", "task_run_id",
+                    "native_run_id", "correlation_id", "created_at")),
+            Map.entry("reaction_definitions", List.of("id", "agent_id", "revision",
+                    "event_type", "filter_json", "action_type", "assignment_template_json",
+                    "enabled", "deleted", "created_at", "updated_at")),
+            Map.entry("reaction_dispatches", List.of("dispatch_id", "reaction_id", "revision",
+                    "source_event_id", "operation_key", "request_digest", "template_snapshot_json",
+                    "root_event_id", "parent_event_id", "parent_dispatch_id",
+                    "depth", "dedupe_key", "dispatch_state", "suppression_reason",
+                    "assignment_id", "task_run_id", "native_run_id", "correlation_id",
+                    "created_at", "updated_at")),
+            Map.entry("reaction_dispatch_attempts", List.of("attempt_id", "dispatch_id", "attempt_number",
+                    "eligible_at", "attempted_at", "claim_owner", "claim_fence",
+                    "outcome", "error_class", "assignment_id", "task_run_id",
+                    "native_run_id", "correlation_id", "created_at"))
     );
 
 
@@ -160,7 +328,9 @@ public final class SchemaMigrationRunner {
             try {
                 boolean freshInit = initializeFreshSchema(connection);
                 ensureMigrationTable(connection);
+                normalizeMigrationTable(connection);
                 validateMigrationTable(connection);
+                normalizeEmptyPreFoundationTables(connection);
                 if (freshInit) {
                     // schema.sql is the canonical end-state; mark all migrations as applied
                     for (MigrationResource resource : resources) {
@@ -168,11 +338,16 @@ public final class SchemaMigrationRunner {
                     }
                 }
                 Map<Integer, AppliedMigration> applied = readApplied(connection);
-                if (!freshInit && applied.isEmpty() && matchesCompleteLatestSchema(connection, resources)) {
+                if (!freshInit && applied.isEmpty()) {
+                    int adoptedVersion = highestCompatibleOwnedVersion(connection, resources);
                     for (MigrationResource resource : resources) {
+                        if (resource.version() > adoptedVersion) break;
                         insertApplied(connection, resource);
                     }
-                    applied = readApplied(connection);
+                    if (adoptedVersion > 0) {
+                        log.info("Adopted existing migration-owned schema through version {}", adoptedVersion);
+                        applied = readApplied(connection);
+                    }
                 }
                 validateBookkeeping(resources, applied);
                 for (MigrationResource resource : resources) {
@@ -266,16 +441,19 @@ public final class SchemaMigrationRunner {
         return true;
     }
 
-    private boolean matchesCompleteLatestSchema(Connection connection,
-                                                List<MigrationResource> resources) throws SQLException {
-        if (resources.isEmpty()) return false;
-        try {
-            validateOwnedSchema(connection, resources.getLast().version());
-            return true;
-        } catch (MigrationException incomplete) {
-            log.warn("Existing schema does not match latest migration-owned shape: {}", incomplete.getMessage());
-            return false;
+    private int highestCompatibleOwnedVersion(Connection connection,
+                                              List<MigrationResource> resources) throws SQLException {
+        for (int index = resources.size() - 1; index >= 0; index--) {
+            int version = resources.get(index).version();
+            try {
+                validateOwnedSchema(connection, version);
+                return version;
+            } catch (MigrationException incomplete) {
+                log.debug("Existing schema is not compatible with migration {}: {}",
+                        version, incomplete.getMessage());
+            }
         }
+        return 0;
     }
 
     private void ensureMigrationTable(Connection connection) throws SQLException {
@@ -291,6 +469,39 @@ public final class SchemaMigrationRunner {
         }
     }
 
+    private void normalizeMigrationTable(Connection connection) throws SQLException {
+        List<String> columns = tableColumns(connection, "schema_migrations");
+        if (!columns.equals(List.of("version", "resource_name", "checksum", "applied_at"))) {
+            throw new MigrationException("Incompatible schema_migrations table: " + columns);
+        }
+        String normalizedSql = normalized(tableSql(connection, "schema_migrations"));
+        if (normalizedSql.contains("resource_name text not null unique")
+                && normalizedSql.contains("check (length(checksum) = 64)")) {
+            return;
+        }
+        if (tableColumns(connection, "schema_migrations_legacy_upgrade").size() > 0) {
+            throw new MigrationException("Cannot normalize schema_migrations: legacy upgrade table already exists");
+        }
+        log.info("Normalizing legacy schema_migrations constraints");
+        try (Statement statement = connection.createStatement()) {
+            statement.execute("alter table schema_migrations rename to schema_migrations_legacy_upgrade");
+            statement.execute("""
+                    create table schema_migrations (
+                        version integer primary key,
+                        resource_name text not null unique,
+                        checksum text not null check (length(checksum) = 64),
+                        applied_at text not null
+                    )
+                    """);
+            statement.execute("""
+                    insert into schema_migrations(version, resource_name, checksum, applied_at)
+                    select version, resource_name, checksum, applied_at
+                    from schema_migrations_legacy_upgrade
+                    """);
+            statement.execute("drop table schema_migrations_legacy_upgrade");
+        }
+    }
+
     private void validateMigrationTable(Connection connection) throws SQLException {
         List<String> columns = tableColumns(connection, "schema_migrations");
         if (!columns.equals(List.of("version", "resource_name", "checksum", "applied_at"))) {
@@ -300,6 +511,53 @@ public final class SchemaMigrationRunner {
         if (!normalized(sql).contains("resource_name text not null unique")
                 || !normalized(sql).contains("check (length(checksum) = 64)")) {
             throw new MigrationException("Incompatible schema_migrations constraints");
+        }
+    }
+
+    private void normalizeEmptyPreFoundationTables(Connection connection) throws SQLException {
+        List<String> locationColumns = tableColumns(connection, "task_run_locations");
+        if (locationColumns.isEmpty() || locationColumns.contains("source_kind")) return;
+        if (rowCount(connection, "schema_migrations") != 0) {
+            throw new MigrationException("Pre-foundation task-run tables cannot be replaced after migration bookkeeping exists");
+        }
+
+        Map<String, List<String>> legacyTables = new LinkedHashMap<>();
+        legacyTables.put("task_run_writer_claims", List.of("task_run_id", "attempt_number",
+                "claim_generation", "claim_token", "created_at"));
+        legacyTables.put("task_run_native_links", List.of("task_run_id", "plan_run_id",
+                "workflow_run_id", "workflow_run_node_index", "job_run_id",
+                "job_work_item_index", "assignment_id", "created_at"));
+        legacyTables.put("task_run_idempotent_ops", List.of("operation_key", "request_digest",
+                "task_run_id", "result_json", "created_at"));
+        legacyTables.put("task_run_attempts", List.of("task_run_id", "attempt_number", "status",
+                "started_at", "completed_at", "error_text", "created_at", "updated_at"));
+        legacyTables.put("task_run_locations", List.of("task_run_id", "workspace_type", "workspace_key",
+                "workspace_identity", "task_path_key", "root_relative_path", "created_at", "updated_at"));
+
+        for (Map.Entry<String, List<String>> entry : legacyTables.entrySet()) {
+            List<String> actual = tableColumns(connection, entry.getKey());
+            if (!actual.equals(entry.getValue())) {
+                throw new MigrationException("Incompatible partial pre-foundation table "
+                        + entry.getKey() + ": " + actual);
+            }
+            if (rowCount(connection, entry.getKey()) != 0) {
+                throw new MigrationException("Pre-foundation task-run table contains data and requires "
+                        + "an explicit data migration: " + entry.getKey());
+            }
+        }
+
+        log.info("Replacing empty pre-foundation task-run tables with ordered migration 001");
+        try (Statement statement = connection.createStatement()) {
+            for (String table : legacyTables.keySet()) {
+                statement.execute("drop table " + table);
+            }
+        }
+    }
+
+    private int rowCount(Connection connection, String table) throws SQLException {
+        try (Statement statement = connection.createStatement();
+             ResultSet rows = statement.executeQuery("select count(*) from " + table)) {
+            return rows.next() ? rows.getInt(1) : 0;
         }
     }
 
@@ -356,7 +614,11 @@ public final class SchemaMigrationRunner {
         if (latestVersion < 1) {
             return;
         }
-        List<String> expectedTables = latestVersion >= 4 ? FOUNDATION_TABLES_V4
+        List<String> expectedTables = latestVersion >= 8 ? FOUNDATION_TABLES_V8
+                : latestVersion >= 7 ? FOUNDATION_TABLES_V7
+                : latestVersion >= 6 ? FOUNDATION_TABLES_V6
+                : latestVersion >= 5 ? FOUNDATION_TABLES_V5
+                : latestVersion >= 4 ? FOUNDATION_TABLES_V4
                 : latestVersion >= 3 ? FOUNDATION_TABLES_V3
                 : latestVersion >= 2 ? FOUNDATION_TABLES_V2 : FOUNDATION_TABLES_V1;
         for (String table : expectedTables) {
@@ -454,6 +716,145 @@ public final class SchemaMigrationRunner {
                     || !pubs.contains("length(expected_sha256) = 64")
                     || !pubs.contains("length(content_sha256) = 64")) {
                 throw new MigrationException("output_publications is missing required constraints");
+            }
+        }
+        if (latestVersion >= 7) {
+            if (!allIndexes.containsAll(FOUNDATION_INDEXES_V7)) {
+                throw new MigrationException("Missing migration-owned v7 indexes: "
+                        + FOUNDATION_INDEXES_V7.stream().filter(index -> !allIndexes.contains(index)).toList());
+            }
+            String summaries = normalized(tableSql(connection, "run_summaries"));
+            String measurements = normalized(tableSql(connection, "run_measurements"));
+            if (!summaries.contains("normalized_status in (")
+                    || !summaries.contains("'succeeded', 'failed', 'cancelled'")
+                    || !summaries.contains("completeness in (")
+                    || !summaries.contains("foreign key (task_run_id) references task_run_locations")) {
+                throw new MigrationException("run_summaries is missing required constraints");
+            }
+            if (!measurements.contains("kind in ('model', 'tool')")
+                    || !measurements.contains("outcome in (")
+                    || !measurements.contains("completeness in (")
+                    || !measurements.contains("foreign key (task_run_id) references task_run_locations")
+                    || !measurements.contains("foreign key (task_run_id, attempt_number)")) {
+                throw new MigrationException("run_measurements is missing required constraints");
+            }
+        }
+        if (latestVersion >= 8) {
+            if (!allIndexes.containsAll(FOUNDATION_INDEXES_V8)) {
+                throw new MigrationException("Missing migration-owned v8 indexes: "
+                        + FOUNDATION_INDEXES_V8.stream().filter(index -> !allIndexes.contains(index)).toList());
+            }
+            String schedDefs = normalized(tableSql(connection, "schedule_definitions"));
+            String claims = normalized(tableSql(connection, "scheduler_claims"));
+            String schedFirings = normalized(tableSql(connection, "schedule_firings"));
+            String firingAttempts = normalized(tableSql(connection, "schedule_firing_attempts"));
+            String rxnDefs = normalized(tableSql(connection, "reaction_definitions"));
+            String rxnDispatches = normalized(tableSql(connection, "reaction_dispatches"));
+            String rxnAttempts = normalized(tableSql(connection, "reaction_dispatch_attempts"));
+            if (!schedDefs.contains("unique (id, revision)")
+                    || !schedDefs.contains("revision integer not null check (revision >= 1)")
+                    || !schedDefs.contains("dialect_version text not null")) {
+                throw new MigrationException("schedule_definitions is missing required constraints");
+            }
+            if (!schedFirings.contains("unique (schedule_id, revision, slot_instant, timezone)")
+                    || !schedFirings.contains("firing_state text not null check")
+                    || !schedFirings.contains("length(request_digest) = 64")
+                    || !schedFirings.contains("foreign key (schedule_id, revision) references schedule_definitions")) {
+                throw new MigrationException("schedule_firings is missing required constraints");
+            }
+            if (!firingAttempts.contains("attempt_number integer not null check (attempt_number between 1 and 3)")
+                    || !firingAttempts.contains("foreign key (firing_id) references schedule_firings")) {
+                throw new MigrationException("schedule_firing_attempts is missing required constraints");
+            }
+            if (!rxnDefs.contains("unique (id, revision)")
+                    || !rxnDefs.contains("action_type text not null check")) {
+                throw new MigrationException("reaction_definitions is missing required constraints");
+            }
+            if (!rxnDispatches.contains("unique (reaction_id, revision, source_event_id)")
+                    || !rxnDispatches.contains("length(request_digest) = 64")
+                    || !rxnDispatches.contains("depth integer not null check")
+                    || !rxnDispatches.contains("foreign key (reaction_id, revision) references reaction_definitions")) {
+                throw new MigrationException("reaction_dispatches is missing required constraints");
+            }
+            if (!rxnAttempts.contains("foreign key (dispatch_id) references reaction_dispatches")) {
+                throw new MigrationException("reaction_dispatch_attempts is missing required constraints");
+            }
+        }
+        if (latestVersion >= 6) {
+            if (!allIndexes.containsAll(FOUNDATION_INDEXES_V6)) {
+                throw new MigrationException("Missing migration-owned v6 indexes: "
+                        + FOUNDATION_INDEXES_V6.stream().filter(index -> !allIndexes.contains(index)).toList());
+            }
+            String snapshots = normalized(tableSql(connection, "skill_snapshots"));
+            String trustDecisions = normalized(tableSql(connection, "skill_trust_decisions"));
+            String snapshotResources = normalized(tableSql(connection, "skill_snapshot_resources"));
+            String activations = normalized(tableSql(connection, "skill_activations"));
+            String execAuths = normalized(tableSql(connection, "skill_executable_authorizations"));
+            String packageOps = normalized(tableSql(connection, "skill_package_operations"));
+            String resourceExecs = normalized(tableSql(connection, "skill_resource_executions"));
+            if (!snapshots.contains("unique (snapshot_digest)")
+                    || !snapshots.contains("unique (candidate_version_id)")
+                    || !snapshots.contains("length(snapshot_digest) = 64")) {
+                throw new MigrationException("skill_snapshots is missing required constraints");
+            }
+            if (!trustDecisions.contains("decision in ('approve', 'reject', 'revoke')")
+                    || !trustDecisions.contains("scope in ('instruction', 'executable_resource', 'package_ingest')")
+                    || !trustDecisions.contains("unique (operation_key)")) {
+                throw new MigrationException("skill_trust_decisions is missing required constraints");
+            }
+            if (!snapshotResources.contains("unique (snapshot_id, relative_path)")
+                    || !snapshotResources.contains("resource_type in ('script', 'reference', 'asset', 'skill_md')")) {
+                throw new MigrationException("skill_snapshot_resources is missing required constraints");
+            }
+            if (!activations.contains("unique (snapshot_id, activation_context)")
+                    || !activations.contains("foreign key (snapshot_id) references skill_snapshots(id)")) {
+                throw new MigrationException("skill_activations is missing required constraints");
+            }
+            if (!execAuths.contains("unique (operation_key)")
+                    || !execAuths.contains("confinement_capability in ('proven', 'unavailable', 'disabled')")) {
+                throw new MigrationException("skill_executable_authorizations is missing required constraints");
+            }
+            if (!packageOps.contains("unique (operation_type, operation_key)")
+                    || !packageOps.contains("operation_state in (")) {
+                throw new MigrationException("skill_package_operations is missing required constraints");
+            }
+            if (!resourceExecs.contains("launch_state in (")
+                    || !resourceExecs.contains("foreign key (snapshot_id) references skill_snapshots(id)")) {
+                throw new MigrationException("skill_resource_executions is missing required constraints");
+            }
+        }
+        if (latestVersion >= 5) {
+            if (!allIndexes.containsAll(FOUNDATION_INDEXES_V5)) {
+                throw new MigrationException("Missing migration-owned v5 indexes: "
+                        + FOUNDATION_INDEXES_V5.stream().filter(index -> !allIndexes.contains(index)).toList());
+            }
+            String extractionDocs = normalized(tableSql(connection, "artifact_extraction_documents"));
+            String lineage = normalized(tableSql(connection, "artifact_lineage_edges"));
+            String retention = normalized(tableSql(connection, "task_run_retention_policies"));
+            String pins = normalized(tableSql(connection, "artifact_retention_pins"));
+            String sessions = normalized(tableSql(connection, "active_artifact_sessions"));
+            if (!extractionDocs.contains("extraction_state in (")
+                    || !extractionDocs.contains("artifact_id text not null unique")
+                    || !extractionDocs.contains("foreign key (artifact_id) references output_publications")) {
+                throw new MigrationException("artifact_extraction_documents is missing required constraints");
+            }
+            if (!lineage.contains("lineage_kind in (")
+                    || !lineage.contains("unique (parent_artifact_id, child_artifact_id, lineage_kind)")
+                    || !lineage.contains("parent_artifact_id <> child_artifact_id")) {
+                throw new MigrationException("artifact_lineage_edges is missing required constraints");
+            }
+            if (!retention.contains("unique (workspace_kind, workspace_key, task_path_key)")
+                    || !retention.contains("policy_type in (")) {
+                throw new MigrationException("task_run_retention_policies is missing required constraints");
+            }
+            if (!pins.contains("pin_kind in (")
+                    || !pins.contains("artifact_id is not null or task_run_id is not null")) {
+                throw new MigrationException("artifact_retention_pins is missing required constraints");
+            }
+            if (!sessions.contains("state in (")
+                    || !sessions.contains("session_token text not null unique")
+                    || !sessions.contains("foreign key (artifact_id) references output_publications")) {
+                throw new MigrationException("active_artifact_sessions is missing required constraints");
             }
         }
         if (latestVersion >= 4) {

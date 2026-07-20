@@ -14,7 +14,7 @@ Three closed workspace kinds exist:
 
 Agent and chat workspaces do not require prior explicit creation. If the entity exists, successful file-producing operations create the physical root when needed. User workspaces are the exception: they must be created through the API or UI before any file or execution operation targets them.
 
-Each workspace includes a reserved `outputs/` directory. Output publication writes there directly; explorer mutations (create, save, rename, move, copy, delete) cannot modify `outputs/` or its descendants.
+Each workspace can contain a reserved legacy/non-task `outputs/` directory. New task, workflow, and job runs are canonical children at `tasks/<taskPathKey>/<taskRunId>/`; their `outputs/` and `staging/` children are lazy and publication-owned. Explorer mutations cannot modify reserved output, task, staging, or skill structures.
 
 ## Project Membership
 
@@ -39,7 +39,7 @@ The agents section lists assigned members and roles. Use HTMX controls to add a 
 
 ## Agent Files Tab
 
-Each agent's operational console at `/agents/{agentId}` has a **Files** tab. This tab is a neutral file explorer bound only to `workspace/agent/<agentId>/`.
+Each agent's operational console at `/agents/{agentId}` has a **Files** tab. It combines a neutral explorer bound only to `workspace/agent/<agentId>/` with an independently loaded Task Runs panel. Persistence-backed run metadata is never queried by the filesystem explorer service.
 
 The explorer supports:
 
@@ -51,7 +51,7 @@ The explorer supports:
 - Custom tags and note labels for files and directories.
 - Rename, delete confirmation, copy, and move operations.
 
-All operations stay confined to the agent's workspace root. The explorer rejects traversal, absolute paths, symlink path components, workspace-root mutation, and modification of the reserved `outputs/` subtree.
+All operations stay confined to the agent's workspace root. The explorer rejects traversal, absolute paths, symlink path components, workspace-root mutation, and modification of reserved `tasks/`, `.skills/`, run-local `outputs/`/`staging/`, or legacy workspace-root `outputs/` structures.
 
 The Files tab uses HTMX for CRUD operations with out-of-band list, inspector, and modal refreshes. JavaScript is limited to narrow interactions where it is the simpler path.
 
@@ -77,9 +77,11 @@ When submitting tasks, workflows, or jobs, execution payloads carry `workspaceTy
 
 The UI workspace selection control presents the bound-agent default and only declared existing user-workspace overrides. Chat is never selectable.
 
+For an end-to-end walkthrough, see [Getting Started with Workspaces, Tasks, and Outputs](getting-started-workspaces-tasks-outputs.md).
+
 ## Outputs
 
-Output publication writes directly beneath the effective workspace's `outputs/` directory using collision-safe normalized names. No `runs/<runId>` hierarchy is created. Durable task, job, run, project, agent, and canonical workspace attribution remains queryable through `/api/outputs`.
+New task-run publication reserves collision-safe names beneath `tasks/<taskPathKey>/<taskRunId>/outputs/`, stages bytes under the same trusted run, verifies writer capability, and promotes create-only. Chat publication remains separately confined to chat output locations. Existing workspace-root `outputs/` is legacy/non-task data and is not moved. Durable task, job, run, project, agent, and canonical workspace attribution remains queryable; project ids never select a filesystem root.
 
 ## What Changed
 

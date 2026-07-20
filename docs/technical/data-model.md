@@ -1,6 +1,6 @@
 # Data Model
 
-Primary Magenta SQLite schema is initialized from [`schema.sql`](../../src/main/resources/schema.sql). Repositories also create tables defensively and add compatibility columns for warm local databases, so code inspection should include the relevant schema file and owning repository before changing schema assumptions.
+Primary Magenta SQLite schema is initialized from [`schema.sql`](../../src/main/resources/schema.sql) and evolved by checksum-protected ordered resources in [`db/migrations`](../../src/main/resources/db/migrations). Migration-owned structures use `SchemaMigrationRunner`; older unrelated repositories may still add compatibility columns for warm databases. See [Schema Migrations 001–009](migrations-001-009.md).
 
 ## Avatar Personal Data (Removed)
 
@@ -38,7 +38,7 @@ Important invariants:
 - Saved plan chats are keyed by saved `plan_id`; anonymous `/chat` planning remains keyed by conversation id and does not use `plan_chat_messages`.
 - Runs snapshot definitions at start time so later edits do not change historical run meaning.
 - Execution selection is persisted as `workspace_type`, `workspace_key`, and internal `workspace_identity`; project ids remain attribution metadata.
-- Declared outputs publish directly beneath the selected workspace's lazy `outputs/` subtree.
+- New task-run outputs publish beneath `tasks/<taskPathKey>/<taskRunId>/outputs/`. Workspace-root `outputs/` is legacy/non-task only.
 
 ## Workflows
 
@@ -64,9 +64,13 @@ Source packages: [`ai/orchestration/agents`](../../src/main/java/io/mindspice/ma
 - `work_assignments`: durable assignment queue. Fields include agent id, job/job item ids, assignment type, priority, status, model override, project attribution, workspace type/key/identity, current item index, checkpoint/input/output/evidence JSON, error, queue lease owner/expires, progress/heartbeat timestamps, and lifecycle timestamps.
 - `assignment_conversation_links`: durable mapping from assignment ids to chat conversation ids so transcripts remain visible even if checkpoint output is incomplete.
 - `agent_inbox_messages`: runtime direct-line agent/operator inbox messages with read/handled flags.
-- `agent_schedules` and `schedule_firings`: cron-like assignment scheduling and de-duplication of due firings.
-- `agent_event_reactions`: event-to-assignment reaction rules.
-- `orchestration_events`: append-only runtime event records with handled timestamp.
+- `schedule_definitions`, `scheduler_claims`, `schedule_firings`, and `schedule_firing_attempts`: revisioned schedule state, fenced poller ownership, deterministic due-slot identity, and append-only enqueue/recovery audit.
+- `reaction_definitions`, `reaction_dispatches`, and `reaction_dispatch_attempts`: revisioned event rules, exact causation/dedupe identity, suppression outcomes, and append-only dispatch audit.
+- `orchestration_events`: append-only runtime event records and causation source facts.
+- `run_summaries`: rebuildable normalized runtime cache with attempt/model/tool counts, wall/active elapsed, completeness, workspace scope, and retry/replay lineage. Native family tables remain status truth.
+- `run_measurements`: one immutable invocation row per model/tool call with attempt, correlation, outcome, elapsed, token/process facts, and completeness.
+
+Active/unavailable runs are excluded from terminal health denominators. Null usage, elapsed, timeout, exit, or completion facts remain unavailable rather than becoming zero.
 
 Compatibility notes:
 
@@ -105,10 +109,39 @@ Source package: [`ai/orchestration/workspaces`](../../src/main/java/io/mindspice
 
 Filesystem workspace identity is derived from type and key and therefore has no active registry table. Execution tables persist `workspace_type`, `workspace_key`, and `workspace_identity`.
 
-- `run_output_artifacts`: output artifact metadata including run/plan and optional agent/job/job-assignment/job-run/project attribution, workspace type/key/identity, run type, output name, artifact type, portable data-root-relative file path, content JSON, and timestamp.
-- Artifact queries are indexed by run and major attribution fields.
-- `OutputArtifactRepository` exclusively owns artifact schema compatibility, persistence, mapping, queries, and deletion.
+- `task_run_locations`: canonical task/workflow/job run identity, workspace kind/key, task-path key, data-root-relative run path, source/native identity, and optional retry/replay lineage.
+- `task_run_attempts`, scoped idempotent operation tables, native/child link tables, assignment fence generations, and writer-claim generations: lifecycle, dispatch linkage, and independent monotonic capability state.
+- `output_publications`: task/chat publication reservation and state, scoped workspace/run attribution, data-root-relative staging/final paths, digest/size, reconciliation state, and create-only lifecycle facts.
+- `artifact_extraction_documents` and optional `artifact_extraction_fts`: bounded extracted text and capability-dependent FTS5 search.
+- `artifact_lineage_edges`, `task_run_retention_policies`, `artifact_retention_pins`, and `active_artifact_sessions`: exact producer/consumer linkage, preservation policy, deletion blockers, and operation-scoped byte access.
+- `run_output_artifacts`: inert/compatibility metadata for legacy and non-task rows; it is not canonical task-run publication state.
+- `OutputArtifactRepository` owns publication and compatibility persistence operations; ordered migrations own DDL.
 - Obsolete generic workspace, link, lease, database-backed file identity, and related structures may remain in existing databases as inert historical data; active startup does not migrate, recreate, read, or write them.
+
+## Skill Candidates, Trust, And Snapshots
+
+- `skill_candidate_versions`: immutable logical key, scope/provenance, digest, relative source identity, parse status, and candidate facts.
+- `skill_candidate_observations`: discovery scan observations for a candidate.
+- `skill_exact_assignments`: exact candidate overlays by target type/key and operation identity.
+- `skill_legacy_conversion_diagnostics`: bounded conversion findings without invented trust.
+- `skill_trust_decisions`: approve/reject/revoke audit tied to candidate and optional snapshot.
+- `skill_snapshots` and `skill_snapshot_resources`: immutable approved manifest/metadata/resource bytes.
+- `skill_activations`: exact snapshot used by a task run/conversation.
+- `skill_executable_authorizations`, `skill_package_operations`, and `skill_resource_executions`: separate executable/package authorization and audit planes.
+
+Approval never mutates a snapshot. Source changes create a new candidate. Revocation blocks new activation without deleting historical run evidence. Executable authorization remains fail-closed while process confinement is unavailable.
+
+## Revisioned Schedules And Reactions
+
+- `schedule_definitions`: agent-scoped revision, six-field cron, IANA timezone, dialect/policy versions, enabled/deleted state, and assignment-template snapshot source.
+- `scheduler_claims`: owner, monotonic fence, heartbeat, and expiry for the supported scheduler topology.
+- `schedule_firings`: unique schedule/revision/slot/timezone identity, operation key/digest, immutable template snapshot, enqueue state, and assignment/run links.
+- `schedule_firing_attempts`: append-only, bounded enqueue/recovery attempt audit including claim fence and outcome.
+- `reaction_definitions`: revisioned event/filter/action/template state.
+- `reaction_dispatches`: unique reaction/revision/source-event identity with request digest, immutable template snapshot, root/parent causation, depth, dedupe, suppression, and assignment/run links.
+- `reaction_dispatch_attempts`: append-only dispatch enqueue/recovery attempts.
+
+Automation schema remains owned by immutable `008-schedule-reaction-hardening.sql`. `009-warm-database-compatibility.sql` is the contiguous no-schema marker for transactional legacy-bookkeeping normalization; it does not rename or rewrite migration 008.
 
 ## Runtime Settings
 

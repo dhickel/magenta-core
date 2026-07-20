@@ -927,3 +927,538 @@ create table if not exists skill_legacy_conversion_diagnostics (
     unique (agent_id, logical_key),
     foreign key (candidate_version_id) references skill_candidate_versions(id)
 );
+
+-- ════════════════════════════════════════════════════════════════
+--  Artifact Access, Search, Retention (migration 005 equivalent)
+-- ════════════════════════════════════════════════════════════════
+
+create table if not exists artifact_extraction_documents (
+    id              integer primary key autoincrement,
+    artifact_id     text not null unique
+        check (length(artifact_id) between 1 and 255
+            and instr(artifact_id, '/') = 0 and instr(artifact_id, char(92)) = 0),
+    content_sha256  text not null check (
+        length(content_sha256) = 64 and content_sha256 not glob '*[^0-9a-f]*'),
+    extracted_text  text not null,
+    byte_count      integer not null check (byte_count >= 0),
+    line_count      integer not null check (line_count >= 0),
+    language_hint   text,
+    extraction_state text not null check (extraction_state in (
+        'EXTRACTED', 'TRUNCATED', 'UNSUPPORTED', 'FAILED')),
+    extracted_at    text not null,
+    foreign key (artifact_id) references output_publications(artifact_id) on delete cascade
+);
+
+create virtual table if not exists artifact_extraction_fts using fts5 (
+    extracted_text,
+    language_hint,
+    content='artifact_extraction_documents',
+    content_rowid='id',
+    tokenize='porter unicode61'
+);
+
+-- FTS5 synchronization is managed programmatically in ArtifactSearchService.
+-- Triggers are omitted to avoid Spring ScriptUtils semicolon splitting issues.
+
+create table if not exists artifact_lineage_edges (
+    id                      integer primary key autoincrement,
+    parent_artifact_id      text not null
+        check (length(parent_artifact_id) between 1 and 255),
+    child_artifact_id       text not null
+        check (length(child_artifact_id) between 1 and 255),
+    lineage_kind            text not null check (lineage_kind in (
+        'DERIVED_FROM', 'GENERATED_BY', 'TRANSFORMED_FROM')),
+    producer_workspace_kind text not null check (producer_workspace_kind in ('agent', 'user')),
+    producer_workspace_key  text not null check (length(producer_workspace_key) > 0),
+    producer_task_run_id    text,
+    declaration_digest      text not null check (
+        length(declaration_digest) = 64 and declaration_digest not glob '*[^0-9a-f]*'),
+    created_at              text not null,
+    unique (parent_artifact_id, child_artifact_id, lineage_kind),
+    check (parent_artifact_id <> child_artifact_id),
+    foreign key (parent_artifact_id) references output_publications(artifact_id)
+        on delete cascade,
+    foreign key (child_artifact_id) references output_publications(artifact_id)
+        on delete cascade
+);
+
+create index if not exists idx_lineage_edges_parent
+    on artifact_lineage_edges (parent_artifact_id);
+create index if not exists idx_lineage_edges_child
+    on artifact_lineage_edges (child_artifact_id);
+create index if not exists idx_lineage_edges_task_run
+    on artifact_lineage_edges (producer_task_run_id)
+    where producer_task_run_id is not null;
+
+create table if not exists task_run_retention_policies (
+    id                  integer primary key autoincrement,
+    workspace_kind      text not null check (workspace_kind in ('agent', 'user')),
+    workspace_key       text not null check (length(workspace_key) > 0),
+    task_path_key       text,
+    policy_type         text not null check (policy_type in ('PRESERVE', 'SOFT_ARCHIVE', 'HARD_EXPIRE')),
+    retain_days         integer check (retain_days is null or retain_days > 0),
+    max_artifact_count  integer check (max_artifact_count is null or max_artifact_count > 0),
+    max_total_bytes     integer check (max_total_bytes is null or max_total_bytes > 0),
+    enabled             integer not null default 1 check (enabled in (0, 1)),
+    created_at          text not null,
+    updated_at          text not null,
+    unique (workspace_kind, workspace_key, task_path_key)
+);
+
+create index if not exists idx_retention_policies_workspace
+    on task_run_retention_policies (workspace_kind, workspace_key);
+
+create table if not exists artifact_retention_pins (
+    id              integer primary key autoincrement,
+    artifact_id     text check (artifact_id is null or
+        (length(artifact_id) between 1 and 255
+            and instr(artifact_id, '/') = 0 and instr(artifact_id, char(92)) = 0)),
+    task_run_id     text check (task_run_id is null or
+        (length(task_run_id) between 1 and 255
+            and task_run_id not in ('.', '..')
+            and instr(task_run_id, '/') = 0 and instr(task_run_id, char(92)) = 0)),
+    pin_kind        text not null check (pin_kind in (
+        'LINEAGE', 'RECONCILIATION_PENDING', 'ACTIVE_CLAIM',
+        'LEGAL_HOLD', 'MANUAL')),
+    reason          text not null check (length(reason) > 0),
+    pinned_by       text,
+    pinned_at       text not null,
+    expires_at      text,
+    check (artifact_id is not null or task_run_id is not null),
+    check (pin_kind <> 'LINEAGE' or artifact_id is not null)
+);
+
+create index if not exists idx_retention_pins_artifact
+    on artifact_retention_pins (artifact_id)
+    where artifact_id is not null;
+create index if not exists idx_retention_pins_task_run
+    on artifact_retention_pins (task_run_id)
+    where task_run_id is not null;
+create index if not exists idx_retention_pins_kind
+    on artifact_retention_pins (pin_kind);
+
+create table if not exists active_artifact_sessions (
+    id              integer primary key autoincrement,
+    artifact_id     text not null
+        check (length(artifact_id) between 1 and 255),
+    session_token   text not null unique check (length(session_token) between 1 and 128),
+    owner_identity  text not null check (length(owner_identity) > 0),
+    bytes_read      integer not null default 0 check (bytes_read >= 0),
+    max_bytes       integer check (max_bytes is null or max_bytes > 0),
+    state           text not null check (state in ('ACTIVE', 'COMPLETED', 'CANCELLED',
+        'ABANDONED')),
+    created_at      text not null,
+    last_activity   text not null,
+    completed_at    text,
+    foreign key (artifact_id) references output_publications(artifact_id) on delete cascade
+);
+
+create index if not exists idx_active_sessions_artifact
+    on active_artifact_sessions (artifact_id)
+    where state = 'ACTIVE';
+create index if not exists idx_active_sessions_token
+    on active_artifact_sessions (session_token);
+
+-- ════════════════════════════════════════════════════════════════
+--  Skill Trust, Snapshots, Activation (migration 007 equivalent)
+-- ════════════════════════════════════════════════════════════════
+
+create table if not exists skill_snapshots (
+    id                    integer primary key autoincrement,
+    candidate_version_id  integer not null,
+    logical_key           text not null,
+    provenance            text not null check (provenance in ('GLOBAL_PACKAGE', 'WORKSPACE_FLAT')),
+    format_version        integer not null,
+    snapshot_digest       text not null check (
+        length(snapshot_digest) = 64 and snapshot_digest not glob '*[^0-9a-f]*'),
+    skill_name            text not null check (length(skill_name) between 1 and 128),
+    description           text not null check (length(description) between 1 and 1024),
+    instructions          text not null check (length(instructions) <= 262144),
+    hints                 text check (hints is null or length(hints) <= 4096),
+    allowed_tools         text check (allowed_tools is null or length(allowed_tools) <= 4096),
+    resource_manifest_json text not null check (length(resource_manifest_json) <= 65536),
+    created_at            text not null,
+    unique (snapshot_digest),
+    unique (candidate_version_id),
+    foreign key (candidate_version_id) references skill_candidate_versions(id)
+);
+
+create index if not exists idx_skill_snapshots_logical_key
+    on skill_snapshots (logical_key, created_at desc);
+
+create table if not exists skill_trust_decisions (
+    id                    integer primary key autoincrement,
+    candidate_version_id  integer not null,
+    logical_key           text not null,
+    decision              text not null check (decision in ('APPROVE', 'REJECT', 'REVOKE')),
+    snapshot_id           integer,
+    actor                 text check (actor is null or (length(actor) between 1 and 255
+        and instr(actor, '/') = 0 and instr(actor, char(92)) = 0)),
+    reason                text check (reason is null or length(reason) <= 4096),
+    scope                 text not null check (scope in ('INSTRUCTION', 'EXECUTABLE_RESOURCE', 'PACKAGE_INGEST')),
+    operation_key         text not null check (length(operation_key) between 1 and 255),
+    request_digest        text not null check (
+        length(request_digest) = 64 and request_digest not glob '*[^0-9a-f]*'),
+    decided_at            text not null,
+    unique (operation_key),
+    foreign key (candidate_version_id) references skill_candidate_versions(id),
+    foreign key (snapshot_id) references skill_snapshots(id)
+);
+
+create index if not exists idx_skill_trust_decisions_candidate
+    on skill_trust_decisions (candidate_version_id, decided_at desc);
+create index if not exists idx_skill_trust_decisions_logical_key
+    on skill_trust_decisions (logical_key, decision, decided_at desc);
+
+create table if not exists skill_snapshot_resources (
+    id                    integer primary key autoincrement,
+    snapshot_id           integer not null,
+    relative_path         text not null check (
+        length(relative_path) between 1 and 1024
+        and substr(relative_path, 1, 1) <> '/'
+        and instr(relative_path, char(92)) = 0
+        and instr(relative_path, '..') = 0
+        and instr(relative_path, char(10)) = 0),
+    resource_type         text not null check (
+        resource_type in ('SCRIPT', 'REFERENCE', 'ASSET', 'SKILL_MD')),
+    content_length        integer not null check (content_length >= 0),
+    content_bytes         blob not null,
+    content_digest        text not null check (
+        length(content_digest) = 64 and content_digest not glob '*[^0-9a-f]*'),
+    unique (snapshot_id, relative_path),
+    foreign key (snapshot_id) references skill_snapshots(id)
+);
+
+create index if not exists idx_skill_snapshot_resources_snapshot
+    on skill_snapshot_resources (snapshot_id, relative_path);
+
+create table if not exists skill_activations (
+    id                    integer primary key autoincrement,
+    snapshot_id           integer not null,
+    logical_key           text not null,
+    task_run_id           text not null check (length(task_run_id) between 1 and 255
+        and instr(task_run_id, '/') = 0 and instr(task_run_id, char(92)) = 0),
+    conversation_id       text check (conversation_id is null or length(conversation_id) between 1 and 255),
+    agent_id              text not null check (length(agent_id) between 1 and 255
+        and instr(agent_id, '/') = 0 and instr(agent_id, char(92)) = 0),
+    activation_context    text not null check (length(activation_context) between 1 and 512),
+    activated_at          text not null,
+    unique (snapshot_id, activation_context),
+    foreign key (snapshot_id) references skill_snapshots(id)
+);
+
+create index if not exists idx_skill_activations_task_run
+    on skill_activations (task_run_id, activated_at desc);
+create index if not exists idx_skill_activations_agent
+    on skill_activations (agent_id, logical_key, activated_at desc);
+
+create table if not exists skill_executable_authorizations (
+    id                    integer primary key autoincrement,
+    snapshot_id           integer not null,
+    snapshot_resource_id  integer not null,
+    logical_key           text not null,
+    decision              text not null check (decision in ('AUTHORIZED', 'DENIED', 'REVOKED')),
+    actor                 text check (actor is null or (length(actor) between 1 and 255
+        and instr(actor, '/') = 0 and instr(actor, char(92)) = 0)),
+    reason                text check (reason is null or length(reason) <= 4096),
+    confinement_capability text not null check (
+        confinement_capability in ('PROVEN', 'UNAVAILABLE', 'DISABLED')),
+    operation_key         text not null check (length(operation_key) between 1 and 255),
+    request_digest        text not null check (
+        length(request_digest) = 64 and request_digest not glob '*[^0-9a-f]*'),
+    decided_at            text not null,
+    unique (operation_key),
+    unique (snapshot_id, snapshot_resource_id),
+    foreign key (snapshot_id) references skill_snapshots(id),
+    foreign key (snapshot_resource_id) references skill_snapshot_resources(id)
+);
+
+create index if not exists idx_skill_executable_authorizations_resource
+    on skill_executable_authorizations (snapshot_resource_id, decision);
+
+create table if not exists skill_package_operations (
+    id                    integer primary key autoincrement,
+    operation_type        text not null check (operation_type in ('INGEST', 'INSTALL', 'REJECT')),
+    operation_key         text not null check (length(operation_key) between 1 and 255),
+    request_digest        text not null check (
+        length(request_digest) = 64 and request_digest not glob '*[^0-9a-f]*'),
+    operation_state       text not null check (operation_state in (
+        'STAGING', 'STAGED', 'INSTALLING', 'INSTALLED', 'FAILED', 'REJECTED')),
+    staging_path          text check (staging_path is null or (
+        length(staging_path) > 0
+        and substr(staging_path, 1, 1) <> '/'
+        and instr(staging_path, char(92)) = 0)),
+    package_identity      text check (package_identity is null or length(package_identity) between 1 and 255),
+    entry_count           integer check (entry_count is null or entry_count >= 0),
+    total_bytes           integer check (total_bytes is null or total_bytes >= 0),
+    validation_evidence   text check (validation_evidence is null or length(validation_evidence) <= 16384),
+    failure_detail        text check (failure_detail is null or length(failure_detail) <= 4096),
+    created_at            text not null,
+    updated_at            text not null,
+    unique (operation_type, operation_key)
+);
+
+create index if not exists idx_skill_package_operations_state
+    on skill_package_operations (operation_state, created_at);
+
+create table if not exists skill_resource_executions (
+    id                    integer primary key autoincrement,
+    snapshot_id           integer not null,
+    snapshot_resource_id  integer not null,
+    task_run_id           text not null check (length(task_run_id) between 1 and 255
+        and instr(task_run_id, '/') = 0 and instr(task_run_id, char(92)) = 0),
+    agent_id              text not null check (length(agent_id) between 1 and 255
+        and instr(agent_id, '/') = 0 and instr(agent_id, char(92)) = 0),
+    writer_owner_id       text check (writer_owner_id is null or length(writer_owner_id) between 1 and 255),
+    fence_generation      integer check (fence_generation is null or fence_generation > 0),
+    attempt_number        integer check (attempt_number is null or attempt_number > 0),
+    launch_state          text not null check (launch_state in (
+        'PREFLIGHT', 'LAUNCHED', 'COMPLETED', 'FAILED', 'REJECTED')),
+    process_policy        text check (process_policy is null or length(process_policy) <= 16384),
+    args_json             text check (args_json is null or length(args_json) <= 8192),
+    env_json              text check (env_json is null or length(env_json) <= 8192),
+    start_result_state    text check (start_result_state is null or length(start_result_state) <= 1024),
+    exit_code             integer,
+    exit_facts_json       text check (exit_facts_json is null or length(exit_facts_json) <= 8192),
+    failure_detail        text check (failure_detail is null or length(failure_detail) <= 4096),
+    started_at            text,
+    completed_at          text,
+    created_at            text not null,
+    foreign key (snapshot_id) references skill_snapshots(id),
+    foreign key (snapshot_resource_id) references skill_snapshot_resources(id)
+);
+
+create index if not exists idx_skill_resource_executions_task_run
+    on skill_resource_executions (task_run_id, created_at desc);
+create index if not exists idx_skill_resource_executions_resource
+    on skill_resource_executions (snapshot_resource_id, created_at desc);
+
+-- ════════════════════════════════════════════════════════════════
+--  Runtime Summaries and Measurements (migration 008 equivalent)
+-- ════════════════════════════════════════════════════════════════
+
+create table if not exists run_summaries (
+    task_run_id          text primary key,
+    normalized_status    text not null check (normalized_status in (
+        'SUCCEEDED', 'FAILED', 'CANCELLED', 'TIMED_OUT',
+        'INTERRUPTED', 'PARTIAL', 'ABANDONED', 'UNAVAILABLE',
+        'ACTIVE')),
+    attempt_count        integer not null check (attempt_count >= 0),
+    model_call_count     integer not null check (model_call_count >= 0),
+    tool_call_count      integer not null check (tool_call_count >= 0),
+    wall_elapsed_ms      integer,
+    active_elapsed_ms    integer,
+    completeness         text not null check (completeness in (
+        'COMPLETE', 'PARTIAL', 'UNAVAILABLE')),
+    workspace_type       text not null check (workspace_type in ('agent', 'user')),
+    workspace_key        text not null check (length(workspace_key) > 0
+        and workspace_key not in ('.', '..')
+        and instr(workspace_key, '/') = 0 and instr(workspace_key, char(92)) = 0),
+    source_kind          text not null check (source_kind in ('task', 'workflow', 'job')),
+    lineage_parent_task_run_id text,
+    lineage_mode         text check (lineage_mode in ('RETRY_OF', 'REPLAY_OF')),
+    created_at           text not null,
+    updated_at           text not null,
+    foreign key (task_run_id) references task_run_locations(task_run_id) on delete cascade
+);
+
+create index if not exists idx_run_summaries_workspace
+    on run_summaries (workspace_type, workspace_key, normalized_status, updated_at desc);
+create index if not exists idx_run_summaries_task_run
+    on run_summaries (task_run_id);
+
+create table if not exists run_measurements (
+    invocation_id        text primary key check (
+        length(invocation_id) between 1 and 255
+        and instr(invocation_id, '/') = 0 and instr(invocation_id, char(92)) = 0),
+    task_run_id          text not null,
+    attempt_number       integer not null check (attempt_number > 0),
+    kind                 text not null check (kind in ('MODEL', 'TOOL')),
+    call_id              text not null check (length(call_id) between 1 and 255),
+    correlation_id       text check (correlation_id is null or length(correlation_id) between 1 and 255),
+    provider             text,
+    model_name           text,
+    tool_name            text,
+    outcome              text not null check (outcome in (
+        'SUCCEEDED', 'FAILED', 'TIMED_OUT', 'REJECTED',
+        'INTERRUPTED', 'TRUNCATED', 'DISABLED', 'UNAVAILABLE')),
+    started_at           text,
+    completed_at         text,
+    elapsed_ms           integer,
+    input_token_count    integer,
+    output_token_count   integer,
+    total_token_count    integer,
+    timeout_ms           integer,
+    exit_code            integer,
+    truncation_kind      text,
+    interruption_kind    text,
+    rejection_reason     text,
+    failure_detail       text,
+    completeness         text not null check (completeness in (
+        'COMPLETE', 'INCOMPLETE', 'UNAVAILABLE')),
+    created_at           text not null,
+    updated_at           text not null,
+    foreign key (task_run_id) references task_run_locations(task_run_id) on delete cascade,
+    foreign key (task_run_id, attempt_number)
+        references task_run_attempts(task_run_id, attempt_number) on delete cascade
+);
+
+create index if not exists idx_run_measurements_task_run
+    on run_measurements (task_run_id, attempt_number, kind, created_at desc);
+create index if not exists idx_run_measurements_call_id
+    on run_measurements (task_run_id, call_id);
+create index if not exists idx_run_measurements_correlation
+    on run_measurements (correlation_id) where correlation_id is not null;
+
+-- ── Schedule and reaction management (migration 008) ──
+drop table if exists schedule_firings;
+drop table if exists agent_schedules;
+drop table if exists agent_event_reactions;
+
+create table if not exists schedule_definitions (
+    id                text primary key check (length(id) between 1 and 128),
+    agent_id          text not null check (length(agent_id) > 0
+        and instr(agent_id, '/') = 0 and instr(agent_id, char(92)) = 0),
+    revision          integer not null check (revision >= 1),
+    cron_expression   text not null check (length(cron_expression) between 1 and 256),
+    timezone          text not null check (length(timezone) between 1 and 128),
+    dialect_version   text not null check (length(dialect_version) between 1 and 32),
+    policy_version    text not null check (length(policy_version) between 1 and 32),
+    enabled           integer not null check (enabled in (0, 1)),
+    deleted           integer not null default 0 check (deleted in (0, 1)),
+    job_id            text,
+    assignment_template_json text not null,
+    created_at        text not null,
+    updated_at        text not null,
+    unique (id, revision)
+);
+create index if not exists idx_schedule_defs_agent on schedule_definitions (agent_id, deleted, enabled);
+create index if not exists idx_schedule_defs_enabled on schedule_definitions (enabled, deleted);
+
+create table if not exists scheduler_claims (
+    id                text primary key check (length(id) between 1 and 128),
+    owner_id          text not null check (length(owner_id) > 0),
+    fence             integer not null check (fence >= 0),
+    heartbeat_at      text not null,
+    expires_at        text not null,
+    claimed_at        text not null,
+    created_at        text not null,
+    updated_at        text not null
+);
+
+create table if not exists schedule_firings (
+    firing_id         text primary key check (length(firing_id) between 1 and 128),
+    schedule_id       text not null,
+    revision          integer not null check (revision >= 1),
+    slot_instant      text not null,
+    timezone          text not null,
+    offset_policy     text not null check (offset_policy in ('GAP_SKIP', 'OVERLAP_FIRE_ONCE')),
+    firing_state      text not null check (firing_state in (
+        'CLAIMED', 'ENQUEUED', 'EXHAUSTED', 'RECOVERED', 'CONFLICT')),
+    operation_key     text not null check (length(operation_key) between 1 and 255),
+    request_digest    text not null check (length(request_digest) = 64),
+    template_snapshot_json text not null,
+    assignment_id     text,
+    task_run_id       text,
+    native_run_id     text,
+    correlation_id    text,
+    error_class       text,
+    created_at        text not null,
+    updated_at        text not null,
+    foreign key (schedule_id, revision) references schedule_definitions(id, revision),
+    unique (schedule_id, revision, slot_instant, timezone)
+);
+create index if not exists idx_schedule_firings_schedule on schedule_firings (schedule_id, revision, firing_state);
+create index if not exists idx_schedule_firings_op_key on schedule_firings (operation_key, request_digest);
+create index if not exists idx_schedule_firings_assignment on schedule_firings (assignment_id);
+
+create table if not exists schedule_firing_attempts (
+    attempt_id        text primary key check (length(attempt_id) between 1 and 128),
+    firing_id         text not null,
+    attempt_number    integer not null check (attempt_number between 1 and 3),
+    eligible_at       text not null,
+    attempted_at      text,
+    claim_owner       text not null,
+    claim_fence       integer not null check (claim_fence >= 0),
+    outcome           text not null check (outcome in (
+        'ENQUEUED', 'FAILED', 'RECOVERED', 'DUPLICATE')),
+    error_class       text,
+    assignment_id     text,
+    task_run_id       text,
+    native_run_id     text,
+    correlation_id    text,
+    created_at        text not null,
+    foreign key (firing_id) references schedule_firings(firing_id)
+);
+create index if not exists idx_schedule_firing_attempts_firing on schedule_firing_attempts (firing_id, attempt_number);
+create index if not exists idx_schedule_firing_attempts_assignment on schedule_firing_attempts (assignment_id);
+
+create table if not exists reaction_definitions (
+    id                text primary key check (length(id) between 1 and 128),
+    agent_id          text not null check (length(agent_id) > 0
+        and instr(agent_id, '/') = 0 and instr(agent_id, char(92)) = 0),
+    revision          integer not null check (revision >= 1),
+    event_type        text not null check (length(event_type) between 1 and 64),
+    filter_json       text,
+    action_type       text not null check (action_type in ('ENQUEUE_ASSIGNMENT')),
+    assignment_template_json text not null,
+    enabled           integer not null check (enabled in (0, 1)),
+    deleted           integer not null default 0 check (deleted in (0, 1)),
+    created_at        text not null,
+    updated_at        text not null,
+    unique (id, revision)
+);
+create index if not exists idx_reaction_defs_agent on reaction_definitions (agent_id, deleted, enabled);
+create index if not exists idx_reaction_defs_enabled_type on reaction_definitions (enabled, event_type, deleted);
+
+create table if not exists reaction_dispatches (
+    dispatch_id       text primary key check (length(dispatch_id) between 1 and 128),
+    reaction_id       text not null,
+    revision          integer not null check (revision >= 1),
+    source_event_id   text not null,
+    operation_key     text not null check (length(operation_key) between 1 and 255),
+    request_digest    text not null check (length(request_digest) = 64),
+    template_snapshot_json text not null,
+    root_event_id     text not null,
+    parent_event_id   text,
+    parent_dispatch_id text,
+    depth             integer not null check (depth >= 1 and depth <= 8),
+    dedupe_key        text not null,
+    dispatch_state    text not null check (dispatch_state in (
+        'ENQUEUED', 'SUPPRESSED_LOOP', 'SUPPRESSED_RATE', 'SUPPRESSED_DEPTH', 'CONFLICT')),
+    suppression_reason text,
+    assignment_id     text,
+    task_run_id       text,
+    native_run_id     text,
+    correlation_id    text,
+    created_at        text not null,
+    updated_at        text not null,
+    foreign key (reaction_id, revision) references reaction_definitions(id, revision),
+    unique (reaction_id, revision, source_event_id)
+);
+create index if not exists idx_reaction_dispatches_reaction on reaction_dispatches (reaction_id, revision, dispatch_state);
+create index if not exists idx_reaction_dispatches_root_event on reaction_dispatches (root_event_id);
+create index if not exists idx_reaction_dispatches_op_key on reaction_dispatches (operation_key, request_digest);
+create index if not exists idx_reaction_dispatches_dedupe on reaction_dispatches (dedupe_key, created_at);
+create index if not exists idx_reaction_dispatches_assignment on reaction_dispatches (assignment_id);
+
+create table if not exists reaction_dispatch_attempts (
+    attempt_id        text primary key check (length(attempt_id) between 1 and 128),
+    dispatch_id       text not null,
+    attempt_number    integer not null check (attempt_number between 1 and 3),
+    eligible_at       text not null,
+    attempted_at      text,
+    claim_owner       text not null,
+    claim_fence       integer not null check (claim_fence >= 0),
+    outcome           text not null check (outcome in (
+        'ENQUEUED', 'FAILED', 'RECOVERED', 'DUPLICATE')),
+    error_class       text,
+    assignment_id     text,
+    task_run_id       text,
+    native_run_id     text,
+    correlation_id    text,
+    created_at        text not null,
+    foreign key (dispatch_id) references reaction_dispatches(dispatch_id)
+);
+create index if not exists idx_reaction_dispatch_attempts_dispatch on reaction_dispatch_attempts (dispatch_id, attempt_number);
+create index if not exists idx_reaction_dispatch_attempts_assignment on reaction_dispatch_attempts (assignment_id);

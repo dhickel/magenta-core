@@ -16,9 +16,11 @@ These docs explain Magenta internals for contributors. Code remains the source o
 - [Frontend HTMX](frontend-htmx.md)
 - [Security](security.md)
 - [Configuration and Operations](configuration-operations.md)
+- [Schema Migrations 001–009](migrations-001-009.md)
 
 ## Owner Notes
 
 - Architecture, API, service, schema, persistence, frontend, security, and configuration changes must update the relevant page.
 - Keep this index current when pages are added, renamed, or removed.
 - Keep route and payload summaries aligned with [`../api/00-index.md`](../api/00-index.md).
+- Ordered migration resources are contiguous through 009; the migration guide documents immutable schedule/reaction version 008 and the no-schema warm-bookkeeping compatibility marker at version 009.

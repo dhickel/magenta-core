@@ -733,7 +733,7 @@ final class WorkspaceExplorerFragments {
         String selected = selectedPath == null || selectedPath.isBlank()
             ? inspected == null ? null : inspected.path() : selectedPath;
         String base = agentFilesRoute(encodedAgentId, "");
-        String createActions = isReservedOutputPath(currentPath) ? "" : """
+        String createActions = isReadOnlyRuntimePath(currentPath) ? "" : """
             <button type="button" class="button button-secondary small" hx-get="%s/modal/create-folder?path=%s" hx-target="#%s" hx-swap="innerHTML">New Folder</button>
             <button type="button" class="button button-secondary small" hx-get="%s/modal/create-text?path=%s" hx-target="#%s" hx-swap="innerHTML">New Text</button>
             <button type="button" class="button button-secondary small" hx-get="%s/modal/create-markdown?path=%s" hx-target="#%s" hx-swap="innerHTML">New Markdown</button>
@@ -742,21 +742,30 @@ final class WorkspaceExplorerFragments {
             base, url(currentPath), AGENT_MODAL_ID,
             base, url(currentPath), AGENT_MODAL_ID);
         return """
-            <div id="%s" class="workspace-file-explorer-shell">
-              <div class="workspace-file-explorer-toolbar">
-                <button type="button" class="button button-secondary small" disabled aria-disabled="true">Back</button>
-                <button type="button" class="button button-secondary small" disabled aria-disabled="true">Forward</button>
-                %s
-                <button type="button" class="button button-secondary small" hx-get="%s/list?path=%s%s" hx-target="#%s" hx-swap="outerHTML">Refresh</button>
-                %s
-                <button type="button" class="button button-secondary small" hx-get="%s/actions" hx-target="#%s" hx-swap="innerHTML">Recent Actions</button>
+            <div id="%s" class="workspace-file-explorer-shell agent-files-operations-shell">
+              <div class="agent-files-operations-layout">
+                <section class="agent-files-browser-panel" aria-label="Workspace files">
+                  <div class="workspace-file-explorer-toolbar">
+                    <button type="button" class="button button-secondary small" disabled aria-disabled="true">Back</button>
+                    <button type="button" class="button button-secondary small" disabled aria-disabled="true">Forward</button>
+                    %s
+                    <button type="button" class="button button-secondary small" hx-get="%s/list?path=%s%s" hx-target="#%s" hx-swap="outerHTML">Refresh</button>
+                    %s
+                    <button type="button" class="button button-secondary small" hx-get="%s/actions" hx-target="#%s" hx-swap="innerHTML">Recent Actions</button>
+                  </div>
+                  <div class="workspace-file-pathbar">%s</div>
+                  <div class="workspace-file-explorer-layout">
+                    %s
+                    %s
+                  </div>
+                  <div id="%s"></div>
+                </section>
+                <aside id="%s" class="run-operations-panel run-state-loading"
+                       hx-get="/agents/_detail/%s/runs?limit=25" hx-trigger="load" hx-swap="outerHTML"
+                       aria-label="Task run operations">
+                  <p>Loading task run metadata…</p>
+                </aside>
               </div>
-              <div class="workspace-file-pathbar">%s</div>
-              <div class="workspace-file-explorer-layout">
-                %s
-                %s
-              </div>
-              <div id="%s"></div>
             </div>
             """.formatted(
             AGENT_SHELL_ID,
@@ -769,7 +778,9 @@ final class WorkspaceExplorerFragments {
             agentBreadcrumbs(listing, encodedAgentId),
             agentList(encodedAgentId, listing, selected, false),
             agentInspector(encodedAgentId, inspected, null, false),
-            AGENT_MODAL_ID
+            AGENT_MODAL_ID,
+            RunOperationsFragments.GROUPS_ID,
+            encodedAgentId
         );
     }
 
@@ -828,7 +839,7 @@ final class WorkspaceExplorerFragments {
         String viewAction = entry.canView()
             ? agentButton("View", "hx-get", agentFilesRoute(encodedAgentId, "/viewer?path=" + url(entry.path())), "#" + AGENT_MODAL_ID, "innerHTML")
             : "<span class=\"workspace-file-muted\">Viewer unavailable</span>";
-        boolean mutable = !".".equals(entry.path()) && !isReservedOutputPath(entry.path());
+        boolean mutable = !".".equals(entry.path()) && !isReadOnlyRuntimePath(entry.path());
         String tagControls = mutable ? """
               <div class="workspace-file-entry-tags">%s</div>
               <form class="workspace-file-inline-form" hx-post="%s/labels" hx-target="#%s" hx-swap="outerHTML">
@@ -839,7 +850,7 @@ final class WorkspaceExplorerFragments {
             """.formatted(
             agentTags(encodedAgentId, entry.path(), entry.tags(), true),
             agentFilesRoute(encodedAgentId, ""), AGENT_INSPECTOR_ID, escapeAttribute(entry.path()))
-            : "<div class=\"workspace-file-entry-tags\">Read-only publication path</div>";
+            : "<div class=\"workspace-file-entry-tags\">Read-only runtime path</div>";
         String mutationActions = mutable
             ? agentModalButton("Rename", encodedAgentId, "rename", entry.path())
                 + agentModalButton("Delete", encodedAgentId, "delete", entry.path())
@@ -907,7 +918,10 @@ final class WorkspaceExplorerFragments {
                 """.formatted(agentFilesRoute(encodedAgentId, ""), url(preview.path()), AGENT_MODAL_ID, safeMarkdown(preview.content()))
                 + agentDownloadLink(apiPrefix, preview.path());
         } else if ("text".equals(preview.kind()) && preview.text()) {
-            body = agentTextEditor(encodedAgentId, preview, false) + agentDownloadLink(apiPrefix, preview.path());
+            body = (isReadOnlyRuntimePath(preview.path())
+                ? agentReadOnlyText(preview)
+                : agentTextEditor(encodedAgentId, preview, false))
+                + agentDownloadLink(apiPrefix, preview.path());
         } else {
             body = unsupportedViewerBody(preview) + agentDownloadLink(apiPrefix, preview.path());
         }
@@ -916,7 +930,7 @@ final class WorkspaceExplorerFragments {
 
     static String agentTextViewer(String encodedAgentId, WorkspaceExplorerService.FilePreview preview, String tab) {
         if (!preview.text()) {
-            return agentModal(encodedAgentId, "Viewer unavailable", "<p>This file cannot be opened as editable text.</p>", false);
+            return agentModal(encodedAgentId, "Viewer unavailable", "<p>This file cannot be opened as text.</p>", false);
         }
         boolean markdown = "markdown".equals(preview.kind());
         boolean rendered = markdown && !"text".equalsIgnoreCase(tab);
@@ -929,7 +943,9 @@ final class WorkspaceExplorerFragments {
                 </div>
                 """.formatted(agentFilesRoute(encodedAgentId, ""), url(preview.path()), AGENT_MODAL_ID, safeMarkdown(preview.content()));
         } else {
-            body = agentTextEditor(encodedAgentId, preview, markdown);
+            body = isReadOnlyRuntimePath(preview.path())
+                ? agentReadOnlyText(preview)
+                : agentTextEditor(encodedAgentId, preview, markdown);
         }
         return agentModal(encodedAgentId, "View " + fileName(preview.path()), body, false);
     }
@@ -1031,20 +1047,29 @@ final class WorkspaceExplorerFragments {
 
     static String agentEmptyRoot(String encodedAgentId) {
         return """
-            <div id="%s" class="workspace-file-explorer-shell">
-              <div class="workspace-file-explorer-toolbar">
-                <button type="button" class="button button-secondary small" hx-get="%s/list?path=." hx-target="#%s" hx-swap="outerHTML">Refresh</button>
-              </div>
-              <div class="workspace-file-explorer-layout">
-                <div id="%s" class="workspace-file-table-region">
-                  <p>Agent workspace root has not been created yet. Create a file or directory to get started.</p>
-                </div>
-                <aside id="%s" class="workspace-file-inspector-pane">
-                  <h4>Empty Workspace</h4>
-                  <p>This agent has no files yet.</p>
+            <div id="%s" class="workspace-file-explorer-shell agent-files-operations-shell">
+              <div class="agent-files-operations-layout">
+                <section class="agent-files-browser-panel" aria-label="Workspace files">
+                  <div class="workspace-file-explorer-toolbar">
+                    <button type="button" class="button button-secondary small" hx-get="%s/list?path=." hx-target="#%s" hx-swap="outerHTML">Refresh</button>
+                  </div>
+                  <div class="workspace-file-explorer-layout">
+                    <div id="%s" class="workspace-file-table-region">
+                      <p>Agent workspace root has not been created yet. Create a file or directory to get started.</p>
+                    </div>
+                    <aside id="%s" class="workspace-file-inspector-pane">
+                      <h4>Empty Workspace</h4>
+                      <p>This agent has no files yet.</p>
+                    </aside>
+                  </div>
+                  <div id="%s"></div>
+                </section>
+                <aside id="%s" class="run-operations-panel run-state-loading"
+                       hx-get="/agents/_detail/%s/runs?limit=25" hx-trigger="load" hx-swap="outerHTML"
+                       aria-label="Task run operations">
+                  <p>Loading task run metadata…</p>
                 </aside>
               </div>
-              <div id="%s"></div>
             </div>
             """.formatted(
             AGENT_SHELL_ID,
@@ -1052,7 +1077,9 @@ final class WorkspaceExplorerFragments {
             AGENT_SHELL_ID,
             AGENT_LIST_ID,
             AGENT_INSPECTOR_ID,
-            AGENT_MODAL_ID
+            AGENT_MODAL_ID,
+            RunOperationsFragments.GROUPS_ID,
+            encodedAgentId
         );
     }
 
@@ -1070,7 +1097,7 @@ final class WorkspaceExplorerFragments {
             : entry.canView()
                 ? agentButton("View", "hx-get", base + "/viewer?path=" + url(entry.path()), "#" + AGENT_MODAL_ID, "innerHTML")
                 : "";
-        String mutations = isReservedOutputPath(entry.path()) ? ""
+        String mutations = isReadOnlyRuntimePath(entry.path()) ? ""
             : agentModalButton("Rename", encodedAgentId, "rename", entry.path())
                 + agentModalButton("Delete", encodedAgentId, "delete", entry.path());
         return """
@@ -1301,14 +1328,24 @@ final class WorkspaceExplorerFragments {
         return out.toString();
     }
 
+    private static String agentReadOnlyText(WorkspaceExplorerService.FilePreview preview) {
+        return """
+            <div class="workspace-file-viewer" data-viewer-kind="text" data-read-only="true">
+              <div class="workspace-file-status">Runtime-managed task and output files are read-only.</div>
+              <pre class="workspace-file-read-only-text">%s</pre>
+            </div>
+            """.formatted(escape(preview.content() == null ? "" : preview.content()));
+    }
+
     private static String agentDownloadLink(String apiPrefix, String path) {
         return "<a class=\"button button-secondary small\" href=\"" + apiPrefix
             + "/files/download?path=" + url(path) + "\">Download</a>";
     }
 
-    private static boolean isReservedOutputPath(String path) {
+    static boolean isReadOnlyRuntimePath(String path) {
         String normalized = pathOrRoot(path);
-        return "outputs".equals(normalized) || normalized.startsWith("outputs/");
+        return "outputs".equals(normalized) || normalized.startsWith("outputs/")
+            || "tasks".equals(normalized) || normalized.startsWith("tasks/");
     }
 
     private static String agentButton(String label, String hxVerb, String route, String target, String swap) {

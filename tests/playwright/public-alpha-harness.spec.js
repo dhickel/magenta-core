@@ -1,4 +1,8 @@
 const { test, expect, request } = require("playwright/test");
+const fs = require("fs/promises");
+const path = require("path");
+
+const PHASE10_SCREENSHOT_DIR = path.join("artifacts", "playwright", "phase10-operational-surfaces");
 
 const PUBLIC_ROUTES = [
   { path: "/", marker: "Magenta" },
@@ -213,6 +217,79 @@ test("workflow HTMX critical flow saves, validates, and separates submit validat
   expect(apiWorkflow.nodes.length).toBeGreaterThanOrEqual(1);
 });
 
+test("phase 10 operational surfaces stay HTMX-active, auth-safe, and secret-free", async ({ page }, testInfo) => {
+  const agentId = await firstAgentId(page);
+  const authFailures = [];
+  page.on("response", (response) => {
+    if ([401, 403].includes(response.status())) {
+      authFailures.push({ status: response.status(), url: response.url() });
+    }
+  });
+
+  await page.goto(`/agents/${agentId}`);
+  await Promise.all([
+    page.waitForResponse((response) => response.url().includes(`/agents/_detail/${agentId}/files`)),
+    page.locator(`[data-tab='files']`).click(),
+  ]);
+  await expect(page.locator("#agent-files-explorer")).toBeVisible();
+  await expect(page.locator("#agent-run-groups")).toBeVisible();
+  await assertNoControlSecrets(page);
+  await attachScreenshot(page, testInfo, "phase10-files-runs.png");
+
+  await page.goto("/skills");
+  await expect(page.locator("#skills-page")).toBeVisible();
+  await expect(page.locator("#skills-list")).toBeVisible();
+  const skillFilter = page.locator("#skill-filter");
+  await skillFilter.fill("phase-10-no-match");
+  await expect(page.locator("#skills-list")).toContainText(/No skills|0 valid|0 invalid/i);
+  await assertNoControlSecrets(page);
+  await attachScreenshot(page, testInfo, "phase10-skills.png");
+
+  await page.goto(`/agents/${agentId}`);
+  await mountFragment(page, "#agent-tab-panel", `/runtime/workspaces/agent/${agentId}/health`);
+  await expect(page.locator("#runtime-health")).toBeVisible();
+  const runtimeRefresh = page.getByRole("button", { name: "Refresh", exact: true });
+  await expect(runtimeRefresh).toHaveAttribute("hx-target", "#runtime-health");
+  await Promise.all([
+    page.waitForResponse((response) => response.url().includes(`/runtime/workspaces/agent/${agentId}/health`)),
+    runtimeRefresh.click(),
+  ]);
+  await expect(page.locator("#runtime-health")).toContainText("Run Health");
+  await assertNoControlSecrets(page);
+  await attachScreenshot(page, testInfo, "phase10-runtime-health.png");
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto(`/agents/${agentId}`);
+  await mountFragment(page, "#agent-tab-panel", `/runtime/workspaces/agent/${agentId}/health`);
+  await assertNoHorizontalOverflow(page);
+  await attachScreenshot(page, testInfo, "phase10-runtime-health-mobile.png");
+  await page.setViewportSize({ width: 1280, height: 720 });
+
+  await page.goto(`/agents/${agentId}`);
+  await mountFragment(page, "#agent-tab-panel", `/fragments/agents/${agentId}/schedules`);
+  await expect(page.locator("[data-schedule-management='true']")).toBeVisible();
+  await expect(page.locator("#schedule-list")).toBeVisible();
+  const scheduleForm = page.locator("form.automation-editor");
+  await expect(scheduleForm).toHaveAttribute("hx-post", `/fragments/agents/${agentId}/schedules`);
+  await expect(scheduleForm).toHaveAttribute("hx-target", "#schedule-editor");
+  await page.locator("input[name='cronExpression']").fill("invalid cron");
+  await scheduleForm.locator("button[type='submit']").click();
+  await expect(page.locator(".automation-validation[role='alert']")).toBeVisible();
+  await expect(page.locator("input[name='cronExpression']")).toHaveValue("invalid cron");
+  await assertNoControlSecrets(page);
+  await attachScreenshot(page, testInfo, "phase10-schedules-validation.png");
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto(`/agents/${agentId}`);
+  await mountFragment(page, "#agent-tab-panel", `/fragments/agents/${agentId}/schedules`);
+  await page.locator("input[name='cronExpression']").fill("invalid cron");
+  await page.locator("form.automation-editor button[type='submit']").click();
+  await expect(page.locator(".automation-validation[role='alert']")).toBeVisible();
+  await page.evaluate(() => window.scrollTo(0, 0));
+  await assertNoHorizontalOverflow(page);
+  await attachScreenshot(page, testInfo, "phase10-schedules-validation-mobile.png");
+
+  expect(authFailures, "operational surfaces must not encounter auth/CSRF gates").toEqual([]);
+});
+
 test("unsafe anonymous mutation surfaces domain validation, not auth prompts", async ({ baseURL }, testInfo) => {
   const context = await request.newContext({ baseURL });
   const response = await context.post("/api/chat/not-a-real-conversation/plan/execute");
@@ -248,6 +325,34 @@ async function idFromHxAttribute(locator, attribute, prefix) {
   const id = value.slice(prefix.length).split("/")[0];
   expect(id, "persisted draft id should be non-empty").toBeTruthy();
   return id;
+}
+
+async function mountFragment(page, hostSelector, fragmentPath) {
+  const response = await page.request.get(fragmentPath);
+  expect(response.ok(), `${fragmentPath} should return 2xx`).toBe(true);
+  const html = await response.text();
+  await page.locator(hostSelector).evaluate((host, markup) => { host.innerHTML = markup; }, html);
+  await page.locator(hostSelector).evaluate((host) => window.htmx?.process(host));
+}
+
+async function assertNoHorizontalOverflow(page) {
+  const widths = await page.evaluate(() => ({
+    viewport: window.innerWidth,
+    document: document.documentElement.scrollWidth,
+  }));
+  expect(widths.document).toBeLessThanOrEqual(widths.viewport + 2);
+}
+
+async function assertNoControlSecrets(page) {
+  const body = await page.locator("body").innerText();
+  expect(body).not.toMatch(/claim[_ -]owner|claim[_ -]secret|fence[_ -]token|writer[_ -]owner/i);
+}
+
+async function attachScreenshot(page, testInfo, name) {
+  await fs.mkdir(PHASE10_SCREENSHOT_DIR, { recursive: true });
+  const screenshotPath = path.join(PHASE10_SCREENSHOT_DIR, name);
+  await page.screenshot({ path: screenshotPath, fullPage: true });
+  await testInfo.attach(name, { path: screenshotPath, contentType: "image/png" });
 }
 
 async function attachDiagnostics(testInfo) {

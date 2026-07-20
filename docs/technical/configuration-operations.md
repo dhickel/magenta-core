@@ -132,15 +132,23 @@ Future migration work is intentionally not implemented in this cleanup. Candidat
 
 Agent execution uses filesystem-first workspaces in the closed three-kind model (`AGENT`, `CHAT`, `USER`). `application.yml` explicitly notes that agent execution uses filesystem-backed workspaces.
 
-Workspace directories are confined under the configured data root by `WorkspaceDirectoryService`. Output downloads and artifact materialization also enforce data-root confinement. The active roots are `workspace/agent/<id>/`, `workspace/chat/<id>/`, and `workspace/user/<name>/`. Agent/user roots may contain canonical `tasks/<taskPathKey>/<taskRunId>/` children and a lazy `.skills/` child. Run-local `outputs/` and `staging/` remain lazy. Existing workspace-root `outputs/` is legacy/non-task publication data until later phases cut execution over.
+Workspace directories are confined under the configured data root by `WorkspaceDirectoryService`. Artifact byte reads also enforce data-root and request-scope confinement. The active roots are `workspace/agent/<id>/`, `workspace/chat/<id>/`, and `workspace/user/<name>/`. Agent/user roots may contain canonical `tasks/<taskPathKey>/<taskRunId>/` children and a lazy `.skills/` child. Run-local `outputs/` and `staging/` remain lazy and are created only by active publication. Existing workspace-root `outputs/` remains legacy/non-task publication data and is not moved.
 
 New Magenta-owned persisted path columns store data-root-relative values. Legacy absolute values under the current configured data root are read for compatibility and may be displayed as data-root-relative values. Stale absolute values from an old root are not rewritten and fail, or are omitted from listings, when an operation tries to use that path.
 
+## Capability And Recovery Operations
+
+- SQLite FTS5 is probed at runtime. When absent, artifact search is unavailable; scoped metadata/detail remains available and no unapproved broad search fallback runs.
+- Filesystem mutation confinement requires supported Linux 64-bit/default-provider relative-handle operations. Unsupported providers fail closed.
+- Host process confinement is not available, so workspace shell and executable skill-resource authorization fail closed. Instruction approval remains usable through immutable snapshots.
+- Ordered migration resources are contiguous through `009-warm-database-compatibility.sql`. Migration 008 remains the immutable schedule/reaction schema owner; migration 009 marks the warm-bookkeeping compatibility release. The runner transactionally normalizes known legacy bookkeeping and replaces the known pre-foundation task-run prototype only when all prototype tables are empty. Startup still rejects checksum drift, gaps, malformed names, non-empty prototype state, and incompatible partial migration-owned structures. See [Schema Migrations 001–009](migrations-001-009.md).
+- Reconciliation never promotes task staging without a live writer capability. Retention reports active attempts/claims/downloads/references/lineage/legal pins or unresolved reconciliation as blockers.
+
 ## Schedules and Recurrence
 
-Agent schedules use `agent_schedules` and `schedule_firings`. Job recurrence uses `job_recurrences`.
+Agent schedules use revisioned `schedule_definitions`, `scheduler_claims`, `schedule_firings`, and `schedule_firing_attempts`; reactions use revisioned definition/dispatch/attempt tables. Job recurrence remains `job_recurrences`.
 
-Cron expressions and timezones are validated by service/controller paths. Schedule firing rows de-duplicate assignment creation for a schedule/due time.
+Cron expressions and timezones are validated. Schedule slot identity plus claim fencing and operation-key digest idempotency prevent duplicate enqueue. Reaction causation/rate/depth checks suppress loops. Simulations are side-effect-free and must never be interpreted as execution.
 
 ## Operational Validation
 

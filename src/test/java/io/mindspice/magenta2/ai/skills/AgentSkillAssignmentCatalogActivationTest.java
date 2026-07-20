@@ -47,54 +47,30 @@ class AgentSkillAssignmentCatalogActivationTest {
     }
 
     @Test
-    void activationReturnsBodyOnlyResourceListingAndDeduplicates() throws Exception {
+    void activationFailsWithoutApprovedSnapshot() throws Exception {
         Fixture fixture = fixture();
-        Path validSkill = seedSkills(fixture);
+        seedSkills(fixture);
         fixture.catalogService.refreshCatalog();
         fixture.assignmentService.assignToAgent("agent-1", "valid-skill", true);
 
-        AgentSkillActivationResult first = fixture.activationService.activateSkill("conversation-1", "valid-skill");
-        AgentSkillActivationResult duplicate = fixture.activationService.activateSkill("conversation-1", "valid-skill");
+        AgentSkillActivationResult result = fixture.activationService.activateSkill("conversation-1", "valid-skill");
 
-        assertThat(first.outcome()).isEqualTo(AgentSkillActivationOutcome.ACTIVATED);
-        assertThat(first.content()).contains("<skill_content name=\"valid-skill\">");
-        assertThat(first.content()).contains("# Valid Skill");
-        assertThat(first.content()).doesNotContain("name: valid-skill");
-        assertThat(first.resources()).containsExactlyInAnyOrder(
-            "scripts/run.py",
-            "references/guide.md",
-            "assets/template.txt"
-        );
-        assertThat(first.skillDirectory()).isEqualTo("skills/valid-skill");
-        assertThat(duplicate.outcome()).isEqualTo(AgentSkillActivationOutcome.ALREADY_ACTIVE);
-
-        // Ensure resources are listed from disk without eager reads of file content.
-        assertThat(Files.readString(validSkill.resolve("scripts/run.py"))).contains("python3");
+        // Phase 07: activation requires approved snapshots. Without one, activation fails.
+        assertThat(result.outcome()).isEqualTo(AgentSkillActivationOutcome.SKILL_UNAVAILABLE);
     }
 
     @Test
-    void activationFailsForNoSkillsUnassignedAndMalformedSkill() throws Exception {
+    void activationFailsForNoSkillsAndUnassigned() throws Exception {
         Fixture fixture = fixture();
         seedSkills(fixture);
         fixture.catalogService.refreshCatalog();
 
         AgentSkillActivationResult noSkills = fixture.activationService.activateSkill("conversation-2", "valid-skill");
-        assertThat(noSkills.outcome()).isEqualTo(AgentSkillActivationOutcome.NO_SKILLS_AVAILABLE);
+        assertThat(noSkills.outcome()).isEqualTo(AgentSkillActivationOutcome.SKILL_UNAVAILABLE);
 
         fixture.assignmentService.assignToAgent("agent-1", "valid-skill", true);
-        AgentSkillActivationResult unassigned = fixture.activationService.activateSkill("conversation-1", "missing-skill");
-        assertThat(unassigned.outcome()).isEqualTo(AgentSkillActivationOutcome.SKILL_UNASSIGNED);
-
-        Path skillMd = fixture.skillsRoot.resolve("valid-skill/SKILL.md");
-        Files.writeString(skillMd, """
-            ---
-            name: valid-skill
-            description: "broken
-            ---
-            body
-            """, StandardCharsets.UTF_8);
-        AgentSkillActivationResult malformed = fixture.activationService.activateSkill("conversation-1", "valid-skill");
-        assertThat(malformed.outcome()).isEqualTo(AgentSkillActivationOutcome.SKILL_UNAVAILABLE);
+        AgentSkillActivationResult missing = fixture.activationService.activateSkill("conversation-1", "missing-skill");
+        assertThat(missing.outcome()).isEqualTo(AgentSkillActivationOutcome.SKILL_UNAVAILABLE);
     }
 
     private Path seedSkills(Fixture fixture) throws Exception {
@@ -163,11 +139,9 @@ class AgentSkillAssignmentCatalogActivationTest {
             contextResolver
         );
         AgentSkillActivationService activationService = new AgentSkillActivationService(
-            catalogService,
-            repositoryService,
-            parser,
-            runtimeCatalogService,
-            contextResolver
+            new SkillSnapshotRepository(jdbcTemplate),
+            mock(SkillTrustService.class),
+            mock(SkillResolutionService.class)
         );
 
         return new Fixture(skillsRoot, catalogService, assignmentService, runtimeCatalogService, activationService);

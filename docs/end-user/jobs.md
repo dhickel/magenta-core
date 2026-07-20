@@ -24,7 +24,7 @@ The page has:
 
 The project field is selector-backed where available. The owner agent field is currently a plain agent dropdown in the job editor.
 
-Jobs run through an agent and bind to a project when one is selected. Jobs do not own separate workspace directories. Job outputs publish beneath the effective workspace's `outputs/` directory. Project association is metadata and membership context only.
+Jobs run through an agent and bind to a project when one is selected. Jobs do not own separate workspace directories. Each job or child task/workflow run publishes beneath its canonical `tasks/<taskPathKey>/<taskRunId>/outputs/` directory. Project association is metadata and membership context only.
 
 ## Add Ordered Items
 
@@ -73,7 +73,7 @@ Saved jobs expose two operational actions:
 
 The submit form shows the job's saved project. Project association is metadata and membership context only.
 
-Before dispatch, Magenta reserves a stable job run identity. Each plan or workflow work item receives its own linked sibling run, so retry/recovery cannot alias the assignment or parent job. Operator retry/replay creates a new lineage-linked run; resume reuses the current run with a new attempt. During execution, published outputs currently remain beneath the effective workspace's `outputs/` directory with collision-safe normalized names. Durable attribution remains queryable through `/api/outputs`.
+Before dispatch, Magenta reserves a stable job run identity. Each plan or workflow work item receives its own linked sibling run, so retry/recovery cannot alias the assignment or parent job. Operator retry/replay creates a new lineage-linked run; resume reuses the current run with a new attempt. Assignment-owned child outputs publish beneath each canonical run-local `outputs/` location with create-only placement and integrity metadata. Scoped attribution and artifact operations are available through `/api/artifacts`.
 
 Recurring jobs also start by creating job assignments. Use the run panel to confirm the assignment id and job run id after a recurrence fires.
 

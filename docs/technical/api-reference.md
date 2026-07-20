@@ -122,8 +122,10 @@ Agent runtime routes:
 
 - Inbox: `GET/POST /api/agents/{agentId}/inbox`, `POST /inbox/{messageId}/read`, `POST /inbox/{messageId}/handled`.
 - Assignments: `GET /assignments`, `GET/DELETE /assignment-history`, `POST /assignments`, `POST /assignments/{assignmentId}/cancel|pause|resume`, `DELETE /assignments/{assignmentId}`.
-- Schedules: `GET/POST /schedules`, `PUT/DELETE /schedules/{scheduleId}`. These return `404` when `magenta.features.schedules-enabled=false`.
-- Event reactions: `GET/POST /event-reactions`, `PUT/DELETE /event-reactions/{reactionId}`. These return `404` when `magenta.features.reactions-enabled=false`.
+- Schedules: definition list/read/create/update/delete, `/enable`, paged revision firing history, firing attempts, pure `/schedules/simulate`, and `/cancel-linked`. These return `404` when `magenta.features.schedules-enabled=false`.
+- Event reactions: definition list/read/create/update/delete, `/enable`, paged revision dispatch history, root-event dispatch lookup, pure `/event-reactions/simulate`, and orchestration-event reads. These return `404` when `magenta.features.reactions-enabled=false`.
+
+See [Schedule and Reaction API](../api/schedules-reactions.md) for exact paths, payloads, revision semantics, simulation guarantees, and audit states.
 - `POST /chat/stream`: agent-scoped SSE chat.
 
 Agent chat emits `start`, `done`, and `error` events as assembled by `AgentOrchestrationController` from `ChatService` responses.
@@ -137,7 +139,7 @@ Source: [`ProjectController`](../../src/main/java/io/mindspice/magenta2/api/web/
 - `GET/POST /api/projects`, `GET/PUT/DELETE /api/projects/{projectId}`.
 - `POST /api/projects/{projectId}/agents`, `GET /api/projects/{projectId}/agents`, `DELETE /api/projects/{projectId}/agents/{agentId}`.
 - `GET /api/projects/{projectId}/network`, `GET /api/projects/{projectId}/events`.
-- `GET /api/projects/{projectId}/workspace`, `POST /api/projects/{projectId}/workspace/release`.
+No project workspace or release routes exist. Projects have no filesystem-root or lease authority.
 
 Create accepts `name`/`description` or legacy-compatible `title`/`summary`, plus nullable legacy `ownerAgentId` and git repo URL. Projects are shared workspace and visibility records, not executable work units. Membership add/remove controls are available through project routes. Deletion and membership removal can return `409` when active assignments, leases, jobs, or runs still reference the project/member. Workspace release can return `409` when a lease cannot be released immediately.
 
@@ -198,19 +200,35 @@ HTMX shell/fragments are available at `/skills`, `/skills/_list`, `/skills/_refr
 
 Skill file routes are confined to `<magenta-root>/skills/<skill>/...` and reject traversal, absolute paths, and symlink escapes. Where distinguishable, invalid requests map to `400`, missing skill/path/agent to `404`, collisions to `409`, and unsupported text/binary operations to `415`.
 
-## Outputs: `/api/outputs`
+The control plane also exposes persisted candidate collections/history, exact overlay mutation/listing, approve/reject/revoke decisions, decision history, immutable snapshot/resource collections, activation history, and a snapshot-only approved catalog. Package ingest returns `503 UNAVAILABLE` and accepts no archive while executable authorization reports confinement unavailable. See [Skill API](../api/skills.md).
 
-Source: [`OutputController`](../../src/main/java/io/mindspice/magenta2/api/web/OutputController.java), [`OutputArtifactService`](../../src/main/java/io/mindspice/magenta2/ai/orchestration/workspaces/OutputArtifactService.java).
+## Artifacts And Retention: `/api/artifacts`, `/api/runs/{taskRunId}/retention`
 
-- `GET /api/outputs?agentId=&jobId=&jobAssignmentId=&jobRunId=&projectId=&workspaceType=&workspaceKey=&workspaceIdentity=&runId=&planId=&runType=&type=&limit=`: query output artifacts.
-- `GET /api/outputs/{artifactId}/content`: return metadata plus text/json/user-message content when safe.
-- `GET /api/outputs/{artifactId}/download`: download a confined file under the data root.
+Source: [`OutputController`](../../src/main/java/io/mindspice/magenta2/api/web/OutputController.java), [`ArtifactSearchService`](../../src/main/java/io/mindspice/magenta2/ai/orchestration/workspaces/ArtifactSearchService.java), [`ArtifactPreviewService`](../../src/main/java/io/mindspice/magenta2/ai/orchestration/workspaces/ArtifactPreviewService.java), and [`TaskRunRetentionService`](../../src/main/java/io/mindspice/magenta2/ai/orchestration/workspaces/TaskRunRetentionService.java).
 
-Output artifacts carry agent, job, job assignment, job run, project, workspace type/key/identity, run type, and work-unit attribution. Content/download enforce a 10 MB limit in the controller. Download resolves real paths and rejects paths outside the data root.
+- `GET /api/artifacts?workspaceKind=&workspaceKey=&taskRunId=`: scoped metadata list.
+- `GET /api/artifacts/search?query=&workspaceKind=&workspaceKey=&taskRunId=&page=&limit=`: scope-constrained FTS5 search; reports unavailable when FTS5 is absent.
+- `GET /api/artifacts/{artifactId}` and `/preview|download|lineage|retention`: scoped detail and safe byte-derived reads.
+- `POST /api/artifacts/{artifactId}/retention/soft-archive|hard-expire`: guarded artifact retention actions.
+- `GET /api/artifacts/{artifactId}/pins`: active retention pins.
+- `GET|POST /api/runs/{taskRunId}/retention/policy` and `POST /api/runs/{taskRunId}/retention/soft-archive|hard-expire`: guarded run retention operations.
 
-Outputs publish directly beneath the effective workspace's `outputs/` directory. No `runs/<runId>` hierarchy is created. Artifact records remain queryable independently of generic workspace records.
+Every request carries workspace scope; optional task-run scope narrows it. Authorization/scope is applied before rows, counts, snippets, lineage, links, or bytes are returned. Preview/download reverify persisted digest and size. Missing, integrity-failed, or unauthorized artifacts expose no bytes. New task artifacts publish beneath canonical run-local outputs; legacy/non-task output rows remain isolated compatibility data. See [Artifact API](../api/artifacts.md) for parameters and status behavior.
 
-## Dashboard, Runtime, Settings, Models
+## Operational HTMX Run Fragments
+
+- `GET /agents/_detail/{agentId}/runs?limit=&oob=` returns `#agent-run-groups` after agent scope validation and a 1-100 limit clamp; `oob=true` is used by the HTMX refresh control for OOB `outerHTML` replacement.
+- `GET /agents/_detail/{agentId}/runs/{taskRunId}` returns `#agent-run-detail` only when the summary workspace is exactly `agent/<agentId>`.
+- Runtime component routes include `/runtime/workspaces/{workspaceType}/{workspaceKey}/health|history` and `/runtime/runs/{taskRunId}/measurements-fragment|audit-fragment`.
+- Artifact, skill trust/snapshot, and schedule/reaction fragment routes retain independent stable hosts and owning controllers.
+
+These are `text/html` browser adapters. They return explicit empty/unavailable/error fragments and never include absolute paths, claim secrets, lease owners, writer fences, or tokens.
+
+## Runtime Summaries, Health, Measurements, And Audit
+
+JSON routes under `/api/runtime` provide status, run summary/rebuild/normalized status, workspace summaries/health, run/attempt/workspace measurements, and composed run audit. Task-capable workspace routes accept only `agent` or `user`; `chat` is forbidden and list limits clamp to 1–200. HTML fragment adapters use the separate `/runtime` prefix. See [Runtime Observability API](../api/runtime-observability.md).
+
+## Dashboard, Runtime Settings, Models
 
 Sources: [`DashboardController`](../../src/main/java/io/mindspice/magenta2/api/web/DashboardController.java), [`RuntimeController`](../../src/main/java/io/mindspice/magenta2/api/web/RuntimeController.java), [`RuntimeSettingsController`](../../src/main/java/io/mindspice/magenta2/api/web/RuntimeSettingsController.java), [`ModelController`](../../src/main/java/io/mindspice/magenta2/api/web/ModelController.java).
 

@@ -9,7 +9,8 @@ This document captures the implemented Agent Skills foundation from Phase 02 thr
 - **Implemented in Phase 04:** `/api/skills` list/detail/refresh/create/diagnostics routes, root-confined file tree/view/save/create routes, assignment add/remove/list routes, and minimal `/skills` shell/fragments for phase-05 UI handoff.
 - **Implemented in Phase 05:** full `/skills` operational browser/editor with list/filter/detail, diagnostics, directory overview, file viewer/editor, add-file flow, optional top-level directory creation, guided scaffold creation, and HTMX assignment controls.
 - **Implemented in scoped-resolution Phase 06:** read-only flat `.skills/<name>.md` discovery for effective AGENT/USER and distinct bound-agent workspaces, normalized global-package candidates, immutable digest-qualified versions, exact AGENT/PROJECT/JOB/TASK/WORKFLOW/CHAT_SESSION overlays, and explicit malformed/stale/unavailable/disabled/conflict/shadow outcomes. Project discovery remains disabled unless a trusted authority is explicitly supplied.
-- **Out of scope:** user-home/client-native scopes, guessed project roots, trust approval/snapshots, script execution policy, registry ingestion, and model-visible activation cutover to scoped candidates.
+- **Implemented in trust/snapshot Phase 07:** digest-bound approve/reject/revoke decisions, canonical confined manifests, immutable snapshot/resource bytes, snapshot-only model-visible activation, persisted activation rehydration, executable authorization records, and HTMX trust/snapshot fragments.
+- **Out of scope/unavailable:** user-home/client-native scopes, guessed project roots, general registry ingestion, and executable resources when process-confinement capability is unavailable.
 
 ## Repository Root
 
@@ -47,7 +48,9 @@ Current ownership boundary:
 - `AgentSkillPromptCatalogAssembler`: concise `available_skills` prompt section injection.
 - `AgentSkillActivationService`: dedicated activation lookup, assignment checks, skill-body loading, resource listing, and dedupe tracking.
 - `AgentSkillManagementService`: API-facing skill lookup, diagnostics, root-confined file operations, skill creation scaffold, and status-classified route-safe errors.
-- `SkillFragments`: server-rendered `/skills` shell and HTMX fragments for catalog browsing, guided creation, file editing, optional-directory creation, and assignment controls.
+- `SkillTrustService`: revalidates confined candidate identity/digest, records decisions, creates immutable snapshots, and handles revocation without trusting live source bytes after approval.
+- `SkillSnapshotRepository`: persists immutable resources, trust decisions, activations, executable authorizations, package operations, and resource execution audit.
+- `SkillFragments`: server-rendered `/skills` shell and HTMX fragments for catalog browsing, guided creation, file editing, optional-directory creation, assignment controls, trust decisions, and snapshot history.
 
 Chat/web/API layers consume this domain surface; they do not own direct parser/discovery logic.
 
@@ -76,6 +79,8 @@ Implemented surfaces:
 - `PUT /api/skills/{skillName}/files/text`, `POST /api/skills/{skillName}/files`
 - `GET /api/skills/{skillName}/assignments`
 - `POST|DELETE /api/skills/{skillName}/assignments/agents/{agentId}`
+- Candidate/trust/snapshot/activation APIs: `/api/skills/candidates/{logicalKey}`, `/trust/approve|reject|revoke`, `/trust/decisions/{logicalKey}`, `/snapshots/{logicalKey}`, `/snapshots/{snapshotId}/resources`, `/activate`, `/exec-auth/{logicalKey}`, and exact `/overlays` mutation.
+- Candidate/snapshot collections, candidate history, exact overlay listing, activation history, and the approved snapshot catalog query persisted control-plane repositories. Package ingest returns `503 UNAVAILABLE` and accepts no archive; executable authorization reports confinement unavailable.
 - HTMX-facing shell/fragments:
   - `/skills`
   - `/skills/_list`
@@ -87,6 +92,8 @@ Implemented surfaces:
   - `/skills/_viewer/{skillName}`
   - `/skills/_directories/{skillName}`
   - `/skills/_assignments/{skillName}`
+  - `/skills/_trust/{logicalKey}` and trust mutation routes
+  - `/skills/_snapshots/{logicalKey}`
 
 Status behavior for file/assignment routes is explicit:
 
@@ -116,9 +123,17 @@ Path safety rules:
 - guided creation returns the new detail plus an out-of-band list refresh;
 - assignment/unassignment updates the assignment panel plus an out-of-band list refresh.
 
-The assignment form reuses the shared `EntitySelectorComponents` agent selector. No custom JavaScript was added for skills; standard SimplyPages/HTMX behavior and the existing selector validation hook cover the interaction.
+The assignment form reuses the shared `EntitySelectorComponents` agent selector. Trust decisions bind an exact observed digest; the UI shows snapshot history and revocation independently from assignment. No custom JavaScript was added for skills; standard SimplyPages/HTMX behavior and the existing selector validation hook cover the interaction.
+
+See [Skill API](../api/skills.md) for payloads and truthful unavailable capability states.
 
 The page intentionally avoids project-local skill claims, user-home scope claims, layered assignment controls, and browser-driven script execution.
+
+## Trust, Snapshots, And Execution Safety
+
+Approval is bound to the exact candidate identity and digest after a confined source re-read. Snapshot manifests and resource bytes are immutable. A source edit creates a changed-digest candidate and cannot mutate an approved snapshot. Pending, malformed, rejected, changed-digest, or revoked candidates disclose no candidate-derived model content.
+
+Activation reads approved snapshot bytes only and persists the snapshot identity used by a task run. Revocation blocks new activation while same-run resume may rehydrate an already persisted activation. Instruction approval and executable authorization are separate records. Because host process confinement is not proven, executable authorization and package/resource execution fail closed; no browser affordance should imply otherwise. Project scope is disabled unless an explicit trusted project authority is supplied, because projects own no filesystem root.
 
 ## Runtime Catalog And Activation Contract (Implemented)
 

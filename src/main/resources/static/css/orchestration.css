@@ -2871,3 +2871,524 @@
 #agent-files-explorer .workspace-file-table {
     width: 100%;
 }
+
+/* ── Runtime health and measurements ── */
+
+.runtime-panel,
+.runtime-history-panel,
+.runtime-detail-panel,
+.invocation-detail-panel,
+.audit-panel {
+    min-width: 0;
+    border: 1px solid #cbd6e2;
+    border-radius: 5px;
+    background: #fff;
+    padding: 0.65rem;
+}
+
+.runtime-panel .panel-title,
+.runtime-detail-panel .detail-title {
+    margin: 0;
+    font-size: 1rem;
+}
+
+.runtime-panel .panel-context {
+    margin: 0.2rem 0 0.55rem;
+    color: #64748b;
+    font-size: 0.78rem;
+}
+
+.health-metrics,
+.health-percentiles {
+    display: grid;
+    gap: 0.4rem;
+    margin-bottom: 0.5rem;
+}
+
+.health-metrics {
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+}
+
+.health-percentiles {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.metric-box {
+    min-width: 0;
+    border: 1px solid #dfe7f0;
+    border-radius: 4px;
+    background: #f8fafc;
+    padding: 0.4rem 0.5rem;
+}
+
+.metric-box .metric-label,
+.metric-box .metric-value {
+    margin: 0;
+}
+
+.metric-box .metric-label {
+    color: #64748b;
+    font-size: 0.7rem;
+    font-weight: 700;
+}
+
+.metric-box .metric-value {
+    margin-top: 0.15rem;
+    color: #263246;
+    font-size: 1rem;
+    font-weight: 700;
+}
+
+.runtime-panel .data-table {
+    width: 100%;
+    margin: 0.4rem 0;
+    font-size: 0.75rem;
+}
+
+@media (max-width: 760px) {
+    .health-metrics,
+    .health-percentiles {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+}
+
+/* ── Schedule and reaction management ── */
+
+.automation-management {
+    display: grid;
+    grid-template-columns: minmax(18rem, 0.8fr) minmax(0, 1.4fr);
+    gap: 0.75rem;
+    align-items: start;
+}
+
+.automation-editor,
+.automation-list-panel,
+.automation-audit-panel {
+    min-width: 0;
+    border: 1px solid #cbd6e2;
+    border-radius: 5px;
+    background: #fff;
+    padding: 0.55rem;
+}
+
+.automation-audit-panel {
+    grid-column: 1 / -1;
+}
+
+.automation-panel-heading,
+.automation-form-actions {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+}
+
+.automation-panel-heading h3 {
+    margin: 0;
+    font-size: 0.9rem;
+}
+
+.automation-form-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.45rem;
+    margin: 0.55rem 0;
+}
+
+.automation-editor label {
+    display: grid;
+    gap: 0.2rem;
+    color: #526174;
+    font-size: 0.75rem;
+    font-weight: 700;
+}
+
+.automation-editor input,
+.automation-editor select,
+.automation-editor textarea {
+    width: 100%;
+    min-width: 0;
+    border: 1px solid #c9d3df;
+    border-radius: 4px;
+    background: #fff;
+    padding: 0.35rem 0.45rem;
+    color: #263246;
+    font: inherit;
+}
+
+.automation-editor textarea {
+    resize: vertical;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-weight: 400;
+}
+
+.automation-form-actions {
+    justify-content: flex-start;
+    margin-top: 0.55rem;
+}
+
+.automation-primary {
+    border-color: #315d91;
+    background: #315d91;
+    color: #fff;
+}
+
+.automation-validation {
+    margin-top: 0.45rem;
+    border-left: 3px solid #b95353;
+    background: #fff1f1;
+    padding: 0.4rem 0.5rem;
+    color: #812d2d;
+    font-size: 0.78rem;
+}
+
+.schedule-list-table,
+.reaction-list-table,
+.firings-table,
+.dispatches-table,
+.attempts-table {
+    width: 100%;
+    margin-top: 0.45rem;
+    font-size: 0.75rem;
+}
+
+.schedule-list-table th,
+.schedule-list-table td,
+.reaction-list-table th,
+.reaction-list-table td {
+    padding: 0.3rem 0.35rem;
+    vertical-align: top;
+    overflow-wrap: anywhere;
+}
+
+.status-chip {
+    display: inline-flex;
+    align-items: center;
+    width: fit-content;
+    border: 1px solid #c4ccd6;
+    border-radius: 999px;
+    padding: 0.08rem 0.4rem;
+    background: #f1f3f5;
+    color: #5f6874;
+    font-size: 0.7rem;
+    font-weight: 700;
+    white-space: nowrap;
+}
+
+.status-chip-enabled {
+    border-color: #82ae8a;
+    background: #edf7ef;
+    color: #286238;
+}
+
+.status-chip-disabled,
+.status-chip-neutral {
+    border-color: #b9c7d7;
+    background: #f4f7fa;
+    color: #42526a;
+}
+
+.status-chip-deleted {
+    border-color: #cf9b9b;
+    background: #fff0f0;
+    color: #8c2f2f;
+}
+
+@media (max-width: 760px) {
+    .automation-management,
+    .automation-form-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .automation-audit-panel {
+        grid-column: auto;
+    }
+
+    .automation-list-panel {
+        overflow-x: auto;
+    }
+
+    .schedule-list-table,
+    .reaction-list-table {
+        min-width: 40rem;
+    }
+}
+
+/* ── Files + run operations composition ── */
+
+.agent-files-operations-layout {
+    display: grid;
+    grid-template-columns: minmax(0, 1.6fr) minmax(20rem, 0.8fr);
+    gap: 0.75rem;
+    align-items: start;
+}
+
+.agent-files-browser-panel,
+.run-operations-panel,
+.run-detail-panel,
+.run-task-group {
+    min-width: 0;
+    border: 1px solid #cbd6e2;
+    border-radius: 5px;
+    background: #fff;
+}
+
+.agent-files-browser-panel {
+    padding: 0.55rem;
+}
+
+.run-operations-panel {
+    display: grid;
+    gap: 0.55rem;
+    padding: 0.55rem;
+    color: #263246;
+}
+
+.run-operations-heading,
+.run-task-group-heading,
+.run-detail-heading,
+.run-artifact-row,
+.run-artifact-counts {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.4rem;
+    flex-wrap: wrap;
+}
+
+.run-operations-heading h2,
+.run-task-group-heading h3,
+.run-detail-heading h3,
+.run-detail-section h4 {
+    margin: 0;
+    font-size: 0.9rem;
+    line-height: 1.25;
+}
+
+.run-task-group {
+    overflow: hidden;
+    border-color: #d7e0ea;
+}
+
+.run-task-group-heading {
+    padding: 0.4rem 0.5rem;
+    border-bottom: 1px solid #d7e0ea;
+    background: #f5f8fb;
+}
+
+.run-groups-table,
+.run-attempt-table {
+    width: 100%;
+    font-size: 0.75rem;
+}
+
+.run-groups-table th,
+.run-groups-table td,
+.run-attempt-table th,
+.run-attempt-table td {
+    padding: 0.3rem 0.4rem;
+    vertical-align: top;
+    overflow-wrap: anywhere;
+}
+
+.run-open {
+    min-height: 1.7rem !important;
+    padding: 0.15rem 0.3rem !important;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+.run-detail-panel {
+    display: grid;
+    gap: 0.55rem;
+    padding: 0.55rem;
+    border-color: #d7e0ea;
+    background: #fbfcfe;
+}
+
+.run-summary-grid,
+.run-claim-summary {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.35rem;
+}
+
+.run-summary-fact {
+    display: grid;
+    gap: 0.08rem;
+    padding: 0.35rem 0.4rem;
+    border: 1px solid #dfe7f0;
+    border-radius: 4px;
+    background: #fff;
+    font-size: 0.76rem;
+}
+
+.run-summary-fact span {
+    color: #64748b;
+}
+
+.run-detail-section {
+    display: grid;
+    gap: 0.35rem;
+}
+
+.run-chip {
+    display: inline-flex;
+    align-items: center;
+    width: fit-content;
+    border: 1px solid #b9c7d7;
+    border-radius: 999px;
+    padding: 0.08rem 0.4rem;
+    background: #f4f7fa;
+    color: #42526a;
+    font-size: 0.7rem;
+    font-weight: 700;
+    white-space: nowrap;
+}
+
+.run-chip-ok {
+    border-color: #82ae8a;
+    background: #edf7ef;
+    color: #286238;
+}
+
+.run-chip-error {
+    border-color: #cf9b9b;
+    background: #fff0f0;
+    color: #8c2f2f;
+}
+
+.run-chip-active {
+    border-color: #7fa6cf;
+    background: #edf4fb;
+    color: #24557f;
+}
+
+.run-chip-partial {
+    border-color: #c9a967;
+    background: #fff8e8;
+    color: #765817;
+}
+
+.run-chip-neutral {
+    border-color: #c4ccd6;
+    background: #f1f3f5;
+    color: #5f6874;
+}
+
+.run-state {
+    margin: 0;
+    border-left: 3px solid #9aabbd;
+    background: #f5f8fb;
+    padding: 0.4rem 0.5rem;
+    color: #536174;
+    font-size: 0.78rem;
+}
+
+.run-state-error {
+    border-color: #b95353;
+    background: #fff1f1;
+    color: #812d2d;
+}
+
+.run-state-partial {
+    border-color: #b9903d;
+    background: #fff8e8;
+    color: #705316;
+}
+
+.run-state-unavailable {
+    border-color: #75879a;
+}
+
+.run-state-loading {
+    min-height: 5rem;
+}
+
+.run-lineage,
+.run-artifact-row {
+    border: 1px solid #dfe7f0;
+    border-radius: 4px;
+    background: #fff;
+    padding: 0.35rem 0.4rem;
+    font-size: 0.75rem;
+    overflow-wrap: anywhere;
+}
+
+.run-lineage {
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+    flex-wrap: wrap;
+}
+
+.run-lineage-open {
+    min-height: 1.65rem !important;
+    padding: 0.1rem 0.3rem !important;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+.run-recent-artifacts {
+    display: grid;
+    gap: 0.3rem;
+}
+
+.run-artifact-suppressed {
+    color: #8c2f2f;
+    font-size: 0.72rem;
+    font-weight: 700;
+}
+
+.run-artifact-preview {
+    min-width: 0;
+    max-height: 24rem;
+    overflow: auto;
+    border: 1px solid #dfe7f0;
+    border-radius: 4px;
+    background: #fff;
+}
+
+.workspace-file-read-only-text {
+    max-height: 28rem;
+    overflow: auto;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    border: 1px solid #dfe7f0;
+    border-radius: 4px;
+    background: #f8fafc;
+    padding: 0.55rem;
+}
+
+.run-operations-footnote {
+    margin: 0;
+    color: #6b7889;
+    font-size: 0.72rem;
+}
+
+@media (max-width: 1080px) {
+    .agent-files-operations-layout {
+        grid-template-columns: 1fr;
+    }
+}
+
+@media (max-width: 620px) {
+    .agent-files-browser-panel,
+    .run-operations-panel,
+    .run-detail-panel {
+        padding: 0.4rem;
+    }
+
+    .run-summary-grid,
+    .run-claim-summary {
+        grid-template-columns: 1fr;
+    }
+
+    .run-task-group {
+        overflow-x: auto;
+    }
+
+    .run-groups-table,
+    .run-attempt-table {
+        min-width: 38rem;
+    }
+}

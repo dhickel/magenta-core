@@ -53,6 +53,7 @@ If no models appear, check `/settings` for runtime defaults and confirm the unde
 6. Choose an agent. If a searchable selector is visible, type part of the agent, workspace, or model name and choose a match instead of copying IDs.
 7. Submit the assignment.
 8. Open the agent detail page and use **Queue**, **History**, **Files**, and **Outputs** to track progress.
+9. Follow [Getting Started with Workspaces, Tasks, and Outputs](getting-started-workspaces-tasks-outputs.md) for workspace selection and [Task Run Monitoring](task-run-monitoring.md) for attempts, lineage, and integrity-aware artifacts.
 
 ## Common First-Run Errors
 

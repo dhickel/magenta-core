@@ -312,7 +312,9 @@ class PublicApiRouteBindingTest {
         mockMvc.perform(get("/api/workspace/user"))
             .andExpect(status().isOk());
 
-        mockMvc.perform(get("/api/outputs"))
+        mockMvc.perform(get("/api/artifacts")
+                .param("workspaceKind", "agent")
+                .param("workspaceKey", agentId))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$").isArray());
 

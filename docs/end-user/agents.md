@@ -70,11 +70,11 @@ Schedules can enqueue assignments on a cron expression when schedules are enable
 
 Event reactions can enqueue assignments when matching runtime events occur, when reactions are enabled. Reaction forms use selectors for model override and workspace where available. Filter JSON and input JSON remain manual because they are user-authored JSON objects.
 
-If schedules or reactions are disabled, the tab shows the required feature flag.
+If schedules or reactions are disabled, the tab shows the required feature flag. See [Schedules and Reactions](schedules-and-reactions.md) for revision, simulation, firing/dispatch audit, and enqueue-versus-completion semantics.
 
 ## Workspace (Files Tab)
 
-The **Files** tab shows the agent's workspace file explorer, bound to `workspace/agent/<agentId>/`. This is a neutral file browser providing:
+The **Files** tab combines the agent's workspace file explorer with an independently loaded **Task Runs** operations panel. The explorer remains bound to `workspace/agent/<agentId>/` and provides:
 
 - Confined folder navigation.
 - File and directory create, rename, move, copy, and delete.
@@ -82,7 +82,11 @@ The **Files** tab shows the agent's workspace file explorer, bound to `workspace
 - Image preview and download.
 - Labels, tags, and recent action history.
 
-All operations stay confined to the agent's workspace root. The reserved `outputs/` subtree is read-only through the explorer (output publication is the only writer). The explorer uses HTMX for standard CRUD operations with OOB list, inspector, and modal refreshes.
+All operations stay confined to the agent's workspace root. The reserved `tasks/` and `outputs/` subtrees remain visible but read-only through the explorer; task runtime and output publication own those writes. The explorer uses HTMX for standard CRUD operations with OOB list, inspector, and modal refreshes.
+
+The Task Runs panel groups the most recently updated task, workflow, and job runs. Select a run to inspect normalized status/outcome, source-supported timestamps, wall and active elapsed time, attempts, safe current-claim state, retry/replay lineage, model/tool call counts, and run-local artifact states. Published recent artifacts offer an authorized HTMX preview. `Unavailable` means the source fact was not recorded; it does not mean zero, healthy, or successful. `Partial` means the run is active or not fully reconciled. Integrity-failed artifacts are counted but their bytes are not offered for preview or download.
+
+Run metadata loads independently from Files. A filesystem error does not authorize or populate run metadata, and run metadata never changes explorer confinement. Empty, unavailable, missing, and load-error panels are explicit. See [Task Run Monitoring](task-run-monitoring.md).
 
 ## Runtime AGENTS.md Guidance
 
@@ -142,6 +146,8 @@ Prefer disabling before destructive deletion. Hard delete is intentionally guard
 - **No assignments**: the agent has no active queue items.
 - **Shell execution service is unavailable**: exec is not enabled in this runtime.
 - **Error creating agent**: check runtime logs and agent profile persistence.
+- **Run metadata is unavailable**: the runtime summary capability is not wired or could not be read; Files remains a separate filesystem surface.
+- **No task, workflow, or job runs**: no scoped run summaries are recorded for this agent workspace.
 - **Invalid JSON for inputJson/filterJson**: schedule or reaction JSON fields must be objects.
 - **Priority must be a number**: enter a numeric priority in the allowed range.
 

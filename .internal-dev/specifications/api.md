@@ -89,7 +89,74 @@ The following route families are absent from the active API, not deprecated:
 | API-20260525-04 | Direct task run SSE | deferred | Consider native reactive SSE or explicit executor-backed execution if concurrency requirements grow. | SSE stream behavior. | Current blocking bridge is acceptable for current scope. | SSE tests and startup. | none | `plan-execution-stream-finalization.md` |
 | API-20260525-06 | Browser chat pending messages | active | Normal `/chat` messages submitted during an active stream are stored through pending-message routes and later drained through the normal stream route. | `GET/POST /api/chat/{conversationId}/pending-messages`, `POST /claim`, `POST /{messageId}/ack`, `POST /{messageId}/release`; Java record DTOs. | Keep `/api/chat/turns/{turnId}/interrupt` intact for explicit interrupt semantics, but ordinary browser mid-turn messages must not use it by default. | Repository/service/controller tests, browser queue validation. | none | `chat-planning-composer-architecture.md`, `event-delegation-sse-dom-replacement.md` |
 | API-20260526-01 | Task/workflow/job submission and run reads | active | Non-job task/workflow submissions require a user-visible `runDisplayName`; project association is metadata-only. Run reads expose execution outputs. Selection uses `workspaceType`/`workspaceKey` pair (see execution selection above). | Additive `runDisplayName` request/record field for non-job work; selection fields replace `selectedWorkAreaId`/`outputWorkAreaId`/`workspaceId`/`outputRouteType`. | Legacy compatibility fields are removed, not retained. | Controller/API tests for workspace selection rules, required names, and docs updates. | `DECISION-20260719-02` | `workspace-api-list-and-agent-tab-operational-pattern.md` |
-| API-20260526-02 | Agent Skills management and assignment APIs | active | Expose APIs for skill metadata list/read/refresh/create, diagnostics, root-confined file tree/view/save/create, and agent-skill assignment add/remove/list. MVP assignment scope is agent profiles only. | Implemented `/api/skills` routes. | Project-local `.agents/skills/`, user-home scopes, and project/job/task/workflow/chat/session layered assignment are deferred and must not appear as active API behavior. | Controller/API tests for success and negative paths, plus docs updates. | `DECISION-20260526-03`, `DECISION-20260526-06` | `agent-skills-specification-reference.md` |
+| API-20260526-02 | Agent Skills management, exact assignment, trust, snapshot, and activation APIs | active | Preserve root-repository metadata/file/agent-assignment routes and expose candidate collections/history, exact overlay writes/listing, explicit approve/reject/revoke, decision history, immutable snapshot collections/resources, activation history, approved catalog, executable-capability status, and fail-closed package status. | `/api/skills/**`; see operational API table. | Project roots are never guessed. No source/scope/assignment auto-trusts a skill. Collection routes query persisted Phase 06/07 control-plane state. Package ingest returns `503 UNAVAILABLE` and accepts no package while confinement is unproven. | Controller/API tests for collection reads, scope, operation-key conflict, digest mismatch, snapshot activation, revocation, and fail-closed capability paths. | `DECISION-20260720-03`, `DECISION-20260720-04` | `scoped-skill-trust-snapshots.md` |
+
+## Operational REST APIs
+
+Every artifact and runtime workspace request requires an explicit `agent` or `user` scope; `chat` is not task-selectable. Scope is checked before aggregate queries, and byte access is checked again when opened.
+
+### Artifacts and Retention
+
+| route family | methods | contract |
+| --- | --- | --- |
+| `/api/artifacts`, `/api/artifacts/{artifactId}` | `GET` | Bounded workspace/task-run listing and scoped metadata. Out-of-scope artifacts are indistinguishable from missing artifacts. |
+| `/api/artifacts/search` | `GET` | Scope-constrained FTS5 search with bounded page inputs. Returns `503` when runtime FTS5 probing fails; there is no fallback scan. |
+| `/api/artifacts/{artifactId}/preview|download|lineage` | `GET` | Integrity-checked bounded preview/download and explicit producer lineage. Integrity failure suppresses bytes. |
+| `/api/artifacts/{artifactId}/retention`, `/pins` | `GET` | Return lifecycle state, blockers, and retention pins inside the authorized scope. |
+| `/api/artifacts/{artifactId}/retention/soft-archive|hard-expire` | `POST` | Explicit artifact lifecycle actions; blocked actions return conflict without deleting protected state. |
+| `/api/runs/{taskRunId}/retention/soft-archive|hard-expire` | `POST` | Scoped batch lifecycle actions for one canonical run. |
+| `/api/runs/{taskRunId}/retention/policy` | `GET`, `POST` | Read/set workspace/task policy. Absence means `PRESERVE`/keep indefinitely. |
+
+### Skills
+
+| route family | methods | contract |
+| --- | --- | --- |
+| `/api/skills`, `/api/skills/{skillName}`, `/refresh`, `/{skillName}/diagnostics`, `/{skillName}/files/**` | `GET`, `POST`, `PUT` | Root-repository management plus confined metadata/file operations. |
+| `/api/skills/{skillName}/assignments/**`, `/api/skills/overlays` | `GET`, `POST`, `DELETE` | Legacy agent assignment and exact candidate overlay controls. Overlay writes bind candidate version, target type/key, enabled state, actor, and operation key; they do not imply trust. |
+| `/api/skills/candidates`, `/api/skills/candidates/{logicalKey}`, `/trust/decisions/{logicalKey}`, `/snapshots`, `/snapshots/{logicalKey}`, `/snapshots/{snapshotId}/resources`, `/activations/{taskRunId}`, `/catalog/approved` | `GET` | Persisted control-plane candidate history, trust decisions, immutable snapshots/resources, activation audit, and snapshot-only approved catalog. Untrusted content is not a model catalog. |
+| `/api/skills/trust/approve|reject|revoke` | `POST` | Operation-keyed explicit trust decisions. Approval requires the exact observed candidate digest and creates immutable snapshot state. |
+| `/api/skills/activate` | `POST` | Activates only an exact approved snapshot and records the activation context; revocation and resume semantics apply. |
+| `/api/skills/exec-auth/{logicalKey}` | `GET` | Reports executable authorization unavailable while confinement is not proven. |
+| `/api/skills/packages/ingest` | `POST` | Fails closed with `503 UNAVAILABLE`; it does not accept/install a package while process confinement is unproven. |
+
+### Runtime Observability
+
+| route family | methods | contract |
+| --- | --- | --- |
+| `/api/runtime/status` | `GET` | Runtime workspace-service availability. |
+| `/api/runtime/runs/{taskRunId}/summary|rebuild|normalized-status|audit` | `GET` | Rebuildable summary, normalized status, and bounded exact-link audit. Native run rows remain authoritative. |
+| `/api/runtime/runs/{taskRunId}/measurements`, `/attempts/{attemptNumber}/measurements` | `GET` | Repeated typed invocation facts, optionally filtered by kind; unavailable values remain null. |
+| `/api/runtime/workspaces/{workspaceType}/{workspaceKey}/summaries|health|measurements` | `GET` | Bounded agent/user history, explicit health denominator, and workspace-scoped measurements. |
+
+### Schedules and Reactions
+
+All routes below are under `/api/agents/{agentId}` and return `404` when their capability flag is disabled.
+
+| route family | methods | contract |
+| --- | --- | --- |
+| `/schedules`, `/schedules/{scheduleId}`, `/{scheduleId}/enable` | `GET`, `POST`, `PUT`, `DELETE` | Revisioned schedule CRUD, soft deletion, and enable/disable with six-field cron and IANA timezone validation. |
+| `/schedules/{scheduleId}/firings`, `/firings/{firingId}/attempts` | `GET` | Bounded revision-qualified firing and append-only attempt audit. `ENQUEUED` is not completion. |
+| `/schedules/simulate` | `POST` | Pure preview with no firing, claim, assignment, run, tool, artifact, event, or external mutation. |
+| `/schedules/{scheduleId}/cancel-linked` | `POST` | Requests lifecycle-owned cancellation without rewriting firing audit. |
+| `/event-reactions`, `/event-reactions/{reactionId}`, `/{reactionId}/enable` | `GET`, `POST`, `PUT`, `DELETE` | Revisioned reaction CRUD, soft deletion, and enable/disable. |
+| `/event-reactions/{reactionId}/dispatches`, `/event-reactions/dispatches/by-root-event/{rootEventId}` | `GET` | Bounded dispatch, causation, suppression, and linked-work audit. |
+| `/event-reactions/simulate` | `POST` | Pure match/dedupe/loop/depth/rate evaluation with no persistent or external side effect. |
+
+## Operational Fragment Routes
+
+These server-rendered routes are scoped browser adapters, not trusted filesystem APIs:
+
+| route | contract |
+| --- | --- |
+| `GET /agents/_detail/{agentId}/runs?limit=&oob=` | Requires an existing agent, clamps `limit` to 1-100, queries only `workspace_type=agent` and the path agent key, and returns `#agent-run-groups`. `oob=true` marks refresh responses for `outerHTML` OOB replacement. Empty and service-unavailable states are explicit. |
+| `GET /agents/_detail/{agentId}/runs/{taskRunId}` | Validates run-id shape, requires an existing agent, and rechecks the persisted summary workspace type/key before composing audit detail. Returns `#agent-run-detail`; out-of-scope and missing rows disclose no run facts. |
+| `GET /runtime/workspaces/{workspaceType}/{workspaceKey}/health|history` | Agent/user runtime health and bounded history fragments. Missing elapsed or samples remain unavailable rather than zero. |
+| `GET /runtime/runs/{taskRunId}/measurements-fragment|audit-fragment` | On-demand measurement/audit fragments over persisted read models; no lease owner, claim secret, fence, token, or absolute path is returned. |
+| `/fragments/agents/{agentId}/schedules/*`, `/fragments/agents/{agentId}/reactions/*` | HTMX list, non-executing simulation preview, and bounded firing/attempt or dispatch audit fragments. |
+| `/artifacts`, `/artifacts/_search`, `/_detail/{artifactId}`, `/_preview/{artifactId}`, `/_lineage/{artifactId}`, `/_retention/{artifactId}` | Scoped artifact page and stable search/detail subfragments. FTS5-unavailable and integrity-failed states suppress unsupported search or byte access. |
+| `/skills/_trust/{logicalKey}`, `/skills/_trust/approve|reject|revoke`, `/skills/_snapshots/{logicalKey}` | Skill trust decision and immutable snapshot fragments; mutations refresh only the trust host. |
+
+The artifact REST family under `/api/artifacts` owns scoped metadata, preview/download, search/lineage, and retention operations. Request scope is workspace kind/key with optional exact task run; authorization is applied before counts or rows are calculated.
 
 ## Ownership Boundary
 
@@ -100,6 +167,7 @@ This file owns route and payload contracts. Service behavior belongs in `service
 | id | status | observed_drift | routing | review_after |
 | --- | --- | --- | --- | --- |
 | DRIFT-20260525-05 | open | Workspace file explorer status mapping is partly message based. | Deferred typed domain errors before expanding compatibility claims. | 2026-06-23 |
+| DRIFT-20260720-01 | blocking | Task-run `/api/runtime/runs/{taskRunId}/*` reads lack workspace scope; schedule firing-attempt JSON exposes claim owner/fence and does not bind the firing to the path schedule/agent; root-event reaction dispatch lookup lacks path-agent filtering. | Add authorization-first scope resolution and secret-free response DTOs before Phase 10 API/security PASS. | 2026-07-20 |
 
 ## Validation Expectations
 

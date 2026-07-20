@@ -67,7 +67,7 @@ The runtime does not attempt token-level or partial model response resume. Durab
 
 Every execution attempt resolves one descriptor from its persisted `workspaceType`/`workspaceKey` selection. Task, workflow, and job submission reserves the immutable native run id as `taskRunId` before queue dispatch. The runner then loads that reservation, provisions `tasks/<taskPathKey>/<taskRunId>/` through `WorkspaceDirectoryService`, acquires a monotonic writer claim independent from the assignment lease, and carries the descriptor, trusted locations, attempt, and opaque capability through execution. Lifecycle setup fails closed.
 
-Operation keys are scoped by operation type. A supplied key retries one submission; omitted keys are generated uniquely so two intentional submissions with identical definitions and inputs remain separate. Resume reuses the run/location and opens a new attempt. Operator retry/replay create new lineage-linked sibling runs. Workflow task children and job work items also receive typed links and sibling lifecycle roots. File, shell, output, checkpoint, terminal, force-interrupt, and stale-lease paths verify current fences; responses never expose paths, owners, fence generations, or tokens. Native run tables remain status truth. Reserved-tree enforcement and run-local artifact publication continue in later phases.
+Operation keys are scoped by operation type. A supplied key retries one submission; omitted keys are generated uniquely so two intentional submissions with identical definitions and inputs remain separate. Resume reuses the run/location and opens a new attempt. Operator retry/replay create new lineage-linked sibling runs. Workflow task children and job work items also receive typed links and sibling lifecycle roots. File, output, checkpoint, terminal, force-interrupt, and stale-lease paths verify current fences; responses never expose paths, owners, fence generations, or tokens. Native run tables remain status truth. Run-local artifact publication is active with reservation, staging, digest/size verification, create-only promotion, reconciliation, and retention safety. Host shell/process execution remains fail-closed because process confinement and process-tree revocation are not proven.
 
 ## Jobs
 
@@ -97,17 +97,15 @@ Keep these separate. They have different recipients, lifecycle flags, and use ca
 
 ## Schedules
 
-`ScheduleService` owns `agent_schedules` and `schedule_firings`.
-
-Schedules include agent id, optional job id, assignment template JSON, cron expression, timezone, enabled flag, next run time, and timestamps. `schedule_firings` de-duplicates assignment creation for the same schedule/due time.
+`ScheduleService` owns revisioned `schedule_definitions`, `scheduler_claims`, `schedule_firings`, and `schedule_firing_attempts`. A firing identity includes schedule id, revision, slot instant, and timezone. Operation-key digest idempotency and claim fences prevent duplicate enqueue for the same fact; retry/recovery attempts remain append-only audit. Timezone, DST gap/overlap, and misfire semantics are explicit. Simulation is pure and creates no firing, assignment, tool call, artifact, or external mutation.
 
 API routes under `/api/agents/{agentId}/schedules` are gated by `magenta.features.schedules-enabled`; disabled routes return `404`.
 
 ## Event Reactions
 
-`EventReactionService` owns `agent_event_reactions`; `OrchestrationEventService` owns `orchestration_events`.
+`EventReactionService` owns revisioned `reaction_definitions`, `reaction_dispatches`, and `reaction_dispatch_attempts`; `OrchestrationEventService` owns source events. Dispatch identity uses persisted event/reaction/revision/causation facts with operation-key digest idempotency. Root-event, parent, depth, rate, and dedupe checks suppress loops and storms before external work is enqueued. Simulation is non-executing and does not create dispatch audit rows.
 
-Reactions match event type and optional filter JSON, then apply an action type such as assignment creation from a stored assignment template. API routes under `/api/agents/{agentId}/event-reactions` are gated by `magenta.features.reactions-enabled`; disabled routes return `404`.
+API routes under `/api/agents/{agentId}/event-reactions` are gated by `magenta.features.reactions-enabled`; disabled routes return `404`.
 
 ## Projects
 
@@ -131,6 +129,8 @@ The settings service falls back to legacy file config where persisted values are
 
 Operational surfaces expose:
 
+- Files-adjacent bounded run groups and on-demand detail through `RunOperationsFragments`; `OrchestrationController` scopes agent/type/key before querying `RunSummaryService`, while `WorkspaceExplorerService` remains filesystem-only.
+- Rebuildable summaries, normalized health, per-invocation model/tool measurements, attempts, exact skill/artifact/causation audit, and explicit partial/unavailable states.
 - Queue and retained assignment history.
 - Assignment diagnostics and audit transcript fragments.
 - Inbox message counts and actions.

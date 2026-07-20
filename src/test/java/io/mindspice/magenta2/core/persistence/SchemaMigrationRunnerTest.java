@@ -149,12 +149,21 @@ class SchemaMigrationRunnerTest {
             JdbcTemplate migratedJdbc = new JdbcTemplate(migrated);
             migratedJdbc.execute("create table representative_legacy_marker(id text)");
             migratedJdbc.execute("create table work_assignments(id text primary key)");
-            run(migrated, migrations());
+            migratedJdbc.execute("""
+                    create table run_output_artifacts(
+                        id text primary key, run_id text not null, plan_id text not null,
+                        agent_id text, job_id text, job_assignment_id text, job_run_id text,
+                        project_id text, workspace_type text, workspace_key text,
+                        workspace_identity text, run_type text, output_name text not null,
+                        artifact_type text not null, file_name text not null,
+                        file_path text not null, content_json text, created_at text not null)
+                    """);
+            run(migrated, allMigrations());
             try (Connection connection = fresh.getConnection()) {
                 ScriptUtils.executeSqlScript(connection,
                         new EncodedResource(new ClassPathResource("schema.sql"), StandardCharsets.UTF_8));
             }
-            run(fresh, migrations());
+            run(fresh, allMigrations());
             assertEquals(ownedMetadata(new JdbcTemplate(migrated)),
                     ownedMetadata(new JdbcTemplate(fresh)));
         }
@@ -221,8 +230,43 @@ class SchemaMigrationRunnerTest {
                     "select task_run_id, root_relative_path from output_publications where artifact_id = 'legacy-1'");
             assertEquals(null, migrated.get("task_run_id"));
             assertEquals("legacy/unavailable/legacy-1", migrated.get("root_relative_path"));
-            assertEquals(4, jdbc.queryForObject("select count(*) from schema_migrations", Integer.class));
+            assertEquals(9, jdbc.queryForObject("select count(*) from schema_migrations", Integer.class));
             assertTrue(tableExists(jdbc, "skill_candidate_versions"));
+        }
+    }
+
+    @Test
+    void warmDatabaseWithLegacyEmptyBookkeepingAdoptsOwnedSchemaAndContinues() throws Exception {
+        try (SingleConnectionDataSource dataSource = memoryDataSource()) {
+            JdbcTemplate jdbc = new JdbcTemplate(dataSource);
+            jdbc.execute("create table work_assignments(id text primary key)");
+            jdbc.execute("""
+                    create table run_output_artifacts(
+                        id text primary key, run_id text not null, plan_id text not null,
+                        agent_id text, job_id text, job_assignment_id text, job_run_id text,
+                        project_id text, workspace_type text, workspace_key text,
+                        workspace_identity text, run_type text, output_name text not null,
+                        artifact_type text not null, file_name text not null,
+                        file_path text not null, content_json text, created_at text not null)
+                    """);
+            jdbc.execute("""
+                    create table schema_migrations(
+                        version integer primary key,
+                        resource_name text not null,
+                        checksum text not null,
+                        applied_at text not null)
+                    """);
+            createEmptyPreFoundationTables(jdbc);
+
+            SchemaMigrationRunner runner = run(dataSource, allMigrations());
+
+            assertEquals(9, runner.appliedMigrations().size());
+            assertTrue(tableExists(jdbc, "reaction_dispatches"));
+            String bookkeepingSql = jdbc.queryForObject(
+                    "select sql from sqlite_master where type='table' and name='schema_migrations'",
+                    String.class).toLowerCase();
+            assertTrue(bookkeepingSql.contains("resource_name text not null unique"));
+            assertTrue(bookkeepingSql.contains("check (length(checksum) = 64)"));
         }
     }
 
@@ -255,6 +299,45 @@ class SchemaMigrationRunnerTest {
             }
             return result;
         });
+    }
+
+    private static void createEmptyPreFoundationTables(JdbcTemplate jdbc) {
+        jdbc.execute("""
+                create table task_run_locations(
+                    task_run_id text primary key, workspace_type text not null,
+                    workspace_key text not null, workspace_identity text not null,
+                    task_path_key text not null, root_relative_path text not null,
+                    created_at text not null, updated_at text not null)
+                """);
+        jdbc.execute("""
+                create table task_run_attempts(
+                    task_run_id text not null, attempt_number integer not null, status text not null,
+                    started_at text, completed_at text, error_text text, created_at text not null,
+                    updated_at text not null, primary key(task_run_id, attempt_number),
+                    foreign key(task_run_id) references task_run_locations(task_run_id)) without rowid
+                """);
+        jdbc.execute("""
+                create table task_run_idempotent_ops(
+                    operation_key text not null, request_digest text not null, task_run_id text,
+                    result_json text, created_at text not null,
+                    primary key(operation_key, request_digest)) without rowid
+                """);
+        jdbc.execute("""
+                create table task_run_native_links(
+                    task_run_id text primary key, plan_run_id text, workflow_run_id text,
+                    workflow_run_node_index integer, job_run_id text, job_work_item_index integer,
+                    assignment_id text, created_at text not null,
+                    foreign key(task_run_id) references task_run_locations(task_run_id))
+                """);
+        jdbc.execute("""
+                create table task_run_writer_claims(
+                    task_run_id text not null, attempt_number integer not null,
+                    claim_generation integer not null, claim_token text not null,
+                    created_at text not null,
+                    primary key(task_run_id, attempt_number, claim_generation),
+                    foreign key(task_run_id, attempt_number)
+                        references task_run_attempts(task_run_id, attempt_number))
+                """);
     }
 
     private static void createBookkeeping(JdbcTemplate jdbc) {
@@ -296,8 +379,31 @@ class SchemaMigrationRunnerTest {
         return new ClassPathResource("db/migrations/004-scoped-skill-resolution.sql");
     }
 
+    private static Resource artifactAccessSearchRetention() {
+        return new ClassPathResource("db/migrations/005-artifact-access-search-retention.sql");
+    }
+
+    private static Resource skillTrustSnapshotsPackages() {
+        return new ClassPathResource("db/migrations/006-skill-trust-snapshots-packages.sql");
+    }
+
+    private static Resource runtimeSummariesMeasurements() {
+        return new ClassPathResource("db/migrations/007-runtime-summaries-measurements.sql");
+    }
+
+    private static Resource scheduleReactionHardening() {
+        return new ClassPathResource("db/migrations/008-schedule-reaction-hardening.sql");
+    }
+
+    private static Resource warmDatabaseCompatibility() {
+        return new ClassPathResource("db/migrations/009-warm-database-compatibility.sql");
+    }
+
     private static Resource[] allMigrations() {
-        return new Resource[] { foundation(), lifecycle(), publication(), scopedSkills() };
+        return new Resource[] { foundation(), lifecycle(), publication(), scopedSkills(),
+                artifactAccessSearchRetention(), skillTrustSnapshotsPackages(),
+                runtimeSummariesMeasurements(), scheduleReactionHardening(),
+                warmDatabaseCompatibility() };
     }
 
     private static Resource resource(String name, String sql) {

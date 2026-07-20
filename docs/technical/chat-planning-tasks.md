@@ -128,7 +128,7 @@ Plan runs and task runs preserve execution history:
 - `PlanRun` stores input values, output values, definition snapshot, workspace/output paths, evidence, validation feedback, deliverable evidence, final/error messages, status, and timestamps.
 - `TaskRun` stores task-specific run state and is used by task execution paths.
 
-Runs snapshot their definitions so edits after execution do not rewrite historical meaning. During execution, outputs publish directly beneath the effective workspace's `outputs/` directory with collision-safe normalized names. No `runs/<runId>` hierarchy is created. Durable task, job, run, project, agent, and canonical workspace attribution is preserved in `run_output_artifacts` through `OutputArtifactRepository`.
+Runs snapshot their definitions so edits after execution do not rewrite historical meaning. During execution, task outputs publish with create-only placement beneath `tasks/<taskPathKey>/<taskRunId>/outputs/`; staging is a lazy sibling owned by publication. No legacy `runs/<runId>` hierarchy is created. Canonical task publication and integrity state live in `output_publications`; `run_output_artifacts` is compatibility metadata for legacy/non-task rows.
 
 ## Submit-To-Agent Semantics
 

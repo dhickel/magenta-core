@@ -55,6 +55,7 @@ import io.mindspice.magenta2.ai.orchestration.runtime.Project;
 import io.mindspice.magenta2.ai.orchestration.runtime.ProjectAgentMembership;
 import io.mindspice.magenta2.ai.orchestration.runtime.ProjectService;
 import io.mindspice.magenta2.ai.orchestration.runtime.ReactionActionType;
+import io.mindspice.magenta2.ai.orchestration.runtime.RunSummaryService;
 import io.mindspice.magenta2.ai.orchestration.runtime.ScheduleService;
 import io.mindspice.magenta2.ai.orchestration.runtime.WorkAssignment;
 import io.mindspice.magenta2.ai.orchestration.settings.RuntimeSettings;
@@ -151,6 +152,10 @@ public class OrchestrationController {
     private final PlanService planService;
     @Autowired(required = false)
     private SavedPlanChatService savedPlanChatService;
+    @Autowired(required = false)
+    private RunSummaryService runSummaryService;
+    @Autowired(required = false)
+    private RunOperationsFragments runOperationsFragments;
     private final AssignmentService assignmentService;
     private final ScheduleService scheduleService;
     private final EventReactionService eventReactionService;
@@ -6307,8 +6312,77 @@ public class OrchestrationController {
     }
 
     // ════════════════════════════════════════════════════════════════
-    //  Agent Files tab — neutral HTMX file explorer
+    //  Agent Files tab — filesystem explorer plus independently loaded run metadata
     // ════════════════════════════════════════════════════════════════
+
+    @GetMapping("/agents/_detail/{agentId}/runs")
+    @ResponseBody
+    public String agentRunGroups(
+        @PathVariable String agentId,
+        @RequestParam(defaultValue = "25") int limit,
+        @RequestParam(defaultValue = "false") boolean oob,
+        HttpServletResponse response
+    ) {
+        try {
+            agentProfileService.get(agentId);
+            if (runSummaryService == null || runOperationsFragments == null) {
+                response.setStatus(HttpServletResponse.SC_SERVICE_UNAVAILABLE);
+                return runFragments().error("Run metadata is unavailable on this deployment.").render();
+            }
+            int boundedLimit = Math.min(Math.max(limit, 1), 100);
+            return runOperationsFragments.groups(agentId,
+                runSummaryService.findSummariesByWorkspace("agent", agentId, null, boundedLimit),
+                boundedLimit, oob).render();
+        } catch (IllegalStateException e) {
+            response.setStatus(HttpServletResponse.SC_NOT_FOUND);
+            return runFragments().error("Agent not found.").render();
+        } catch (RuntimeException e) {
+            log.warn("Run groups fragment failed for agent {}", agentId, e);
+            response.setStatus(HttpServletResponse.SC_INTERNAL_SERVER_ERROR);
+            return runFragments().error("Run metadata could not be loaded.").render();
+        }
+    }
+
+    @GetMapping("/agents/_detail/{agentId}/runs/{taskRunId}")
+    @ResponseBody
+    public String agentRunDetail(
+        @PathVariable String agentId,
+        @PathVariable String taskRunId,
+        HttpServletResponse response
+    ) {
+        try {
+            agentProfileService.get(agentId);
+            if (!StringUtils.hasText(taskRunId) || taskRunId.contains("/") || taskRunId.contains("\\")) {
+                throw new IllegalArgumentException("Invalid taskRunId");
+            }
+            if (runSummaryService == null || runOperationsFragments == null) {
+                response.setStatus(HttpServletResponse.SC_SERVICE_UNAVAILABLE);
+                return runFragments().detail(null).render();
+            }
+            var summary = runSummaryService.findSummary(taskRunId).orElse(null);
+            if (summary == null
+                || !"agent".equalsIgnoreCase(summary.workspaceType())
+                || !agentId.equals(summary.workspaceKey())) {
+                response.setStatus(HttpServletResponse.SC_NOT_FOUND);
+                return runOperationsFragments.detail(null).render();
+            }
+            return runOperationsFragments.detail(runSummaryService.composeAudit(taskRunId).orElse(null)).render();
+        } catch (IllegalArgumentException e) {
+            response.setStatus(HttpServletResponse.SC_BAD_REQUEST);
+            return runFragments().detail(null).render();
+        } catch (IllegalStateException e) {
+            response.setStatus(HttpServletResponse.SC_NOT_FOUND);
+            return runFragments().detail(null).render();
+        } catch (RuntimeException e) {
+            log.warn("Run detail fragment failed for agent {}", agentId, e);
+            response.setStatus(HttpServletResponse.SC_INTERNAL_SERVER_ERROR);
+            return runFragments().detail(null).render();
+        }
+    }
+
+    private RunOperationsFragments runFragments() {
+        return runOperationsFragments != null ? runOperationsFragments : new RunOperationsFragments();
+    }
 
     @GetMapping("/agents/_detail/{agentId}/files")
     @ResponseBody
@@ -6453,6 +6527,10 @@ public class OrchestrationController {
             WorkspaceDescriptor descriptor = resolveAgentDescriptor(agentId, dirService, response);
             if (descriptor == null) return errorText(response);
             WorkspaceExplorerService.RelativePath relativePath = explorer.normalizeRelativePath(path);
+            if (isFileMutationAction(action) && WorkspaceExplorerFragments.isReadOnlyRuntimePath(relativePath.value())) {
+                throw new WorkspaceFileException(WorkspaceFileException.Reason.INVALID,
+                    "Runtime-managed task and output paths are read-only.");
+            }
             WorkspaceExplorerService.DeletePreflight preflight = null;
             if ("delete".equals(action) || "delete-recursive".equals(action)) {
                 try {
@@ -6718,6 +6796,7 @@ public class OrchestrationController {
         try {
             WorkspaceDescriptor descriptor = resolveAgentWriteDescriptor(agentId, dirService, response);
             if (descriptor == null) return errorText(response);
+            requireMutableAgentFilePath(path);
             explorer.ensureTag(label, label);
             explorer.addLabel(descriptor, path, label);
             WorkspaceExplorerService.Entry inspected = explorer.inspect(descriptor, explorer.normalizeRelativePath(path));
@@ -6745,6 +6824,7 @@ public class OrchestrationController {
         try {
             WorkspaceDescriptor descriptor = resolveAgentWriteDescriptor(agentId, dirService, response);
             if (descriptor == null) return errorText(response);
+            requireMutableAgentFilePath(path);
             explorer.removeLabel(descriptor, path, label);
             WorkspaceExplorerService.Entry inspected = explorer.inspect(descriptor, explorer.normalizeRelativePath(path));
             String encodedAgentId = URLEncoder.encode(agentId, StandardCharsets.UTF_8);
@@ -6753,6 +6833,21 @@ public class OrchestrationController {
             response.setStatus(fileErrorStatus(e));
             String encoded = URLEncoder.encode(agentId, StandardCharsets.UTF_8);
             return WorkspaceExplorerFragments.agentInspectorError(e.getMessage());
+        }
+    }
+
+    private boolean isFileMutationAction(String action) {
+        return switch (action) {
+            case "create-folder", "create-text", "create-markdown", "rename", "copy", "move", "tag",
+                 "delete", "delete-recursive" -> true;
+            default -> false;
+        };
+    }
+
+    private void requireMutableAgentFilePath(String path) {
+        if (WorkspaceExplorerFragments.isReadOnlyRuntimePath(path)) {
+            throw new WorkspaceFileException(WorkspaceFileException.Reason.INVALID,
+                "Runtime-managed task and output paths are read-only.");
         }
     }
 

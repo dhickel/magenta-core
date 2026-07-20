@@ -18,6 +18,8 @@ import java.io.IOException;
 import java.io.PrintWriter;
 import java.io.StringWriter;
 import java.nio.file.Path;
+import java.time.Duration;
+import java.time.Instant;
 
 import org.springframework.web.client.ResourceAccessException;
 
@@ -64,6 +66,11 @@ import io.mindspice.magenta2.ai.execution.ConversationTurnCoordinator;
 import io.mindspice.magenta2.ai.execution.MagentaWorkRequest;
 import io.mindspice.magenta2.ai.orchestration.runtime.OrchestrationTaskContext;
 import io.mindspice.magenta2.ai.orchestration.runtime.OrchestrationTaskContextHolder;
+import io.mindspice.magenta2.ai.orchestration.runtime.RunMeasurementRepository;
+import io.mindspice.magenta2.ai.orchestration.runtime.RunMeasurementRepository.MeasurementCompleteness;
+import io.mindspice.magenta2.ai.orchestration.runtime.RunMeasurementRepository.MeasurementKind;
+import io.mindspice.magenta2.ai.orchestration.runtime.RunMeasurementRepository.MeasurementOutcome;
+import io.mindspice.magenta2.ai.orchestration.runtime.RunMeasurementRepository.RunMeasurement;
 import io.mindspice.magenta2.ai.orchestration.settings.RuntimeSettingsService;
 import io.mindspice.magenta2.ai.orchestration.workspaces.AgentsMdResolver;
 import io.mindspice.magenta2.ai.skills.AgentSkillActivationService;
@@ -145,6 +152,7 @@ public class ChatService {
     private final ChatFileService chatFileService;
     private final ChatPendingMessageService chatPendingMessageService;
     private final AgentSkillActivationService agentSkillActivationService;
+    private final RunMeasurementRepository measurementRepo;
     private final Set<String> toolUnsupportedModels = ConcurrentHashMap.newKeySet();
     private final Map<String, Semaphore> streamLocks = new ConcurrentHashMap<>();
 
@@ -167,6 +175,7 @@ public class ChatService {
             chatSessionMetadataRepository,
             chatMarkdownRenderer,
             aiConfig,
+            null,
             null,
             null,
             null,
@@ -245,6 +254,7 @@ public class ChatService {
             agentsMdResolver,
             null,
             null,
+            null,
             null
         );
     }
@@ -292,6 +302,7 @@ public class ChatService {
             null,
             null,
             null,
+            null,
             null
         );
     }
@@ -324,7 +335,8 @@ public class ChatService {
         @Autowired(required = false) AgentsMdResolver agentsMdResolver,
         @Autowired(required = false) AgentSkillRuntimeCatalogService skillRuntimeCatalogService,
         @Autowired(required = false) AgentSkillPromptCatalogAssembler skillPromptCatalogAssembler,
-        @Autowired(required = false) AgentSkillActivationService agentSkillActivationService
+        @Autowired(required = false) AgentSkillActivationService agentSkillActivationService,
+        @Autowired(required = false) RunMeasurementRepository measurementRepo
     ) {
         this.chatMemory = chatMemory;
         this.chatMemoryRepository = chatMemoryRepository;
@@ -349,6 +361,7 @@ public class ChatService {
         this.chatFileService = chatFileService;
         this.chatPendingMessageService = chatPendingMessageService;
         this.agentSkillActivationService = agentSkillActivationService;
+        this.measurementRepo = measurementRepo;
 
         // Initialize extracted turn components
         this.promptAssembler = new PromptContextAssembler(
@@ -414,6 +427,7 @@ public class ChatService {
             chatFileService,
             chatPendingMessageService,
             workTypeProfileService,
+            null,
             null,
             null,
             null,
@@ -1562,7 +1576,15 @@ public class ChatService {
 
     private void handleInvokeModel(ToolLoopState s) {
         phase(s.activeTurn, ActiveTurnPhase.MODEL_CALL);
-        s.response = chatModelRouter.chatModel(s.request.model()).call(s.prompt);
+        Instant startedAt = Instant.now();
+        String invocationId = reserveMeasurement(s, MeasurementKind.MODEL, s.request.model());
+        try {
+            s.response = chatModelRouter.chatModel(s.request.model()).call(s.prompt);
+            completeModelMeasurement(invocationId, s, startedAt);
+        } catch (Exception e) {
+            completeModelMeasurementFailure(invocationId, s, startedAt, e);
+            throw e;
+        }
         s.phase = TurnPhase.EVALUATE;
     }
 
@@ -1619,12 +1641,19 @@ public class ChatService {
 
         phase(s.activeTurn, ActiveTurnPhase.TOOL_CALL);
         int promptMessageCount = s.prompt.getInstructions().size();
+        Instant toolsStartedAt = Instant.now();
+        Map<String, String> toolInvocationIds = reserveToolMeasurements(s);
         ToolExecutionResult toolExecutionResult;
         try {
             toolExecutionResult = toolCallingManager.executeToolCalls(s.prompt, s.response);
+            completeToolMeasurements(toolInvocationIds, s, toolExecutionResult, toolsStartedAt);
         } catch (ToolExecutionException exception) {
+            failToolMeasurements(toolInvocationIds, s, toolsStartedAt, exception);
             handleToolExecutionFailure(s, exception);
             return;
+        } catch (Exception exception) {
+            failToolMeasurements(toolInvocationIds, s, toolsStartedAt, exception);
+            throw exception;
         }
         List<ToolTranscriptEntry> toolTranscriptEntries = toolTranscriptEntries(s.response, toolExecutionResult);
         List<ChatMessage> pendingToolMessages = new ArrayList<>();
@@ -2477,6 +2506,184 @@ public class ChatService {
     }
 
     private record MalformedToolCall(String id, String name, String arguments, String parserMessage) {
+    }
+
+    // ── Measurement Instrumentation ──
+
+    private String reserveMeasurement(ToolLoopState s, MeasurementKind kind, String modelOrToolName) {
+        if (measurementRepo == null) return null;
+        OrchestrationTaskContext ctx = OrchestrationTaskContextHolder.current();
+        if (ctx == null || ctx.taskRunLocation() == null) return null;
+        String taskRunId = ctx.taskRunId();
+        int attemptNumber = ctx.attemptNumber();
+        if (taskRunId == null || attemptNumber < 1) return null;
+        String invocationId = taskRunId + "/" + kind.name().toLowerCase() + "/" + UUID.randomUUID();
+        String callId = kind == MeasurementKind.MODEL
+                ? s.request.conversationId() + "/model/" + System.currentTimeMillis()
+                : s.request.conversationId() + "/tools/" + System.currentTimeMillis();
+        try {
+            measurementRepo.reserve(RunMeasurement.reserve(
+                    invocationId, taskRunId, attemptNumber, kind, callId, null));
+            return invocationId;
+        } catch (Exception e) {
+            logger.warn("Failed to reserve measurement {}: {}", invocationId, e.getMessage());
+            return null;
+        }
+    }
+
+    private Map<String, String> reserveToolMeasurements(ToolLoopState s) {
+        Map<String, String> ids = new java.util.LinkedHashMap<>();
+        if (measurementRepo == null) return ids;
+        OrchestrationTaskContext ctx = OrchestrationTaskContextHolder.current();
+        if (ctx == null || ctx.taskRunLocation() == null) return ids;
+        String taskRunId = ctx.taskRunId();
+        int attemptNumber = ctx.attemptNumber();
+        if (taskRunId == null || attemptNumber < 1) return ids;
+        List<org.springframework.ai.chat.messages.AssistantMessage.ToolCall> toolCalls =
+                s.response.getResult().getOutput().getToolCalls();
+        for (var tc : toolCalls) {
+            String invocationId = taskRunId + "/tool/" + tc.id();
+            try {
+                measurementRepo.reserve(RunMeasurement.reserve(
+                        invocationId, taskRunId, attemptNumber,
+                        MeasurementKind.TOOL, tc.id(), null));
+                ids.put(tc.id(), invocationId);
+            } catch (Exception e) {
+                logger.warn("Failed to reserve tool measurement {}: {}", invocationId, e.getMessage());
+            }
+        }
+        return ids;
+    }
+
+    private void completeModelMeasurement(String invocationId, ToolLoopState s, Instant startedAt) {
+        if (invocationId == null || measurementRepo == null) return;
+        Instant completedAt = Instant.now();
+        long elapsedMs = Duration.between(startedAt, completedAt).toMillis();
+        try {
+            org.springframework.ai.chat.model.ChatResponse response = s.response;
+            Integer inputTokens = null;
+            Integer outputTokens = null;
+            Integer totalTokens = null;
+            String provider = null;
+            if (response != null && response.getMetadata() != null) {
+                var metadata = response.getMetadata();
+                if (metadata.containsKey("usage")) {
+                    Object usage = metadata.get("usage");
+                    if (usage instanceof Map<?, ?> usageMap) {
+                        inputTokens = intFromMap(usageMap, "prompt_tokens", "input_tokens");
+                        outputTokens = intFromMap(usageMap, "completion_tokens", "output_tokens");
+                        totalTokens = intFromMap(usageMap, "total_tokens");
+                    }
+                }
+                if (metadata.containsKey("provider")) {
+                    provider = String.valueOf(metadata.get("provider"));
+                }
+            }
+            RunMeasurement reserved = measurementRepo.findById(invocationId).orElse(null);
+            if (reserved == null) return;
+            measurementRepo.complete(reserved.complete(
+                    MeasurementOutcome.SUCCEEDED, MeasurementCompleteness.COMPLETE,
+                    startedAt, completedAt, (int) elapsedMs,
+                    provider, s.request.model(), null,
+                    inputTokens, outputTokens, totalTokens,
+                    null, null, null, null, null, null));
+        } catch (Exception e) {
+            logger.warn("Failed to complete model measurement {}: {}", invocationId, e.getMessage());
+        }
+    }
+
+    private void completeModelMeasurementFailure(String invocationId, ToolLoopState s,
+                                                   Instant startedAt, Exception error) {
+        if (invocationId == null || measurementRepo == null) return;
+        Instant completedAt = Instant.now();
+        long elapsedMs = Duration.between(startedAt, completedAt).toMillis();
+        try {
+            RunMeasurement reserved = measurementRepo.findById(invocationId).orElse(null);
+            if (reserved == null) return;
+            measurementRepo.complete(reserved.complete(
+                    MeasurementOutcome.FAILED, MeasurementCompleteness.COMPLETE,
+                    startedAt, completedAt, (int) elapsedMs,
+                    null, s.request.model(), null,
+                    null, null, null,
+                    null, null, null, null, null,
+                    error.getMessage() != null ? error.getMessage() : "model call failed"));
+        } catch (Exception e) {
+            logger.warn("Failed to record model measurement failure {}: {}", invocationId, e.getMessage());
+        }
+    }
+
+    private void completeToolMeasurements(Map<String, String> invocationIds, ToolLoopState s,
+                                            ToolExecutionResult toolExecutionResult, Instant startedAt) {
+        if (invocationIds.isEmpty() || measurementRepo == null) return;
+        Instant completedAt = Instant.now();
+        Map<String, MeasurementOutcome> outcomes = toolResponseOutcomes(toolExecutionResult);
+        for (var tc : s.response.getResult().getOutput().getToolCalls()) {
+            String invocationId = invocationIds.get(tc.id());
+            if (invocationId == null) continue;
+            try {
+                RunMeasurement reserved = measurementRepo.findById(invocationId).orElse(null);
+                if (reserved == null) continue;
+                MeasurementOutcome outcome = outcomes.getOrDefault(tc.id(), MeasurementOutcome.SUCCEEDED);
+                long elapsedMs = Duration.between(startedAt, completedAt).toMillis();
+                measurementRepo.complete(reserved.complete(
+                        outcome, MeasurementCompleteness.COMPLETE,
+                        startedAt, completedAt, (int) elapsedMs,
+                        null, null, tc.name(),
+                        null, null, null,
+                        null, null, null, null, null, null));
+            } catch (Exception e) {
+                logger.warn("Failed to complete tool measurement {}: {}", invocationId, e.getMessage());
+            }
+        }
+    }
+
+    private void failToolMeasurements(Map<String, String> invocationIds, ToolLoopState s,
+                                        Instant startedAt, Exception error) {
+        if (invocationIds.isEmpty() || measurementRepo == null) return;
+        Instant completedAt = Instant.now();
+        for (var entry : invocationIds.entrySet()) {
+            try {
+                RunMeasurement reserved = measurementRepo.findById(entry.getValue()).orElse(null);
+                if (reserved == null) continue;
+                long elapsedMs = Duration.between(startedAt, completedAt).toMillis();
+                measurementRepo.complete(reserved.complete(
+                        MeasurementOutcome.FAILED, MeasurementCompleteness.COMPLETE,
+                        startedAt, completedAt, (int) elapsedMs,
+                        null, null, null,
+                        null, null, null,
+                        null, null, null, null, null,
+                        error.getMessage() != null ? error.getMessage() : "tool execution failed"));
+            } catch (Exception e) {
+                logger.warn("Failed to record tool measurement failure {}: {}", entry.getValue(), e.getMessage());
+            }
+        }
+    }
+
+    private static Map<String, MeasurementOutcome> toolResponseOutcomes(
+            ToolExecutionResult toolExecutionResult) {
+        Map<String, MeasurementOutcome> outcomes = new java.util.LinkedHashMap<>();
+        if (toolExecutionResult == null || toolExecutionResult.conversationHistory() == null) {
+            return outcomes;
+        }
+        for (var message : toolExecutionResult.conversationHistory()) {
+            if (message instanceof org.springframework.ai.chat.messages.ToolResponseMessage trm) {
+                for (var response : trm.getResponses()) {
+                    outcomes.put(response.id(), MeasurementOutcome.SUCCEEDED);
+                }
+            }
+        }
+        return outcomes;
+    }
+
+    private static Integer intFromMap(Map<?, ?> map, String... keys) {
+        for (String key : keys) {
+            Object value = map.get(key);
+            if (value instanceof Number num) return num.intValue();
+            if (value instanceof String s && org.springframework.util.StringUtils.hasText(s)) {
+                try { return Integer.parseInt(s); } catch (NumberFormatException ignored) { }
+            }
+        }
+        return null;
     }
 
     private static final class ToolLoopState {

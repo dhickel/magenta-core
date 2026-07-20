@@ -20,6 +20,21 @@ SimplyPages is the default server-rendered frontend composition library for Mage
 | Workspace selector control | active | A reusable SimplyPages fragment for execution submission surfaces. It presents the bound-agent default and only declared/existing user-workspace overrides; chat is never selectable. Rendered via HTMX with OOB refresh on user-workspace creation. | New reusable fragment mounted only where task/workflow/job submission exposes workspace choice | Selection interaction stays HTMX-first. JavaScript only for narrow interactions where it is clearly simpler. | Browser validation verifies pair submission, fallback presentation, HTMX viability, and JS justification. |
 | User workspace creation control | active | A reusable HTMX form posts the validated name to `POST /api/workspace/user`, renders controlled `400`/`409` feedback, and OOB-refreshes every mounted workspace selector after successful creation. | New reusable fragment colocated with workspace choice controls | No rename, root deletion, generic browser, sharing, or permissions UI. | Controller and browser checks cover success, invalid names, collisions, and selector refresh. |
 
+## Operational Run Fragment Composition
+
+`RunOperationsFragments` is a reusable stateless SimplyPages renderer over `RunSummary` and `RunAudit` values. It owns no persistence or scope resolution. `OrchestrationController` supplies authorized bounded data, while `WorkspaceExplorerFragments` supplies only the stable independent host. Component-built headings, tables, buttons, chips, facts, and states are preferred; no transport JavaScript or raw-path markup is introduced.
+
+Stable hosts are `#agent-run-groups` for bounded groups, `#agent-run-detail` for expansion, and `#artifact-preview` inside the selected run. Refresh OOB-replaces only the groups host; expansion and lineage navigation replace only detail; artifact preview delegates to the artifact-owned authorized fragment. Filesystem list/inspector/modal OOB behavior remains separate, preventing file mutations or stale run responses from replacing unrelated domain panels. Responsive CSS stacks the independently useful panels without changing server composition.
+
+## Cross-Domain Fragment Patterns
+
+- **Independent stable hosts:** artifact search/detail/preview/lineage/retention, skill trust/snapshots, runtime health/history/detail/audit, schedule firing/attempt audit, and reaction dispatch audit each own a stable host. A response replaces only its domain host; mutation OOB swaps never refresh the entire Files surface.
+- **Stateless renderers over authorized values:** reusable fragment classes render service-provided records and own no repositories, filesystem roots, claims, or scope derivation. Controllers validate scope and bounds before rendering.
+- **Truthful state components:** semantic chips and compact state panels distinguish unavailable, legacy, partial, integrity-failed, pending, revoked, suppressed, simulated, enqueued, and terminal states. Missing facts render as unavailable, never numeric zero or implied success.
+- **Bounded master/detail expansion:** list rows load on-demand detail into a sibling host; pagination and refresh preserve workspace/agent scope and bounded limits. Stale responses cannot overwrite unrelated panels.
+- **HTMX-first control plane:** filters, refresh, CRUD, trust decisions, simulation previews, pagination, and audit expansion use `hx-get`/`hx-post`/`hx-put`/`hx-delete`, explicit targets, and OOB swaps where multiple same-domain hosts change. Phase 10 adds no JavaScript transport.
+- **Raw markup exception:** most operational renderers use SimplyPages components. `ScheduleReactionFragments` uses narrowly contained escaped table markup for dense audit rows; inputs are escaped and transport remains HTMX. This is a local renderer choice, not a general raw-HTML pattern.
+
 ## Retained SimplyPages Entries
 
 | id | component_or_module | status | intended_contract | observed_anchors | reuse_boundary | validation | related_decisions | related_knowledge |

@@ -12,6 +12,11 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import io.mindspice.magenta2.ai.orchestration.agents.AgentProfile;
 import io.mindspice.magenta2.ai.orchestration.agents.AgentProfileService;
 import io.mindspice.magenta2.ai.orchestration.agents.AgentProfileStatus;
+import io.mindspice.magenta2.ai.skills.AgentSkillAssignmentRepository;
+import io.mindspice.magenta2.ai.skills.AgentSkillTargetType;
+import io.mindspice.magenta2.ai.skills.CandidateVersion;
+import io.mindspice.magenta2.ai.skills.SkillProvenance;
+import io.mindspice.magenta2.ai.skills.SkillScope;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledOnOs;
@@ -52,6 +57,9 @@ class SkillControllerTest {
 
     @Autowired
     private ObjectMapper objectMapper;
+
+    @Autowired
+    private AgentSkillAssignmentRepository assignmentRepository;
 
     @DynamicPropertySource
     static void configure(DynamicPropertyRegistry registry) {
@@ -212,6 +220,28 @@ class SkillControllerTest {
         mockMvc.perform(delete("/api/skills/dedupe-skill/assignments/agents/agent-1"))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.removed").value(true));
+    }
+
+    @Test
+    void candidateCollectionsHistoryAndOverlayListingsUsePersistedControlPlaneState() throws Exception {
+        CandidateVersion candidate = assignmentRepository.insertCandidateVersion(new CandidateVersion(
+            null, "control-plane-skill", SkillScope.GLOBAL, "global",
+            SkillProvenance.GLOBAL_PACKAGE, 1, "a".repeat(64), java.time.Instant.now()));
+        assignmentRepository.upsertOverlay(candidate.id(), candidate.logicalKey(),
+            AgentSkillTargetType.AGENT, "agent-1", true, "skill-controller-overlay", "operator");
+
+        mockMvc.perform(get("/api/skills/candidates"))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$[?(@.logicalKey == 'control-plane-skill')]").exists());
+        mockMvc.perform(get("/api/skills/candidates/control-plane-skill"))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$[0].contentDigest").value("a".repeat(64)));
+        mockMvc.perform(get("/api/skills/overlays"))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$[?(@.logicalKey == 'control-plane-skill')].targetKey").value("agent-1"));
+        mockMvc.perform(get("/api/skills/overlays/control-plane-skill"))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$[0].enabled").value(true));
     }
 
     @Test

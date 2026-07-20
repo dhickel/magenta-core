@@ -63,7 +63,7 @@ Validation is exposed at:
 
 Runs persist in `workflow_runs`; per-node rows persist in `workflow_node_runs`.
 
-Workflow execution publishes outputs directly beneath the effective workspace's `outputs/` directory with collision-safe normalized names. No run-owned directory hierarchy is created. Durable artifact attribution is preserved in `run_output_artifacts` through `OutputArtifactRepository`.
+Assignment-owned workflow execution publishes task artifacts through the trusted canonical run-local output location, current writer capability, staged verification, and create-only promotion. Standalone workflow execution without that capability does not fall back to arbitrary publication. Durable artifact attribution is preserved in `output_publications`; legacy/non-task rows remain isolated compatibility data.
 
 ## Submission and Execution
 
@@ -108,7 +108,7 @@ Assignment-backed workflow runs preserve `WAITING` assignment status while waiti
 
 ## Output Mapping
 
-Workflow final output metadata is stored in `workflow_runs.final_outputs_json`. During execution, workflow task nodes publish outputs directly beneath the effective workspace's `outputs/` directory. `OutputArtifactRepository` owns artifact records with durable attribution to run, task, workflow, job, assignment, project, agent, and workspace identity.
+Workflow final output metadata is stored in `workflow_runs.final_outputs_json`. During execution, workflow and child task runs publish with create-only placement beneath their canonical `tasks/<taskPathKey>/<taskRunId>/outputs/` directories. `OutputArtifactRepository` owns publication and compatibility records with durable run, assignment, project, agent, and workspace attribution.
 
 Task nodes can produce task output artifacts via the task/plan execution path. The workflow runner gathers relevant output values and artifact ids into the workflow run record.
 

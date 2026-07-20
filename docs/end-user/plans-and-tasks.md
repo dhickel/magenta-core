@@ -98,7 +98,7 @@ Plan submissions create agent assignments and may create task run records. The p
 - `/outputs` for artifacts.
 - `/jobs` when the plan runs as part of a job.
 
-During execution, outputs publish directly beneath the effective workspace's `outputs/` directory with collision-safe normalized names. Ordinary chat files remain separate from these output artifacts. Durable attribution is queryable through `/api/outputs`.
+During execution, task outputs publish beneath the canonical run-local `tasks/<taskPathKey>/<taskRunId>/outputs/` location with create-only placement and integrity metadata. Ordinary chat files remain separate. Scoped artifact metadata, safe preview/download, lineage, and retention are available through `/api/artifacts`. See [Task Run Monitoring](task-run-monitoring.md).
 
 ## Anonymous Chat Plan Execution
 

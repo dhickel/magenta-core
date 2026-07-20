@@ -213,9 +213,17 @@ public class AgentSkillAssignmentRepository {
         );
     }
 
-    public List<CandidateVersion> findCandidatesByLogicalKey(String logicalKey) {
+    public List<CandidateVersion> findAllCandidates() {
         return jdbcTemplate.query(
-            "select * from skill_candidate_versions where logical_key = ? order by id",
+            "select * from skill_candidate_versions order by logical_key, created_at desc, id desc",
+            (rs, rowNum) -> fromCandidateRow(rs)
+        );
+    }
+
+    public List<CandidateVersion> findCandidatesByLogicalKey(String logicalKey) {
+        if (!StringUtils.hasText(logicalKey)) return List.of();
+        return jdbcTemplate.query(
+            "select * from skill_candidate_versions where logical_key = ? order by created_at desc, id desc",
             (rs, rowNum) -> fromCandidateRow(rs),
             logicalKey
         );
@@ -357,6 +365,22 @@ public class AgentSkillAssignmentRepository {
             "select * from skill_exact_assignments where logical_key = ? and target_type = ? and target_key = ?",
             rs -> rs.next() ? Optional.of(fromOverlayRow(rs)) : Optional.empty(),
             logicalKey, targetType.name(), targetKey
+        );
+    }
+
+    public List<ResolvedSkill.ExactAssignmentOverlay> findAllOverlays() {
+        return jdbcTemplate.query(
+            "select * from skill_exact_assignments order by logical_key, target_type, target_key",
+            (rs, rowNum) -> fromOverlayRow(rs)
+        );
+    }
+
+    public List<ResolvedSkill.ExactAssignmentOverlay> findOverlaysByLogicalKey(String logicalKey) {
+        if (!StringUtils.hasText(logicalKey)) return List.of();
+        return jdbcTemplate.query(
+            "select * from skill_exact_assignments where logical_key = ? order by target_type, target_key",
+            (rs, rowNum) -> fromOverlayRow(rs),
+            logicalKey
         );
     }
 

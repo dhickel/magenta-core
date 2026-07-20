@@ -52,7 +52,7 @@ class AgentOrchestrationControllerTest {
     ) {
         return new AgentOrchestrationController(
             inboxService, assignmentService, scheduleService, reactionService,
-            agentProfileService, chatService, new AgentChatPromptService()
+            null, agentProfileService, chatService, new AgentChatPromptService()
         );
     }
 
@@ -761,9 +761,10 @@ class AgentOrchestrationControllerTest {
 
     private static class StubScheduleService extends ScheduleService {
         private final Map<String, List<AgentSchedule>> byAgent = new java.util.HashMap<>();
+        private static final com.fasterxml.jackson.databind.ObjectMapper MAPPER = new com.fasterxml.jackson.databind.ObjectMapper();
 
         StubScheduleService() {
-            super(null, null, null, null, true);
+            super(null, MAPPER, null, null, java.time.Clock.systemUTC(), true);
         }
 
         @Override
@@ -817,9 +818,10 @@ class AgentOrchestrationControllerTest {
 
     private static class StubReactionService extends EventReactionService {
         private final Map<String, List<AgentEventReaction>> byAgent = new java.util.HashMap<>();
+        private static final com.fasterxml.jackson.databind.ObjectMapper MAPPER = new com.fasterxml.jackson.databind.ObjectMapper();
 
         StubReactionService() {
-            super(null, null);
+            super(null, MAPPER, null, java.time.Clock.systemUTC(), true);
         }
 
         @Override

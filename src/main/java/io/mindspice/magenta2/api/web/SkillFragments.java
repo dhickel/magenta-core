@@ -7,11 +7,14 @@ import java.time.format.DateTimeFormatter;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.UUID;
 
 import io.mindspice.magenta2.ai.orchestration.agents.AgentProfile;
 import io.mindspice.magenta2.ai.orchestration.agents.AgentProfileService;
 import io.mindspice.magenta2.ai.skills.AgentSkill;
+import io.mindspice.magenta2.ai.skills.AgentSkillActivationService;
 import io.mindspice.magenta2.ai.skills.AgentSkillAssignment;
+import io.mindspice.magenta2.ai.skills.AgentSkillAssignmentRepository;
 import io.mindspice.magenta2.ai.skills.AgentSkillDiagnostic;
 import io.mindspice.magenta2.ai.skills.AgentSkillManagementService;
 import io.mindspice.magenta2.ai.skills.AgentSkillManagementService.SkillApiException;
@@ -20,6 +23,9 @@ import io.mindspice.magenta2.ai.skills.AgentSkillManagementService.SkillFileEntr
 import io.mindspice.magenta2.ai.skills.AgentSkillManagementService.SkillFileTree;
 import io.mindspice.magenta2.ai.skills.AgentSkillManagementService.SkillFileView;
 import io.mindspice.magenta2.ai.skills.AgentSkillStatus;
+import io.mindspice.magenta2.ai.skills.CandidateVersion;
+import io.mindspice.magenta2.ai.skills.SkillSnapshotRepository;
+import io.mindspice.magenta2.ai.skills.SkillTrustService;
 import io.mindspice.magenta2.api.web.selector.EntityKind;
 import io.mindspice.magenta2.api.web.selector.EntitySelectorComponents;
 import io.mindspice.magenta2.api.web.selector.EntitySelectorConfig;
@@ -58,15 +64,27 @@ public class SkillFragments {
     private final AgentSkillManagementService managementService;
     private final AgentProfileService agentProfileService;
     private final EntitySelectorComponents selectorComponents;
+    private final SkillTrustService trustService;
+    private final SkillSnapshotRepository snapshotRepository;
+    private final AgentSkillActivationService activationService;
+    private final AgentSkillAssignmentRepository assignmentRepository;
 
     public SkillFragments(
         AgentSkillManagementService managementService,
         AgentProfileService agentProfileService,
-        EntitySelectorComponents selectorComponents
+        EntitySelectorComponents selectorComponents,
+        SkillTrustService trustService,
+        SkillSnapshotRepository snapshotRepository,
+        AgentSkillActivationService activationService,
+        AgentSkillAssignmentRepository assignmentRepository
     ) {
         this.managementService = managementService;
         this.agentProfileService = agentProfileService;
         this.selectorComponents = selectorComponents;
+        this.trustService = trustService;
+        this.snapshotRepository = snapshotRepository;
+        this.activationService = activationService;
+        this.assignmentRepository = assignmentRepository;
     }
 
     @GetMapping("/skills")
@@ -890,5 +908,197 @@ public class SkillFragments {
 
     private String url(String value) {
         return URLEncoder.encode(value == null ? "" : value, StandardCharsets.UTF_8).replace("+", "%20");
+    }
+
+    // ════════════════════════════════════════════════════════════════
+    //  Phase 07: Trust / Approval / Snapshot fragments
+    // ════════════════════════════════════════════════════════════════
+
+    private static final String TRUST_PANEL_ID = "skills-trust-panel";
+
+    @GetMapping("/skills/_trust/{logicalKey}")
+    @ResponseBody
+    public String trustPanel(@PathVariable String logicalKey) {
+        Div panel = new Div().withId(TRUST_PANEL_ID).withClass("orch-panel skills-trust-panel")
+            .withChild(new Div().withClass("skill-section-header")
+                .withChild(Header.H3("Trust & Approval \u2014 " + logicalKey)));
+
+        List<CandidateVersion> candidates = assignmentRepository.findCandidatesByLogicalKey(logicalKey);
+        if (candidates.isEmpty()) {
+            panel.withChild(new Paragraph("No candidates found for this skill key."));
+            return panel.render();
+        }
+
+        boolean isApproved = snapshotRepository.isCurrentlyApproved(logicalKey);
+        boolean isRevoked = snapshotRepository.isRevoked(logicalKey);
+        String trustStatus = isRevoked ? "REVOKED" : isApproved ? "APPROVED" : "PENDING";
+        String trustClass = isRevoked ? "is-neutral" : isApproved ? "is-approved" : "is-draft";
+
+        panel.withChild(new Div().withClass("skill-trust-status")
+            .withChild(new HtmlTag("span").withClass("plan-status-badge " + trustClass)
+                .withInnerText(trustStatus))
+            .withChild(new HtmlTag("span").withInnerText(
+                isRevoked ? "Revoked \u2014 no new activations allowed."
+                    : isApproved ? "Approved \u2014 activation available."
+                    : "Pending \u2014 requires operator approval.")));
+
+        Div candidateList = new Div().withClass("skill-candidate-list");
+        for (CandidateVersion cv : candidates) {
+            boolean hasSnapshot = snapshotRepository.snapshotExistsForCandidate(cv.id());
+            var decisions = snapshotRepository.findDecisionsByCandidate(cv.id());
+
+            Div row = new Div().withClass("skill-candidate-row")
+                .withChild(new HtmlTag("code").withInnerText(cv.contentDigest().substring(0, 16) + "..."))
+                .withChild(new HtmlTag("span").withInnerText(cv.scopeType().name() + " / " + cv.provenance().name()))
+                .withChild(new HtmlTag("small").withInnerText(hasSnapshot ? "Snapshot exists" : "No snapshot"));
+
+            if (!hasSnapshot && !isRevoked) {
+                Form approveForm = Form.create().withClass("skill-inline-form")
+                    .withHxPost("/skills/_trust/approve")
+                    .withHxTarget("#" + TRUST_PANEL_ID)
+                    .withHxSwap("outerHTML")
+                    .withChild(hidden("candidateVersionId", String.valueOf(cv.id())))
+                    .withChild(hidden("observedDigest", cv.contentDigest()))
+                    .withChild(hidden("logicalKey", logicalKey))
+                    .withChild(Button.submit("Approve").withClass("orch-primary"));
+                row.withChild(approveForm);
+
+                Form rejectForm = Form.create().withClass("skill-inline-form")
+                    .withHxPost("/skills/_trust/reject")
+                    .withHxTarget("#" + TRUST_PANEL_ID)
+                    .withHxSwap("outerHTML")
+                    .withChild(hidden("candidateVersionId", String.valueOf(cv.id())))
+                    .withChild(hidden("logicalKey", logicalKey))
+                    .withChild(Button.submit("Reject").withClass("orch-secondary"));
+                row.withChild(rejectForm);
+            }
+
+            if (!decisions.isEmpty()) {
+                Div history = new Div().withClass("skill-decision-history");
+                for (var d : decisions) {
+                    history.withChild(new HtmlTag("span")
+                        .withClass("skill-decision-item " + d.decision().toLowerCase(Locale.ROOT))
+                        .withInnerText(d.decision() + " by " + (d.actor() != null ? d.actor() : "system")
+                            + " at " + (d.decidedAt() != null ? TIME_FORMAT.format(d.decidedAt()) : "unknown")));
+                }
+                row.withChild(history);
+            }
+
+            candidateList.withChild(row);
+        }
+        panel.withChild(candidateList);
+
+        if (isApproved && !isRevoked) {
+            Form revokeForm = Form.create().withClass("skill-revoke-form")
+                .withHxPost("/skills/_trust/revoke")
+                .withHxTarget("#" + TRUST_PANEL_ID)
+                .withHxSwap("outerHTML")
+                .withChild(hidden("logicalKey", logicalKey))
+                .withChild(TextInput.create("reason").withPlaceholder("Reason for revocation"))
+                .withChild(Button.submit("Revoke Approval").withClass("orch-danger"));
+            panel.withChild(revokeForm);
+        }
+
+        var snapshots = snapshotRepository.findByLogicalKey(logicalKey);
+        if (!snapshots.isEmpty()) {
+            Div snapshotPanel = new Div().withClass("skill-snapshot-panel")
+                .withChild(Header.H3("Immutable Snapshots"));
+            for (var s : snapshots) {
+                Div snapRow = new Div().withClass("skill-snapshot-row")
+                    .withChild(new HtmlTag("code").withInnerText(s.snapshotDigest().substring(0, 16) + "..."))
+                    .withChild(new HtmlTag("span").withInnerText(s.skillName()))
+                    .withChild(new HtmlTag("small").withInnerText(
+                        s.createdAt() != null ? "Created " + TIME_FORMAT.format(s.createdAt()) : ""));
+
+                var resources = snapshotRepository.findResourcesBySnapshotId(s.id());
+                snapRow.withChild(new HtmlTag("span").withInnerText(resources.size() + " resources"));
+
+                boolean hasScript = resources.stream().anyMatch(r -> "SCRIPT".equals(r.resourceType()));
+                if (hasScript) {
+                    snapRow.withChild(new HtmlTag("span").withClass("skill-exec-status")
+                        .withInnerText("Executables: Phase 03 confinement required"));
+                }
+
+                snapshotPanel.withChild(snapRow);
+            }
+            panel.withChild(snapshotPanel);
+        }
+
+        return panel.render();
+    }
+
+    @PostMapping("/skills/_trust/approve")
+    @ResponseBody
+    public String approveCandidate(@RequestParam Map<String, String> params) {
+        try {
+            Long cvId = Long.parseLong(params.get("candidateVersionId"));
+            String observedDigest = params.get("observedDigest");
+            String logicalKey = params.get("logicalKey");
+            String operationKey = UUID.randomUUID().toString();
+
+            var result = trustService.approve(operationKey, cvId, observedDigest,
+                "operator", params.get("reason"));
+
+            return trustPanel(logicalKey) + statusOob(
+                "Approved snapshot " + result.snapshotId(), false).render();
+        } catch (Exception e) {
+            return trustPanel(params.get("logicalKey")) + statusOob(
+                "Approval failed: " + e.getMessage(), true).render();
+        }
+    }
+
+    @PostMapping("/skills/_trust/reject")
+    @ResponseBody
+    public String rejectCandidate(@RequestParam Map<String, String> params) {
+        try {
+            Long cvId = Long.parseLong(params.get("candidateVersionId"));
+            String logicalKey = params.get("logicalKey");
+            String operationKey = UUID.randomUUID().toString();
+
+            trustService.reject(operationKey, cvId, "operator", params.get("reason"));
+            return trustPanel(logicalKey) + statusOob("Candidate rejected.", false).render();
+        } catch (Exception e) {
+            return trustPanel(params.get("logicalKey")) + statusOob(
+                "Rejection failed: " + e.getMessage(), true).render();
+        }
+    }
+
+    @PostMapping("/skills/_trust/revoke")
+    @ResponseBody
+    public String revokeApproval(@RequestParam Map<String, String> params) {
+        try {
+            String logicalKey = params.get("logicalKey");
+            String operationKey = UUID.randomUUID().toString();
+
+            trustService.revoke(operationKey, logicalKey, "operator", params.get("reason"));
+            return trustPanel(logicalKey) + statusOob("Approval revoked.", false).render();
+        } catch (Exception e) {
+            return trustPanel(params.get("logicalKey")) + statusOob(
+                "Revocation failed: " + e.getMessage(), true).render();
+        }
+    }
+
+    @GetMapping("/skills/_snapshots/{logicalKey}")
+    @ResponseBody
+    public String snapshotHistory(@PathVariable String logicalKey) {
+        Div panel = new Div().withClass("skill-snapshot-history-panel")
+            .withChild(Header.H3("Snapshot History \u2014 " + logicalKey));
+
+        var snapshots = snapshotRepository.findByLogicalKey(logicalKey);
+        if (snapshots.isEmpty()) {
+            panel.withChild(new Paragraph("No immutable snapshots exist for this skill."));
+            return panel.render();
+        }
+
+        for (var s : snapshots) {
+            Div row = new Div().withClass("skill-snapshot-history-row")
+                .withChild(new HtmlTag("code").withInnerText(s.snapshotDigest().substring(0, 20) + "..."))
+                .withChild(new HtmlTag("strong").withInnerText(s.skillName()))
+                .withChild(new HtmlTag("span").withInnerText(
+                    s.createdAt() != null ? TIME_FORMAT.format(s.createdAt()) : ""));
+            panel.withChild(row);
+        }
+
+        return panel.render();
     }
 }

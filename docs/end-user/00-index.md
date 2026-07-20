@@ -10,6 +10,9 @@ Magenta has two main browser surfaces:
 ## Start Here
 
 - New user setup: [Quickstart](quickstart.md)
+- First workspace-backed run: [Getting Started with Workspaces, Tasks, and Outputs](getting-started-workspaces-tasks-outputs.md)
+- Runtime history, outputs, and lineage: [Task Run Monitoring](task-run-monitoring.md)
+- Timed and event-driven automation: [Schedules and Reactions](schedules-and-reactions.md)
 - Conversational work and planning: [Chat](chat.md)
 - Manage the application workspace tree: [Projects and Workspaces](projects-and-workspaces.md)
 - Operator overview: [Dashboard](dashboard.md)
@@ -20,6 +23,7 @@ Magenta has two main browser surfaces:
 - Manage reusable agent capabilities: [Agent Skills](agent-skills.md)
 - Organize workspace-backed work: [Projects and Workspaces](projects-and-workspaces.md)
 - Handle messages, artifacts, and defaults: [Inbox, Outputs, and Settings](inbox-outputs-settings.md)
+- View, assign, approve, revoke, and activate reusable capabilities: [Agent Skills](agent-skills.md)
 
 ## Common Workflows
 
@@ -45,7 +49,7 @@ Operate a running agent:
 
 1. Open `/agents`.
 2. Select an agent.
-3. Use the dashboard, queue, inbox, workspace, outputs, and history tabs.
+3. Use the dashboard, queue, inbox, Files plus Task Runs, outputs/artifacts, and history tabs.
 4. Pause, resume, cancel, force-interrupt, or inspect diagnostics from the queue and history tabs.
 
 ## Selector Behavior

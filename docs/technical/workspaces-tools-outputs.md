@@ -12,7 +12,7 @@ The active layout beneath the configured data root is:
 - `workspace/chat/<conversationId>/`
 - `workspace/user/<name>/`
 - `<selected-agent-or-user>/tasks/<taskPathKey>/<taskRunId>/` — canonical task-run child, provisioned only by the task lifecycle
-- `<task-run>/outputs/` and `<task-run>/staging/` — reserved lazy children for later publication phases
+- `<task-run>/outputs/` and `<task-run>/staging/` — reserved lazy children owned by active task-run publication
 - `<selected-agent-or-user>/.skills/` — reserved lazy workspace skill root
 - `<selected-root>/outputs/` — existing legacy/non-task publication subtree
 
@@ -42,7 +42,7 @@ Saved task, workflow, and job definitions use immutable definition ids to derive
 
 `plan_runs.id`, `workflow_runs.id`, and `job_runs.id` are canonical task-run ids for their respective families. Assignment, workflow-node, and job-work-item identities remain separate explicit linkage. `WorkspaceDirectoryService` recomputes keys and constructs trusted child values; callers cannot supply roots or reconstruct workspace identity from paths. Persisted locations contain workspace kind/key and a data-root-relative path only.
 
-Phase 01 establishes these locations but does not route execution or publication into them. Run provisioning creates no output or staging child.
+Lifecycle provisioning creates only the run root. Active publication creates output/staging children lazily and only after validating the persisted trusted location and current writer capability.
 
 ## Output publication
 
@@ -52,7 +52,11 @@ Task-run publication accepts only a trusted `RunOutputLocation` plus a current `
 
 Names use deterministic collision suffixes and existing filesystem entries are collisions. Byte reads use a confined read and verify the digest and size of the exact bytes returned; mismatch moves the row to `INTEGRITY_FAILED`. Reconciliation never promotes or cleans task-owned staging without the opaque live writer capability. Migration 003 preserves legacy rows without inventing task attribution or copying absolute paths into publication records.
 
-`GET /api/outputs` supports attribution filters including `agentId`, `jobId`, `jobAssignmentId`, `jobRunId`, `projectId`, `workspaceType`, `workspaceKey`, `workspaceIdentity`, `runId`, `planId`, `runType`, `type`, and `limit`. Filters query metadata and never authorize or select a filesystem root.
+Artifact access adds workspace/task-run scoped metadata, extraction, FTS5 search when the deployed SQLite supports it, safe text/Markdown preview, exact lineage, sessions, retention pins, and soft/hard retention actions. Scope constraints are applied before counts and snippets. Unsupported FTS5 is reported as unavailable; integrity failure suppresses preview/download. Retention cannot remove active attempts, claims, downloads, references, lineage/legal pins, or unresolved reconciliation state.
+
+The agent Files tab composes run metadata beside the explorer through independent web fragments. `WorkspaceExplorerService` remains filesystem-only and receives no artifact, summary, skill, schedule, or reaction repository dependency.
+
+`GET /api/artifacts` and `/api/artifacts/search` require workspace kind/key scope and may be narrowed to an exact task run. Scoped metadata, preview/download, lineage, pins, and retention routes never authorize or select a filesystem root from project metadata.
 
 ## Legacy isolation
 

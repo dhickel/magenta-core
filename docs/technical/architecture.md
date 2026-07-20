@@ -29,8 +29,9 @@ Typical flows:
 - Chat turn: `/api/chat/stream` -> `ChatController` -> `RequestResolver`/`ChatService` -> `ChatModelRouter`, chat memory repositories, audit repository, tool registry, and plan/task services as needed.
 - Saved plan submit: `/api/plans/{planId}/submit` -> `PlanController` -> `PlanService.getTask` -> `AssignmentService.create` with `AssignmentType.TASK_RUN`.
 - Workflow submit: `/api/workflows/{workflowId}/runs` -> `WorkflowController` -> `WorkflowService.validateGraph` -> `AssignmentService.create` with `AssignmentType.WORKFLOW_RUN`.
-- Assignment execution: `AssignmentService` holds queue state, then `OrchestrationRunnerService` executes task/workflow/job boundaries through `TaskService`, `WorkflowRunner`, `JobService`, workspace services, and output artifact services.
-- Output read: `/api/outputs` or `/api/outputs/{artifactId}/content` -> `OutputController` -> `OutputArtifactService` -> `run_output_artifacts` plus confined filesystem paths under the data root.
+- Assignment execution: `AssignmentService` holds queue state, then `OrchestrationRunnerService` executes task/workflow/job boundaries through `TaskService`, `WorkflowRunner`, `JobService`, lifecycle/fencing, workspace, skill snapshot, and artifact publication services.
+- Artifact read: `/api/artifacts*` -> `OutputController` -> scoped search/preview/retention services -> `output_publications` plus digest-verified confined bytes. Unsupported FTS5 and integrity failures remain explicit unavailable states.
+- Files/run UI: `/agents/_detail/{agentId}/files` renders `WorkspaceExplorerFragments`; its independent run host calls the thin `OrchestrationController` adapter -> `RunSummaryService` -> `RunOperationsFragments`. No persistence edge enters `WorkspaceExplorerService`.
 
 ## Package Boundaries
 
@@ -48,25 +49,43 @@ Typical flows:
 
 `ai.orchestration.agents` owns durable agent profiles and initial seeding from legacy file config.
 
-`ai.orchestration.runtime` owns durable assignments, jobs, schedules, event reactions, direct-line agent inbox messages, orchestration events, projects, and runtime execution coordination.
+`ai.orchestration.runtime` owns durable assignments, jobs, revisioned/fenced schedules and event reactions, direct-line agent inbox messages, orchestration events, projects, runtime execution coordination, rebuildable run summaries, and per-invocation measurements. Native family records remain status authority.
 
 `ai.orchestration.workflow` owns workflow definitions, v2 routed node graphs, validation, workflow run state, node runs, workflow-owned inbox approvals, and workflow execution.
 
-`ai.orchestration.workspaces` owns filesystem-first workspace identity (three closed kinds: `AGENT`, `CHAT`, `USER`), trusted descriptor resolution through `WorkspaceDirectoryService`, structural paths through `WorkspacePathLayout`, confined file explorer behavior, workspace-scoped `AGENTS.md` resolution, output artifact persistence through `OutputArtifactRepository`, and output publication.
+`ai.orchestration.workspaces` owns filesystem-first workspace identity (three closed kinds: `AGENT`, `CHAT`, `USER`), trusted descriptor/run-location resolution, confined file behavior, `AGENTS.md`, create-only output publication, reconciliation, scope-constrained extraction/search/preview/lineage, and retention. Projects have no root authority.
 
 `ai.orchestration.settings` owns persisted runtime defaults such as default agent/model, chat models, tool policy, context limits, and assignment history purge settings.
 
+## Operational Task-Run, Skill, And Observability Layers
+
+The execution path is split into explicit layers rather than one generic workspace/runtime model:
+
+- **Task-run lifecycle** reserves canonical native run identity, attempts, retry/replay lineage, assignment fences, writer claims, and trusted workspace-relative run locations. Native task/workflow/job rows remain status truth.
+- **Artifact publication/access** owns idempotent reservation, run-local staging, create-only promotion, digest/size integrity, reconciliation, scoped search/preview/download/lineage, and retention blockers.
+- **Skill control plane** resolves digest-qualified candidates and exact overlays, then separates trust decisions, immutable snapshots, activation, revocation, executable authorization, and package/resource audit. Model-visible instructions come only from approved snapshots.
+- **Observability** rebuilds `run_summaries` from native facts and records one `run_measurements` row per model/tool invocation. Missing facts stay unavailable.
+- **Automation** stores revisioned schedules and reactions with fenced claims, immutable firing/dispatch snapshots, append-only attempts, operation-key digest idempotency, causation, dedupe, and suppression.
+
+The web layer composes these through independent HTMX hosts. It does not inject persistence-backed concerns into `WorkspaceExplorerService`.
+
 ## Persistence Shape
 
-SQLite is initialized from `schema.sql` through Spring SQL init. Domain repositories create tables defensively and add compatibility columns where older local databases may predate current schema fields.
+SQLite is initialized by `SchemaMigrationRunner` from `schema.sql` and immutable ordered migration resources. Some older, unrelated repositories still retain compatibility columns for warm databases; migration-owned structures must not regain repository-local DDL.
 
 The schema groups into these domains:
 
 - Chat and audit: `ai_chat_memory`, `ai_chat_session_metadata`, `audit_event`, `agent_jobs`.
 - Plan/task and runs: `plan_definitions`, `plan_runs`.
 - Workflows: `workflow_definitions`, `workflow_runs`, `workflow_node_runs`, workflow-owned `inbox_messages`.
-- Runtime agents and assignments: `agent_profiles`, `orchestration_jobs`, `orchestration_job_items`, `work_assignments`, `assignment_conversation_links`, `agent_inbox_messages`, schedules, reactions, and events.
-- Jobs/projects/workspaces/outputs/settings: `job_definitions`, `job_runs`, `job_recurrences`, `projects`, `project_agent_memberships`, `project_events`, `workspace_file_labels`, `workspace_file_label_assignments`, `workspace_file_actions`, `run_output_artifacts`, and `runtime_settings`.
+- Runtime agents and assignments: `agent_profiles`, `orchestration_jobs`, `orchestration_job_items`, `work_assignments`, `assignment_conversation_links`, `agent_inbox_messages`, and `orchestration_events`.
+- Task-run lifecycle: `task_run_locations`, `task_run_attempts`, scoped idempotent operations, native/child links, assignment fence generations, and writer-claim generations.
+- Artifact system: `output_publications`, extraction/FTS capability structures, lineage edges, retention policies/pins, and active artifact sessions.
+- Skill control plane: candidate versions/observations, exact overlays, trust decisions, immutable snapshots/resources, activations, executable authorizations, package operations, and resource execution audit.
+- Observability and automation: `run_summaries`, `run_measurements`, revisioned schedule definitions/claims/firings/attempts, and reaction definitions/dispatches/attempts.
+- Jobs/projects/workspace metadata/settings: `job_definitions`, `job_runs`, `job_recurrences`, `projects`, memberships/events, file labels/actions, compatibility `run_output_artifacts`, and `runtime_settings`.
+
+See [Data Model](data-model.md) and [Schema Migrations 001–009](migrations-001-009.md). Ordered resources are contiguous through `009-warm-database-compatibility.sql`; schedule/reaction hardening remains immutable version 008, while version 009 records the runner-owned warm-bookkeeping compatibility release without changing schema end state.
 
 ## Streaming Model
 
@@ -76,6 +95,6 @@ See [API Reference](api-reference.md) for route-level SSE details.
 
 ## Frontend Shape
 
-The frontend is server-rendered. SimplyPages renders the main shell and operational pages; HTMX drives standard CRUD, tab, panel, list, and fragment refresh interactions. JavaScript is limited to behavior where persistent browser state or SSE interaction is simpler than HTMX alone: chat streaming, shared HTMX/error shell helpers, orchestration dashboard polling/fragment helpers, entity side-panel interactions, and agent chat islands.
+The frontend is server-rendered. SimplyPages renders the main shell and operational pages; HTMX drives standard CRUD, tab, panel, list, run expansion, and fragment refresh interactions. Files and persistence-backed run metadata are independently composed at stable hosts. JavaScript is limited to behavior where persistent browser state or SSE interaction is simpler than HTMX alone: chat streaming, shared HTMX/error shell helpers, orchestration dashboard polling/fragment helpers, entity side-panel interactions, and agent chat islands.
 
 See [Frontend HTMX](frontend-htmx.md) for file-level guidance.

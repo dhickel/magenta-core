@@ -14,6 +14,9 @@ End-user docs:
 
 - [End-user index](end-user/00-index.md)
 - [Quickstart](end-user/quickstart.md)
+- [Getting Started with Workspaces, Tasks, and Outputs](end-user/getting-started-workspaces-tasks-outputs.md)
+- [Task Run Monitoring](end-user/task-run-monitoring.md)
+- [Schedules and Reactions](end-user/schedules-and-reactions.md)
 - [Chat](end-user/chat.md)
 - [Dashboard](end-user/dashboard.md)
 - [Plans and Tasks](end-user/plans-and-tasks.md)
@@ -39,10 +42,15 @@ Technical docs:
 - [Frontend HTMX](technical/frontend-htmx.md)
 - [Security](technical/security.md)
 - [Configuration and Operations](technical/configuration-operations.md)
+- [Schema Migrations 001–009](technical/migrations-001-009.md)
 
 API docs:
 
 - [API index](api/00-index.md)
+- [Artifacts](api/artifacts.md)
+- [Skills](api/skills.md)
+- [Runtime Observability](api/runtime-observability.md)
+- [Schedules and Reactions](api/schedules-reactions.md)
 
 ## Current Status
 

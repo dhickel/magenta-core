@@ -225,6 +225,30 @@ Each active consumer identified during repository inspection is listed with its 
 - **Legacy `workspaces` table rows with obsolete `owner_type` values**: Historical data; no active repository dependency after Phase 06.
 - **`docs/maestro/` directory**: Historical review artifact; no active consumer.
 
+## Phase 01-09 Service Additions
+
+| owner | depends on | allowed interaction | prohibited interaction |
+| --- | --- | --- | --- |
+| `SchemaMigrationRunner` | migration resources, SQLite datasource | Apply checksum-governed contiguous resources 001-008 before dependent repositories initialize. | Repository-local duplicate DDL or accepting checksum/partial-state drift. |
+| `TaskRunLifecycleService` | native run repositories, assignment lease CAS, `WorkspaceDirectoryService` | Reserve native/task-run identity, attempts, operation digests, lineage, and independent writer claims; provision only trusted canonical run locations. | Treat assignment id as run id, infer identity from a path, or expose owners/fences. |
+| reserved-tree mutation policy and shell boundary | `WorkspacePathLayout`, trusted descriptor/run capability | Classify reserved structures and verify current workspace/run/fence facts at each mutation boundary. | Path-only authorization or enabling workspace-bound process execution while confinement is unavailable. |
+| `OutputArtifactService` / `ArtifactReconciliationService` | `OutputArtifactRepository`, trusted run output, current writer capability | Reserve, stage, digest, create-only publish, reconcile, and preserve legacy/non-task rows honestly. | Replace final bytes, publish from arbitrary paths, or make repositories own DDL. |
+| `ArtifactSearchService` / `ArtifactPreviewService` / `TaskRunRetentionService` | artifact access context, repository, verified byte handles | Scope before search/counts/metadata; recheck at byte open; probe FTS5; default retention to preserve; honor blockers and pins. | Unscoped counts/snippets/bytes, preview after integrity failure, or automatic deletion under absent policy. |
+| `SkillScopeDiscoveryService` / `SkillResolutionService` | trusted workspace skill locations, global repository, exact overlays | Discover without creating roots, persist digest-qualified candidates, and resolve root precedence separately from assignment specificity. | Guess project roots, fall through an occupying pending candidate, or disclose candidate content. |
+| `SkillTrustService` / `SkillSnapshotRepository` / `AgentSkillActivationService` | candidate repository, confined source reread, immutable snapshot rows | Explicitly approve exact digests, revoke, activate snapshot bytes, and preserve same-run resume identity. | Auto-trust based on source/scope/assignment, activate live mutable bytes, or grant executable authority with instruction approval. |
+| `RunMeasurementRepository` / `RunSummaryService` | native status, attempts, exact measurements and domain links | Record repeated typed calls and build replaceable summaries, health, and bounded audits. | Become status authority, flatten retries, fabricate null facts, or join by proximity. |
+| `ScheduleService` | assignment/lifecycle operation boundary, supplied clock, persisted claim/firing audit | Own revisioned definitions, cron/timezone semantics, fenced claims, idempotent firings, attempts, misfire recovery, and pure simulation. | Equate enqueue with completion, let stale owners mutate, or create execution-like simulation rows. |
+| `EventReactionService` / `OrchestrationEventService` | event snapshots, lifecycle operation boundary, causation ledger | Own revision-qualified dispatch identity, dedupe, loop/depth/rate suppression, append-only attempts, and pure simulation. | Drop suppressed events silently, infer outcomes, or bypass causation checks. |
+
+## Operational Composition Edges
+
+| from | to | allowed interaction | prohibited interaction |
+| --- | --- | --- | --- |
+| `OrchestrationController` | agent existence scope, `RunSummaryService`, `RunOperationsFragments` | Validate the agent boundary, request at most 100 workspace summaries, recheck run workspace type/key before audit composition, then render secret-free fragments. | Query claims/fences/paths in the renderer or reveal cross-workspace aggregate facts. |
+| `WorkspaceExplorerFragments` | stable run host | Render `#agent-run-groups` beside the filesystem browser and independently load `/agents/_detail/{agentId}/runs`. | Inject repositories, summary services, artifact services, or skill/schedule services into `WorkspaceExplorerService`. |
+| `RunSummaryService` | native lifecycle, measurements, skill activations, artifacts, causation | Build rebuildable summary/audit facts through exact persisted identifiers. | Become native status authority or infer attribution from display names, paths, or temporal proximity. |
+| `ArtifactFragments`, `SkillFragments`, `RuntimeHealthFragments`, `ScheduleReactionFragments` | each owning domain service | Render independent scoped HTMX hosts and update only the affected host. | Broaden scope through stale/OOB responses or move domain persistence into the Files explorer. |
+
 ## Ownership Boundary
 
 This spec owns the allowed direction of dependencies and the active-consumer inventory. Individual service behavior belongs in `services.md`; HTTP contracts belong in `api.md`.
