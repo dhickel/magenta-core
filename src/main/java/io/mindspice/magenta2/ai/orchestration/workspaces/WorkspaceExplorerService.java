@@ -8,7 +8,6 @@ import java.nio.file.Files;
 import java.nio.file.InvalidPathException;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
-import java.nio.file.StandardCopyOption;
 import java.nio.file.attribute.BasicFileAttributes;
 import java.nio.file.attribute.FileTime;
 import java.time.Instant;
@@ -21,7 +20,15 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
-/** Descriptor-first owner of confined workspace file exploration and mutation. */
+/**
+ * Descriptor-first owner of confined workspace file exploration and mutation.
+ *
+ * <p>Phase 03 routes every browse and mutation operation through
+ * {@link ReservedWorkspacePathPolicy} to protect reserved trees (outputs,
+ * tasks, .skills, staging). Ordinary mutation is denied inside any reserved
+ * subtree. Hidden content (.skills, publication staging) is invisible to
+ * browse operations.
+ */
 @Service
 public class WorkspaceExplorerService {
     static final long NORMAL_TEXT_BYTES = 10L * 1024 * 1024;
@@ -31,14 +38,35 @@ public class WorkspaceExplorerService {
 
     private final WorkspaceFileMetadataService metadataService;
     private final WorkspaceFileActionLogRepository actionLogRepository;
+    private final WorkspaceDirectoryService directoryService;
+    private final ConfinedPathMutationService mutations;
 
-    @Autowired
     public WorkspaceExplorerService(
         WorkspaceFileMetadataService metadataService,
         WorkspaceFileActionLogRepository actionLogRepository
     ) {
+        this(metadataService, actionLogRepository, null, new ConfinedPathMutationService());
+    }
+
+    @Autowired
+    public WorkspaceExplorerService(
+        WorkspaceFileMetadataService metadataService,
+        WorkspaceFileActionLogRepository actionLogRepository,
+        WorkspaceDirectoryService directoryService
+    ) {
+        this(metadataService, actionLogRepository, directoryService, new ConfinedPathMutationService());
+    }
+
+    WorkspaceExplorerService(
+        WorkspaceFileMetadataService metadataService,
+        WorkspaceFileActionLogRepository actionLogRepository,
+        WorkspaceDirectoryService directoryService,
+        ConfinedPathMutationService mutations
+    ) {
         this.metadataService = metadataService;
         this.actionLogRepository = actionLogRepository;
+        this.directoryService = directoryService;
+        this.mutations = mutations;
     }
 
     /** A normalized workspace-relative path kept distinct from workspace identity. */
@@ -90,14 +118,17 @@ public class WorkspaceExplorerService {
     }
 
     public FilePreview preview(WorkspaceDescriptor descriptor, RelativePath path) {
+        requireBrowsable(path.value());
         return preview(descriptor.root(), path);
     }
 
     public DownloadContent download(WorkspaceDescriptor descriptor, RelativePath path) {
+        requireBrowsable(path.value());
         return downloadContent(descriptor, descriptor.root(), path);
     }
 
     public FilePreview saveText(WorkspaceDescriptor descriptor, RelativePath path, String content) {
+        requireOrdinaryMutationAllowed(path.value());
         FilePreview saved = saveText(descriptor, descriptor.root(), path, content);
         logAction(descriptor, "markdown".equals(saved.kind()) ? WorkspaceFileActionType.SAVE_MARKDOWN : WorkspaceFileActionType.SAVE_TEXT,
             path.value(), null, "SUCCEEDED", "{\"bytes\":" + saved.size() + "}");
@@ -105,7 +136,7 @@ public class WorkspaceExplorerService {
     }
 
     public Entry createDirectory(WorkspaceDescriptor descriptor, RelativePath path) {
-        requireNonReserved(path);
+        requireOrdinaryMutationAllowed(path.value());
         requireCreatableParent(descriptor, path);
         ensureDescriptorRootForCreate(descriptor);
         Entry created = createDirectoryRoot(descriptor.root(), path);
@@ -114,7 +145,7 @@ public class WorkspaceExplorerService {
     }
 
     public Entry createTextFile(WorkspaceDescriptor descriptor, RelativePath parent, String fileName) {
-        requireNonReserved(parent);
+        requireOrdinaryMutationAllowed(childValue(parent, fileName.trim()));
         requireFileName(fileName, ".txt", "text");
         requireCreatableParent(descriptor, new RelativePath(childValue(parent, fileName.trim())));
         ensureDescriptorRootForCreate(descriptor);
@@ -124,7 +155,7 @@ public class WorkspaceExplorerService {
     }
 
     public Entry createMarkdownFile(WorkspaceDescriptor descriptor, RelativePath parent, String fileName) {
-        requireNonReserved(parent);
+        requireOrdinaryMutationAllowed(childValue(parent, fileName.trim()));
         requireFileName(fileName, ".md", "markdown");
         requireCreatableParent(descriptor, new RelativePath(childValue(parent, fileName.trim())));
         ensureDescriptorRootForCreate(descriptor);
@@ -181,6 +212,7 @@ public class WorkspaceExplorerService {
     }
 
     public Entry inspect(WorkspaceDescriptor descriptor, RelativePath path) {
+        requireBrowsable(path.value());
         if (!Files.exists(descriptor.root(), LinkOption.NOFOLLOW_LINKS) && ".".equals(path.value())) {
             return virtualRootEntry();
         }
@@ -240,12 +272,15 @@ public class WorkspaceExplorerService {
     /* ── Internal descriptor-based bridges ── */
 
     DirectoryListing list(WorkspaceDescriptor descriptor, Path root, RelativePath relativePath) {
+        requireBrowsable(relativePath.value());
         Path dir = resolveExisting(root, relativePath);
         if (!Files.isDirectory(dir, LinkOption.NOFOLLOW_LINKS)) {
             throw new WorkspaceFileException(WorkspaceFileException.Reason.INVALID, "path is not a directory");
         }
         try (var stream = Files.list(dir)) {
-            List<Entry> entries = stream.map(path -> decorate(descriptor, entry(root, path)))
+            List<Entry> entries = stream
+                .filter(path -> isBrowsable(relative(root, path)))
+                .map(path -> decorate(descriptor, entry(root, path)))
                 .sorted(Comparator.comparing(Entry::directory).reversed().thenComparing(Entry::name))
                 .toList();
             return new DirectoryListing(relative(root, dir), entries);
@@ -278,12 +313,15 @@ public class WorkspaceExplorerService {
     /* ── Internal filesystem operations ── */
 
     private DirectoryListing listRoot(Path root, RelativePath relativePath) {
+        requireBrowsable(relativePath.value());
         Path dir = resolveExisting(root, relativePath);
         if (!Files.isDirectory(dir, LinkOption.NOFOLLOW_LINKS)) {
             throw new WorkspaceFileException(WorkspaceFileException.Reason.INVALID, "path is not a directory");
         }
         try (var stream = Files.list(dir)) {
-            List<Entry> entries = stream.map(path -> entry(root, path))
+            List<Entry> entries = stream
+                .filter(path -> isBrowsable(relative(root, path)))
+                .map(path -> entry(root, path))
                 .sorted(Comparator.comparing(Entry::directory).reversed().thenComparing(Entry::name))
                 .toList();
             return new DirectoryListing(relative(root, dir), entries);
@@ -293,6 +331,7 @@ public class WorkspaceExplorerService {
     }
 
     private FilePreview previewRoot(Path root, RelativePath relativePath) {
+        requireBrowsable(relativePath.value());
         Path file = resolveExisting(root, relativePath);
         requireRegularFile(file);
         try {
@@ -322,6 +361,7 @@ public class WorkspaceExplorerService {
     }
 
     private Path downloadRoot(Path root, RelativePath relativePath) {
+        requireBrowsable(relativePath.value());
         Path file = resolveExisting(root, relativePath);
         requireRegularFile(file);
         return file;
@@ -343,7 +383,9 @@ public class WorkspaceExplorerService {
                 throw new WorkspaceFileException(WorkspaceFileException.Reason.INVALID, "file is not valid UTF-8");
             }
             String lineEnding = dominantLineEnding(file);
-            Files.write(file, applyLineEnding(normalizedContent, lineEnding).getBytes(StandardCharsets.UTF_8));
+            mutations.write(root, relativePath.value(),
+                applyLineEnding(normalizedContent, lineEnding).getBytes(StandardCharsets.UTF_8),
+                ConfinedPathMutationService.WriteMode.OVERWRITE, false);
             return preview(root, relativePath);
         } catch (IOException exception) {
             throw new IllegalStateException("failed to save text file", exception);
@@ -351,14 +393,15 @@ public class WorkspaceExplorerService {
     }
 
     private Entry createDirectoryRoot(Path root, RelativePath relativePath) {
-        requireNonReserved(relativePath);
+        requireOrdinaryMutationAllowed(relativePath.value());
         Path dir = resolveForWrite(root, relativePath);
         ensureMutable(root, dir);
         try {
             if (Files.exists(dir, LinkOption.NOFOLLOW_LINKS)) {
                 throw new WorkspaceFileException(WorkspaceFileException.Reason.CONFLICT, "target already exists");
             }
-            return entry(root, Files.createDirectory(dir).toRealPath(LinkOption.NOFOLLOW_LINKS));
+            mutations.createDirectory(root, relativePath.value());
+            return entry(root, dir.toRealPath(LinkOption.NOFOLLOW_LINKS));
         } catch (IOException exception) {
             throw new IllegalStateException("failed to create directory", exception);
         }
@@ -384,7 +427,7 @@ public class WorkspaceExplorerService {
         rejectCollision(target);
         try {
             rejectSymbolicTree(root, source);
-            movePath(source, target);
+            mutations.move(root, relative(root, source), relative(root, target));
             return entry(root, target.toRealPath(LinkOption.NOFOLLOW_LINKS));
         } catch (IOException exception) {
             throw new IllegalStateException("failed to rename path", exception);
@@ -409,7 +452,7 @@ public class WorkspaceExplorerService {
         }
         try {
             rejectSymbolicTree(root, source);
-            movePath(source, target);
+            mutations.move(root, relative(root, source), relative(root, target));
             return entry(root, target.toRealPath(LinkOption.NOFOLLOW_LINKS));
         } catch (IOException exception) {
             throw new IllegalStateException("failed to move path", exception);
@@ -433,7 +476,7 @@ public class WorkspaceExplorerService {
         }
         try {
             rejectSymbolicTree(root, source);
-            copyPath(source, target);
+            copyPath(root, source, target);
             return entry(root, target.toRealPath(LinkOption.NOFOLLOW_LINKS));
         } catch (IOException exception) {
             throw new IllegalStateException("failed to copy path", exception);
@@ -458,7 +501,7 @@ public class WorkspaceExplorerService {
         try {
             List<Path> paths = validatedDeletePaths(root, target);
             for (Path path : paths) {
-                Files.delete(path);
+                mutations.delete(root, relative(root, path), Files.isDirectory(path, LinkOption.NOFOLLOW_LINKS));
             }
             return new DeleteResult(relative(root, target), paths.size());
         } catch (IOException exception) {
@@ -467,6 +510,7 @@ public class WorkspaceExplorerService {
     }
 
     private Entry inspectRoot(Path root, RelativePath relativePath) {
+        requireBrowsable(relativePath.value());
         return entry(root, resolveExisting(root, relativePath));
     }
 
@@ -538,7 +582,21 @@ public class WorkspaceExplorerService {
             throw new WorkspaceFileException(WorkspaceFileException.Reason.NOT_FOUND, "user workspace does not exist");
         }
         try {
-            Files.createDirectories(descriptor.root());
+            if (directoryService != null) {
+                WorkspaceDescriptor provisioned = directoryService.resolveForWrite(
+                    descriptor.kind(), descriptor.key());
+                if (!provisioned.root().equals(descriptor.root())) {
+                    throw new WorkspaceFileException(WorkspaceFileException.Reason.INVALID,
+                        "workspace descriptor root mismatch");
+                }
+                return;
+            }
+            Path parent = descriptor.root().getParent();
+            if (parent == null || !Files.isDirectory(parent, LinkOption.NOFOLLOW_LINKS)) {
+                throw new WorkspaceFileException(WorkspaceFileException.Reason.NOT_FOUND,
+                    "workspace parent does not exist");
+            }
+            mutations.createDirectory(parent, descriptor.root().getFileName().toString());
         } catch (IOException exception) {
             throw new IllegalStateException("failed to create workspace root", exception);
         }
@@ -554,7 +612,8 @@ public class WorkspaceExplorerService {
         ensureMutable(root, file);
         rejectCollision(file);
         try {
-            Files.writeString(file, "", StandardCharsets.UTF_8);
+            mutations.write(root, relative(root, file), new byte[0],
+                ConfinedPathMutationService.WriteMode.CREATE_NEW, false);
             return entry(root, file.toRealPath(LinkOption.NOFOLLOW_LINKS));
         } catch (IOException exception) {
             throw new IllegalStateException("failed to create file", exception);
@@ -569,7 +628,7 @@ public class WorkspaceExplorerService {
             BasicFileAttributes attributes = Files.readAttributes(path, BasicFileAttributes.class, LinkOption.NOFOLLOW_LINKS);
             String relative = relative(root, path);
             ViewerKind viewer = viewerKind(path, directory, regular, size);
-            boolean mutable = isMutableRelative(relative);
+            boolean mutable = isMutableByOrdinaryRoute(relative);
             return new Entry(path.getFileName() == null ? "." : path.getFileName().toString(), relative, directory, regular,
                 size, createdAt(attributes.creationTime()), attributes.lastModifiedTime().toInstant(),
                 fileType(path, directory, regular), sizeLabel(size, directory), viewer, List.of(),
@@ -618,19 +677,98 @@ public class WorkspaceExplorerService {
     private void ensureMutable(Path root, Path target) {
         ensureConfined(root, target);
         String relative = relative(root, target);
-        if (!isMutableRelative(relative)) {
-            throw new WorkspaceFileException(WorkspaceFileException.Reason.INVALID, "workspace root and outputs are protected");
+        if (!isMutableByOrdinaryRoute(relative)) {
+            throw new WorkspaceFileException(WorkspaceFileException.Reason.INVALID,
+                    "workspace root, outputs, task structure, skills, and staging are protected");
         }
     }
 
-    private void requireNonReserved(RelativePath path) {
-        if ("outputs".equals(path.value()) || path.value().startsWith("outputs/")) {
-            throw new WorkspaceFileException(WorkspaceFileException.Reason.INVALID, "outputs are protected");
+    // ── Phase 03 policy-based protection ──
+
+    /**
+     * Require that the path is classifiable for ordinary browse without
+     * accessing hidden content. Hidden: {@code .skills}, {@code staging}.
+     */
+    private void requireBrowsable(String relativePath) {
+        ReservedWorkspacePathPolicy.Classification c;
+        try {
+            c = ReservedWorkspacePathPolicy.classify(relativePath);
+        } catch (IllegalArgumentException e) {
+            throw new WorkspaceFileException(WorkspaceFileException.Reason.INVALID,
+                    e.getMessage(), e);
+        }
+        if (c == ReservedWorkspacePathPolicy.Classification.SKILLS
+                || c == ReservedWorkspacePathPolicy.Classification.PUBLICATION_STAGING) {
+            throw new WorkspaceFileException(WorkspaceFileException.Reason.NOT_FOUND,
+                    "path does not exist: " + relativePath);
         }
     }
 
-    private boolean isMutableRelative(String relative) {
-        return !".".equals(relative) && !"outputs".equals(relative) && !relative.startsWith("outputs/");
+    /**
+     * Require that the path is mutable by ordinary explorer routes.
+     * Ordinary mutation is allowed only on {@code ORDINARY_CONTENT}.
+     * Workspace root (.) is also protected.
+     */
+    private void requireOrdinaryMutationAllowed(String relativePath) {
+        if (".".equals(relativePath)) {
+            throw new WorkspaceFileException(WorkspaceFileException.Reason.INVALID,
+                    "workspace root is protected");
+        }
+        ReservedWorkspacePathPolicy.Classification c;
+        try {
+            c = ReservedWorkspacePathPolicy.classify(relativePath);
+        } catch (IllegalArgumentException e) {
+            throw new WorkspaceFileException(WorkspaceFileException.Reason.INVALID,
+                    e.getMessage(), e);
+        }
+        ReservedWorkspacePathPolicy.Decision d = ReservedWorkspacePathPolicy.decide(
+                c, ReservedWorkspacePathPolicy.Operation.ORDINARY_MUTATION);
+        if (d != ReservedWorkspacePathPolicy.Decision.ALLOW) {
+            throw new WorkspaceFileException(WorkspaceFileException.Reason.INVALID,
+                    protectedTreeMessage(c));
+        }
+    }
+
+    /**
+     * Check whether browse should be permitted for a relative path.
+     * Hidden trees (skills, staging) are denied. Unsafe paths are denied.
+     */
+    private boolean isBrowsable(String relative) {
+        if (".".equals(relative)) return true;
+        try {
+            ReservedWorkspacePathPolicy.Classification c =
+                    ReservedWorkspacePathPolicy.classify(relative);
+            return c != ReservedWorkspacePathPolicy.Classification.SKILLS
+                    && c != ReservedWorkspacePathPolicy.Classification.PUBLICATION_STAGING;
+        } catch (IllegalArgumentException e) {
+            return false;
+        }
+    }
+
+    /** Check whether an ordinary mutation is allowed on a relative path. */
+    private boolean isMutableByOrdinaryRoute(String relative) {
+        if (".".equals(relative)) return false;
+        try {
+            ReservedWorkspacePathPolicy.Classification c =
+                    ReservedWorkspacePathPolicy.classify(relative);
+            return ReservedWorkspacePathPolicy.decide(c,
+                    ReservedWorkspacePathPolicy.Operation.ORDINARY_MUTATION)
+                    == ReservedWorkspacePathPolicy.Decision.ALLOW;
+        } catch (IllegalArgumentException e) {
+            return false;
+        }
+    }
+
+    private static String protectedTreeMessage(
+            ReservedWorkspacePathPolicy.Classification classification) {
+        return switch (classification) {
+            case WORKSPACE_OUTPUTS -> "outputs are protected";
+            case TASKS_ROOT, TASK_KEY_ROOT, RUN_ROOT, RUN_WORKING_CONTENT,
+                 RUN_OUTPUTS -> "task structure is protected";
+            case PUBLICATION_STAGING -> "publication staging is protected";
+            case SKILLS -> "skills are protected";
+            default -> "path is protected";
+        };
     }
 
     private void ensureConfined(Path root, Path path) {
@@ -653,24 +791,22 @@ public class WorkspaceExplorerService {
         }
     }
 
-    private void movePath(Path source, Path target) throws IOException {
-        try {
-            Files.move(source, target, StandardCopyOption.ATOMIC_MOVE);
-        } catch (IOException ignored) {
-            Files.move(source, target);
-        }
-    }
-
-    private void copyPath(Path source, Path target) throws IOException {
+    private void copyPath(Path root, Path source, Path target) throws IOException {
         if (!Files.isDirectory(source, LinkOption.NOFOLLOW_LINKS)) {
-            Files.copy(source, target, StandardCopyOption.COPY_ATTRIBUTES);
+            mutations.write(root, relative(root, target), mutations.read(root, relative(root, source)),
+                ConfinedPathMutationService.WriteMode.CREATE_NEW, false);
             return;
         }
         try (var walk = Files.walk(source)) {
             for (Path path : walk.toList()) {
                 Path copyTarget = target.resolve(source.relativize(path)).normalize();
-                if (Files.isDirectory(path, LinkOption.NOFOLLOW_LINKS)) Files.createDirectory(copyTarget);
-                else Files.copy(path, copyTarget, StandardCopyOption.COPY_ATTRIBUTES);
+                if (Files.isDirectory(path, LinkOption.NOFOLLOW_LINKS)) {
+                    mutations.createDirectory(root, relative(root, copyTarget));
+                } else {
+                    mutations.write(root, relative(root, copyTarget),
+                        mutations.read(root, relative(root, path)),
+                        ConfinedPathMutationService.WriteMode.CREATE_NEW, false);
+                }
             }
         }
     }
@@ -681,6 +817,7 @@ public class WorkspaceExplorerService {
             for (Path path : paths) {
                 ensureConfined(root, path.toRealPath(LinkOption.NOFOLLOW_LINKS));
                 if (Files.isSymbolicLink(path)) throw new WorkspaceFileException(WorkspaceFileException.Reason.INVALID, "symbolic links are not deleted");
+                if (Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS)) mutations.requireSingleLink(path);
             }
             return paths;
         }

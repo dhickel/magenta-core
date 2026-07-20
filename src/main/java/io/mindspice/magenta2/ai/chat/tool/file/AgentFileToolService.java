@@ -3,11 +3,13 @@ package io.mindspice.magenta2.ai.chat.tool.file;
 import java.io.IOException;
 import java.io.BufferedReader;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.FileVisitResult;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
+import java.nio.file.SimpleFileVisitor;
+import java.nio.file.attribute.BasicFileAttributes;
 import java.nio.file.Path;
 import java.nio.file.PathMatcher;
-import java.nio.file.StandardOpenOption;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.ArrayDeque;
@@ -25,14 +27,18 @@ import io.mindspice.magenta2.ai.config.user.AiConfig;
 import io.mindspice.magenta2.ai.orchestration.runtime.OrchestrationTaskContext;
 import io.mindspice.magenta2.ai.orchestration.runtime.OrchestrationTaskContextHolder;
 import io.mindspice.magenta2.ai.orchestration.runtime.TaskRunLifecycleService;
+import io.mindspice.magenta2.ai.orchestration.workspaces.ConfinedPathMutationService;
+import io.mindspice.magenta2.ai.orchestration.workspaces.ReservedWorkspacePathPolicy;
+import io.mindspice.magenta2.ai.orchestration.workspaces.TaskRunLocation;
 import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceDirectoryService;
+import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceKind;
+import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspacePathLayout;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
 @Service
 public class AgentFileToolService {
-    private static final String OUTPUTS = "outputs";
     private static final int DEFAULT_MAX_ENTRIES = 200;
     private static final int MAX_ENTRIES = 1_000;
     private static final int DEFAULT_READ_LINES = 200;
@@ -51,6 +57,7 @@ public class AgentFileToolService {
     private final Path root;
     private final WorkspaceDirectoryService workspaceDirectoryService;
     private final TaskRunLifecycleService taskRunLifecycleService;
+    private final ConfinedPathMutationService mutations;
 
     public AgentFileToolService(
         AiConfig aiConfig,
@@ -74,6 +81,7 @@ public class AgentFileToolService {
         this.root = aiConfig.dataRoot().toRealPath();
         this.workspaceDirectoryService = workspaceDirectoryService;
         this.taskRunLifecycleService = taskRunLifecycleService;
+        this.mutations = new ConfinedPathMutationService();
     }
 
     public AgentFileToolService(AiConfig aiConfig) throws IOException {
@@ -88,6 +96,7 @@ public class AgentFileToolService {
         this.root = root.toRealPath();
         this.workspaceDirectoryService = workspaceDirectoryService;
         this.taskRunLifecycleService = null;
+        this.mutations = new ConfinedPathMutationService();
     }
 
     public FileListResult list(String path, boolean recursive, Integer maxEntries) throws IOException {
@@ -106,18 +115,24 @@ public class AgentFileToolService {
         }
         int limit = clamp(maxEntries, DEFAULT_MAX_ENTRIES, 1, MAX_ENTRIES);
         List<FileEntry> entries = new ArrayList<>();
-        try (Stream<Path> stream = recursive ? Files.walk(target.path()) : Files.list(target.path())) {
-            List<Path> paths = stream
-                .filter(item -> !item.equals(target.path()))
-                .filter(item -> matchesGlob(item, target.scope(), glob))
-                .sorted(Comparator.comparing(item -> displayPath(item, target.scope())))
-                .limit(limit + 1L)
-                .toList();
-            for (Path item : paths.stream().limit(limit).toList()) {
-                entries.add(fileEntry(item, target.scope()));
+        List<Path> discovered;
+        if (recursive) {
+            discovered = browsableTree(target);
+        } else {
+            try (Stream<Path> stream = Files.list(target.path())) {
+                discovered = stream.filter(item -> isBrowsableDiscovered(item, target.scope())).toList();
             }
-            return new FileListResult(displayPath(target), entries, paths.size() > limit);
         }
+        List<Path> paths = discovered.stream()
+            .filter(item -> !item.equals(target.path()))
+            .filter(item -> matchesGlob(item, target.scope(), glob))
+            .sorted(Comparator.comparing(item -> displayPath(item, target.scope())))
+            .limit(limit + 1L)
+            .toList();
+        for (Path item : paths.stream().limit(limit).toList()) {
+            entries.add(fileEntry(item, target.scope()));
+        }
+        return new FileListResult(displayPath(target), entries, paths.size() > limit);
     }
 
     private boolean matchesGlob(Path path, FileScope scope, String glob) {
@@ -256,9 +271,8 @@ public class AgentFileToolService {
     }
 
     public FileWriteResult write(String path, String content, boolean overwrite) throws IOException {
-        requireCurrentWriterForMutation();
         ResolvedFilePath target = resolveForWrite(path);
-        rejectReservedOutputMutation(target);
+        requireWritablePath(target);
         recordActiveRuntimePath(target);
         boolean existed = Files.exists(target.path(), LinkOption.NOFOLLOW_LINKS);
         if (existed && !overwrite) {
@@ -267,16 +281,19 @@ public class AgentFileToolService {
         if (existed && !Files.isRegularFile(target.path(), LinkOption.NOFOLLOW_LINKS)) {
             throw new IllegalArgumentException("target is not a regular file: " + displayPath(target));
         }
-        Files.createDirectories(target.path().getParent());
         String text = content == null ? "" : content;
-        Files.writeString(target.path(), text, StandardCharsets.UTF_8);
+        requireCurrentWriterForMutation();
+        mutations.write(target.scope().root(), relativePath(target.path(), target.scope()).toString(),
+            text.getBytes(StandardCharsets.UTF_8),
+            existed ? ConfinedPathMutationService.WriteMode.OVERWRITE
+                    : ConfinedPathMutationService.WriteMode.CREATE_NEW,
+            true);
         return new FileWriteResult(displayPath(target), text.getBytes(StandardCharsets.UTF_8).length, !existed);
     }
 
     public FileAppendResult append(String path, String content, boolean create) throws IOException {
-        requireCurrentWriterForMutation();
         ResolvedFilePath target = create ? resolveForWrite(path) : resolveTextFile(path);
-        rejectReservedOutputMutation(target);
+        requireWritablePath(target);
         recordActiveRuntimePath(target);
         boolean existed = Files.exists(target.path(), LinkOption.NOFOLLOW_LINKS);
         if (existed && !Files.isRegularFile(target.path(), LinkOption.NOFOLLOW_LINKS)) {
@@ -285,22 +302,19 @@ public class AgentFileToolService {
         if (!existed && !create) {
             throw new IllegalArgumentException("file does not exist: " + displayPath(target));
         }
-        Files.createDirectories(target.path().getParent());
         String text = content == null ? "" : content;
-        Files.writeString(
-            target.path(),
-            text,
-            StandardCharsets.UTF_8,
-            StandardOpenOption.CREATE,
-            StandardOpenOption.APPEND
-        );
+        requireCurrentWriterForMutation();
+        mutations.write(target.scope().root(), relativePath(target.path(), target.scope()).toString(),
+            text.getBytes(StandardCharsets.UTF_8),
+            existed ? ConfinedPathMutationService.WriteMode.APPEND
+                    : ConfinedPathMutationService.WriteMode.CREATE_NEW,
+            true);
         return new FileAppendResult(displayPath(target), text.getBytes(StandardCharsets.UTF_8).length, !existed);
     }
 
     public FileReplaceResult replace(String path, String startAnchor, String endAnchor, String replacement) throws IOException {
-        requireCurrentWriterForMutation();
         ResolvedFilePath target = resolveTextFile(path);
-        rejectReservedOutputMutation(target);
+        requireWritablePath(target);
         recordActiveRuntimePath(target);
         long fileSize = Files.size(target.path());
         if (fileSize > MAX_FULL_BUFFER_BYTES) {
@@ -333,7 +347,10 @@ public class AgentFileToolService {
         if (finalNewline && !updatedText.isEmpty()) {
             updatedText += lineSeparator;
         }
-        Files.writeString(target.path(), updatedText, StandardCharsets.UTF_8);
+        requireCurrentWriterForMutation();
+        mutations.write(target.scope().root(), relativePath(target.path(), target.scope()).toString(),
+            updatedText.getBytes(StandardCharsets.UTF_8),
+            ConfinedPathMutationService.WriteMode.OVERWRITE, false);
         return new FileReplaceResult(
             displayPath(target),
             start.lineNumber(),
@@ -350,7 +367,8 @@ public class AgentFileToolService {
             throw new TaskRunLifecycleService.StaleWriterException(
                 "Task-run file mutation requires a current writer capability");
         }
-        taskRunLifecycleService.requireCurrentWriter(context.writerCapability());
+        taskRunLifecycleService.requireCurrentWriter(
+            context.taskRunLocation(), context.writerCapability());
     }
 
     private ResolvedFilePath resolveExisting(String path) throws IOException {
@@ -362,7 +380,9 @@ public class AgentFileToolService {
         if (!real.startsWith(resolved.scope().root())) {
             throw new IllegalArgumentException("path escapes " + resolved.scope().label());
         }
-        return new ResolvedFilePath(real, resolved.scope());
+        ResolvedFilePath result = new ResolvedFilePath(real, resolved.scope());
+        requireBrowsablePath(result);
+        return result;
     }
 
     private ResolvedFilePath resolveTextFile(String path) throws IOException {
@@ -422,6 +442,13 @@ public class AgentFileToolService {
 
     private FileScope resolveContextScope(OrchestrationTaskContext ctx, String requested) throws IOException {
         String normalized = normalizeContextRequest(requested);
+        if (ctx.taskRunLocation() != null) {
+            Path runRoot = ctx.taskRunLocation().confinedPath().toRealPath(LinkOption.NOFOLLOW_LINKS);
+            if (!runRoot.startsWith(root) || !Files.isDirectory(runRoot, LinkOption.NOFOLLOW_LINKS)) {
+                throw new IllegalArgumentException("trusted task-run location escapes data root");
+            }
+            return directWorkspaceScope(runRoot, normalized, requested, "task run workspace");
+        }
         if (StringUtils.hasText(ctx.hostDurableWorkspacePath())) {
             return resolveAssignmentScope(ctx, normalized, requested);
         }
@@ -490,15 +517,109 @@ public class AgentFileToolService {
         return real;
     }
 
-    private void rejectReservedOutputMutation(ResolvedFilePath target) {
-        OrchestrationTaskContext context = OrchestrationTaskContextHolder.current();
-        if (context == null || !context.hasContext()) {
-            return;
+    // ── Phase 03 policy-based path protection ──
+
+    /**
+     * Require that the resolved target is writable under the current
+     * context. Classifies via {@link ReservedWorkspacePathPolicy} using a
+     * workspace-relative or scope-relative path.
+     *
+     * <p>With a {@link TaskRunLocation}: requires
+     * {@code RUN_WRITER_MUTATION} (only run working content is writable).
+     * Without a task run (agent/workspace scope): requires
+     * {@code ORDINARY_MUTATION} (outputs, tasks, .skills are protected).
+     */
+    private void requireWritablePath(ResolvedFilePath target) {
+        OrchestrationTaskContext ctx = OrchestrationTaskContextHolder.current();
+        String workspaceRelative = ctx != null && ctx.hasContext()
+                ? workspaceRelative(target, ctx)
+                : workspaceRelativeFromDataRoot(target);
+        if (workspaceRelative == null) return;
+        ReservedWorkspacePathPolicy.Classification c =
+                ReservedWorkspacePathPolicy.classify(workspaceRelative);
+        ReservedWorkspacePathPolicy.Operation requiredOp =
+                ctx != null && ctx.taskRunLocation() != null
+                ? ReservedWorkspacePathPolicy.Operation.RUN_WRITER_MUTATION
+                : ReservedWorkspacePathPolicy.Operation.ORDINARY_MUTATION;
+        if (ReservedWorkspacePathPolicy.decide(c, requiredOp)
+                != ReservedWorkspacePathPolicy.Decision.ALLOW) {
+            throw new IllegalArgumentException(
+                    "path is not writable in current context: " + displayPath(target));
         }
-        Path relative = target.scope().root().relativize(target.path().toAbsolutePath().normalize());
-        if (!relative.toString().isEmpty() && OUTPUTS.equals(relative.getName(0).toString())) {
-            throw new IllegalArgumentException("outputs is reserved for output publication");
+    }
+
+    /**
+     * Require that the resolved target is browsable. Hidden content
+     * ({@code .skills}, staging) is rejected. Applies only when a context
+     * is active.
+     */
+    private void requireBrowsablePath(ResolvedFilePath target) {
+        OrchestrationTaskContext ctx = OrchestrationTaskContextHolder.current();
+        String workspaceRelative = ctx != null && ctx.hasContext()
+                ? workspaceRelative(target, ctx)
+                : workspaceRelativeFromDataRoot(target);
+        if (workspaceRelative == null) return;
+        ReservedWorkspacePathPolicy.Classification c =
+                ReservedWorkspacePathPolicy.classify(workspaceRelative);
+        if (ReservedWorkspacePathPolicy.decide(c,
+                ReservedWorkspacePathPolicy.Operation.BROWSE)
+                != ReservedWorkspacePathPolicy.Decision.ALLOW) {
+            throw new IllegalArgumentException("path is not accessible: " + displayPath(target));
         }
+    }
+
+    /** Classify every recursive discovery; hidden .skills and staging entries are skipped. */
+    private boolean isBrowsableDiscovered(Path path, FileScope scope) {
+        try {
+            requireBrowsablePath(new ResolvedFilePath(path, scope));
+            return true;
+        } catch (IllegalArgumentException exception) {
+            return false;
+        }
+    }
+
+    /**
+     * Compute a workspace-relative path for policy classification.
+     * When a {@link TaskRunLocation} is available, prepends its
+     * {@code rootRelativePath}. Otherwise falls back to scope-relative.
+     */
+    private String workspaceRelative(ResolvedFilePath target,
+                                     OrchestrationTaskContext ctx) {
+        if (ctx != null && ctx.taskRunLocation() != null) {
+            String prefix = ctx.taskRunLocation().rootRelativePath();
+            Path runRoot = ctx.taskRunLocation().confinedPath();
+            java.nio.file.Path resolved = target.path().toAbsolutePath().normalize();
+            String relative = runRoot.relativize(resolved).toString().replace('\\', '/');
+            if (relative.isEmpty() || ".".equals(relative)) return prefix;
+            return prefix + "/" + relative;
+        }
+        return workspaceRelativeOrScopeRelative(target);
+    }
+
+    private String workspaceRelativeOrScopeRelative(ResolvedFilePath target) {
+        return target.scope().root()
+                .relativize(target.path().toAbsolutePath().normalize())
+                .toString().replace('\\', '/');
+    }
+
+    /**
+     * Recognize canonical workspace roots even in legacy no-context data-root
+     * scope so that fallback chat tooling cannot bypass reserved-tree policy.
+     */
+    private String workspaceRelativeFromDataRoot(ResolvedFilePath target) {
+        Path relative = root.relativize(target.path().toAbsolutePath().normalize());
+        if (relative.getNameCount() < 3
+                || !WorkspacePathLayout.WORKSPACE.equals(relative.getName(0).toString())) {
+            return null;
+        }
+        try {
+            WorkspaceKind.fromToken(relative.getName(1).toString());
+        } catch (IllegalArgumentException exception) {
+            throw new IllegalArgumentException("invalid workspace path");
+        }
+        String value = relative.getNameCount() == 3
+                ? "." : relative.subpath(3, relative.getNameCount()).toString().replace('\\', '/');
+        return value.isBlank() ? "." : value;
     }
 
     private Path nearestExistingParent(Path path) {
@@ -519,12 +640,31 @@ public class AgentFileToolService {
         if (!Files.isDirectory(target.path(), LinkOption.NOFOLLOW_LINKS)) {
             return List.of();
         }
-        try (Stream<Path> stream = Files.walk(target.path())) {
-            return stream
-                .filter(path -> Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS))
-                .sorted(Comparator.comparing(path -> displayPath(path, target.scope())))
-                .toList();
-        }
+        return browsableTree(target).stream()
+            .filter(path -> Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS))
+            .sorted(Comparator.comparing(path -> displayPath(path, target.scope())))
+            .toList();
+    }
+
+    private List<Path> browsableTree(ResolvedFilePath target) throws IOException {
+        List<Path> paths = new ArrayList<>();
+        Files.walkFileTree(target.path(), new SimpleFileVisitor<>() {
+            @Override
+            public FileVisitResult preVisitDirectory(Path directory, BasicFileAttributes attributes) {
+                if (!directory.equals(target.path()) && !isBrowsableDiscovered(directory, target.scope())) {
+                    return FileVisitResult.SKIP_SUBTREE;
+                }
+                paths.add(directory);
+                return FileVisitResult.CONTINUE;
+            }
+
+            @Override
+            public FileVisitResult visitFile(Path file, BasicFileAttributes attributes) {
+                if (isBrowsableDiscovered(file, target.scope())) paths.add(file);
+                return FileVisitResult.CONTINUE;
+            }
+        });
+        return paths;
     }
 
     private Pattern compilePattern(String query, boolean regex, boolean caseSensitive) {

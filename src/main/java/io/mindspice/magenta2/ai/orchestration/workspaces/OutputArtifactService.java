@@ -117,7 +117,8 @@ public class OutputArtifactService {
             throw new TaskRunLifecycleService.StaleWriterException(
                 "Task-run output mutation requires a current writer capability");
         }
-        taskRunLifecycleService.requireCurrentWriter(taskContext.writerCapability());
+        taskRunLifecycleService.requireCurrentWriter(
+            taskContext.taskRunLocation(), taskContext.writerCapability());
     }
 
     /**

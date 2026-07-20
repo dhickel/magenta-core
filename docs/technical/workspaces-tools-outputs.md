@@ -32,7 +32,9 @@ The operational submission UI intentionally shows no temporary raw workspace sel
 
 Runtime `AGENTS.md` files are user-authored only. Resolution is confined from the selected descriptor root to the active relative path. Ancestor guidance remains active and the closest file wins only on conflict.
 
-File and shell tools are confined to the selected descriptor root. They reject traversal, symlink escape, and mutation of `outputs/` or descendants. Tools update the active runtime path after confined operations so subsequent prompt context follows the actual target.
+File tools reject traversal, symlink escape, and mutation of reserved outputs, task structure, staging, and `.skills`. Recursive list/search classifies every discovered entry and prunes hidden `.skills` and staging subtrees. Task-run writes resolve from the exact trusted run location and revalidate a capability carrying the same workspace kind/key, task-path key, run id, attempt, owner, and fence immediately before each mutation.
+
+On the deployed Linux 64-bit default filesystem provider, mutations walk and hold relative directory descriptors with `O_NOFOLLOW`, use `openat`-family primitives, check existing regular-file link count with `fstat`, and use no-replace relative rename. Unsupported providers fail closed with a confinement-unavailable error; there is no ordinary-path fallback. Workspace-bound shell remains disabled because host `ProcessBuilder` execution does not prove filesystem isolation or process-tree revocation. Tools update the active runtime path after confined operations so subsequent prompt context follows the actual target.
 
 ## Canonical task-run identity
 

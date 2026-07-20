@@ -23,6 +23,7 @@ This package owns filesystem-first workspace identity, descriptor resolution, co
 ### Change guidance
 - Pass trusted descriptors and child-location values across filesystem boundaries; never infer identity from `Path` or hand-concatenate reserved segments.
 - Validate canonical identity/key agreement, path components, traversal, containment, existing links, and mutation-boundary parent state.
+- Ordinary and structural workspace mutations use `ConfinedPathMutationService`: held Linux relative directory handles, no-follow traversal, opened-file link-count checks, and typed fail-closed behavior on unsupported providers. Do not add a path-based fallback under the same confinement claim.
 - Do not add workspace kinds, generic workspace ids, project roots, Work Areas, aliases, leases, or eager scaffolding.
 - `TaskRunWriteCapability` is non-authorizing until lifecycle services verify persisted owner/fence facts at mutation boundaries.
 - Applied migration resources are immutable. Schema corrections use a new ordered resource.

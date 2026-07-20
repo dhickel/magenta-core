@@ -222,7 +222,7 @@ public class TaskRunLifecycleService {
                 """, now.toString(), now.toString(), location.taskRunId(), attemptNumber);
         if (updated != 1) throw new StaleWriterException("Attempt is not reservable");
         return TaskRunWriteCapability.create(
-                location.taskRunId(), attemptNumber, ownerId, generation, fenceToken);
+                location, attemptNumber, ownerId, generation, fenceToken);
     }
 
     public boolean verifyWriterClaimCurrent(TaskRunWriteCapability capability) {
@@ -240,6 +240,20 @@ public class TaskRunLifecycleService {
         if (!verifyWriterClaimCurrent(capability)) {
             throw new StaleWriterException("Writer capability is stale");
         }
+    }
+
+    /**
+     * Mutation-boundary validation bound to the exact trusted run location.
+     * Capability currency alone is insufficient because a current capability
+     * must never be paired with a sibling or cross-workspace location.
+     */
+    public void requireCurrentWriter(TaskRunLocation expectedLocation,
+                                     TaskRunWriteCapability capability) {
+        if (expectedLocation == null || capability == null
+                || !capability.matches(expectedLocation)) {
+            throw new StaleWriterException("Writer capability does not match task-run location");
+        }
+        requireCurrentWriter(capability);
     }
 
     @Transactional

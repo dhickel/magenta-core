@@ -342,7 +342,7 @@ class AgentFileToolServiceTest {
 
         assertThatThrownBy(() -> service.write("outputs/result.txt", "done\n", false))
             .isInstanceOf(IllegalArgumentException.class)
-            .hasMessageContaining("reserved for output publication");
+            .hasMessageContaining("not writable");
         assertThat(service.read("workspace/notes.txt", 1, 10).lines().getFirst())
             .endsWith("|ordinary directory");
     }
@@ -413,6 +413,47 @@ class AgentFileToolServiceTest {
         service.read("b/file.txt", 1, 10);
         assertThat(OrchestrationTaskContextHolder.current().activeRuntimePath())
             .isEqualTo("b/file.txt");
+    }
+
+    @Test
+    void recursiveListAndSearchClassifyEveryDiscoveredEntry() throws Exception {
+        Path workspace = Files.createDirectories(tempDir.resolve("workspace/agent/agent-1"));
+        Files.writeString(workspace.resolve("visible.txt"), "needle visible\n");
+        Files.createDirectories(workspace.resolve(".skills/private"));
+        Files.writeString(workspace.resolve(".skills/private/secret.txt"), "needle skill\n");
+        String key = "v1-task-" + "a".repeat(64);
+        Path staging = Files.createDirectories(workspace.resolve("tasks/" + key + "/run-1/staging"));
+        Files.writeString(staging.resolve("secret.txt"), "needle staging\n");
+
+        AgentFileToolService service = new AgentFileToolService(tempDir, workspaceDirectoryService());
+        OrchestrationTaskContextHolder.set(new OrchestrationTaskContext("agent-1", "TestAgent",
+            null, null, null, null, "agent", "agent-1", "agent/agent-1", "TASK_RUN",
+            null, workspace.toString(), null, null, null, null, null));
+
+        AgentFileToolService.FileListResult listing = service.list(".", true, 100, null);
+        assertThat(listing.entries()).extracting(AgentFileToolService.FileEntry::path)
+            .contains("visible.txt")
+            .noneMatch(path -> path.startsWith(".skills") || path.contains("/staging"));
+        AgentFileToolService.FileSearchResult search = service.search(".", "needle", false, true, 0, 20);
+        assertThat(search.matches()).extracting(AgentFileToolService.SearchMatch::path)
+            .containsExactly("visible.txt");
+    }
+
+    @Test
+    void noContextFallbackStillEnforcesCanonicalWorkspaceReservedTrees() throws Exception {
+        Path workspace = Files.createDirectories(tempDir.resolve("workspace/agent/agent-1"));
+        Files.createDirectories(workspace.resolve("outputs"));
+        Files.createDirectories(workspace.resolve(".skills/private"));
+        AgentFileToolService service = service();
+
+        assertThatThrownBy(() -> service.write(
+                "workspace/agent/agent-1/outputs/result.txt", "bad", false))
+            .isInstanceOf(IllegalArgumentException.class)
+            .hasMessageContaining("not writable");
+        assertThatThrownBy(() -> service.list(
+                "workspace/agent/agent-1/.skills", true, 20))
+            .isInstanceOf(IllegalArgumentException.class)
+            .hasMessageContaining("not accessible");
     }
 
     @Test

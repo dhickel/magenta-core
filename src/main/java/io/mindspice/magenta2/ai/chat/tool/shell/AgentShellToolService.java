@@ -23,12 +23,27 @@ import io.mindspice.magenta2.ai.orchestration.runtime.OrchestrationTaskContextHo
 import io.mindspice.magenta2.ai.orchestration.runtime.TaskRunLifecycleService;
 import io.mindspice.magenta2.ai.orchestration.settings.RuntimeSettingsService;
 import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceDirectoryService;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
 @Service
 public class AgentShellToolService {
+    private static final Logger log = LoggerFactory.getLogger(AgentShellToolService.class);
+
+    /**
+     * Phase 03: ProcessBuilder provides no filesystem confinement or
+     * process-tree revocation. Workspace-bound shell execution in task-run
+     * contexts returns {@link ShellExecResult#confinementUnavailable()} true
+     * until Phase 07 demonstrates a real boundary.
+     */
+    private static final String CONFINEMENT_UNAVAILABLE_MESSAGE =
+            "Shell execution is not available in the current task-run context: "
+            + "process confinement cannot be guaranteed. Use file tools for "
+            + "filesystem access. Executable skill authorization is deferred to Phase 07.";
+
     private static final String WILDCARD = "*";
     private static final int DEFAULT_TIMEOUT_SECONDS = 10;
     private static final int MAX_TIMEOUT_SECONDS = 30;
@@ -114,7 +129,6 @@ public class AgentShellToolService {
 
     public ShellExecResult exec(String command, String workingDirectory, Integer timeoutSeconds)
         throws IOException, InterruptedException {
-        requireCurrentWriterForMutation();
         List<String> commandLine = parseCommandLine(command);
         String executable = validateExecutable(commandLine.getFirst());
         validateCommandLineSafety(commandLine);
@@ -123,19 +137,25 @@ public class AgentShellToolService {
         }
 
         OrchestrationTaskContext taskContext = OrchestrationTaskContextHolder.current();
-        ResolvedWorkingDirectory resolved;
 
+        // Phase 03: ProcessBuilder does not provide filesystem confinement.
+        // Task-run contexts require provable isolation; return confinement-unavailable.
         if (taskContext != null && taskContext.hasContext()) {
-            resolved = resolveContextWorkingDirectory(taskContext, workingDirectory);
-            OrchestrationTaskContextHolder.recordActiveRuntimePath(resolved.displayPath());
-        } else {
-            Path workingDir = resolveWorkingDirectory(workingDirectory);
-            resolved = new ResolvedWorkingDirectory(workingDir, displayPath(workingDir));
+            log.info("Shell execution unavailable in task context (confinement not proven): command={}", executable);
+            return ShellExecResult.confinementUnavailable(executable, command);
         }
+
+        Path workingDir = resolveWorkingDirectory(workingDirectory);
+        ResolvedWorkingDirectory resolved = new ResolvedWorkingDirectory(workingDir, displayPath(workingDir));
 
         return execOnHost(command, executable, commandLine, resolved.path(), resolved.displayPath(), timeoutSeconds);
     }
 
+    /**
+     * Phase 03: This method is retained but no longer called from {@link #exec}.
+     * It is preserved for potential Phase 07 re-enablement when real process
+     * confinement is demonstrated.
+     */
     private void requireCurrentWriterForMutation() {
         OrchestrationTaskContext context = OrchestrationTaskContextHolder.current();
         if (context == null || context.taskRunLocation() == null) return;
@@ -143,7 +163,8 @@ public class AgentShellToolService {
             throw new TaskRunLifecycleService.StaleWriterException(
                 "Task-run shell execution requires a current writer capability");
         }
-        taskRunLifecycleService.requireCurrentWriter(context.writerCapability());
+        taskRunLifecycleService.requireCurrentWriter(
+            context.taskRunLocation(), context.writerCapability());
     }
 
     /** Resolves one direct workspace-relative shell target. The publication-owned outputs subtree is rejected. */
@@ -233,6 +254,7 @@ public class AgentShellToolService {
             err.text(),
             !completed,
             out.truncated() || err.truncated(),
+            false,
             "bash"
         );
     }
@@ -488,13 +510,23 @@ public class AgentShellToolService {
         String stderr,
         boolean timedOut,
         boolean truncated,
+        boolean confinementUnavailable,
         String executionType
     ) {
         public ShellExecResult(String command, String commandLine, List<String> args,
                                String workingDirectory, Integer exitCode, String stdout,
                                String stderr, boolean timedOut, boolean truncated) {
             this(command, commandLine, args, workingDirectory, exitCode, stdout, stderr,
-                timedOut, truncated, "bash");
+                timedOut, truncated, false, "bash");
+        }
+
+        /**
+         * Phase 03: Construct a result indicating that process confinement
+         * cannot be guaranteed for workspace-bound shell execution.
+         */
+        public static ShellExecResult confinementUnavailable(String executable, String command) {
+            return new ShellExecResult(executable, command, List.of(), "", null,
+                    "", CONFINEMENT_UNAVAILABLE_MESSAGE, false, false, true, "unavailable");
         }
     }
 }

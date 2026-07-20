@@ -4,6 +4,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.util.Locale;
 import java.util.Objects;
+import java.util.regex.Pattern;
 
 import io.mindspice.magenta2.core.util.PlainPathSegmentValidator;
 
@@ -16,6 +17,8 @@ public final class WorkspacePathLayout {
     public static final String STAGING = "staging";
 
     private static final int MAX_COMPONENT_BYTES = 255;
+    private static final Pattern TASK_PATH_KEY = Pattern.compile(
+        "v1-(task|workflow|job)-[0-9a-f]{64}");
 
     private WorkspacePathLayout() {
     }
@@ -62,6 +65,14 @@ public final class WorkspacePathLayout {
 
     static String validateRunId(String taskRunId) {
         return validateComponent(taskRunId, "taskRunId");
+    }
+
+    static String validateTaskPathKeySegment(String value) {
+        String component = validateComponent(value, "taskPathKey");
+        if (!TASK_PATH_KEY.matcher(component).matches()) {
+            throw new IllegalArgumentException("taskPathKey is not canonical");
+        }
+        return component;
     }
 
     private static String segment(String value, String label) {

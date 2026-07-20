@@ -164,6 +164,23 @@ class TaskRunLifecycleExecutionTest {
         tx(() -> { service.completeAttempt(cap2); return null; });
     }
 
+    @Test
+    void currentCapabilityIsRejectedForMismatchedTrustedLocation() {
+        insertNativePlanRun("plan-1", "run-location-a", "RUNNING");
+        insertNativePlanRun("plan-1", "run-location-b", "RUNNING");
+        tx(() -> service.reserve(reservation("location-a", "plan-1", "run-location-a", "a")));
+        tx(() -> service.reserve(reservation("location-b", "plan-1", "run-location-b", "b")));
+        TaskRunLocation locationA = service.resolveLocation("run-location-a");
+        TaskRunLocation locationB = service.resolveLocation("run-location-b");
+        TaskRunWriteCapability capabilityA = tx(() ->
+                service.acquireWriterClaim(locationA, 1, "worker-a"));
+
+        assertThat(service.verifyWriterClaimCurrent(capabilityA)).isTrue();
+        assertThatThrownBy(() -> service.requireCurrentWriter(locationB, capabilityA))
+                .isInstanceOf(TaskRunLifecycleService.StaleWriterException.class)
+                .hasMessageContaining("does not match");
+    }
+
     // ── Gap 6.4: only one current writer per attempt ──
 
     @Test

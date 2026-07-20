@@ -36,6 +36,7 @@ public class WorkspaceDirectoryService {
     private final Path dataRoot;
     private final AgentProfileRepository agentProfileRepository;
     private final ChatConversationExistenceRepository chatConversationExistenceRepository;
+    private final ConfinedPathMutationService mutations;
 
     public WorkspaceDirectoryService(
             AiConfig aiConfig,
@@ -49,6 +50,7 @@ public class WorkspaceDirectoryService {
                 agentProfileRepository, "agentProfileRepository");
         this.chatConversationExistenceRepository = Objects.requireNonNull(
                 chatConversationExistenceRepository, "chatConversationExistenceRepository");
+        this.mutations = new ConfinedPathMutationService();
     }
 
     // ── Descriptor resolution ──
@@ -94,7 +96,7 @@ public class WorkspaceDirectoryService {
         try {
             ensureDirectoryChain(absoluteRoot.getParent());
             verifyOrAbsent(absoluteRoot);
-            Files.createDirectory(absoluteRoot);
+            mutations.createDirectory(dataRoot, dataRootRelative(absoluteRoot));
         } catch (FileAlreadyExistsException e) {
             throw new WorkspaceResolutionException(
                     WorkspaceResolutionException.Reason.CONFLICT,
@@ -270,7 +272,8 @@ public class WorkspaceDirectoryService {
         }
         try (var paths = Files.walk(root)) {
             for (Path path : paths.sorted(Comparator.reverseOrder()).toList()) {
-                Files.delete(path);
+                mutations.delete(dataRoot, dataRootRelative(path),
+                    Files.isDirectory(path, LinkOption.NOFOLLOW_LINKS));
             }
         } catch (IOException e) {
             throw new IllegalStateException("Failed to delete canonical agent workspace: " + agentId, e);
@@ -498,7 +501,7 @@ public class WorkspaceDirectoryService {
             return verifyRoot(path);
         }
         try {
-            Files.createDirectory(path);
+            mutations.createDirectory(dataRoot, dataRootRelative(path));
         } catch (FileAlreadyExistsException ignored) {
         } catch (IOException e) {
             throw new IllegalStateException("Failed to create directory: " + path, e);
