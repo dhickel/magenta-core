@@ -674,7 +674,7 @@ class ChatServiceTest {
             outputRoot.toString(),
             null,
             workspaceRoot.toString(),
-            null));
+            null, null, null, null, null));
 
         try {
             ChatResponse.MsgResponse response = chatService.chat("conversation-1", "read both files", "main");

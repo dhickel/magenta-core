@@ -65,7 +65,9 @@ Obsolete filesystem lease tables may remain in existing databases but are inert 
 
 The runtime does not attempt token-level or partial model response resume. Durable recovery is at task, workflow, and job item boundaries using assignment checkpoints and run records.
 
-Every execution attempt resolves one descriptor from its persisted `workspaceType`/`workspaceKey` selection. The descriptor flows through tools, prompts, workflow/job children, and current direct output publication. Phase 01 reserves canonical agent/user child grammar at `tasks/<taskPathKey>/<taskRunId>/`: saved task, workflow, and job runs reuse their immutable native run ids; assignment and child identities remain separate links. The foundation does not yet cut execution over, create output/staging children, or authorize a writer capability.
+Every execution attempt resolves one descriptor from its persisted `workspaceType`/`workspaceKey` selection. Task, workflow, and job submission reserves the immutable native run id as `taskRunId` before queue dispatch. The runner then loads that reservation, provisions `tasks/<taskPathKey>/<taskRunId>/` through `WorkspaceDirectoryService`, acquires a monotonic writer claim independent from the assignment lease, and carries the descriptor, trusted locations, attempt, and opaque capability through execution. Lifecycle setup fails closed.
+
+Operation keys are scoped by operation type. A supplied key retries one submission; omitted keys are generated uniquely so two intentional submissions with identical definitions and inputs remain separate. Resume reuses the run/location and opens a new attempt. Operator retry/replay create new lineage-linked sibling runs. Workflow task children and job work items also receive typed links and sibling lifecycle roots. File, shell, output, checkpoint, terminal, force-interrupt, and stale-lease paths verify current fences; responses never expose paths, owners, fence generations, or tokens. Native run tables remain status truth. Reserved-tree enforcement and run-local artifact publication continue in later phases.
 
 ## Jobs
 

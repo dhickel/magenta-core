@@ -24,6 +24,7 @@ import java.util.stream.Stream;
 import io.mindspice.magenta2.ai.config.user.AiConfig;
 import io.mindspice.magenta2.ai.orchestration.runtime.OrchestrationTaskContext;
 import io.mindspice.magenta2.ai.orchestration.runtime.OrchestrationTaskContextHolder;
+import io.mindspice.magenta2.ai.orchestration.runtime.TaskRunLifecycleService;
 import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceDirectoryService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
@@ -49,11 +50,20 @@ public class AgentFileToolService {
 
     private final Path root;
     private final WorkspaceDirectoryService workspaceDirectoryService;
+    private final TaskRunLifecycleService taskRunLifecycleService;
+
+    public AgentFileToolService(
+        AiConfig aiConfig,
+        WorkspaceDirectoryService workspaceDirectoryService
+    ) throws IOException {
+        this(aiConfig, workspaceDirectoryService, null);
+    }
 
     @Autowired
     public AgentFileToolService(
         AiConfig aiConfig,
-        @Autowired(required = false) WorkspaceDirectoryService workspaceDirectoryService
+        @Autowired(required = false) WorkspaceDirectoryService workspaceDirectoryService,
+        @Autowired(required = false) TaskRunLifecycleService taskRunLifecycleService
     ) throws IOException {
         if (aiConfig == null || aiConfig.dataRoot() == null) {
             throw new IllegalArgumentException("AI config dataRoot is required for file tools");
@@ -63,6 +73,7 @@ public class AgentFileToolService {
         }
         this.root = aiConfig.dataRoot().toRealPath();
         this.workspaceDirectoryService = workspaceDirectoryService;
+        this.taskRunLifecycleService = taskRunLifecycleService;
     }
 
     public AgentFileToolService(AiConfig aiConfig) throws IOException {
@@ -76,6 +87,7 @@ public class AgentFileToolService {
     AgentFileToolService(Path root, WorkspaceDirectoryService workspaceDirectoryService) throws IOException {
         this.root = root.toRealPath();
         this.workspaceDirectoryService = workspaceDirectoryService;
+        this.taskRunLifecycleService = null;
     }
 
     public FileListResult list(String path, boolean recursive, Integer maxEntries) throws IOException {
@@ -244,6 +256,7 @@ public class AgentFileToolService {
     }
 
     public FileWriteResult write(String path, String content, boolean overwrite) throws IOException {
+        requireCurrentWriterForMutation();
         ResolvedFilePath target = resolveForWrite(path);
         rejectReservedOutputMutation(target);
         recordActiveRuntimePath(target);
@@ -261,6 +274,7 @@ public class AgentFileToolService {
     }
 
     public FileAppendResult append(String path, String content, boolean create) throws IOException {
+        requireCurrentWriterForMutation();
         ResolvedFilePath target = create ? resolveForWrite(path) : resolveTextFile(path);
         rejectReservedOutputMutation(target);
         recordActiveRuntimePath(target);
@@ -284,6 +298,7 @@ public class AgentFileToolService {
     }
 
     public FileReplaceResult replace(String path, String startAnchor, String endAnchor, String replacement) throws IOException {
+        requireCurrentWriterForMutation();
         ResolvedFilePath target = resolveTextFile(path);
         rejectReservedOutputMutation(target);
         recordActiveRuntimePath(target);
@@ -326,6 +341,16 @@ public class AgentFileToolService {
             end.lineNumber() - start.lineNumber() + 1,
             replacementLines.size()
         );
+    }
+
+    private void requireCurrentWriterForMutation() {
+        OrchestrationTaskContext context = OrchestrationTaskContextHolder.current();
+        if (context == null || context.taskRunLocation() == null) return;
+        if (taskRunLifecycleService == null || context.writerCapability() == null) {
+            throw new TaskRunLifecycleService.StaleWriterException(
+                "Task-run file mutation requires a current writer capability");
+        }
+        taskRunLifecycleService.requireCurrentWriter(context.writerCapability());
     }
 
     private ResolvedFilePath resolveExisting(String path) throws IOException {

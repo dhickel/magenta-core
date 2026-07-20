@@ -64,6 +64,12 @@ Execution payloads (`AssignmentRequest` and equivalent submission DTOs) carry `w
 
 Canonical identity (`agent/<id>` or `user/<name>`) is derived internally and persisted alongside the pair. Clients never submit canonical identity.
 
+### Run Lifecycle Operations
+
+Task, workflow, job, and agent-assignment submission payloads accept an optional `operationKey`. If omitted, the server generates and persists a unique key for that submission. Repeating the same operation type/key with the same canonical request returns the recorded assignment/run identity; a different digest is a conflict. Assignment responses expose lifecycle facts in the secret-free checkpoint (`taskRunId`, `nativeRunId`, `lifecycleOperationKey`, `attemptNumber`, and applicable lineage), while task/workflow submission SSE events include `taskRunId` and `operationKey`. No response exposes paths, lease owners, fence values, or writer tokens.
+
+Agent assignments support `POST /api/agents/{agentId}/assignments/{assignmentId}/retry` and `/replay` with optional `{ "operationKey": "..." }`. Resume continues to use the existing `/resume` endpoint: it reuses the native/task-run id and opens a new attempt. Retry/replay create a new assignment and native/task-run id with `RETRY_OF` or `REPLAY_OF` lineage.
+
 ### Absent Routes
 
 The following route families are absent from the active API, not deprecated:

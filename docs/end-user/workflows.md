@@ -70,7 +70,7 @@ The workspace selector controls which workspace receives output files. By defaul
 
 The **Recent Runs** table shows workflow run ID, status, current node, start time, and action. Runs in `WAITING` state can be resumed from the table when the workflow runtime allows it. Approval and wait messages may also appear in `/inbox`.
 
-Workflow run state is kept while a run is waiting so resume can continue the same run. During execution, outputs publish directly beneath the effective workspace's `outputs/` directory with collision-safe normalized names.
+Workflow run state is kept while a run is waiting so resume continues the same run in a new fenced attempt. Operator retry or replay creates a separate linked run instead of changing the original. Each task node has its own linked sibling run identity. During execution, outputs currently publish directly beneath the effective workspace's `outputs/` directory with collision-safe normalized names.
 
 ## Common Errors
 

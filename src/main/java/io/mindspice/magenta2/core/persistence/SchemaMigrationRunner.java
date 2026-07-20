@@ -47,25 +47,37 @@ public final class SchemaMigrationRunner {
     private static final String MIGRATION_PATH = "classpath*:db/migrations/*.sql";
     private static final String FRESH_SCHEMA_PATH = "classpath:schema.sql";
     private static final Pattern MIGRATION_NAME = Pattern.compile("^(\\d{3})-([a-z0-9]+(?:-[a-z0-9]+)*)\\.sql$");
-    private static final List<String> FOUNDATION_TABLES = List.of(
+    private static final List<String> FOUNDATION_TABLES_V1 = List.of(
             "task_run_locations", "task_run_attempts", "task_run_idempotent_ops",
             "task_run_native_links", "task_run_writer_claims");
-    private static final Set<String> FOUNDATION_INDEXES = Set.of(
+    private static final List<String> FOUNDATION_TABLES_V2 = List.of(
+            "task_run_locations", "task_run_attempts", "task_run_idempotent_ops",
+            "task_run_native_links", "assignment_fence_generations", "writer_claim_generations",
+            "task_run_links");
+    private static final Set<String> FOUNDATION_INDEXES_V1 = Set.of(
             "idx_task_run_locations_workspace", "idx_task_run_locations_source",
             "idx_task_run_attempts_status", "idx_task_run_native_links_assignment",
             "idx_task_run_native_links_workflow_child", "idx_task_run_native_links_job_work_item");
+    private static final Set<String> FOUNDATION_INDEXES_V2 = Set.of(
+            "idx_writer_claim_generations_current", "idx_task_run_links_child");
+
     private static final Map<String, List<String>> FOUNDATION_COLUMNS = Map.of(
             "task_run_locations", List.of("task_run_id", "source_kind", "source_id", "workspace_type",
                     "workspace_key", "workspace_identity", "task_path_key", "root_relative_path",
-                    "created_at", "updated_at"),
+                    "lineage_parent_task_run_id", "lineage_mode", "created_at", "updated_at"),
             "task_run_attempts", List.of("task_run_id", "attempt_number", "status", "started_at",
                     "completed_at", "error_text", "created_at", "updated_at"),
-            "task_run_idempotent_ops", List.of("operation_key", "request_digest", "task_run_id",
-                    "result_json", "created_at", "updated_at"),
+            "task_run_idempotent_ops", List.of("id", "operation_type", "operation_key", "request_digest",
+                    "operation_state", "task_run_id", "result_json", "created_at", "updated_at"),
             "task_run_native_links", List.of("task_run_id", "native_kind", "native_run_id",
                     "assignment_id", "workflow_child_id", "job_work_item_id", "created_at"),
             "task_run_writer_claims", List.of("task_run_id", "attempt_number", "claim_generation",
-                    "owner_id", "fence_token", "created_at"));
+                    "owner_id", "fence_token", "created_at"),
+            "assignment_fence_generations", List.of("assignment_id", "generation", "owner_id", "claimed_at"),
+            "writer_claim_generations", List.of("task_run_id", "attempt_number", "generation", "owner_id",
+                    "fence_token", "is_current", "superseded_at", "created_at"),
+            "task_run_links", List.of("parent_task_run_id", "child_task_run_id", "link_type",
+                    "link_key", "created_at"));
 
     private final DataSource dataSource;
     private final JdbcTemplate jdbcTemplate;
@@ -111,10 +123,22 @@ public final class SchemaMigrationRunner {
             statement.execute("pragma busy_timeout = 30000");
             statement.execute("begin immediate");
             try {
-                initializeFreshSchema(connection);
+                boolean freshInit = initializeFreshSchema(connection);
                 ensureMigrationTable(connection);
                 validateMigrationTable(connection);
+                if (freshInit) {
+                    // schema.sql is the canonical end-state; mark all migrations as applied
+                    for (MigrationResource resource : resources) {
+                        insertApplied(connection, resource);
+                    }
+                }
                 Map<Integer, AppliedMigration> applied = readApplied(connection);
+                if (!freshInit && applied.isEmpty() && matchesCompleteLatestSchema(connection, resources)) {
+                    for (MigrationResource resource : resources) {
+                        insertApplied(connection, resource);
+                    }
+                    applied = readApplied(connection);
+                }
                 validateBookkeeping(resources, applied);
                 for (MigrationResource resource : resources) {
                     if (applied.containsKey(resource.version())) {
@@ -187,14 +211,14 @@ public final class SchemaMigrationRunner {
         }
     }
 
-    private void initializeFreshSchema(Connection connection) throws SQLException {
+    private boolean initializeFreshSchema(Connection connection) throws SQLException {
         try (Statement statement = connection.createStatement();
              ResultSet rows = statement.executeQuery("""
                      select count(*) from sqlite_master
                      where type = 'table' and name not like 'sqlite_%'
                      """)) {
             if (!rows.next() || rows.getInt(1) != 0) {
-                return;
+                return false;
             }
         }
         Resource schema = resourceResolver.getResource(FRESH_SCHEMA_PATH);
@@ -204,6 +228,18 @@ public final class SchemaMigrationRunner {
         log.info("Initializing fresh schema from {}", FRESH_SCHEMA_PATH);
         ScriptUtils.executeSqlScript(connection,
                 new EncodedResource(schema, StandardCharsets.UTF_8));
+        return true;
+    }
+
+    private boolean matchesCompleteLatestSchema(Connection connection,
+                                                List<MigrationResource> resources) throws SQLException {
+        if (resources.isEmpty()) return false;
+        try {
+            validateOwnedSchema(connection, resources.getLast().version());
+            return true;
+        } catch (MigrationException incomplete) {
+            return false;
+        }
     }
 
     private void ensureMigrationTable(Connection connection) throws SQLException {
@@ -284,9 +320,21 @@ public final class SchemaMigrationRunner {
         if (latestVersion < 1) {
             return;
         }
-        for (String table : FOUNDATION_TABLES) {
+        List<String> expectedTables = latestVersion >= 2 ? FOUNDATION_TABLES_V2 : FOUNDATION_TABLES_V1;
+        for (String table : expectedTables) {
             List<String> actual = tableColumns(connection, table);
-            if (!actual.equals(FOUNDATION_COLUMNS.get(table))) {
+            List<String> expectedCols = FOUNDATION_COLUMNS.get(table);
+            if (latestVersion == 1 && "task_run_idempotent_ops".equals(table)) {
+                expectedCols = List.of("operation_key", "request_digest", "task_run_id",
+                        "result_json", "created_at", "updated_at");
+            }
+            if (latestVersion == 1 && "task_run_locations".equals(table)) {
+                expectedCols = expectedCols.stream()
+                        .filter(column -> !column.equals("lineage_parent_task_run_id")
+                                && !column.equals("lineage_mode"))
+                        .toList();
+            }
+            if (expectedCols != null && !actual.containsAll(expectedCols)) {
                 throw new MigrationException("Incompatible partial table " + table + ": " + actual);
             }
         }
@@ -301,10 +349,16 @@ public final class SchemaMigrationRunner {
             throw new MigrationException("task_run_attempts is missing key or ownership constraints");
         }
         String operations = normalized(tableSql(connection, "task_run_idempotent_ops"));
-        if (!operations.contains("operation_key text primary key")
+        boolean operationsValid = latestVersion >= 2
+                ? operations.contains("operation_type text check")
+                    && operations.contains("unique (operation_type, operation_key)")
+                    && operations.contains("operation_state text not null")
+                    && operations.contains("'reserved', 'completed'")
+                : operations.contains("operation_key text primary key");
+        if (!operationsValid
                 || !operations.contains("length(request_digest) = 64")
                 || !operations.contains("references task_run_locations(task_run_id)")) {
-            throw new MigrationException("task_run_idempotent_ops is missing digest or ownership constraints");
+            throw new MigrationException("task_run_idempotent_ops is missing scoped digest or ownership constraints");
         }
         String links = normalized(tableSql(connection, "task_run_native_links"));
         if (!links.contains("unique (native_kind, native_run_id)")
@@ -313,17 +367,38 @@ public final class SchemaMigrationRunner {
                 || !links.contains("job_work_item_id is null or native_kind = 'job'")) {
             throw new MigrationException("task_run_native_links is missing explicit linkage constraints");
         }
-        String claims = normalized(tableSql(connection, "task_run_writer_claims"));
-        if (!claims.contains("primary key (task_run_id, attempt_number, claim_generation)")
-                || !claims.contains("claim_generation > 0")
-                || !claims.contains("fence_token text not null unique")
-                || !claims.contains("references task_run_attempts(task_run_id, attempt_number) on delete cascade")) {
-            throw new MigrationException("task_run_writer_claims is missing monotonic fence constraints");
+        if (latestVersion == 1) {
+            String claims = normalized(tableSql(connection, "task_run_writer_claims"));
+            if (!claims.contains("primary key (task_run_id, attempt_number, claim_generation)")
+                    || !claims.contains("claim_generation > 0")
+                    || !claims.contains("fence_token text not null unique")
+                    || !claims.contains("references task_run_attempts(task_run_id, attempt_number) on delete cascade")) {
+                throw new MigrationException("task_run_writer_claims is missing monotonic fence constraints");
+            }
         }
-        Set<String> indexes = objectNames(connection, "index", "idx_task_run_%");
-        if (!indexes.containsAll(FOUNDATION_INDEXES)) {
-            throw new MigrationException("Missing migration-owned indexes: "
-                    + FOUNDATION_INDEXES.stream().filter(index -> !indexes.contains(index)).toList());
+        if (latestVersion >= 2) {
+            String fenceGens = normalized(tableSql(connection, "assignment_fence_generations"));
+            if (!fenceGens.contains("primary key (assignment_id, generation)")
+                    || !fenceGens.contains("generation > 0")
+                    || !fenceGens.contains("references work_assignments(id)")) {
+                throw new MigrationException("assignment_fence_generations is missing required constraints");
+            }
+            String claimGens = normalized(tableSql(connection, "writer_claim_generations"));
+            if (!claimGens.contains("primary key (task_run_id, attempt_number, generation)")
+                    || !claimGens.contains("unique (task_run_id, generation)")
+                    || !claimGens.contains("is_current in (0, 1)")
+                    || !claimGens.contains("references task_run_attempts(task_run_id, attempt_number) on delete cascade")) {
+                throw new MigrationException("writer_claim_generations is missing required constraints");
+            }
+        }
+        Set<String> allIndexes = objectNames(connection, "index", "idx_%");
+        if (!allIndexes.containsAll(FOUNDATION_INDEXES_V1)) {
+            throw new MigrationException("Missing migration-owned v1 indexes: "
+                    + FOUNDATION_INDEXES_V1.stream().filter(index -> !allIndexes.contains(index)).toList());
+        }
+        if (latestVersion >= 2 && !allIndexes.containsAll(FOUNDATION_INDEXES_V2)) {
+            throw new MigrationException("Missing migration-owned v2 indexes: "
+                    + FOUNDATION_INDEXES_V2.stream().filter(index -> !allIndexes.contains(index)).toList());
         }
     }
 

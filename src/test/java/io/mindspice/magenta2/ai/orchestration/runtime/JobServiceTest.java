@@ -84,7 +84,7 @@ class JobServiceTest {
             "JOB_RUN",
             null,
             null,
-            null));
+            null, null, null, null, null));
         try {
             JobRun run = service.startRun(saved.id(), "agent-1", null, "assignment-user");
             assertThat(run.workspaceIdentity()).isEqualTo("user/shared");

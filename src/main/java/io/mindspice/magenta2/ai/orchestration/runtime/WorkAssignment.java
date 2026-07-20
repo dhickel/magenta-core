@@ -25,6 +25,7 @@ public record WorkAssignment(
     String errorText,
     String leaseOwner,
     Instant leaseExpiresAt,
+    long leaseFence,
     Instant createdAt,
     Instant updatedAt,
     Instant startedAt,
@@ -32,6 +33,45 @@ public record WorkAssignment(
     Instant lastProgressAt,
     Instant lastHeartbeatAt
 ) {
+    // Full constructor matching the old canonical shape (27 args without leaseFence,
+    // defaults leaseFence to 0).
+    public WorkAssignment(
+        String id,
+        String agentId,
+        String jobId,
+        String jobItemId,
+        AssignmentType assignmentType,
+        String runDisplayName,
+        int priority,
+        OrchestrationStatus status,
+        String modelOverride,
+        String workspaceType,
+        String workspaceKey,
+        String workspaceIdentity,
+        String projectId,
+        int currentItemIndex,
+        Map<String, Object> checkpoint,
+        Map<String, Object> input,
+        Map<String, Object> output,
+        Map<String, Object> evidence,
+        String errorText,
+        String leaseOwner,
+        Instant leaseExpiresAt,
+        Instant createdAt,
+        Instant updatedAt,
+        Instant startedAt,
+        Instant completedAt,
+        Instant lastProgressAt,
+        Instant lastHeartbeatAt
+    ) {
+        this(
+            id, agentId, jobId, jobItemId, assignmentType, runDisplayName, priority, status, modelOverride,
+            workspaceType, workspaceKey, workspaceIdentity, projectId, currentItemIndex, checkpoint, input, output,
+            evidence, errorText, leaseOwner, leaseExpiresAt, 0L, createdAt, updatedAt, startedAt, completedAt,
+            lastProgressAt, lastHeartbeatAt
+        );
+    }
+
     public WorkAssignment(
         String id,
         String agentId,

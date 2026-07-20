@@ -18,12 +18,15 @@ import io.mindspice.magenta2.ai.chat.model.ChatPlanState;
 import io.mindspice.magenta2.ai.chat.model.PlanMode;
 import io.mindspice.magenta2.ai.chat.rendering.ChatMarkdownRenderer;
 import io.mindspice.magenta2.ai.chat.repository.ChatSessionMetadataRepository;
+import io.mindspice.magenta2.ai.orchestration.runtime.LifecycleReservationRequest;
 import io.mindspice.magenta2.ai.orchestration.runtime.OrchestrationTaskContext;
 import io.mindspice.magenta2.ai.orchestration.runtime.OrchestrationTaskContextHolder;
+import io.mindspice.magenta2.ai.orchestration.runtime.TaskRunLifecycleService;
 import io.mindspice.magenta2.ai.orchestration.settings.RuntimeSettingsService;
 import io.mindspice.magenta2.ai.orchestration.workspaces.OutputArtifactContext;
 import io.mindspice.magenta2.ai.orchestration.workspaces.OutputArtifactService;
 import io.mindspice.magenta2.ai.orchestration.workspaces.RootRelativePathService;
+import io.mindspice.magenta2.ai.orchestration.workspaces.TaskSourceKind;
 import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspacePathLayout;
 import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceDirectoryService;
 import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceKind;
@@ -58,10 +61,11 @@ public class PlanService {
     private final OutputArtifactService outputArtifactService;
     private final RootRelativePathService rootRelativePathService;
     private final RuntimeSettingsService runtimeSettingsService;
+    private final TaskRunLifecycleService taskRunLifecycleService;
     private final Map<String, String> executionRunsByConversationId = new ConcurrentHashMap<>();
 
     public PlanService(PlanRepository planRepository, ChatMemoryRepository chatMemoryRepository) {
-        this(planRepository, chatMemoryRepository, null, new ChatMarkdownRenderer(), null, null, null, null);
+        this(planRepository, chatMemoryRepository, null, new ChatMarkdownRenderer(), null, null, null, null, null);
     }
 
     // Used by tests that need session metadata and markdown rendering
@@ -71,7 +75,7 @@ public class PlanService {
         ChatSessionMetadataRepository chatSessionMetadataRepository,
         ChatMarkdownRenderer markdownRenderer
     ) {
-        this(planRepository, chatMemoryRepository, chatSessionMetadataRepository, markdownRenderer, null, null, null, null);
+        this(planRepository, chatMemoryRepository, chatSessionMetadataRepository, markdownRenderer, null, null, null, null, null);
     }
 
     public PlanService(
@@ -83,7 +87,7 @@ public class PlanService {
         OutputArtifactService outputArtifactService
     ) {
         this(planRepository, chatMemoryRepository, chatSessionMetadataRepository, markdownRenderer,
-            workspaceDirectoryService, outputArtifactService, null, null);
+            workspaceDirectoryService, outputArtifactService, null, null, null);
     }
 
     @Autowired
@@ -95,7 +99,8 @@ public class PlanService {
         @Autowired(required = false) WorkspaceDirectoryService workspaceDirectoryService,
         @Autowired(required = false) OutputArtifactService outputArtifactService,
         @Autowired(required = false) RootRelativePathService rootRelativePathService,
-        @Autowired(required = false) RuntimeSettingsService runtimeSettingsService
+        @Autowired(required = false) RuntimeSettingsService runtimeSettingsService,
+        @Autowired(required = false) TaskRunLifecycleService taskRunLifecycleService
     ) {
         this.planRepository = planRepository;
         this.chatMemoryRepository = chatMemoryRepository;
@@ -107,6 +112,7 @@ public class PlanService {
             ? rootRelativePathService
             : workspaceDirectoryService == null ? null : new RootRelativePathService(workspaceDirectoryService);
         this.runtimeSettingsService = runtimeSettingsService;
+        this.taskRunLifecycleService = taskRunLifecycleService;
     }
 
     // ════════════════════════════════════════════════════════════════
@@ -897,12 +903,35 @@ public class PlanService {
             throw new IllegalArgumentException("Missing required input(s): " + String.join(", ", missing));
         }
         Instant now = Instant.now();
-        String runId = UUID.randomUUID().toString();
+        boolean usesReservedRun = context != null && context.taskRunLocation() != null
+            && context.taskRunLocation().taskIdentity().sourceKind() == TaskSourceKind.TASK
+            && definition.id().equals(context.taskRunLocation().taskIdentity().stableId());
+        String runId = usesReservedRun
+            ? context.taskRunLocation().taskRunId() : UUID.randomUUID().toString();
         String runDisplayName = context == null ? null : context.runDisplayName();
+        if (usesReservedRun) {
+            PlanRun existing = planRepository.findRun(runId).orElse(null);
+            if (existing != null) return existing;
+        }
 
         String workspaceType = context != null ? context.workspaceType() : null;
         String workspaceKey = context != null ? context.workspaceKey() : null;
         String workspaceIdentity = context != null ? context.workspaceIdentity() : null;
+
+        // Top-level assignments arrive with a submission-reserved native run id.
+        // Direct/child calls receive a unique operation key so identical inputs are
+        // still independent submissions.
+        if (!usesReservedRun && taskRunLifecycleService != null && context != null
+                && workspaceType != null && workspaceKey != null) {
+            WorkspaceKind kind = WorkspaceKind.fromToken(workspaceType);
+            if (kind == WorkspaceKind.CHAT) {
+                throw new IllegalArgumentException("CHAT workspaces are not task-selectable");
+            }
+            String inputDigest = taskRunLifecycleService.canonicalInputDigest(cleanInputs);
+            taskRunLifecycleService.reserve(LifecycleReservationRequest.reuseNative(
+                    "plan-submission:" + UUID.randomUUID(), TaskSourceKind.TASK, definition.id(),
+                    kind, workspaceKey, runId, context.jobAssignmentId(), inputDigest));
+        }
 
         return planRepository.saveRun(new PlanRun(
             runId,

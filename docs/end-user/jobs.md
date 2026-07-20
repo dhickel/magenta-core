@@ -73,7 +73,7 @@ Saved jobs expose two operational actions:
 
 The submit form shows the job's saved project. Project association is metadata and membership context only.
 
-During execution, outputs publish directly beneath the effective workspace's `outputs/` directory with collision-safe normalized names. No run-owned directory hierarchy is created. Durable attribution remains queryable through `/api/outputs`.
+Before dispatch, Magenta reserves a stable job run identity. Each plan or workflow work item receives its own linked sibling run, so retry/recovery cannot alias the assignment or parent job. Operator retry/replay creates a new lineage-linked run; resume reuses the current run with a new attempt. During execution, published outputs currently remain beneath the effective workspace's `outputs/` directory with collision-safe normalized names. Durable attribution remains queryable through `/api/outputs`.
 
 Recurring jobs also start by creating job assignments. Use the run panel to confirm the assignment id and job run id after a recurrence fires.
 

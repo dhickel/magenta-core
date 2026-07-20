@@ -75,6 +75,8 @@ Finalize changes the plan status from draft to approved. It does not execute the
 
 ## Submit To Agent
 
+Each submission reserves a distinct run before the agent starts. Transport retries can reuse the submission operation key, but two intentional submissions with identical inputs remain separate runs. Resume keeps the same run and opens a new attempt; operator retry/replay creates a linked sibling run.
+
 1. Open an existing plan.
 2. Select **Submit to Agent**.
 3. Choose an agent.

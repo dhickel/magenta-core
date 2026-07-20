@@ -21,11 +21,13 @@ import io.mindspice.magenta2.ai.orchestration.workflow.WorkflowRun;
 import io.mindspice.magenta2.ai.orchestration.workflow.WorkflowService;
 import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceDescriptor;
 import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceDirectoryService;
+import io.mindspice.magenta2.ai.orchestration.workspaces.TaskSourceKind;
 import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceKind;
 import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceResolutionException;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
 @Service
@@ -38,6 +40,7 @@ public class AssignmentService {
     private final PlanService planService;
     private final WorkflowService workflowService;
     private final WorkspaceDirectoryService workspaceDirectoryService;
+    private final TaskRunLifecycleService taskRunLifecycleService;
     private volatile Consumer<String> localInterruptHandler = ignored -> { };
 
     public AssignmentService(
@@ -46,7 +49,21 @@ public class AssignmentService {
         RuntimeSettingsService runtimeSettingsService,
         JobService jobService
     ) {
-        this(repository, agentProfileService, runtimeSettingsService, jobService, null, null, null, null);
+        this(repository, agentProfileService, runtimeSettingsService, jobService, null, null, null, null, null);
+    }
+
+    public AssignmentService(
+        OrchestrationRuntimeRepository repository,
+        AgentProfileService agentProfileService,
+        RuntimeSettingsService runtimeSettingsService,
+        JobService jobService,
+        AuditRepository auditRepository,
+        PlanService planService,
+        WorkflowService workflowService,
+        WorkspaceDirectoryService workspaceDirectoryService
+    ) {
+        this(repository, agentProfileService, runtimeSettingsService, jobService, auditRepository,
+            planService, workflowService, workspaceDirectoryService, null);
     }
 
     @Autowired
@@ -58,7 +75,8 @@ public class AssignmentService {
         @Autowired(required = false) AuditRepository auditRepository,
         @Autowired(required = false) PlanService planService,
         @Autowired(required = false) WorkflowService workflowService,
-        @Autowired(required = false) WorkspaceDirectoryService workspaceDirectoryService
+        @Autowired(required = false) WorkspaceDirectoryService workspaceDirectoryService,
+        @Autowired(required = false) TaskRunLifecycleService taskRunLifecycleService
     ) {
         this.repository = repository;
         this.agentProfileService = agentProfileService;
@@ -68,8 +86,10 @@ public class AssignmentService {
         this.planService = planService;
         this.workflowService = workflowService;
         this.workspaceDirectoryService = workspaceDirectoryService;
+        this.taskRunLifecycleService = taskRunLifecycleService;
     }
 
+    @Transactional
     public WorkAssignment create(AssignmentRequest request) {
         return create(UUID.randomUUID().toString(), request);
     }
@@ -108,7 +128,7 @@ public class AssignmentService {
             selection.workspaceKey(),
             input
         ));
-        return repository.saveAssignment(new WorkAssignment(
+        WorkAssignment assignment = repository.saveAssignment(new WorkAssignment(
             assignmentId,
             request.agentId(),
             normalize(request.jobId()),
@@ -137,6 +157,75 @@ public class AssignmentService {
             null,
             null
         ));
+        return reserveLifecycleAtSubmission(assignment, request.operationKey());
+    }
+
+    private WorkAssignment reserveLifecycleAtSubmission(WorkAssignment assignment, String requestedOperationKey) {
+        if (taskRunLifecycleService == null || !isTaskRunAssignment(assignment.assignmentType())) {
+            return assignment;
+        }
+        TaskSourceKind sourceKind = sourceKind(assignment.assignmentType());
+        String sourceId = sourceId(assignment);
+        String operationKey = StringUtils.hasText(requestedOperationKey)
+            ? requestedOperationKey.trim() : "submission:" + UUID.randomUUID();
+        String nativeRunId = UUID.randomUUID().toString();
+        String inputDigest = taskRunLifecycleService.canonicalInputDigest(Map.of(
+            "assignmentType", assignment.assignmentType().name(),
+            "sourceId", sourceId,
+            "workspaceType", assignment.workspaceType(),
+            "workspaceKey", assignment.workspaceKey(),
+            "input", assignment.input()
+        ));
+        LifecycleResult lifecycle = taskRunLifecycleService.reserve(
+            LifecycleReservationRequest.reuseNative(operationKey, sourceKind, sourceId,
+                WorkspaceKind.fromToken(assignment.workspaceType()), assignment.workspaceKey(),
+                nativeRunId, assignment.id(), inputDigest));
+
+        String owningAssignmentId = taskRunLifecycleService.findAssignmentId(lifecycle.taskRunId());
+        if (!assignment.id().equals(owningAssignmentId)) {
+            repository.deleteAssignment(assignment.agentId(), assignment.id());
+            return get(owningAssignmentId);
+        }
+        Map<String, Object> checkpoint = new LinkedHashMap<>();
+        checkpoint.put("taskRunId", lifecycle.taskRunId());
+        checkpoint.put("nativeRunId", lifecycle.nativeRunId());
+        checkpoint.put("lifecycleOperationKey", lifecycle.operationKey());
+        checkpoint.put("lifecycleInputDigest", inputDigest);
+        checkpoint.put("attemptNumber", lifecycle.attemptNumber());
+        return repository.saveAssignment(copy(assignment, assignment.status(), assignment.currentItemIndex(),
+            checkpoint, assignment.output(), assignment.evidence(), assignment.errorText(),
+            assignment.leaseOwner(), assignment.leaseExpiresAt(), assignment.completedAt()));
+    }
+
+    private boolean isTaskRunAssignment(AssignmentType type) {
+        return type == AssignmentType.TASK_RUN || type == AssignmentType.WORKFLOW_RUN || type == AssignmentType.JOB_RUN;
+    }
+
+    private TaskSourceKind sourceKind(AssignmentType type) {
+        return switch (type) {
+            case TASK_RUN -> TaskSourceKind.TASK;
+            case WORKFLOW_RUN -> TaskSourceKind.WORKFLOW;
+            case JOB_RUN -> TaskSourceKind.JOB;
+            default -> throw new IllegalArgumentException("Assignment has no task-run lifecycle: " + type);
+        };
+    }
+
+    private String sourceId(WorkAssignment assignment) {
+        return switch (assignment.assignmentType()) {
+            case TASK_RUN -> requireSourceId(assignment.input(), "taskId", "planId");
+            case WORKFLOW_RUN -> requireSourceId(assignment.input(), "workflowId");
+            case JOB_RUN -> StringUtils.hasText(assignment.jobId())
+                ? assignment.jobId() : requireSourceId(assignment.input(), "jobId");
+            default -> throw new IllegalArgumentException("Assignment has no native source");
+        };
+    }
+
+    private String requireSourceId(Map<String, Object> input, String... keys) {
+        for (String key : keys) {
+            String value = text(input.get(key));
+            if (StringUtils.hasText(value)) return value.trim();
+        }
+        throw new IllegalArgumentException("Executable assignment is missing its native source id");
     }
 
     // ── Centralized workspace selection ──
@@ -299,7 +388,83 @@ public class AssignmentService {
             && current.status() != OrchestrationStatus.WAITING) {
             throw new IllegalStateException("Assignment is not resumable: " + current.id());
         }
+        if (taskRunLifecycleService != null && isTaskRunAssignment(current.assignmentType())) {
+            String taskRunId = text(current.checkpoint().get("taskRunId"));
+            if (!StringUtils.hasText(taskRunId)) {
+                throw new IllegalStateException("Legacy assignment has no resumable lifecycle identity: " + current.id());
+            }
+            int currentAttempt = integer(current.checkpoint().get("attemptNumber"),
+                taskRunLifecycleService.currentAttemptNumber(taskRunId));
+            String operationKey = "assignment-resume:" + current.id() + ":" + currentAttempt;
+            String inputDigest = taskRunLifecycleService.canonicalInputDigest(Map.of(
+                "assignmentId", current.id(), "taskRunId", taskRunId, "fromAttempt", currentAttempt));
+            LifecycleResult resumed = taskRunLifecycleService.resume(
+                new LifecycleResumeRequest(operationKey, taskRunId, inputDigest));
+            Map<String, Object> checkpoint = new LinkedHashMap<>(current.checkpoint());
+            checkpoint.put("lifecycleOperationKey", resumed.operationKey());
+            checkpoint.put("lifecycleInputDigest", inputDigest);
+            checkpoint.put("attemptNumber", resumed.attemptNumber());
+            current = copy(current, current.status(), current.currentItemIndex(), checkpoint,
+                current.output(), current.evidence(), current.errorText(), current.leaseOwner(),
+                current.leaseExpiresAt(), current.completedAt());
+        }
         return saveStatus(current, OrchestrationStatus.QUEUED);
+    }
+
+    public WorkAssignment retry(String agentId, String assignmentId, String operationKey) {
+        return createLineage(requireAgentAssignment(agentId, assignmentId),
+            RunLineageMode.RETRY_OF, operationKey);
+    }
+
+    public WorkAssignment replay(String agentId, String assignmentId, String operationKey) {
+        return createLineage(requireAgentAssignment(agentId, assignmentId),
+            RunLineageMode.REPLAY_OF, operationKey);
+    }
+
+    @Transactional
+    WorkAssignment createLineage(WorkAssignment source, RunLineageMode mode, String requestedOperationKey) {
+        if (!isTaskRunAssignment(source.assignmentType())) {
+            throw new IllegalArgumentException("Assignment has no task-run lineage: " + source.id());
+        }
+        String parentTaskRunId = text(source.checkpoint().get("taskRunId"));
+        if (!StringUtils.hasText(parentTaskRunId)) {
+            throw new IllegalStateException("Legacy assignment has no lineage identity: " + source.id());
+        }
+        if (!source.status().isTerminal() && source.status() != OrchestrationStatus.INTERRUPTED) {
+            throw new IllegalStateException("Only terminal or interrupted assignments can be retried or replayed");
+        }
+        String newAssignmentId = UUID.randomUUID().toString();
+        WorkAssignment child = repository.saveAssignment(new WorkAssignment(
+            newAssignmentId, source.agentId(), source.jobId(), source.jobItemId(), source.assignmentType(),
+            source.runDisplayName(), source.priority(), OrchestrationStatus.QUEUED, source.modelOverride(),
+            source.workspaceType(), source.workspaceKey(), source.workspaceIdentity(), source.projectId(),
+            0, Map.of(), source.input(), Map.of(), Map.of(), null, null, null, 0L,
+            null, null, null, null, null, null));
+        String key = StringUtils.hasText(requestedOperationKey)
+            ? requestedOperationKey.trim() : mode.name().toLowerCase() + ":" + UUID.randomUUID();
+        String digest = taskRunLifecycleService.canonicalInputDigest(Map.of(
+            "mode", mode.name(), "parentTaskRunId", parentTaskRunId,
+            "workspaceIdentity", source.workspaceIdentity(), "input", source.input()));
+        String nativeRunId = UUID.randomUUID().toString();
+        LifecycleLineageRequest request = new LifecycleLineageRequest(key, parentTaskRunId, mode,
+            nativeRunId, nativeRunId, newAssignmentId, digest);
+        LifecycleResult lifecycle = mode == RunLineageMode.RETRY_OF
+            ? taskRunLifecycleService.retry(request) : taskRunLifecycleService.replay(request);
+        String owningAssignmentId = taskRunLifecycleService.findAssignmentId(lifecycle.taskRunId());
+        if (!newAssignmentId.equals(owningAssignmentId)) {
+            repository.deleteAssignment(source.agentId(), newAssignmentId);
+            return get(owningAssignmentId);
+        }
+        Map<String, Object> checkpoint = new LinkedHashMap<>();
+        checkpoint.put("taskRunId", lifecycle.taskRunId());
+        checkpoint.put("nativeRunId", lifecycle.nativeRunId());
+        checkpoint.put("lifecycleOperationKey", lifecycle.operationKey());
+        checkpoint.put("lifecycleInputDigest", digest);
+        checkpoint.put("attemptNumber", lifecycle.attemptNumber());
+        checkpoint.put("lineageParentTaskRunId", parentTaskRunId);
+        checkpoint.put("lineageMode", mode.name());
+        return repository.saveAssignment(copy(child, child.status(), 0, checkpoint, Map.of(), Map.of(),
+            null, null, null, null));
     }
 
     WorkAssignment forceInterrupt(String assignmentId, String reason) {
@@ -318,7 +483,12 @@ public class AssignmentService {
             throw new IllegalStateException("Assignment is not force-interruptible: " + current.id());
         }
         String operatorReason = StringUtils.hasText(reason) ? reason.trim() : "operator requested force interrupt";
-        boolean updated = repository.forceInterruptAssignment(current.id(), "Force interrupted: " + operatorReason);
+        boolean updated = repository.forceInterruptAssignmentFenced(current.id(), current.leaseOwner(),
+            current.leaseFence(), "Force interrupted: " + operatorReason);
+        if (updated && taskRunLifecycleService != null) {
+            taskRunLifecycleService.interruptCurrentWriterForAssignment(current.id(),
+                "Force interrupted: " + operatorReason);
+        }
         localInterruptHandler.accept(current.id());
         return updated ? get(current.id()) : get(current.id());
     }
@@ -396,13 +566,22 @@ public class AssignmentService {
         return runtimeSettingsService.resolveModel(key, null);
     }
 
-    WorkAssignment save(WorkAssignment assignment) {
+    // Private: all external mutation must go through fenced paths or
+    // public lifecycle methods that validate state transitions.
+    private WorkAssignment save(WorkAssignment assignment) {
         return repository.saveAssignment(assignment);
     }
 
     WorkAssignment saveIfLeaseOwner(WorkAssignment assignment, String leaseOwner) {
         return repository.saveAssignmentIfLeaseOwner(assignment, leaseOwner)
-            .orElseGet(() -> repository.findAssignment(assignment.id()).orElse(assignment));
+            .orElseThrow(() -> new StaleAssignmentLeaseException(
+                "Assignment lease is stale: " + assignment.id()));
+    }
+
+    public static final class StaleAssignmentLeaseException extends RuntimeException {
+        public StaleAssignmentLeaseException(String message) {
+            super(message);
+        }
     }
 
     public AssignmentSummary summary(String assignmentId) {
@@ -468,7 +647,8 @@ public class AssignmentService {
             assignment.workspaceIdentity(), assignment.projectId(),
             currentItemIndex, checkpoint == null ? Map.of() : checkpoint, assignment.input(),
             output == null ? Map.of() : output, evidence == null ? Map.of() : evidence, errorText,
-            leaseOwner, leaseExpiresAt, assignment.createdAt(), assignment.updatedAt(), assignment.startedAt(),
+            leaseOwner, leaseExpiresAt, assignment.leaseFence(),
+            assignment.createdAt(), assignment.updatedAt(), assignment.startedAt(),
             completedAt, assignment.lastProgressAt(), assignment.lastHeartbeatAt()
         );
     }
@@ -626,6 +806,11 @@ public class AssignmentService {
 
     private String text(Object value) {
         return value == null ? null : value.toString();
+    }
+
+    private int integer(Object value, int fallback) {
+        if (value == null) return fallback;
+        return value instanceof Number number ? number.intValue() : Integer.parseInt(value.toString());
     }
 
     private Duration age(Instant now, Instant instant) {

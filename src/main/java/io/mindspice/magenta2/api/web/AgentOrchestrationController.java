@@ -136,12 +136,14 @@ public class AgentOrchestrationController {
                 request.jobId(),
                 request.jobItemId(),
                 request.assignmentType(),
+                null,
                 request.priority(),
                 request.modelOverride(),
                 request.projectId(),
                 request.workspaceType(),
                 request.workspaceKey(),
-                request.input()
+                request.input(),
+                request.operationKey()
             ));
         } catch (IllegalArgumentException | IllegalStateException exception) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, exception.getMessage());
@@ -170,6 +172,28 @@ public class AgentOrchestrationController {
     public WorkAssignment resume(@PathVariable String agentId, @PathVariable String assignmentId) {
         try {
             return assignmentService.resume(agentId, assignmentId);
+        } catch (IllegalArgumentException | IllegalStateException exception) {
+            throw assignmentLifecycleException(exception);
+        }
+    }
+
+    @PostMapping("/assignments/{assignmentId}/retry")
+    public WorkAssignment retry(@PathVariable String agentId, @PathVariable String assignmentId,
+                                @RequestBody(required = false) RunOperationRequest request) {
+        try {
+            return assignmentService.retry(agentId, assignmentId,
+                request == null ? null : request.operationKey());
+        } catch (IllegalArgumentException | IllegalStateException exception) {
+            throw assignmentLifecycleException(exception);
+        }
+    }
+
+    @PostMapping("/assignments/{assignmentId}/replay")
+    public WorkAssignment replay(@PathVariable String agentId, @PathVariable String assignmentId,
+                                 @RequestBody(required = false) RunOperationRequest request) {
+        try {
+            return assignmentService.replay(agentId, assignmentId,
+                request == null ? null : request.operationKey());
         } catch (IllegalArgumentException | IllegalStateException exception) {
             throw assignmentLifecycleException(exception);
         }
@@ -392,6 +416,8 @@ public class AgentOrchestrationController {
 
     private record AgentChatEvent(String name, Map<String, Object> data) {}
 
+    public record RunOperationRequest(String operationKey) { }
+
     public record AgentChatRequest(String conversationId, String message, String model, String pageContext) {
     }
 
@@ -405,8 +431,18 @@ public class AgentOrchestrationController {
         String projectId,
         String workspaceType,
         String workspaceKey,
-        Map<String, Object> input
+        Map<String, Object> input,
+        String operationKey
     ) {
+        public AgentAssignmentCreateRequest(
+            String jobId, String jobItemId, AssignmentType assignmentType, Integer priority,
+            String modelOverride, String projectId, String workspaceType, String workspaceKey,
+            Map<String, Object> input
+        ) {
+            this(jobId, jobItemId, assignmentType, priority, modelOverride, projectId,
+                workspaceType, workspaceKey, input, null);
+        }
+
         public AgentAssignmentCreateRequest(
             String jobId,
             String jobItemId,
@@ -417,7 +453,7 @@ public class AgentOrchestrationController {
             Map<String, Object> input
         ) {
             this(jobId, jobItemId, assignmentType, priority, modelOverride, projectId,
-                null, null, input);
+                null, null, input, null);
         }
 
         public AgentAssignmentCreateRequest {

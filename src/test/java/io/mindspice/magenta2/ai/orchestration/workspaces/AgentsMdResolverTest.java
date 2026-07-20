@@ -133,7 +133,7 @@ class AgentsMdResolverTest {
             agentRoot.resolve("outputs").toString(),
             null,
             agentRoot.toString(),
-            null);
+            null, null, null, null, null);
 
         Optional<AgentsMdResolution> result = new AgentsMdResolver().resolveForContext(context, "nested/file.txt");
 
@@ -161,7 +161,7 @@ class AgentsMdResolverTest {
             workspaceRoot.resolve("runs/run-1/outputs").toString(),
             null,
             workspaceRoot.toString(),
-            null);
+            null, null, null, null, null);
 
         Optional<AgentsMdResolution> result = new AgentsMdResolver().resolveForContext(context, "docs/file.txt");
 

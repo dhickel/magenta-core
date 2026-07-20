@@ -169,12 +169,14 @@ public class JobController {
                 jobId,
                 null,
                 AssignmentType.JOB_RUN,
+                null,
                 request == null || request.priority() == null ? PUBLIC_SUBMIT_PRIORITY : request.priority(),
                 normalize(request == null ? null : request.modelOverride(), job.model()),
                 normalize(request == null ? null : request.projectId(), job.projectId()),
                 normalize(request == null ? null : request.workspaceType(), null),
                 normalize(request == null ? null : request.workspaceKey(), null),
-                Map.of("jobId", jobId)
+                Map.of("jobId", jobId),
+                normalize(request == null ? null : request.operationKey(), null)
             ));
         } catch (IllegalArgumentException e) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, e.getMessage());
@@ -285,15 +287,21 @@ public class JobController {
         String projectId,
         String workspaceType,
         String workspaceKey,
-        Integer priority
+        Integer priority,
+        String operationKey
     ) {
+        public JobRunRequest(String agentId, String modelOverride, String projectId,
+                             String workspaceType, String workspaceKey, Integer priority) {
+            this(agentId, modelOverride, projectId, workspaceType, workspaceKey, priority, null);
+        }
+
         public JobRunRequest(
             String agentId,
             String modelOverride,
             String projectId,
             Integer priority
         ) {
-            this(agentId, modelOverride, projectId, null, null, priority);
+            this(agentId, modelOverride, projectId, null, null, priority, null);
         }
     }
 

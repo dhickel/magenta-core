@@ -147,7 +147,7 @@ class AgentOperationalToolServiceTest {
             "TASK_RUN",
             null,
             "/tmp/run",
-            null);
+            null, null, null, null, null);
     }
 
     private AgentProfile profile(String id, List<String> approvedTools, AgentProfileStatus status) {

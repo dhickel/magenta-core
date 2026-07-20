@@ -125,7 +125,7 @@ public class OrchestrationRuntimeRepository {
         );
     }
 
-    public WorkAssignment saveAssignment(WorkAssignment assignment) {
+    WorkAssignment saveAssignment(WorkAssignment assignment) {
         Instant now = Instant.now();
         Instant createdAt = assignment.createdAt() == null ? now : assignment.createdAt();
         Instant updatedAt = now;
@@ -140,10 +140,11 @@ public class OrchestrationRuntimeRepository {
                     id, agent_id, job_id, job_item_id, assignment_type, priority, status, model_override,
                     run_display_name, workspace_type, workspace_key, workspace_identity, project_id,
                     current_item_index, checkpoint_json, input_json, output_json, evidence_json,
-                    error_text, lease_owner, lease_expires_at, last_progress_at, last_heartbeat_at,
+                    error_text, lease_owner, lease_expires_at, lease_fence,
+                    last_progress_at, last_heartbeat_at,
                     created_at, updated_at, started_at, completed_at
                 )
-                values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 on conflict(id) do update set
                     agent_id = excluded.agent_id,
                     job_id = excluded.job_id,
@@ -178,24 +179,20 @@ public class OrchestrationRuntimeRepository {
             assignment.projectId(), assignment.currentItemIndex(),
             jsonOrNull(assignment.checkpoint()), jsonOrNull(assignment.input()), jsonOrNull(assignment.output()),
             jsonOrNull(assignment.evidence()), assignment.errorText(), assignment.leaseOwner(),
-            instant(assignment.leaseExpiresAt()), instant(lastProgressAt), instant(lastHeartbeatAt),
+            instant(assignment.leaseExpiresAt()), assignment.leaseFence(),
+            instant(lastProgressAt), instant(lastHeartbeatAt),
             createdAt.toString(), updatedAt.toString(),
             instant(assignment.startedAt()), instant(assignment.completedAt())
         );
         return findAssignment(assignment.id()).orElseThrow();
     }
 
-    public Optional<WorkAssignment> saveAssignmentIfLeaseOwner(WorkAssignment assignment, String leaseOwner) {
+    Optional<WorkAssignment> saveAssignmentIfLeaseOwner(WorkAssignment assignment, String leaseOwner) {
         if (!StringUtils.hasText(assignment.id()) || !StringUtils.hasText(leaseOwner)) {
             return Optional.empty();
         }
         Optional<WorkAssignment> current = findAssignment(assignment.id());
-        if (current.isEmpty()
-            || (current.get().status() != OrchestrationStatus.RUNNING
-                && current.get().status() != OrchestrationStatus.CANCEL_REQUESTED)
-            || !leaseOwner.equals(current.get().leaseOwner())) {
-            return Optional.empty();
-        }
+        if (current.isEmpty()) return Optional.empty();
         Instant now = Instant.now();
         Instant lastProgressAt = progressTimestamp(current.get(), assignment, now, current.get().createdAt());
         Instant lastHeartbeatAt = assignment.lastHeartbeatAt() != null
@@ -229,7 +226,7 @@ public class OrchestrationRuntimeRepository {
                     updated_at = ?,
                     started_at = ?,
                     completed_at = ?
-                where id = ? and status in (?, ?) and lease_owner = ?
+                where id = ? and status in (?, ?) and lease_owner = ? and lease_fence = ?
                 """,
             assignment.agentId(), assignment.jobId(), assignment.jobItemId(), assignment.assignmentType().name(),
             assignment.priority(), assignment.status().name(), assignment.modelOverride(), assignment.runDisplayName(),
@@ -239,7 +236,7 @@ public class OrchestrationRuntimeRepository {
             assignment.errorText(), assignment.leaseOwner(), instant(assignment.leaseExpiresAt()),
             instant(lastProgressAt), instant(lastHeartbeatAt), now.toString(), instant(assignment.startedAt()),
             instant(assignment.completedAt()), assignment.id(), OrchestrationStatus.RUNNING.name(),
-            OrchestrationStatus.CANCEL_REQUESTED.name(), leaseOwner
+            OrchestrationStatus.CANCEL_REQUESTED.name(), leaseOwner, assignment.leaseFence()
         );
         return updated == 1 ? findAssignment(assignment.id()) : Optional.empty();
     }
@@ -540,7 +537,7 @@ public class OrchestrationRuntimeRepository {
     }
 
     @Transactional
-    public Optional<WorkAssignment> acquireLease(String assignmentId, String leaseOwner, Instant leaseExpiresAt) {
+    Optional<WorkAssignment> acquireLease(String assignmentId, String leaseOwner, Instant leaseExpiresAt) {
         Instant now = Instant.now();
         int updated = jdbcTemplate.update(
             """
@@ -560,7 +557,7 @@ public class OrchestrationRuntimeRepository {
         return updated == 0 ? Optional.empty() : findAssignment(assignmentId);
     }
 
-    public int markStaleRunningLeases(Instant now) {
+    int markStaleRunningLeases(Instant now) {
         return jdbcTemplate.update(
             """
                 update work_assignments
@@ -572,7 +569,7 @@ public class OrchestrationRuntimeRepository {
         );
     }
 
-    public int markStaleCancelRequestedLeases(Instant now) {
+    int markStaleCancelRequestedLeases(Instant now) {
         return jdbcTemplate.update(
             """
                 update work_assignments
@@ -586,7 +583,7 @@ public class OrchestrationRuntimeRepository {
         );
     }
 
-    public Optional<WorkAssignment> requestCancel(String assignmentId) {
+    Optional<WorkAssignment> requestCancel(String assignmentId) {
         Instant now = Instant.now();
         int updated = jdbcTemplate.update(
             """
@@ -655,7 +652,7 @@ public class OrchestrationRuntimeRepository {
         );
     }
 
-    public boolean revertToQueued(String assignmentId, String leaseOwner) {
+    boolean revertToQueued(String assignmentId, String leaseOwner) {
         int updated = jdbcTemplate.update(
             """
                 update work_assignments
@@ -668,7 +665,7 @@ public class OrchestrationRuntimeRepository {
         return updated == 1;
     }
 
-    public int extendRunningLease(String assignmentId, String leaseOwner, Instant leaseExpiresAt) {
+    int extendRunningLease(String assignmentId, String leaseOwner, Instant leaseExpiresAt) {
         Instant now = Instant.now();
         return jdbcTemplate.update(
             """
@@ -681,19 +678,32 @@ public class OrchestrationRuntimeRepository {
         );
     }
 
-    public boolean forceInterruptAssignment(String assignmentId, String reason) {
+    public boolean forceInterruptAssignmentFenced(String assignmentId, String expectedOwner,
+                                                   long expectedFence, String reason) {
+        if (!StringUtils.hasText(expectedOwner) || expectedFence < 1) return false;
         Instant now = Instant.now();
         int updated = jdbcTemplate.update(
             """
                 update work_assignments
                 set status = ?, lease_owner = null, lease_expires_at = null,
                     error_text = ?, last_progress_at = ?, updated_at = ?
-                where id = ? and status in (?, ?)
+                where id = ? and lease_owner = ? and lease_fence = ? and status in (?, ?)
                 """,
             OrchestrationStatus.INTERRUPTED.name(), reason, now.toString(), now.toString(),
-            assignmentId, OrchestrationStatus.RUNNING.name(), OrchestrationStatus.CANCEL_REQUESTED.name()
+            assignmentId, expectedOwner, expectedFence,
+            OrchestrationStatus.RUNNING.name(), OrchestrationStatus.CANCEL_REQUESTED.name()
         );
         return updated == 1;
+    }
+
+    public boolean isAssignmentLeaseCurrent(String assignmentId, String owner, long fence) {
+        Integer count = jdbcTemplate.queryForObject("""
+                select count(*) from work_assignments
+                where id = ? and lease_owner = ? and lease_fence = ?
+                  and status in (?, ?)
+                """, Integer.class, assignmentId, owner, fence,
+                OrchestrationStatus.RUNNING.name(), OrchestrationStatus.CANCEL_REQUESTED.name());
+        return count != null && count == 1;
     }
 
     public InboxMessage saveInboxMessage(InboxMessage message) {
@@ -973,10 +983,19 @@ public class OrchestrationRuntimeRepository {
             rs.getString("project_id"), rs.getInt("current_item_index"), map(rs.getString("checkpoint_json")),
             map(rs.getString("input_json")), map(rs.getString("output_json")), map(rs.getString("evidence_json")),
             rs.getString("error_text"), rs.getString("lease_owner"), instantValue(rs.getString("lease_expires_at")),
+            readLeaseFence(rs),
             instantValue(rs.getString("created_at")), instantValue(rs.getString("updated_at")),
             instantValue(rs.getString("started_at")), instantValue(rs.getString("completed_at")),
             instantValue(rs.getString("last_progress_at")), instantValue(rs.getString("last_heartbeat_at"))
         );
+    }
+
+    private long readLeaseFence(ResultSet rs) {
+        try {
+            return rs.getInt("lease_fence");
+        } catch (SQLException e) {
+            return 0L;
+        }
     }
 
     private String getNullable(ResultSet rs, String column) throws SQLException {
@@ -1215,6 +1234,11 @@ public class OrchestrationRuntimeRepository {
         if (!assignmentColumns.contains("run_display_name")) {
             jdbcTemplate.execute("alter table work_assignments add column run_display_name text");
         }
+        // Compatibility for repository-only tests and pre-runner embeddings. Normal
+        // application startup receives this column from ordered migration 002.
+        if (!assignmentColumns.contains("lease_fence")) {
+            jdbcTemplate.execute("alter table work_assignments add column lease_fence integer not null default 0");
+        }
         backfillAssignmentWorkspaceIdentity();
         jdbcTemplate.execute("""
             create index if not exists idx_work_assignments_queue
@@ -1337,5 +1361,218 @@ public class OrchestrationRuntimeRepository {
             tableName
         );
         return count != null && count > 0;
+    }
+
+    // ── Phase 02: Fenced lease operations ──
+
+    /**
+     * Acquire a lease with monotonic fence increment. Returns the updated
+     * assignment with the new fence value, or empty if acquisition fails.
+     */
+    @Transactional
+    public Optional<WorkAssignment> acquireLeaseFenced(String assignmentId, String leaseOwner,
+                                                        Instant leaseExpiresAt) {
+        Instant now = Instant.now();
+        int updated = jdbcTemplate.update(
+            """
+                update work_assignments
+                set status = ?, lease_owner = ?, lease_expires_at = ?,
+                    lease_fence = lease_fence + 1,
+                    started_at = coalesce(started_at, ?),
+                    last_progress_at = coalesce(last_progress_at, ?),
+                    last_heartbeat_at = ?,
+                    updated_at = ?
+                where id = ? and status in (?, ?)
+                  and (lease_expires_at is null or lease_expires_at <= ?)
+                """,
+            OrchestrationStatus.RUNNING.name(), leaseOwner, leaseExpiresAt.toString(),
+            now.toString(), now.toString(), now.toString(), now.toString(),
+            assignmentId, OrchestrationStatus.QUEUED.name(), OrchestrationStatus.INTERRUPTED.name(),
+            now.toString()
+        );
+        if (updated == 0) return Optional.empty();
+        WorkAssignment leased = findAssignment(assignmentId).orElse(null);
+        if (leased != null) {
+            recordFenceGeneration(assignmentId, leased.leaseFence(), leaseOwner, now);
+        }
+        return Optional.ofNullable(leased);
+    }
+
+    /**
+     * Heartbeat with fence check. Only succeeds if the expected owner and fence match.
+     */
+    public int extendRunningLeaseFenced(String assignmentId, String leaseOwner,
+                                         long expectedFence, Instant leaseExpiresAt) {
+        Instant now = Instant.now();
+        return jdbcTemplate.update(
+            """
+                update work_assignments
+                set lease_expires_at = ?, last_heartbeat_at = ?, updated_at = ?
+                where id = ? and status = ? and lease_owner = ? and lease_fence = ?
+                """,
+            leaseExpiresAt.toString(), now.toString(), now.toString(),
+            assignmentId, OrchestrationStatus.RUNNING.name(), leaseOwner, expectedFence
+        );
+    }
+
+    /**
+     * Checkpoint with fence check. Stores progress and updates lease.
+     */
+    public Optional<WorkAssignment> checkpointAssignmentFenced(
+            String assignmentId, String leaseOwner, long expectedFence,
+            OrchestrationStatus status, int currentItemIndex,
+            Map<String, Object> checkpoint, Map<String, Object> output,
+            Map<String, Object> evidence, String errorText, Instant completedAt) {
+        Instant now = Instant.now();
+        int updated = jdbcTemplate.update(
+            """
+                update work_assignments
+                set status = ?, current_item_index = ?,
+                    checkpoint_json = ?, output_json = ?, evidence_json = ?,
+                    error_text = coalesce(?, error_text),
+                    last_progress_at = ?,
+                    lease_expires_at = case when ? is not null then ? else lease_expires_at end,
+                    updated_at = ?,
+                    completed_at = coalesce(?, completed_at)
+                where id = ? and lease_owner = ? and lease_fence = ?
+                """,
+            status.name(), currentItemIndex,
+            jsonOrNull(checkpoint), jsonOrNull(output), jsonOrNull(evidence),
+            errorText,
+            now.toString(),
+            now.toString(), now.toString(),
+            now.toString(),
+            instant(completedAt),
+            assignmentId, leaseOwner, expectedFence
+        );
+        return updated == 1 ? findAssignment(assignmentId) : Optional.empty();
+    }
+
+    /**
+     * Cancel with fence check. Only succeeds if running/cancel-requested
+     * with matching owner and fence.
+     */
+    public Optional<WorkAssignment> cancelAssignmentFenced(String assignmentId,
+                                                            String leaseOwner,
+                                                            long expectedFence) {
+        Instant now = Instant.now();
+        int updated = jdbcTemplate.update(
+            """
+                update work_assignments
+                set status = ?, lease_owner = null, lease_expires_at = null,
+                    completed_at = ?, last_progress_at = ?, updated_at = ?
+                where id = ? and lease_owner = ? and lease_fence = ?
+                  and status in (?, ?)
+                """,
+            OrchestrationStatus.CANCELLED.name(),
+            now.toString(), now.toString(), now.toString(),
+            assignmentId, leaseOwner, expectedFence,
+            OrchestrationStatus.RUNNING.name(), OrchestrationStatus.CANCEL_REQUESTED.name()
+        );
+        return updated == 1 ? findAssignment(assignmentId) : Optional.empty();
+    }
+
+    /**
+     * Complete with fence check.
+     */
+    public Optional<WorkAssignment> completeAssignmentFenced(String assignmentId,
+                                                              String leaseOwner,
+                                                              long expectedFence) {
+        Instant now = Instant.now();
+        int updated = jdbcTemplate.update(
+            """
+                update work_assignments
+                set status = ?, lease_owner = null, lease_expires_at = null,
+                    completed_at = ?, last_progress_at = ?, updated_at = ?
+                where id = ? and lease_owner = ? and lease_fence = ? and status = ?
+                """,
+            OrchestrationStatus.COMPLETED.name(),
+            now.toString(), now.toString(), now.toString(),
+            assignmentId, leaseOwner, expectedFence,
+            OrchestrationStatus.RUNNING.name()
+        );
+        return updated == 1 ? findAssignment(assignmentId) : Optional.empty();
+    }
+
+    /**
+     * Release lease with fence check, returning to QUEUED.
+     */
+    public boolean releaseAssignmentFenced(String assignmentId, String leaseOwner,
+                                            long expectedFence) {
+        Instant now = Instant.now();
+        int updated = jdbcTemplate.update(
+            """
+                update work_assignments
+                set status = ?, lease_owner = null, lease_expires_at = null, updated_at = ?
+                where id = ? and status = ? and lease_owner = ? and lease_fence = ?
+                """,
+            OrchestrationStatus.QUEUED.name(), now.toString(),
+            assignmentId, OrchestrationStatus.RUNNING.name(), leaseOwner, expectedFence
+        );
+        return updated == 1;
+    }
+
+    /**
+     * Takeover stale lease by incrementing fence. Only succeeds when the
+     * current lease has expired.
+     */
+    public Optional<WorkAssignment> takeoverStaleLeaseFenced(String assignmentId,
+                                                               String newOwner,
+                                                               Instant now) {
+        int updated = jdbcTemplate.update(
+            """
+                update work_assignments
+                set status = ?, lease_owner = ?, lease_expires_at = null,
+                    lease_fence = lease_fence + 1,
+                    last_progress_at = ?, updated_at = ?
+                where id = ? and status = ?
+                  and (lease_expires_at is null or lease_expires_at <= ?)
+                """,
+            OrchestrationStatus.INTERRUPTED.name(), newOwner,
+            now.toString(), now.toString(),
+            assignmentId, OrchestrationStatus.RUNNING.name(), now.toString()
+        );
+        if (updated != 1) return Optional.empty();
+        WorkAssignment assignment = findAssignment(assignmentId).orElse(null);
+        if (assignment != null) {
+            recordFenceGeneration(assignmentId, assignment.leaseFence(), newOwner, now);
+        }
+        return Optional.ofNullable(assignment);
+    }
+
+    /**
+     * Check if a lease fence is current.
+     */
+    public boolean isLeaseFenceCurrent(String assignmentId, String leaseOwner, long fence) {
+        Integer count = jdbcTemplate.queryForObject(
+            "select count(*) from work_assignments"
+                + " where id = ? and lease_owner = ? and lease_fence = ? and status = ?",
+            Integer.class,
+            assignmentId, leaseOwner, fence, OrchestrationStatus.RUNNING.name()
+        );
+        return count != null && count == 1;
+    }
+
+    private void recordFenceGeneration(String assignmentId, long generation,
+                                        String ownerId, Instant claimedAt) {
+        jdbcTemplate.update(
+            "insert or ignore into assignment_fence_generations"
+                + " (assignment_id, generation, owner_id, claimed_at)"
+                + " values (?, ?, ?, ?)",
+            assignmentId, generation, ownerId, claimedAt.toString()
+        );
+    }
+
+    /**
+     * Find the latest task run ID linked to an assignment.
+     */
+    public Optional<String> findTaskRunIdForAssignment(String assignmentId) {
+        if (!tableExists("task_run_native_links")) return Optional.empty();
+        return jdbcTemplate.query(
+            "select task_run_id from task_run_native_links"
+                + " where assignment_id = ? order by created_at desc limit 1",
+            rs -> rs.next() ? Optional.of(rs.getString(1)) : Optional.empty(),
+            assignmentId
+        );
     }
 }

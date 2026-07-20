@@ -102,7 +102,7 @@ class PromptContextAssemblerTest {
             "TASK_RUN",
             null,
             workspaceRoot.toString(),
-            "a/file.txt"));
+            "a/file.txt", null, null, null, null));
         String promptA = assembler.mergeModePrompt(PlanMode.NORMAL, "conversation-1");
 
         OrchestrationTaskContextHolder.set(new OrchestrationTaskContext("agent-1",
@@ -117,7 +117,7 @@ class PromptContextAssemblerTest {
             "TASK_RUN",
             null,
             workspaceRoot.toString(),
-            "b/file.txt"));
+            "b/file.txt", null, null, null, null));
         String promptB = assembler.mergeModePrompt(PlanMode.NORMAL, "conversation-1");
 
         assertThat(promptA).contains("workspace-root-guidance");
@@ -153,7 +153,7 @@ class PromptContextAssemblerTest {
             "TASK_RUN",
             null,
             workspaceRoot.toString(),
-            null));
+            null, null, null, null, null));
 
         fileTool.read("a/file.txt", 1, 10);
         String promptA = assembler.mergeModePrompt(PlanMode.NORMAL, "conversation-1");
@@ -185,7 +185,7 @@ class PromptContextAssemblerTest {
             "TASK_RUN",
             null,
             workspaceRoot.toString(),
-            null);
+            null, null, null, null, null);
         OrchestrationTaskContextHolder.set(context);
 
         PromptContextAssembler assembler = assemblerWithResolver(new AgentsMdResolver());
@@ -210,7 +210,7 @@ class PromptContextAssemblerTest {
             "CHAT",
             null,
             tempDir.toString(),
-            null));
+            null, null, null, null, null));
         PromptContextAssembler assembler = assemblerWithResolver(resolver);
 
         String prompt = assembler.mergeModePrompt(PlanMode.NORMAL, "conversation-1");
@@ -233,7 +233,7 @@ class PromptContextAssemblerTest {
             "TASK_RUN",
             null,
             null,
-            null));
+            null, null, null, null, null));
         PromptContextAssembler assembler = assemblerWithResolver(new AgentsMdResolver());
 
         String prompt = assembler.mergeModePrompt(PlanMode.NORMAL, "conversation-1");
@@ -409,7 +409,7 @@ class PromptContextAssemblerTest {
             "TASK_RUN",
             null,
             workspaceRoot.toString(),
-            activePath);
+            activePath, null, null, null, null);
     }
 
     private static final class CountingResolver extends AgentsMdResolver {

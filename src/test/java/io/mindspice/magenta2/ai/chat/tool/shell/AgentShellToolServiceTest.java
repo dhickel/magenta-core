@@ -259,7 +259,7 @@ class AgentShellToolServiceTest {
             "TASK_RUN",
             null,
             null,
-            null));
+            null, null, null, null, null));
 
         try {
             AgentShellToolService.ShellExecResult result = service.exec("pwd", "", 5);
@@ -293,7 +293,7 @@ class AgentShellToolServiceTest {
             "TASK_RUN",
             null,
             null,
-            null));
+            null, null, null, null, null));
 
         try {
             assertThat(service.exec("pwd", "workspace", 5).stdout().trim())
@@ -324,7 +324,7 @@ class AgentShellToolServiceTest {
             "TASK_RUN",
             null,
             null,
-            null));
+            null, null, null, null, null));
 
         try {
             assertThatThrownBy(() -> service.exec("pwd", "outputs", 5))
@@ -355,7 +355,7 @@ class AgentShellToolServiceTest {
             "TASK_RUN",
             null,
             null,
-            null));
+            null, null, null, null, null));
 
         try {
             assertThat(service.exec("pwd", "scratch", 5).stdout().trim())
@@ -387,7 +387,7 @@ class AgentShellToolServiceTest {
             "TASK_RUN",
             null,
             runWorkspace.toString(),
-            null));
+            null, null, null, null, null));
 
         try {
             AgentShellToolService.ShellExecResult result = service.exec("pwd", "nested", 5);
@@ -420,7 +420,7 @@ class AgentShellToolServiceTest {
             "TASK_RUN",
             null,
             runWorkspace.toString(),
-            null));
+            null, null, null, null, null));
 
         try {
             assertThatThrownBy(() -> service.exec("pwd", "outputs", 5))
@@ -454,7 +454,7 @@ class AgentShellToolServiceTest {
             "TASK_RUN",
             null,
             workspace.toString(),
-            null));
+            null, null, null, null, null));
 
         try {
             for (String directory : List.of("workspace", "root", "run", "work", "projects/project-1")) {
@@ -491,7 +491,7 @@ class AgentShellToolServiceTest {
             "TASK_RUN",
             null,
             durableWorkspace.toString(),
-            null));
+            null, null, null, null, null));
 
         try {
             AgentShellToolService.ShellExecResult result = service.exec("pwd", "nested", 5);
@@ -525,7 +525,7 @@ class AgentShellToolServiceTest {
             "TASK_RUN",
             null,
             workspace.toString(),
-            null));
+            null, null, null, null, null));
 
         try {
             assertThat(service.exec("pwd", "projects/project-1", 5).stdout().trim())
@@ -555,7 +555,7 @@ class AgentShellToolServiceTest {
             "TASK_RUN",
             null,
             null,
-            null));
+            null, null, null, null, null));
 
         try {
             assertThatThrownBy(() -> service.exec("pwd", "/etc", 5))
@@ -586,7 +586,7 @@ class AgentShellToolServiceTest {
             "TASK_RUN",
             null,
             null,
-            null));
+            null, null, null, null, null));
 
         try {
             assertThatThrownBy(() -> service.exec("pwd", "..", 5))

@@ -16,8 +16,25 @@ public record AssignmentRequest(
     String projectId,
     String workspaceType,
     String workspaceKey,
-    Map<String, Object> input
+    Map<String, Object> input,
+    String operationKey
 ) {
+    public AssignmentRequest(
+        String agentId,
+        String jobId,
+        String jobItemId,
+        AssignmentType assignmentType,
+        String runDisplayName,
+        Integer priority,
+        String modelOverride,
+        String projectId,
+        String workspaceType,
+        String workspaceKey,
+        Map<String, Object> input
+    ) {
+        this(agentId, jobId, jobItemId, assignmentType, runDisplayName, priority, modelOverride,
+            projectId, workspaceType, workspaceKey, input, null);
+    }
     public AssignmentRequest(
         String agentId,
         String jobId,
@@ -28,7 +45,7 @@ public record AssignmentRequest(
         String projectId,
         Map<String, Object> input
     ) {
-        this(agentId, jobId, jobItemId, assignmentType, null, priority, modelOverride, projectId, null, null, input);
+        this(agentId, jobId, jobItemId, assignmentType, null, priority, modelOverride, projectId, null, null, input, null);
     }
 
     public AssignmentRequest(
@@ -40,7 +57,7 @@ public record AssignmentRequest(
         String modelOverride,
         Map<String, Object> input
     ) {
-        this(agentId, jobId, jobItemId, assignmentType, null, priority, modelOverride, null, null, null, input);
+        this(agentId, jobId, jobItemId, assignmentType, null, priority, modelOverride, null, null, null, input, null);
     }
 
     public AssignmentRequest(
@@ -56,6 +73,6 @@ public record AssignmentRequest(
         Map<String, Object> input
     ) {
         this(agentId, jobId, jobItemId, assignmentType, null, priority, modelOverride, projectId,
-            workspaceType, workspaceKey, input);
+            workspaceType, workspaceKey, input, null);
     }
 }

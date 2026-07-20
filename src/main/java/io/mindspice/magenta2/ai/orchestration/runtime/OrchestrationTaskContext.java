@@ -1,5 +1,9 @@
 package io.mindspice.magenta2.ai.orchestration.runtime;
 
+import io.mindspice.magenta2.ai.orchestration.workspaces.RunOutputLocation;
+import io.mindspice.magenta2.ai.orchestration.workspaces.TaskRunLocation;
+import io.mindspice.magenta2.ai.orchestration.workspaces.TaskRunWriteCapability;
+import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceDescriptor;
 import org.springframework.util.StringUtils;
 
 /**
@@ -8,6 +12,13 @@ import org.springframework.util.StringUtils;
  *
  * <p>Contains agent, job, project identifiers plus one trusted descriptor root
  * and one direct workspace-relative active path.
+ *
+ * <p>The {@code taskRunLocation}, {@code runOutputLocation}, {@code attemptId},
+ * and {@code writerCapability} fields were added in Phase 02 to carry trusted
+ * lifecycle-provisioned locations and a write fence capability. Tools that
+ * perform filesystem mutation must verify {@code writerCapability} before
+ * writing. The legacy {@code hostDurableWorkspacePath} is now derived from
+ * {@code taskRunLocation} when available.
  */
 public record OrchestrationTaskContext(
     String agentId,
@@ -22,10 +33,29 @@ public record OrchestrationTaskContext(
     String runType,
     String runDisplayName,
     String hostDurableWorkspacePath,
-    String activeRuntimePath
+    String activeRuntimePath,
+    TaskRunLocation taskRunLocation,
+    RunOutputLocation runOutputLocation,
+    String attemptId,
+    TaskRunWriteCapability writerCapability,
+    WorkspaceDescriptor workspaceDescriptor
 ) {
     public static final OrchestrationTaskContext EMPTY = new OrchestrationTaskContext(
-        null, null, null, null, null, null, null, null, null, null, null, null, null);
+        null, null, null, null, null, null, null, null, null, null, null, null, null,
+        null, null, null, null, null);
+
+    /** Compatibility constructor for contexts that predate trusted descriptor carriage. */
+    public OrchestrationTaskContext(
+        String agentId, String agentName, String jobId, String jobAssignmentId, String jobRunId,
+        String projectId, String workspaceType, String workspaceKey, String workspaceIdentity,
+        String runType, String runDisplayName, String hostDurableWorkspacePath, String activeRuntimePath,
+        TaskRunLocation taskRunLocation, RunOutputLocation runOutputLocation, String attemptId,
+        TaskRunWriteCapability writerCapability
+    ) {
+        this(agentId, agentName, jobId, jobAssignmentId, jobRunId, projectId, workspaceType,
+            workspaceKey, workspaceIdentity, runType, runDisplayName, hostDurableWorkspacePath,
+            activeRuntimePath, taskRunLocation, runOutputLocation, attemptId, writerCapability, null);
+    }
 
     public OrchestrationTaskContext {
         agentId = normalize(agentId);
@@ -41,6 +71,7 @@ public record OrchestrationTaskContext(
         runDisplayName = normalize(runDisplayName);
         hostDurableWorkspacePath = normalize(hostDurableWorkspacePath);
         activeRuntimePath = normalize(activeRuntimePath);
+        attemptId = normalize(attemptId);
     }
 
     public boolean hasAgentContext() {
@@ -55,6 +86,21 @@ public record OrchestrationTaskContext(
             || StringUtils.hasText(workspaceType);
     }
 
+    /** Derive the active execution root from trusted values. */
+    public String resolvedHostPath() {
+        if (taskRunLocation != null) return taskRunLocation.confinedPath().toString();
+        if (workspaceDescriptor != null) return workspaceDescriptor.root().toString();
+        return hostDurableWorkspacePath;
+    }
+
+    public String taskRunId() {
+        return taskRunLocation == null ? null : taskRunLocation.taskRunId();
+    }
+
+    public int attemptNumber() {
+        return writerCapability == null ? 0 : writerCapability.attemptNumber();
+    }
+
     private static String normalize(String value) {
         return StringUtils.hasText(value) ? value.trim() : null;
     }
@@ -63,7 +109,8 @@ public record OrchestrationTaskContext(
         return new OrchestrationTaskContext(
             agentId, agentName, jobId, jobAssignmentId, jobRunId, projectId,
             workspaceType, workspaceKey, workspaceIdentity, runType, runDisplayName,
-            hostDurableWorkspacePath, activeRuntimePath
+            hostDurableWorkspacePath, activeRuntimePath,
+            taskRunLocation, runOutputLocation, attemptId, writerCapability, workspaceDescriptor
         );
     }
 
@@ -71,7 +118,19 @@ public record OrchestrationTaskContext(
         return new OrchestrationTaskContext(
             agentId, agentName, jobId, jobAssignmentId, jobRunId, projectId,
             workspaceType, workspaceKey, workspaceIdentity, runType, runDisplayName,
-            hostDurableWorkspacePath, activeRuntimePath
+            hostDurableWorkspacePath, activeRuntimePath,
+            taskRunLocation, runOutputLocation, attemptId, writerCapability, workspaceDescriptor
+        );
+    }
+
+    public OrchestrationTaskContext withLifecycle(TaskRunLocation location, RunOutputLocation outputLocation,
+                                                   String attempt, TaskRunWriteCapability capability) {
+        return new OrchestrationTaskContext(
+            agentId, agentName, jobId, jobAssignmentId, jobRunId, projectId,
+            workspaceType, workspaceKey, workspaceIdentity, runType, runDisplayName,
+            location != null ? location.confinedPath().toString() : hostDurableWorkspacePath,
+            activeRuntimePath,
+            location, outputLocation, attempt, capability, workspaceDescriptor
         );
     }
 }

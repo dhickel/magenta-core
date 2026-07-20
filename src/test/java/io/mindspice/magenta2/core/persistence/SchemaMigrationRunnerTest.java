@@ -37,19 +37,20 @@ class SchemaMigrationRunnerTest {
     void freshApplicationRerunAndChecksumProtection() throws Exception {
         try (SingleConnectionDataSource dataSource = memoryDataSource()) {
             Resource migration = foundation();
-            SchemaMigrationRunner first = run(dataSource, migration);
-            assertEquals(List.of(1), first.appliedMigrations().stream()
+            Resource lifecycle = lifecycle();
+            SchemaMigrationRunner first = run(dataSource, migration, lifecycle);
+            assertEquals(List.of(1, 2), first.appliedMigrations().stream()
                     .map(SchemaMigrationRunner.MigrationRecord::version).toList());
             assertTrue(tableExists(new JdbcTemplate(dataSource), "task_run_locations"));
 
-            run(dataSource, migration);
-            assertEquals(1, new JdbcTemplate(dataSource).queryForObject(
+            run(dataSource, migration, lifecycle);
+            assertEquals(2, new JdbcTemplate(dataSource).queryForObject(
                     "select count(*) from schema_migrations", Integer.class));
 
             Resource drifted = resource("001-task-run-foundation.sql",
                     migration.getContentAsByteArray(), "\n-- drift\n");
             assertThrows(SchemaMigrationRunner.MigrationException.class,
-                    () -> run(dataSource, drifted));
+                    () -> run(dataSource, drifted, lifecycle));
         }
     }
 
@@ -104,9 +105,10 @@ class SchemaMigrationRunnerTest {
             assertFalse(tableExists(jdbc, "interruption_probe"));
             assertFalse(tableExists(jdbc, "schema_migrations"));
 
-            run(dataSource, foundation());
-            assertTrue(tableExists(jdbc, "task_run_writer_claims"));
-            assertEquals(1, jdbc.queryForObject("select count(*) from schema_migrations", Integer.class));
+            run(dataSource, migrations());
+            assertTrue(tableExists(jdbc, "writer_claim_generations"));
+            assertFalse(tableExists(jdbc, "task_run_writer_claims"));
+            assertEquals(2, jdbc.queryForObject("select count(*) from schema_migrations", Integer.class));
         }
     }
 
@@ -124,7 +126,7 @@ class SchemaMigrationRunnerTest {
                     ready.countDown();
                     try {
                         start.await();
-                        run(dataSource, foundation());
+                        run(dataSource, migrations());
                     } catch (Throwable failure) {
                         failures.add(failure);
                     }
@@ -136,7 +138,7 @@ class SchemaMigrationRunnerTest {
             assertTrue(executor.awaitTermination(35, TimeUnit.SECONDS));
         }
         assertTrue(failures.isEmpty(), failures.toString());
-        assertEquals(1, new JdbcTemplate(first).queryForObject(
+        assertEquals(2, new JdbcTemplate(first).queryForObject(
                 "select count(*) from schema_migrations", Integer.class));
     }
 
@@ -144,13 +146,15 @@ class SchemaMigrationRunnerTest {
     void freshSchemaAndMigratedDatabaseHaveEquivalentOwnedMetadata() throws Exception {
         try (SingleConnectionDataSource migrated = memoryDataSource();
              SingleConnectionDataSource fresh = memoryDataSource()) {
-            new JdbcTemplate(migrated).execute("create table representative_legacy_marker(id text)");
-            run(migrated, foundation());
+            JdbcTemplate migratedJdbc = new JdbcTemplate(migrated);
+            migratedJdbc.execute("create table representative_legacy_marker(id text)");
+            migratedJdbc.execute("create table work_assignments(id text primary key)");
+            run(migrated, migrations());
             try (Connection connection = fresh.getConnection()) {
                 ScriptUtils.executeSqlScript(connection,
                         new EncodedResource(new ClassPathResource("schema.sql"), StandardCharsets.UTF_8));
             }
-            run(fresh, foundation());
+            run(fresh, migrations());
             assertEquals(ownedMetadata(new JdbcTemplate(migrated)),
                     ownedMetadata(new JdbcTemplate(fresh)));
         }
@@ -159,7 +163,7 @@ class SchemaMigrationRunnerTest {
     @Test
     void persistedLocationsRejectChatAbsoluteOrNonCanonicalPathsAndOperationKeyDigestConflicts() throws Exception {
         try (SingleConnectionDataSource dataSource = memoryDataSource()) {
-            run(dataSource, foundation());
+            run(dataSource, migrations());
             JdbcTemplate jdbc = new JdbcTemplate(dataSource);
             String key = "v1-task-" + "a".repeat(64);
             String insert = """
@@ -176,13 +180,15 @@ class SchemaMigrationRunnerTest {
                     "agent/agent-1", key, "/tmp/run-abs"));
             jdbc.update("""
                     insert into task_run_idempotent_ops(
-                        operation_key, request_digest, task_run_id, created_at, updated_at)
-                    values ('op-1', ?, 'run-1', 'now', 'now')
+                        operation_type, operation_key, request_digest, operation_state,
+                        task_run_id, created_at, updated_at)
+                    values ('RESERVE', 'op-1', ?, 'COMPLETED', 'run-1', 'now', 'now')
                     """, "b".repeat(64));
             assertThrows(Exception.class, () -> jdbc.update("""
                     insert into task_run_idempotent_ops(
-                        operation_key, request_digest, task_run_id, created_at, updated_at)
-                    values ('op-1', ?, 'run-1', 'now', 'now')
+                        operation_type, operation_key, request_digest, operation_state,
+                        task_run_id, created_at, updated_at)
+                    values ('RESERVE', 'op-1', ?, 'COMPLETED', 'run-1', 'now', 'now')
                     """, "c".repeat(64)));
         }
     }
@@ -204,8 +210,10 @@ class SchemaMigrationRunnerTest {
         return jdbc.query("""
                 select type || ':' || name as object_name, lower(replace(replace(sql, char(10), ' '), char(13), ' ')) as ddl
                 from sqlite_master
-                where (type = 'table' and name like 'task_run_%')
-                   or (type = 'index' and name like 'idx_task_run_%')
+                where (type = 'table' and (name like 'task_run_%'
+                        or name in ('assignment_fence_generations', 'writer_claim_generations')))
+                   or (type = 'index' and (name like 'idx_task_run_%'
+                        or name = 'idx_writer_claim_generations_current'))
                 order by object_name
                 """, rs -> {
             Map<String, String> result = new java.util.LinkedHashMap<>();
@@ -237,6 +245,14 @@ class SchemaMigrationRunnerTest {
 
     private static Resource foundation() {
         return new ClassPathResource("db/migrations/001-task-run-foundation.sql");
+    }
+
+    private static Resource lifecycle() {
+        return new ClassPathResource("db/migrations/002-run-lifecycle-fencing.sql");
+    }
+
+    private static Resource[] migrations() {
+        return new Resource[] { foundation(), lifecycle() };
     }
 
     private static Resource resource(String name, String sql) {

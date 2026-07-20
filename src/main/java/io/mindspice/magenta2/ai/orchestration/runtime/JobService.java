@@ -13,6 +13,8 @@ import java.util.Optional;
 import java.util.UUID;
 
 import io.mindspice.magenta2.ai.chat.plan.PlanService;
+import io.mindspice.magenta2.ai.orchestration.workspaces.TaskSourceKind;
+import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceKind;
 import io.mindspice.magenta2.ai.orchestration.agents.AgentProfile;
 import io.mindspice.magenta2.ai.orchestration.agents.AgentProfileService;
 import io.mindspice.magenta2.ai.orchestration.workflow.WorkflowService;
@@ -48,6 +50,7 @@ public class JobService {
     private final ProjectService projectService;
     private final OutputArtifactService outputArtifactService;
     private final RootRelativePathService rootRelativePathService;
+    private final TaskRunLifecycleService taskRunLifecycleService;
 
     public JobService(JobRepository jobRepository,
                       WorkspaceDirectoryService workspaceDirectoryService,
@@ -62,7 +65,7 @@ public class JobService {
                       WorkflowService workflowService,
                       OrchestrationRuntimeRepository runtimeRepository) {
         this(jobRepository, workspaceDirectoryService, planService, workflowService,
-            runtimeRepository, null, null, null, null, null);
+            runtimeRepository, null, null, null, null, null, null);
     }
 
     @Autowired
@@ -75,7 +78,8 @@ public class JobService {
                       @Autowired(required = false) AgentProfileService agentProfileService,
                       @Autowired(required = false) ProjectService projectService,
                       @Autowired(required = false) OutputArtifactService outputArtifactService,
-                      @Autowired(required = false) RootRelativePathService rootRelativePathService) {
+                      @Autowired(required = false) RootRelativePathService rootRelativePathService,
+                      @Autowired(required = false) TaskRunLifecycleService taskRunLifecycleService) {
         this.jobRepository = jobRepository;
         this.workspaceDirectoryService = workspaceDirectoryService;
         this.planService = planService;
@@ -88,6 +92,7 @@ public class JobService {
         this.rootRelativePathService = rootRelativePathService != null
             ? rootRelativePathService
             : workspaceDirectoryService == null ? null : new RootRelativePathService(workspaceDirectoryService);
+        this.taskRunLifecycleService = taskRunLifecycleService;
     }
 
     // ════════════════════════════════════════════════════════════════
@@ -244,13 +249,34 @@ public class JobService {
         }
         String workspaceIdentity = StringUtils.hasText(workspaceType)
             ? workspaceType + "/" + workspaceKey : null;
+
+        boolean usesReservedRun = context != null && context.taskRunLocation() != null
+            && context.taskRunLocation().taskIdentity().sourceKind() == TaskSourceKind.JOB
+            && jobId.equals(context.taskRunLocation().taskIdentity().stableId());
+        String runId = usesReservedRun
+            ? context.taskRunLocation().taskRunId() : UUID.randomUUID().toString();
+        if (usesReservedRun) {
+            JobRun existing = jobRepository.findRun(runId).orElse(null);
+            if (existing != null) return existing;
+        } else if (taskRunLifecycleService != null && StringUtils.hasText(workspaceType)) {
+            WorkspaceKind kind = WorkspaceKind.fromToken(workspaceType);
+            if (kind == WorkspaceKind.CHAT) {
+                throw new IllegalArgumentException("CHAT workspaces are not task-selectable");
+            }
+            String inputDigest = taskRunLifecycleService.canonicalInputDigest(Map.of(
+                "jobId", jobId, "assignmentId", assignmentKey));
+            taskRunLifecycleService.reserve(LifecycleReservationRequest.reuseNative(
+                    "job-submission:" + UUID.randomUUID(), TaskSourceKind.JOB, jobId, kind,
+                    workspaceKey, runId, assignmentKey, inputDigest));
+        }
+
         Instant now = Instant.now();
         List<JobWorkItemRun> itemRuns = def.items().stream()
             .map(item -> new JobWorkItemRun(item.key(), item.type().name(), item.planId(), item.workflowId(),
                 "QUEUED", null, Map.of(), Map.of(), null, null, null))
             .toList();
         return jobRepository.saveRun(new JobRun(
-            UUID.randomUUID().toString(), jobId, assignmentKey,
+            runId, jobId, assignmentKey,
             workspaceType, workspaceKey, workspaceIdentity, JobRunStatus.QUEUED,
             itemRuns, null, null, now, now, null, null
         ));

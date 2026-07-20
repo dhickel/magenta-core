@@ -323,6 +323,7 @@ create table if not exists work_assignments (
     error_text text,
     lease_owner text,
     lease_expires_at text,
+    lease_fence integer not null default 0 check (lease_fence >= 0),
     last_progress_at text,
     last_heartbeat_at text,
     created_at text not null,
@@ -666,6 +667,8 @@ create table if not exists task_run_locations (
             || '/tasks/' || task_path_key || '/' || task_run_id),
     created_at         text not null,
     updated_at         text not null,
+    lineage_parent_task_run_id text references task_run_locations(task_run_id),
+    lineage_mode       text check (lineage_mode in ('RETRY_OF', 'REPLAY_OF')),
     unique (workspace_type, workspace_key, root_relative_path)
 );
 
@@ -691,15 +694,19 @@ create index if not exists idx_task_run_attempts_status
     on task_run_attempts (status, created_at desc);
 
 create table if not exists task_run_idempotent_ops (
-    operation_key      text primary key check (length(operation_key) > 0),
+    id                 integer primary key,
+    operation_type     text check (operation_type is null or operation_type in ('RESERVE', 'RESUME', 'RETRY', 'REPLAY')),
+    operation_key      text not null check (length(operation_key) > 0),
     request_digest     text not null check (
         length(request_digest) = 64 and request_digest not glob '*[^0-9a-f]*'),
+    operation_state    text not null check (operation_state in ('RESERVED', 'COMPLETED')),
     task_run_id        text,
     result_json        text,
     created_at         text not null,
     updated_at         text not null,
+    unique (operation_type, operation_key),
     foreign key (task_run_id) references task_run_locations(task_run_id)
-) without rowid;
+);
 
 create table if not exists task_run_native_links (
     task_run_id        text primary key,
@@ -723,17 +730,50 @@ create index if not exists idx_task_run_native_links_workflow_child
 create index if not exists idx_task_run_native_links_job_work_item
     on task_run_native_links (job_work_item_id) where job_work_item_id is not null;
 
-create table if not exists task_run_writer_claims (
-    task_run_id        text not null,
-    attempt_number     integer not null check (attempt_number > 0),
-    claim_generation   integer not null check (claim_generation > 0),
-    owner_id           text not null check (length(owner_id) > 0),
-    fence_token        text not null unique check (length(fence_token) > 0),
-    created_at         text not null,
-    primary key (task_run_id, attempt_number, claim_generation),
+-- Assignment fence generation tracking.
+create table if not exists assignment_fence_generations (
+    assignment_id    text not null,
+    generation       integer not null check (generation > 0),
+    owner_id         text not null check (length(owner_id) > 0),
+    claimed_at       text not null,
+    primary key (assignment_id, generation),
+    foreign key (assignment_id) references work_assignments(id)
+) without rowid;
+
+-- Writer claim generation tracking with current-claim flag.
+create table if not exists writer_claim_generations (
+    task_run_id      text not null,
+    attempt_number   integer not null check (attempt_number > 0),
+    generation       integer not null check (generation > 0),
+    owner_id         text not null check (length(owner_id) > 0),
+    fence_token      text not null unique check (length(fence_token) > 0),
+    is_current       integer not null default 1 check (is_current in (0, 1)),
+    superseded_at    text,
+    created_at       text not null,
+    primary key (task_run_id, attempt_number, generation),
+    unique (task_run_id, generation),
     foreign key (task_run_id, attempt_number)
         references task_run_attempts(task_run_id, attempt_number) on delete cascade
 ) without rowid;
+
+create unique index if not exists idx_writer_claim_generations_current
+    on writer_claim_generations (task_run_id, attempt_number)
+    where is_current = 1;
+
+create table if not exists task_run_links (
+    parent_task_run_id text not null,
+    child_task_run_id  text not null,
+    link_type          text not null check (link_type in ('WORKFLOW_CHILD', 'JOB_WORK_ITEM')),
+    link_key           text not null check (length(link_key) > 0),
+    created_at         text not null,
+    primary key (parent_task_run_id, link_type, link_key),
+    unique (child_task_run_id, link_type),
+    check (parent_task_run_id <> child_task_run_id),
+    foreign key (parent_task_run_id) references task_run_locations(task_run_id) on delete cascade,
+    foreign key (child_task_run_id) references task_run_locations(task_run_id) on delete cascade
+) without rowid;
+
+create index if not exists idx_task_run_links_child on task_run_links(child_task_run_id);
 
 create table if not exists schema_migrations (
     version       integer primary key,

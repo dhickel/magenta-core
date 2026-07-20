@@ -20,6 +20,9 @@ import java.util.UUID;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.mindspice.magenta2.ai.chat.plan.PlanFieldType;
+import io.mindspice.magenta2.ai.orchestration.runtime.OrchestrationTaskContext;
+import io.mindspice.magenta2.ai.orchestration.runtime.OrchestrationTaskContextHolder;
+import io.mindspice.magenta2.ai.orchestration.runtime.TaskRunLifecycleService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
@@ -43,16 +46,26 @@ public class OutputArtifactService {
     private final WorkspaceDirectoryService directoryService;
     private final RootRelativePathService rootRelativePathService;
     private final ObjectMapper objectMapper;
+    private final TaskRunLifecycleService taskRunLifecycleService;
+
+    public OutputArtifactService(OutputArtifactRepository repository,
+                                 WorkspaceDirectoryService directoryService,
+                                 RootRelativePathService rootRelativePathService,
+                                 ObjectMapper objectMapper) {
+        this(repository, directoryService, rootRelativePathService, objectMapper, null);
+    }
 
     @Autowired
     public OutputArtifactService(OutputArtifactRepository repository,
                                  WorkspaceDirectoryService directoryService,
                                  RootRelativePathService rootRelativePathService,
-                                 ObjectMapper objectMapper) {
+                                 ObjectMapper objectMapper,
+                                 @Autowired(required = false) TaskRunLifecycleService taskRunLifecycleService) {
         this.repository = repository;
         this.directoryService = directoryService;
         this.rootRelativePathService = rootRelativePathService;
         this.objectMapper = objectMapper;
+        this.taskRunLifecycleService = taskRunLifecycleService;
     }
 
     /**
@@ -76,6 +89,7 @@ public class OutputArtifactService {
                                                       String outputName, PlanFieldType outputType,
                                                       Object value, Path outputDir,
                                                       OutputArtifactContext context) throws IOException {
+        requireCurrentWriterForMutation();
         requireId(runId, "runId");
         requireId(planId, "planId");
         requireId(outputName, "outputName");
@@ -94,6 +108,16 @@ public class OutputArtifactService {
             case JSON -> materializeJson(runId, planId, outputName, value, realOutputDir, context);
             case STRING, NUMBER -> materializeText(runId, planId, outputName, value, realOutputDir, context);
         };
+    }
+
+    private void requireCurrentWriterForMutation() {
+        OrchestrationTaskContext taskContext = OrchestrationTaskContextHolder.current();
+        if (taskContext == null || taskContext.taskRunLocation() == null) return;
+        if (taskRunLifecycleService == null || taskContext.writerCapability() == null) {
+            throw new TaskRunLifecycleService.StaleWriterException(
+                "Task-run output mutation requires a current writer capability");
+        }
+        taskRunLifecycleService.requireCurrentWriter(taskContext.writerCapability());
     }
 
     /**

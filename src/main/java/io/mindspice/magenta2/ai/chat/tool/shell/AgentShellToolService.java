@@ -20,6 +20,7 @@ import io.mindspice.magenta2.ai.config.user.AgentConfig;
 import io.mindspice.magenta2.ai.config.user.AiConfig;
 import io.mindspice.magenta2.ai.orchestration.runtime.OrchestrationTaskContext;
 import io.mindspice.magenta2.ai.orchestration.runtime.OrchestrationTaskContextHolder;
+import io.mindspice.magenta2.ai.orchestration.runtime.TaskRunLifecycleService;
 import io.mindspice.magenta2.ai.orchestration.settings.RuntimeSettingsService;
 import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceDirectoryService;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -45,11 +46,19 @@ public class AgentShellToolService {
     private final Set<String> allowedCommands;
     private final boolean allowAllCommands;
     private final WorkspaceDirectoryService workspaceDirectoryService;
+    private final TaskRunLifecycleService taskRunLifecycleService;
+
+    public AgentShellToolService(AiConfig aiConfig,
+                                  RuntimeSettingsService runtimeSettingsService,
+                                  WorkspaceDirectoryService workspaceDirectoryService) throws IOException {
+        this(aiConfig, runtimeSettingsService, workspaceDirectoryService, null);
+    }
 
     @Autowired
     public AgentShellToolService(AiConfig aiConfig,
                                   @Autowired(required = false) RuntimeSettingsService runtimeSettingsService,
-                                  @Autowired(required = false) WorkspaceDirectoryService workspaceDirectoryService) throws IOException {
+                                  @Autowired(required = false) WorkspaceDirectoryService workspaceDirectoryService,
+                                  @Autowired(required = false) TaskRunLifecycleService taskRunLifecycleService) throws IOException {
         if (aiConfig == null || aiConfig.dataRoot() == null) {
             throw new IllegalArgumentException("AI config dataRoot is required for shell tools");
         }
@@ -66,6 +75,7 @@ public class AgentShellToolService {
             && commands.contains(WILDCARD);
         this.allowedCommands = normalizeAllowedCommands(commands);
         this.workspaceDirectoryService = workspaceDirectoryService;
+        this.taskRunLifecycleService = taskRunLifecycleService;
     }
 
     public AgentShellToolService(AiConfig aiConfig) throws IOException {
@@ -83,6 +93,7 @@ public class AgentShellToolService {
         this.allowAllCommands = unsafeAllowWildcardShellCommands && commands.contains(WILDCARD);
         this.allowedCommands = normalizeAllowedCommands(commands);
         this.workspaceDirectoryService = null;
+        this.taskRunLifecycleService = null;
     }
 
     AgentShellToolService(Path root, List<String> allowedCommands,
@@ -98,10 +109,12 @@ public class AgentShellToolService {
         this.allowAllCommands = unsafeAllowWildcardShellCommands && commands.contains(WILDCARD);
         this.allowedCommands = normalizeAllowedCommands(commands);
         this.workspaceDirectoryService = workspaceDirectoryService;
+        this.taskRunLifecycleService = null;
     }
 
     public ShellExecResult exec(String command, String workingDirectory, Integer timeoutSeconds)
         throws IOException, InterruptedException {
+        requireCurrentWriterForMutation();
         List<String> commandLine = parseCommandLine(command);
         String executable = validateExecutable(commandLine.getFirst());
         validateCommandLineSafety(commandLine);
@@ -121,6 +134,16 @@ public class AgentShellToolService {
         }
 
         return execOnHost(command, executable, commandLine, resolved.path(), resolved.displayPath(), timeoutSeconds);
+    }
+
+    private void requireCurrentWriterForMutation() {
+        OrchestrationTaskContext context = OrchestrationTaskContextHolder.current();
+        if (context == null || context.taskRunLocation() == null) return;
+        if (taskRunLifecycleService == null || context.writerCapability() == null) {
+            throw new TaskRunLifecycleService.StaleWriterException(
+                "Task-run shell execution requires a current writer capability");
+        }
+        taskRunLifecycleService.requireCurrentWriter(context.writerCapability());
     }
 
     /** Resolves one direct workspace-relative shell target. The publication-owned outputs subtree is rejected. */

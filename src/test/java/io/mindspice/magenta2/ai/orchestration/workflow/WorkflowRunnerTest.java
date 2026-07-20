@@ -431,7 +431,7 @@ class WorkflowRunnerTest {
             "JOB_WORKFLOW_ITEM",
             null,
             null,
-            null).withJobRun("assignment-1", "job-run-1"));
+            null, null, null, null, null).withJobRun("assignment-1", "job-run-1"));
         try {
             WorkflowRun run = workflowService.startRun(def.id());
             WorkflowRun finished = pollForTerminal(run.id());
@@ -485,7 +485,7 @@ class WorkflowRunnerTest {
             "WORKFLOW_RUN",
             null,
             tempDir.resolve("caller-workspace").toString(),
-            null));
+            null, null, null, null, null));
         try {
             WorkflowRun run = workflowService.startRun(def.id());
             WorkflowRun finished = pollForTerminal(run.id());
@@ -524,7 +524,7 @@ class WorkflowRunnerTest {
             "WORKFLOW_RUN",
             "Daily workflow run",
             tempDir.resolve("caller-workspace").toString(),
-            null));
+            null, null, null, null, null));
         try {
             WorkflowRun run = workflowService.startRun(def.id());
             WorkflowRun finished = pollForTerminal(run.id());
@@ -571,7 +571,7 @@ class WorkflowRunnerTest {
             "WORKFLOW_RUN",
             null,
             null,
-            null));
+            null, null, null, null, null));
         try {
             WorkflowRun run = workflowService.startRun(def.id());
             WorkflowRun finished = pollForTerminal(run.id());

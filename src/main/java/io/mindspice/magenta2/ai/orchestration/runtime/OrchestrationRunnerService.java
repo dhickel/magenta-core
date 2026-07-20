@@ -31,6 +31,9 @@ import io.mindspice.magenta2.ai.orchestration.workflow.WorkflowService;
 import io.mindspice.magenta2.ai.orchestration.workspaces.OutputArtifactContext;
 import io.mindspice.magenta2.ai.orchestration.workspaces.OutputArtifactService;
 import io.mindspice.magenta2.ai.orchestration.workspaces.RootRelativePathService;
+import io.mindspice.magenta2.ai.orchestration.workspaces.TaskRunLocation;
+import io.mindspice.magenta2.ai.orchestration.workspaces.TaskRunWriteCapability;
+import io.mindspice.magenta2.ai.orchestration.workspaces.TaskSourceKind;
 import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceDescriptor;
 import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceDirectoryService;
 import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceKind;
@@ -65,6 +68,7 @@ public class OrchestrationRunnerService {
     private final WorkspaceDirectoryService workspaceDirectoryService;
     private final RootRelativePathService rootRelativePathService;
     private final AgentProfileService agentProfileService;
+    private final TaskRunLifecycleService taskRunLifecycleService;
 
     private final MagentaWorkExecutor executor;
     private final Duration leaseDuration;
@@ -89,7 +93,7 @@ public class OrchestrationRunnerService {
     ) {
         this(repository, assignmentService, jobService, taskService, workflowService, null, inboxService,
             eventService, null, null, null, null, null, executor,
-            DEFAULT_LEASE_DURATION.toSeconds(), DEFAULT_HEARTBEAT_INTERVAL.toSeconds());
+            DEFAULT_LEASE_DURATION.toSeconds(), DEFAULT_HEARTBEAT_INTERVAL.toSeconds(), null);
     }
 
     @Autowired
@@ -109,7 +113,8 @@ public class OrchestrationRunnerService {
         @Autowired(required = false) RootRelativePathService rootRelativePathService,
         MagentaWorkExecutor executor,
         @Value("${magenta.orchestration.lease-seconds:300}") long leaseSeconds,
-        @Value("${magenta.orchestration.heartbeat-seconds:60}") long heartbeatSeconds
+        @Value("${magenta.orchestration.heartbeat-seconds:60}") long heartbeatSeconds,
+        @Autowired(required = false) TaskRunLifecycleService taskRunLifecycleService
     ) {
         this.repository = repository;
         this.assignmentService = assignmentService;
@@ -129,6 +134,7 @@ public class OrchestrationRunnerService {
         this.executor = executor;
         this.leaseDuration = secondsOrDefault(leaseSeconds, DEFAULT_LEASE_DURATION);
         this.heartbeatInterval = secondsOrDefault(heartbeatSeconds, DEFAULT_HEARTBEAT_INTERVAL);
+        this.taskRunLifecycleService = taskRunLifecycleService;
         this.assignmentService.registerLocalInterruptHandler(this::cancelLocalAssignment);
     }
 
@@ -136,7 +142,7 @@ public class OrchestrationRunnerService {
     public void pollQueuedWork() {
         recoverStaleLeases();
         for (WorkAssignment queued : repository.findRecoverableAssignments(4)) {
-            var leased = repository.acquireLease(queued.id(), leaseOwner, Instant.now().plus(leaseDuration));
+            var leased = repository.acquireLeaseFenced(queued.id(), leaseOwner, Instant.now().plus(leaseDuration));
             if (leased.isEmpty()) continue;
             WorkAssignment assignment = leased.get();
             try {
@@ -148,14 +154,20 @@ public class OrchestrationRunnerService {
                 activeAssignmentFutures.put(assignment.id(), future);
                 future.whenComplete((ignored, error) -> activeAssignmentFutures.remove(assignment.id(), future));
             } catch (RejectedExecutionException e) {
-                repository.revertToQueued(assignment.id(), leaseOwner);
+                repository.releaseAssignmentFenced(assignment.id(), leaseOwner, assignment.leaseFence());
             }
         }
     }
 
     public int recoverStaleLeases() {
         Instant now = Instant.now();
-        return repository.markStaleRunningLeases(now) + repository.markStaleCancelRequestedLeases(now);
+        int recovered = repository.markStaleRunningLeases(now)
+            + repository.markStaleCancelRequestedLeases(now);
+        if (recovered > 0 && taskRunLifecycleService != null) {
+            taskRunLifecycleService.interruptWritersForStaleAssignments(
+                "Assignment lease expired or cancellation became stale");
+        }
+        return recovered;
     }
 
     @EventListener(ApplicationReadyEvent.class)
@@ -176,45 +188,86 @@ public class OrchestrationRunnerService {
     }
 
     public WorkAssignment runAssignment(String assignmentId) {
-        return repository.acquireLease(assignmentId, leaseOwner, Instant.now().plus(leaseDuration))
+        return repository.acquireLeaseFenced(assignmentId, leaseOwner, Instant.now().plus(leaseDuration))
             .map(this::executeWithLease)
             .orElseGet(() -> assignmentService.get(assignmentId));
     }
 
     private WorkAssignment executeWithLease(WorkAssignment leased) {
-        ScheduledFuture<?> heartbeat = startLeaseHeartbeat(leased.id());
         AgentProfile profile = null;
         if (agentProfileService != null) {
             profile = agentProfileService.get(leased.agentId());
             if (profile.status() == AgentProfileStatus.DISABLED) {
-                heartbeat.cancel(false);
                 return fail(assignmentService.get(leased.id()),
                     "Agent " + leased.agentId() + " is disabled and cannot execute assignments.");
             }
         }
 
-        // Resolve workspace descriptor from persisted type/key
         WorkspaceDescriptor workspaceDescriptor = resolveWorkspaceDescriptor(leased);
         if (workspaceDescriptor == null) {
-            heartbeat.cancel(false);
             return fail(assignmentService.get(leased.id()), "Workspace selection cannot be resolved");
         }
-        String durablePath = workspaceDescriptor.root().toString();
 
+        TaskRunLocation taskRunLocation = null;
+        TaskRunWriteCapability writerCapability = null;
+        String attemptId = null;
+        if (isTaskRunAssignment(leased.assignmentType())) {
+            if (taskRunLifecycleService == null) {
+                return fail(assignmentService.get(leased.id()), "Task-run lifecycle service is unavailable");
+            }
+            String taskRunId = text(leased.checkpoint().get("taskRunId"), null);
+            if (!StringUtils.hasText(taskRunId)) {
+                return fail(assignmentService.get(leased.id()),
+                    "Assignment has no reserved native task-run identity");
+            }
+            try {
+                LifecycleResult lifecycleResult = taskRunLifecycleService.findById(taskRunId);
+                int attemptNumber = integer(leased.checkpoint().get("attemptNumber"),
+                    lifecycleResult.attemptNumber());
+                taskRunLocation = taskRunLifecycleService.provisionLocation(taskRunId);
+                if (!taskRunLocation.workspaceIdentity().equals(workspaceDescriptor.identity())) {
+                    throw new IllegalStateException("Reserved run workspace does not match assignment workspace");
+                }
+                try {
+                    writerCapability = taskRunLifecycleService.acquireWriterClaim(
+                        taskRunLocation, attemptNumber, leaseOwner);
+                } catch (IllegalStateException staleClaim) {
+                    String recoveryDigest = taskRunLifecycleService.canonicalInputDigest(Map.of(
+                        "assignmentId", leased.id(), "taskRunId", taskRunId,
+                        "assignmentFence", leased.leaseFence()));
+                    lifecycleResult = taskRunLifecycleService.recoverForAssignment(taskRunId, leased.id(),
+                        "lease-recovery:" + leased.id() + ":" + leased.leaseFence(), recoveryDigest);
+                    attemptNumber = lifecycleResult.attemptNumber();
+                    taskRunLocation = taskRunLifecycleService.provisionLocation(taskRunId);
+                    writerCapability = taskRunLifecycleService.acquireWriterClaim(
+                        taskRunLocation, attemptNumber, leaseOwner);
+                    Map<String, Object> checkpoint = new LinkedHashMap<>(leased.checkpoint());
+                    checkpoint.put("attemptNumber", attemptNumber);
+                    checkpoint.put("lifecycleOperationKey", lifecycleResult.operationKey());
+                    checkpoint.put("lifecycleInputDigest", recoveryDigest);
+                    leased = assignmentService.saveIfLeaseOwner(checkpointed(leased,
+                        leased.currentItemIndex(), checkpoint, leased.output(), leased.evidence()), leaseOwner);
+                }
+                attemptId = taskRunId + ":" + attemptNumber;
+            } catch (RuntimeException lifecycleFailure) {
+                logger.error("Lifecycle setup for assignment {} failed closed", leased.id(), lifecycleFailure);
+                return fail(assignmentService.get(leased.id()),
+                    "Task-run lifecycle setup failed: " + lifecycleFailure.getMessage());
+            }
+        }
+
+        final TaskRunWriteCapability activeWriter = writerCapability;
+        ScheduledFuture<?> heartbeat = startLeaseHeartbeat(
+            leased.id(), leased.leaseFence(), activeWriter);
         OrchestrationTaskContext taskContext = new OrchestrationTaskContext(
-            leased.agentId(),
-            profile != null ? profile.name() : null,
-            leased.jobId(),
-            null,
-            null,
-            resolveProjectId(leased), // projectId for attribution only
-            leased.workspaceType(),
-            leased.workspaceKey(),
-            leased.workspaceIdentity(),
-            leased.assignmentType().name(), // runType
-            null,
-            durablePath, // hostDurableWorkspacePath
-            null
+            leased.agentId(), profile != null ? profile.name() : null, leased.jobId(),
+            leased.id(), null, resolveProjectId(leased),
+            leased.workspaceType(), leased.workspaceKey(), leased.workspaceIdentity(),
+            leased.assignmentType().name(), leased.runDisplayName(),
+            taskRunLocation != null ? taskRunLocation.confinedPath().toString() : workspaceDescriptor.root().toString(),
+            null, taskRunLocation,
+            taskRunLocation == null ? null : workspaceDirectoryService.resolveRunOutput(taskRunLocation),
+            attemptId, writerCapability, workspaceDescriptor
         );
 
         // Validate project membership (projectId is metadata only)
@@ -229,22 +282,32 @@ public class OrchestrationRunnerService {
 
         try {
             OrchestrationTaskContextHolder.set(taskContext);
-            return switch (leased.assignmentType()) {
+            WorkAssignment result = switch (leased.assignmentType()) {
                 case TASK_RUN -> runTask(leased);
                 case WORKFLOW_RUN -> runWorkflow(leased);
                 case JOB_RUN -> runJob(leased);
                 case AGENT_MESSAGE -> runAgentMessage(leased);
-                case WAIT_FOR_MESSAGE -> assignmentService.saveStatus(leased, OrchestrationStatus.WAITING);
+                case WAIT_FOR_MESSAGE -> waiting(leased);
                 case REPORT -> complete(leased,
                     Map.of("message", text(leased.input().get("message"), "Report completed.")),
                     Map.of("reports", List.of(text(leased.input().get("message"), "Report completed."))));
             };
+            finishWriterForResult(activeWriter, result);
+            return result;
+        } catch (TaskRunLifecycleService.StaleWriterException
+                 | AssignmentService.StaleAssignmentLeaseException stale) {
+            logger.warn("Stale worker stopped for assignment {}: {}", leased.id(), stale.getMessage());
+            return assignmentService.get(leased.id());
         } catch (RuntimeException exception) {
             WorkAssignment current = assignmentService.get(leased.id());
             if (current.status() == OrchestrationStatus.CANCEL_REQUESTED) {
-                return cancel(current);
+                WorkAssignment cancelled = cancel(current);
+                finishWriterForResult(activeWriter, cancelled);
+                return cancelled;
             }
-            return fail(current, exception.getMessage());
+            WorkAssignment failed = fail(current, exception.getMessage());
+            finishWriterForResult(activeWriter, failed);
+            return failed;
         } finally {
             OrchestrationTaskContextHolder.clear();
             heartbeat.cancel(false);
@@ -303,14 +366,21 @@ public class OrchestrationRunnerService {
         heartbeatExecutor.shutdownNow();
     }
 
-    private ScheduledFuture<?> startLeaseHeartbeat(String assignmentId) {
+    private ScheduledFuture<?> startLeaseHeartbeat(String assignmentId, long fence,
+                                                     TaskRunWriteCapability writerCapability) {
         long heartbeatMillis = Math.max(1, heartbeatInterval.toMillis());
-        return heartbeatExecutor.scheduleAtFixedRate(
-            () -> repository.extendRunningLease(assignmentId, leaseOwner, Instant.now().plus(leaseDuration)),
-            heartbeatMillis,
-            heartbeatMillis,
-            TimeUnit.MILLISECONDS
-        );
+        return heartbeatExecutor.scheduleAtFixedRate(() -> {
+            int updated = repository.extendRunningLeaseFenced(assignmentId, leaseOwner, fence,
+                Instant.now().plus(leaseDuration));
+            if (updated == 0 && writerCapability != null && taskRunLifecycleService != null
+                    && taskRunLifecycleService.verifyWriterClaimCurrent(writerCapability)) {
+                try {
+                    taskRunLifecycleService.interruptAttempt(writerCapability,
+                        "Assignment lease became stale");
+                } catch (TaskRunLifecycleService.StaleWriterException ignored) { }
+                cancelLocalAssignment(assignmentId);
+            }
+        }, heartbeatMillis, heartbeatMillis, TimeUnit.MILLISECONDS);
     }
 
     private WorkAssignment runTask(WorkAssignment assignment) {
@@ -386,7 +456,7 @@ public class OrchestrationRunnerService {
         if (current.status() == OrchestrationStatus.CANCEL_REQUESTED) {
             jobService.cancelRunFromAssignment(jobRun.id());
             jobService.updateDefinitionStatus(job.id(), "CANCELLED");
-            return assignmentService.saveStatus(current, OrchestrationStatus.CANCELLED);
+            return cancel(current);
         }
         int start = Math.max(assignment.currentItemIndex(),
             integer(assignment.checkpoint().get("nextItemIndex"), 0));
@@ -396,7 +466,7 @@ public class OrchestrationRunnerService {
             if (current.status() == OrchestrationStatus.CANCEL_REQUESTED) {
                 jobService.cancelRunFromAssignment(jobRun.id());
                 jobService.updateDefinitionStatus(job.id(), "CANCELLED");
-                return assignmentService.saveStatus(current, OrchestrationStatus.CANCELLED);
+                return cancel(current);
             }
             JobWorkItem item = items.get(i);
             jobRun = jobService.updateWorkItemRun(jobRun.id(), item.key(), "RUNNING", null, Map.of(), null);
@@ -449,7 +519,11 @@ public class OrchestrationRunnerService {
     }
 
     private JobItemResult runJobItem(WorkAssignment assignment, WorkAssignment current, JobWorkItem item, String jobRunId) {
+        ChildExecution child = null;
+        OrchestrationTaskContext parentContext = OrchestrationTaskContextHolder.current();
         try {
+            child = beginJobChild(parentContext, assignment, item, jobRunId);
+            if (child != null) OrchestrationTaskContextHolder.set(child.context());
             JobItemOutput output = switch (item.type()) {
                 case PLAN -> {
                     if (!StringUtils.hasText(item.planId())) {
@@ -480,15 +554,60 @@ public class OrchestrationRunnerService {
                         conversationIds(latest.checkpoint())));
                 }
             };
+            if (child != null) taskRunLifecycleService.completeAttempt(child.capability());
             return new JobItemResult(true, output.payload(), Map.of(
                 "itemType", item.type().name(), "itemKey", item.key(),
                 "completedAt", Instant.now().toString()), null, output.runId());
         } catch (RuntimeException exception) {
             String error = exception.getMessage();
+            if (child != null && taskRunLifecycleService.verifyWriterClaimCurrent(child.capability())) {
+                taskRunLifecycleService.failAttempt(child.capability(), error);
+            }
             return new JobItemResult(false, Map.of("failed", true, "error", error), Map.of(
                 "itemType", item.type().name(), "itemKey", item.key(),
                 "failedAt", Instant.now().toString(), "error", error), error, null);
+        } finally {
+            if (parentContext == null) OrchestrationTaskContextHolder.clear();
+            else OrchestrationTaskContextHolder.set(parentContext);
         }
+    }
+
+    private ChildExecution beginJobChild(OrchestrationTaskContext parent, WorkAssignment assignment,
+                                         JobWorkItem item, String jobRunId) {
+        if (taskRunLifecycleService == null || parent == null || parent.taskRunLocation() == null
+                || parent.writerCapability() == null) return null;
+        taskRunLifecycleService.requireCurrentWriter(parent.writerCapability());
+        TaskSourceKind childKind = item.type() == JobWorkItemType.PLAN
+            ? TaskSourceKind.TASK : TaskSourceKind.WORKFLOW;
+        String sourceId = item.type() == JobWorkItemType.PLAN ? item.planId() : item.workflowId();
+        if (!StringUtils.hasText(sourceId)) {
+            throw new IllegalArgumentException("Job work item has no executable source id: " + item.key());
+        }
+        String linkKey = jobRunId + ":" + item.key();
+        String digest = taskRunLifecycleService.canonicalInputDigest(Map.of(
+            "jobRunId", jobRunId, "itemKey", item.key(), "inputs", item.inputBindings()));
+        LifecycleResult lifecycle = taskRunLifecycleService.reserveChild(parent.taskRunId(),
+            "JOB_WORK_ITEM", linkKey, "job-work-item:" + linkKey, childKind, sourceId,
+            UUID.randomUUID().toString(), digest);
+        TaskRunLocation location = taskRunLifecycleService.provisionLocation(lifecycle.taskRunId());
+        TaskRunWriteCapability capability;
+        try {
+            capability = taskRunLifecycleService.acquireWriterClaim(location,
+                lifecycle.attemptNumber(), parent.writerCapability().ownerId());
+        } catch (IllegalStateException stale) {
+            lifecycle = taskRunLifecycleService.recoverForAssignment(lifecycle.taskRunId(), assignment.id(),
+                "job-work-item-recovery:" + linkKey + ":" + assignment.leaseFence(), digest);
+            capability = taskRunLifecycleService.acquireWriterClaim(location,
+                lifecycle.attemptNumber(), parent.writerCapability().ownerId());
+        }
+        OrchestrationTaskContext context = new OrchestrationTaskContext(
+            parent.agentId(), parent.agentName(), parent.jobId(), assignment.id(), jobRunId,
+            parent.projectId(), parent.workspaceType(), parent.workspaceKey(), parent.workspaceIdentity(),
+            "JOB_WORK_ITEM", parent.runDisplayName(), location.confinedPath().toString(), null,
+            location, workspaceDirectoryService.resolveRunOutput(location),
+            lifecycle.taskRunId() + ":" + lifecycle.attemptNumber(), capability,
+            parent.workspaceDescriptor());
+        return new ChildExecution(context, capability);
     }
 
     private TaskExecution runTaskThroughModel(
@@ -531,6 +650,7 @@ public class OrchestrationRunnerService {
     }
 
     private void checkpointActiveConversation(WorkAssignment assignment, String conversationId) {
+        verifyExecutionCapabilities(assignment);
         repository.saveAssignmentConversationLink(assignment.id(), conversationId);
         WorkAssignment current = assignmentService.get(assignment.id());
         Map<String, Object> checkpoint = mergeConversationCheckpoint(
@@ -541,6 +661,7 @@ public class OrchestrationRunnerService {
 
     private WorkflowExecutionObserver assignmentConversationObserver(WorkAssignment assignment) {
         return (workflowRunId, nodeKey, conversationId) -> {
+            verifyExecutionCapabilities(assignment);
             repository.saveAssignmentConversationLink(assignment.id(), conversationId);
             WorkAssignment current = assignmentService.get(assignment.id());
             Map<String, Object> checkpoint = mergeConversationCheckpoint(current.checkpoint(),
@@ -597,24 +718,28 @@ public class OrchestrationRunnerService {
 
     private WorkAssignment complete(WorkAssignment assignment, Map<String, Object> output,
                                     Map<String, Object> evidence) {
+        verifyExecutionCapabilities(assignment);
         return assignmentService.saveIfLeaseOwner(assignmentService.copy(assignment,
             OrchestrationStatus.COMPLETED, assignment.currentItemIndex(), assignment.checkpoint(),
             output, evidence, null, null, null, Instant.now()), leaseOwner);
     }
 
     private WorkAssignment fail(WorkAssignment assignment, String errorText) {
+        verifyExecutionCapabilities(assignment);
         return assignmentService.saveIfLeaseOwner(assignmentService.copy(assignment,
             OrchestrationStatus.FAILED, assignment.currentItemIndex(), assignment.checkpoint(),
             assignment.output(), assignment.evidence(), errorText, null, null, Instant.now()), leaseOwner);
     }
 
     private WorkAssignment waiting(WorkAssignment assignment) {
+        verifyExecutionCapabilities(assignment);
         return assignmentService.saveIfLeaseOwner(assignmentService.copy(assignment,
             OrchestrationStatus.WAITING, assignment.currentItemIndex(), assignment.checkpoint(),
             assignment.output(), assignment.evidence(), null, null, null, null), leaseOwner);
     }
 
     private WorkAssignment cancel(WorkAssignment assignment) {
+        verifyExecutionCapabilities(assignment);
         return assignmentService.saveIfLeaseOwner(assignmentService.copy(assignment,
             OrchestrationStatus.CANCELLED, assignment.currentItemIndex(), assignment.checkpoint(),
             assignment.output(), assignment.evidence(), "Cancelled", null, null, Instant.now()), leaseOwner);
@@ -728,6 +853,39 @@ public class OrchestrationRunnerService {
         );
     }
 
+    // ── Lifecycle helpers ──
+
+    private void verifyExecutionCapabilities(WorkAssignment assignment) {
+        if (!repository.isAssignmentLeaseCurrent(assignment.id(), leaseOwner, assignment.leaseFence())) {
+            throw new AssignmentService.StaleAssignmentLeaseException(
+                "Assignment lease is stale: " + assignment.id());
+        }
+        OrchestrationTaskContext context = OrchestrationTaskContextHolder.current();
+        if (context != null && context.writerCapability() != null) {
+            taskRunLifecycleService.requireCurrentWriter(context.writerCapability());
+        }
+    }
+
+    private void finishWriterForResult(TaskRunWriteCapability capability, WorkAssignment result) {
+        if (capability == null || taskRunLifecycleService == null
+                || !taskRunLifecycleService.verifyWriterClaimCurrent(capability)) return;
+        switch (result.status()) {
+            case COMPLETED -> taskRunLifecycleService.completeAttempt(capability);
+            case WAITING, PAUSED -> taskRunLifecycleService.waitAttempt(capability);
+            case FAILED, CANCELLED, NEEDS_REVIEW -> taskRunLifecycleService.failAttempt(
+                capability, result.errorText());
+            case INTERRUPTED -> taskRunLifecycleService.interruptAttempt(capability, result.errorText());
+            default -> taskRunLifecycleService.releaseWriterClaim(capability);
+        }
+    }
+
+    private static boolean isTaskRunAssignment(AssignmentType type) {
+        return type == AssignmentType.TASK_RUN || type == AssignmentType.WORKFLOW_RUN
+            || type == AssignmentType.JOB_RUN;
+    }
+
+    private record ChildExecution(OrchestrationTaskContext context,
+                                  TaskRunWriteCapability capability) {}
     private record JobItemResult(boolean succeeded, Object output, Map<String, Object> evidence,
                                   String errorText, String childRunId) {}
     private record JobItemOutput(String runId, Map<String, Object> payload) {}

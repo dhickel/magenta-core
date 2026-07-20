@@ -195,7 +195,8 @@ public class TaskController {
                 normalize(request == null ? null : request.projectId()),
                 normalize(request == null ? null : request.workspaceType()),
                 normalize(request == null ? null : request.workspaceKey()),
-                taskRunInput(taskId, request)
+                taskRunInput(taskId, request),
+                normalize(request == null ? null : request.operationKey())
             ));
             SseStreamLifecycle.sendSseEvent(emitter, "submitted", Map.of(
                 "event", "submitted",
@@ -203,7 +204,9 @@ public class TaskController {
                 "taskId", taskId,
                 "runDisplayName", displayValue(assignment.runDisplayName()),
                 "status", assignment.status().name(),
-                "priority", assignment.priority()
+                "priority", assignment.priority(),
+                "taskRunId", displayValue(String.valueOf(assignment.checkpoint().get("taskRunId"))),
+                "operationKey", displayValue(String.valueOf(assignment.checkpoint().get("lifecycleOperationKey")))
             ));
             SseStreamLifecycle.completeQuietly(emitter);
         } catch (IllegalArgumentException exception) {
@@ -283,8 +286,18 @@ public class TaskController {
         String workspaceKey,
         String runDisplayName,
         String modelOverride,
-        Integer priority
+        Integer priority,
+        String operationKey
     ) {
+        public TaskRunRequest(
+            Map<String, Object> inputValues, String conversationId, String agentId, String jobId,
+            String projectId, String workspaceType, String workspaceKey, String runDisplayName,
+            String modelOverride, Integer priority
+        ) {
+            this(inputValues, conversationId, agentId, jobId, projectId, workspaceType, workspaceKey,
+                runDisplayName, modelOverride, priority, null);
+        }
+
         public TaskRunRequest(
             Map<String, Object> inputValues,
             String conversationId,
@@ -294,7 +307,8 @@ public class TaskController {
             String modelOverride,
             Integer priority
         ) {
-            this(inputValues, conversationId, agentId, jobId, projectId, null, null, null, modelOverride, priority);
+            this(inputValues, conversationId, agentId, jobId, projectId, null, null, null,
+                modelOverride, priority, null);
         }
     }
 

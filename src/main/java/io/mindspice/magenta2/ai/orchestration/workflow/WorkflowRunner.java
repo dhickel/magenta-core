@@ -5,9 +5,14 @@ import io.mindspice.magenta2.ai.chat.plan.PlanFieldType;
 import io.mindspice.magenta2.ai.chat.plan.PlanRun;
 import io.mindspice.magenta2.ai.chat.plan.PlanRunStatus;
 import io.mindspice.magenta2.ai.chat.plan.PlanService;
+import io.mindspice.magenta2.ai.orchestration.runtime.LifecycleReservationRequest;
 import io.mindspice.magenta2.ai.orchestration.runtime.OrchestrationTaskContext;
 import io.mindspice.magenta2.ai.orchestration.runtime.OrchestrationTaskContextHolder;
+import io.mindspice.magenta2.ai.orchestration.runtime.TaskRunLifecycleService;
 import io.mindspice.magenta2.ai.orchestration.workspaces.OutputArtifactContext;
+import io.mindspice.magenta2.ai.orchestration.workspaces.TaskRunLocation;
+import io.mindspice.magenta2.ai.orchestration.workspaces.TaskRunWriteCapability;
+import io.mindspice.magenta2.ai.orchestration.workspaces.TaskSourceKind;
 import io.mindspice.magenta2.ai.orchestration.workspaces.OutputArtifactService;
 import io.mindspice.magenta2.ai.orchestration.workspaces.RunOutputArtifact;
 import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceDescriptor;
@@ -52,6 +57,7 @@ public class WorkflowRunner {
     private final WorkspaceDirectoryService workspaceDirectoryService;
     private final OutputArtifactService outputArtifactService;
     private final WorkflowTaskExecutor workflowTaskExecutor;
+    private final TaskRunLifecycleService taskRunLifecycleService;
     private final ExecutorService executor = Executors.newCachedThreadPool();
 
     private volatile TaskNodeExecutor taskNodeExecutor;
@@ -60,7 +66,7 @@ public class WorkflowRunner {
                           InboxService inboxService,
                           WorkspaceDirectoryService workspaceDirectoryService,
                           OutputArtifactService outputArtifactService) {
-        this(repository, planService, inboxService, workspaceDirectoryService, outputArtifactService, null);
+        this(repository, planService, inboxService, workspaceDirectoryService, outputArtifactService, null, null);
     }
 
     @Autowired
@@ -68,13 +74,15 @@ public class WorkflowRunner {
                           InboxService inboxService,
                           WorkspaceDirectoryService workspaceDirectoryService,
                           OutputArtifactService outputArtifactService,
-                          ObjectProvider<WorkflowTaskExecutor> workflowTaskExecutorProvider) {
+                          ObjectProvider<WorkflowTaskExecutor> workflowTaskExecutorProvider,
+                          @Autowired(required = false) TaskRunLifecycleService taskRunLifecycleService) {
         this.repository = repository;
         this.planService = planService;
         this.inboxService = inboxService;
         this.workspaceDirectoryService = workspaceDirectoryService;
         this.outputArtifactService = outputArtifactService;
         this.workflowTaskExecutor = workflowTaskExecutorProvider == null ? null : workflowTaskExecutorProvider.getIfAvailable();
+        this.taskRunLifecycleService = taskRunLifecycleService;
     }
 
     @FunctionalInterface
@@ -95,12 +103,34 @@ public class WorkflowRunner {
     }
 
     private WorkflowRun createRun(WorkflowDefinition definition, String modelOverride, boolean submitAsync) {
-        String runId = UUID.randomUUID().toString();
-        Instant now = Instant.now();
-
         OrchestrationTaskContext currentContext = OrchestrationTaskContextHolder.current();
+        boolean usesReservedRun = currentContext != null && currentContext.taskRunLocation() != null
+            && currentContext.taskRunLocation().taskIdentity().sourceKind() == TaskSourceKind.WORKFLOW
+            && definition.id().equals(currentContext.taskRunLocation().taskIdentity().stableId());
+        String runId = usesReservedRun
+            ? currentContext.taskRunLocation().taskRunId() : UUID.randomUUID().toString();
+        Instant now = Instant.now();
+        if (usesReservedRun) {
+            WorkflowRun existing = repository.findRun(runId).orElse(null);
+            if (existing != null) return existing;
+        }
+
+
         WorkspaceDescriptor descriptor = resolveDescriptor(currentContext);
         OutputArtifactContext attribution = outputContext(currentContext);
+
+        if (!usesReservedRun && taskRunLifecycleService != null && descriptor != null) {
+            if (descriptor.kind() == WorkspaceKind.CHAT) {
+                throw new IllegalArgumentException("CHAT workspaces are not task-selectable");
+            }
+            String inputDigest = taskRunLifecycleService.canonicalInputDigest(Map.of(
+                "workflowId", definition.id(), "nodeCount", definition.nodes().size()));
+            taskRunLifecycleService.reserve(LifecycleReservationRequest.reuseNative(
+                    "workflow-submission:" + UUID.randomUUID(), TaskSourceKind.WORKFLOW,
+                    definition.id(), descriptor.kind(), descriptor.key(), runId,
+                    attribution.jobAssignmentId(), inputDigest));
+        }
+
         List<WorkflowNodeRun> nodeRuns = definition.nodes().stream()
             .map(node -> new WorkflowNodeRun(
                 node.key(), node.type(), WorkflowNodeRunStatus.PENDING,
@@ -432,11 +462,13 @@ public class WorkflowRunner {
             if (observer != null) {
                 observer.taskConversationStarted(run.id(), node.key(), conversationId);
             }
-            var taskRun = workflowTaskExecutor.execute(node.planId(), inputs, conversationId, modelOverride);
+            var taskRun = executeWorkflowTaskChild(node, inputs, run, conversationId, modelOverride);
             if (!workflowTaskExecutor.succeeded(taskRun.status())) {
                 throw new IllegalStateException("Task node '" + node.key() + "' failed with status " + taskRun.status().name());
             }
-            return taskRun.outputValues();
+            Map<String, Object> outputs = new LinkedHashMap<>(taskRun.outputValues());
+            outputs.put("taskRunId", taskRun.id());
+            return outputs;
         }
 
         if (taskNodeExecutor == null) {
@@ -449,6 +481,57 @@ public class WorkflowRunner {
             throw new IllegalStateException("Task node '" + node.key() + "' failed with status " + planRun.status().name());
         }
         return planRun.outputValues();
+    }
+
+    private io.mindspice.magenta2.ai.chat.task.TaskRun executeWorkflowTaskChild(
+        WorkflowNode node, Map<String, Object> inputs, WorkflowRun workflowRun,
+        String conversationId, String modelOverride
+    ) {
+        OrchestrationTaskContext parent = OrchestrationTaskContextHolder.current();
+        if (taskRunLifecycleService == null || parent == null || parent.taskRunLocation() == null
+                || parent.writerCapability() == null) {
+            return workflowTaskExecutor.execute(node.planId(), inputs, conversationId, modelOverride);
+        }
+        taskRunLifecycleService.requireCurrentWriter(parent.writerCapability());
+        String childRunId = UUID.randomUUID().toString();
+        String linkKey = workflowRun.id() + ":" + node.key() + ":" + parent.attemptNumber();
+        String digest = taskRunLifecycleService.canonicalInputDigest(Map.of(
+            "workflowRunId", workflowRun.id(), "nodeKey", node.key(), "inputs", inputs));
+        var child = taskRunLifecycleService.reserveChild(parent.taskRunId(), "WORKFLOW_CHILD", linkKey,
+            "workflow-child:" + linkKey, TaskSourceKind.TASK, node.planId(), childRunId, digest);
+        TaskRunLocation location = taskRunLifecycleService.provisionLocation(child.taskRunId());
+        TaskRunWriteCapability capability;
+        try {
+            capability = taskRunLifecycleService.acquireWriterClaim(location, child.attemptNumber(),
+                parent.writerCapability().ownerId());
+        } catch (IllegalStateException stale) {
+            child = taskRunLifecycleService.recoverForAssignment(child.taskRunId(), parent.jobAssignmentId(),
+                "workflow-child-recovery:" + linkKey, digest);
+            capability = taskRunLifecycleService.acquireWriterClaim(location, child.attemptNumber(),
+                parent.writerCapability().ownerId());
+        }
+        final TaskRunWriteCapability childCapability = capability;
+        OrchestrationTaskContext childContext = new OrchestrationTaskContext(
+            parent.agentId(), parent.agentName(), parent.jobId(), parent.jobAssignmentId(), parent.jobRunId(),
+            parent.projectId(), parent.workspaceType(), parent.workspaceKey(), parent.workspaceIdentity(),
+            "WORKFLOW_CHILD", parent.runDisplayName(), location.confinedPath().toString(), null,
+            location, workspaceDirectoryService.resolveRunOutput(location),
+            child.taskRunId() + ":" + child.attemptNumber(), childCapability, parent.workspaceDescriptor());
+        try {
+            var result = runWithContext(childContext,
+                () -> workflowTaskExecutor.execute(node.planId(), inputs, conversationId, modelOverride));
+            if (workflowTaskExecutor.succeeded(result.status())) {
+                taskRunLifecycleService.completeAttempt(childCapability);
+            } else {
+                taskRunLifecycleService.failAttempt(childCapability, "Workflow child task failed: " + result.status());
+            }
+            return result;
+        } catch (RuntimeException failure) {
+            if (taskRunLifecycleService.verifyWriterClaimCurrent(childCapability)) {
+                taskRunLifecycleService.failAttempt(childCapability, failure.getMessage());
+            }
+            throw failure;
+        }
     }
 
     private Map<String, Object> executeFinalOutputNode(WorkflowNode node, Map<String, Object> inputs, WorkflowRun run) {
@@ -746,13 +829,20 @@ public class WorkflowRunner {
 
     private OrchestrationTaskContext executionContextFor(WorkflowRun run, OrchestrationTaskContext base) {
         WorkspaceDescriptor descriptor = descriptorForRun(run);
+        boolean sameLifecycle = base != null && base.taskRunLocation() != null
+            && run.id().equals(base.taskRunLocation().taskRunId());
         return new OrchestrationTaskContext(
             run.agentId() != null ? run.agentId() : base == null ? null : base.agentId(),
             base == null ? null : base.agentName(),
             run.jobId(), run.jobAssignmentId(), run.jobRunId(), run.projectId(),
             descriptor.kind().token(), descriptor.key(), descriptor.identity(),
             StringUtils.hasText(run.runType()) ? run.runType() : "WORKFLOW_RUN",
-            run.runDisplayName(), descriptor.root().toString(), null
+            run.runDisplayName(), sameLifecycle ? base.resolvedHostPath() : descriptor.root().toString(), null,
+            sameLifecycle ? base.taskRunLocation() : null,
+            sameLifecycle ? base.runOutputLocation() : null,
+            sameLifecycle ? base.attemptId() : null,
+            sameLifecycle ? base.writerCapability() : null,
+            descriptor
         );
     }
 

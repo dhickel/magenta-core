@@ -31,6 +31,14 @@ public final class TaskRunWriteCapability {
         this.fenceToken = requireText(fenceToken, "fenceToken");
     }
 
+    /** Factory exposed for Phase 02 lifecycle. Does not authorize mutation. */
+    public static TaskRunWriteCapability create(String taskRunId, int attemptNumber,
+                                                 String ownerId, long fenceGeneration,
+                                                 String fenceToken) {
+        return new TaskRunWriteCapability(taskRunId, attemptNumber, ownerId,
+                fenceGeneration, fenceToken);
+    }
+
     public String taskRunId() { return taskRunId; }
     public int attemptNumber() { return attemptNumber; }
     public String ownerId() { return ownerId; }

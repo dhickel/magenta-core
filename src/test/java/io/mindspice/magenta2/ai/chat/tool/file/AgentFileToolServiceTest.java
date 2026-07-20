@@ -308,7 +308,7 @@ class AgentFileToolServiceTest {
             "TASK_RUN",
             null,
             runWorkspace.toString(),
-            null));
+            null, null, null, null, null));
 
         AgentFileToolService.FileReadResult result = service.read("notes.txt", 1, 10);
 
@@ -338,7 +338,7 @@ class AgentFileToolServiceTest {
             "TASK_RUN",
             null,
             workspace.toString(),
-            null));
+            null, null, null, null, null));
 
         assertThatThrownBy(() -> service.write("outputs/result.txt", "done\n", false))
             .isInstanceOf(IllegalArgumentException.class)
@@ -370,7 +370,7 @@ class AgentFileToolServiceTest {
             "TASK_RUN",
             null,
             workspace.toString(),
-            null));
+            null, null, null, null, null));
         try {
             for (String directory : List.of("workspace", "root", "work", "run", "projects")) {
                 assertThat(service.read(directory + "/notes.txt", 1, 10).lines().getFirst())
@@ -404,7 +404,7 @@ class AgentFileToolServiceTest {
             "TASK_RUN",
             null,
             durableWorkspace.toString(),
-            null));
+            null, null, null, null, null));
 
         service.read("a/file.txt", 1, 10);
         assertThat(OrchestrationTaskContextHolder.current().activeRuntimePath())
@@ -447,7 +447,7 @@ class AgentFileToolServiceTest {
             "TASK_RUN",
             null,
             workspace.toString(),
-            null));
+            null, null, null, null, null));
 
         assertThat(service.read("projects/project-1/shared.txt", 1, 10).lines().getFirst())
             .endsWith("|ordinary project directory");
@@ -473,7 +473,7 @@ class AgentFileToolServiceTest {
             "TASK_RUN",
             null,
             null,
-            null));
+            null, null, null, null, null));
 
         AgentFileToolService.FileReadResult result = service.read("profile.txt", 1, 10);
 
@@ -506,7 +506,7 @@ class AgentFileToolServiceTest {
             "TASK_RUN",
             null,
             runWorkspace.toString(),
-            null));
+            null, null, null, null, null));
 
         assertThatThrownBy(() -> service.read("../run-2/secret.txt", 1, 10))
             .isInstanceOf(IllegalArgumentException.class)
