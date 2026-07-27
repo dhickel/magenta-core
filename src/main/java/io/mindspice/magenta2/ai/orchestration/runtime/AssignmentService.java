@@ -16,6 +16,7 @@ import io.mindspice.magenta2.ai.chat.plan.PlanService;
 import io.mindspice.magenta2.ai.chat.repository.AuditRepository;
 import io.mindspice.magenta2.ai.orchestration.agents.AgentProfile;
 import io.mindspice.magenta2.ai.orchestration.agents.AgentProfileService;
+import io.mindspice.magenta2.ai.orchestration.context.AgentContextService;
 import io.mindspice.magenta2.ai.orchestration.settings.RuntimeSettingsService;
 import io.mindspice.magenta2.ai.orchestration.workflow.WorkflowRun;
 import io.mindspice.magenta2.ai.orchestration.workflow.WorkflowService;
@@ -32,6 +33,8 @@ import org.springframework.util.StringUtils;
 
 @Service
 public class AssignmentService {
+    private static final org.slf4j.Logger logger = org.slf4j.LoggerFactory.getLogger(AssignmentService.class);
+
     private final OrchestrationRuntimeRepository repository;
     private final AgentProfileService agentProfileService;
     private final RuntimeSettingsService runtimeSettingsService;
@@ -41,6 +44,7 @@ public class AssignmentService {
     private final WorkflowService workflowService;
     private final WorkspaceDirectoryService workspaceDirectoryService;
     private final TaskRunLifecycleService taskRunLifecycleService;
+    private final AgentContextService agentContextService;
     private volatile Consumer<String> localInterruptHandler = ignored -> { };
 
     public AssignmentService(
@@ -49,7 +53,7 @@ public class AssignmentService {
         RuntimeSettingsService runtimeSettingsService,
         JobService jobService
     ) {
-        this(repository, agentProfileService, runtimeSettingsService, jobService, null, null, null, null, null);
+        this(repository, agentProfileService, runtimeSettingsService, jobService, null, null, null, null, null, null);
     }
 
     public AssignmentService(
@@ -63,7 +67,7 @@ public class AssignmentService {
         WorkspaceDirectoryService workspaceDirectoryService
     ) {
         this(repository, agentProfileService, runtimeSettingsService, jobService, auditRepository,
-            planService, workflowService, workspaceDirectoryService, null);
+            planService, workflowService, workspaceDirectoryService, null, null);
     }
 
     @Autowired
@@ -76,7 +80,8 @@ public class AssignmentService {
         @Autowired(required = false) PlanService planService,
         @Autowired(required = false) WorkflowService workflowService,
         @Autowired(required = false) WorkspaceDirectoryService workspaceDirectoryService,
-        @Autowired(required = false) TaskRunLifecycleService taskRunLifecycleService
+        @Autowired(required = false) TaskRunLifecycleService taskRunLifecycleService,
+        @Autowired(required = false) AgentContextService agentContextService
     ) {
         this.repository = repository;
         this.agentProfileService = agentProfileService;
@@ -87,6 +92,7 @@ public class AssignmentService {
         this.workflowService = workflowService;
         this.workspaceDirectoryService = workspaceDirectoryService;
         this.taskRunLifecycleService = taskRunLifecycleService;
+        this.agentContextService = agentContextService;
     }
 
     @Transactional
@@ -157,7 +163,45 @@ public class AssignmentService {
             null,
             null
         ));
+        captureAssignmentContextBinding(assignmentId, request.agentId());
         return reserveLifecycleAtSubmission(assignment, request.operationKey());
+    }
+
+    private void captureAssignmentContextBinding(String assignmentId, String agentId) {
+        if (agentContextService == null) {
+            return;
+        }
+        // Skip if no default exists (common in tests and fresh deployments)
+        var defaultLookup = agentContextService.getDefault(agentId);
+        if (defaultLookup.outcome() != io.mindspice.magenta2.ai.orchestration.context.AgentContextService.ContextOutcome.AVAILABLE) {
+            return;
+        }
+        try {
+            String bindingKey = "assignment:" + assignmentId;
+            agentContextService.captureFromDefault(agentId, bindingKey, bindingKey);
+            agentContextService.linkOwner("ASSIGNMENT", assignmentId, bindingKey,
+                "owner-link:assignment:" + assignmentId);
+        } catch (IllegalArgumentException | IllegalStateException e) {
+            logger.warn("Context binding capture failed for assignment {}: {}", assignmentId, e.getMessage());
+        }
+    }
+
+    /** Link a task-run reservation to the same binding as its owning assignment. */
+    private void linkTaskRunBinding(String taskRunId, String assignmentId) {
+        if (agentContextService == null) {
+            return;
+        }
+        try {
+            var link = agentContextService.getOwnerLink("ASSIGNMENT", assignmentId);
+            if (link.outcome() == io.mindspice.magenta2.ai.orchestration.context.AgentContextService.ContextOutcome.AVAILABLE
+                    && link.value() != null) {
+                String bindingKey = link.value().bindingKey();
+                agentContextService.linkOwner("TASK_RUN", taskRunId, bindingKey,
+                    "owner-link:task-run:" + taskRunId);
+            }
+        } catch (IllegalArgumentException | IllegalStateException e) {
+            logger.debug("Task-run binding link skipped for {}: {}", taskRunId, e.getMessage());
+        }
     }
 
     private WorkAssignment reserveLifecycleAtSubmission(WorkAssignment assignment, String requestedOperationKey) {
@@ -186,12 +230,16 @@ public class AssignmentService {
             repository.deleteAssignment(assignment.agentId(), assignment.id());
             return get(owningAssignmentId);
         }
+        // Link the task run to the same binding as its assignment
+        linkTaskRunBinding(lifecycle.taskRunId(), assignment.id());
+
         Map<String, Object> checkpoint = new LinkedHashMap<>();
         checkpoint.put("taskRunId", lifecycle.taskRunId());
         checkpoint.put("nativeRunId", lifecycle.nativeRunId());
         checkpoint.put("lifecycleOperationKey", lifecycle.operationKey());
         checkpoint.put("lifecycleInputDigest", inputDigest);
         checkpoint.put("attemptNumber", lifecycle.attemptNumber());
+        checkpoint.put("contextBindingKey", "assignment:" + assignment.id());
         return repository.saveAssignment(copy(assignment, assignment.status(), assignment.currentItemIndex(),
             checkpoint, assignment.output(), assignment.evidence(), assignment.errorText(),
             assignment.leaseOwner(), assignment.leaseExpiresAt(), assignment.completedAt()));
@@ -440,6 +488,11 @@ public class AssignmentService {
             source.workspaceType(), source.workspaceKey(), source.workspaceIdentity(), source.projectId(),
             0, Map.of(), source.input(), Map.of(), Map.of(), null, null, null, 0L,
             null, null, null, null, null, null));
+
+        // Copy immutable binding facts from source → new binding with lineage
+        String newBindingKey = "assignment:" + newAssignmentId;
+        captureLineageBinding(source, newAssignmentId, newBindingKey);
+
         String key = StringUtils.hasText(requestedOperationKey)
             ? requestedOperationKey.trim() : mode.name().toLowerCase() + ":" + UUID.randomUUID();
         String digest = taskRunLifecycleService.canonicalInputDigest(Map.of(
@@ -463,8 +516,47 @@ public class AssignmentService {
         checkpoint.put("attemptNumber", lifecycle.attemptNumber());
         checkpoint.put("lineageParentTaskRunId", parentTaskRunId);
         checkpoint.put("lineageMode", mode.name());
+        checkpoint.put("contextBindingKey", newBindingKey);
+        linkTaskRunBinding(lifecycle.taskRunId(), newAssignmentId);
         return repository.saveAssignment(copy(child, child.status(), 0, checkpoint, Map.of(), Map.of(),
             null, null, null, null));
+    }
+
+    /**
+     * Copies the source assignment's immutable binding facts into a new binding
+     * for a lineage child, then creates the owner link.
+     */
+    private void captureLineageBinding(WorkAssignment source, String newAssignmentId, String newBindingKey) {
+        if (agentContextService == null) {
+            return;
+        }
+        String sourceBindingKey = text(source.checkpoint().get("contextBindingKey"));
+        if (!StringUtils.hasText(sourceBindingKey)) {
+            // Try to find by owner link
+            var link = agentContextService.getOwnerLink("ASSIGNMENT", source.id());
+            if (link.outcome() == io.mindspice.magenta2.ai.orchestration.context.AgentContextService.ContextOutcome.AVAILABLE
+                    && link.value() != null) {
+                sourceBindingKey = link.value().bindingKey();
+            }
+        }
+        if (!StringUtils.hasText(sourceBindingKey)) {
+            return;
+        }
+        var bindingLookup = agentContextService.getBinding(sourceBindingKey);
+        if (bindingLookup.outcome() != io.mindspice.magenta2.ai.orchestration.context.AgentContextService.ContextOutcome.AVAILABLE
+                || bindingLookup.value() == null) {
+            return;
+        }
+        var sourceBinding = bindingLookup.value();
+        try {
+            // Capture a new binding with the same immutable facts
+            agentContextService.captureMaterialization(sourceBinding.agentId(), newBindingKey,
+                sourceBinding.materializationKey(), sourceBinding.materializationGeneration(), newBindingKey);
+            agentContextService.linkOwner("ASSIGNMENT", newAssignmentId, newBindingKey,
+                "owner-link:assignment:" + newAssignmentId);
+        } catch (IllegalArgumentException | IllegalStateException e) {
+            logger.warn("Lineage binding capture failed for assignment {}: {}", newAssignmentId, e.getMessage());
+        }
     }
 
     WorkAssignment forceInterrupt(String assignmentId, String reason) {

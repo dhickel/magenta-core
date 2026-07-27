@@ -24,6 +24,7 @@ Run lifecycle idempotency, migration, and fencing invariants.
 - Workflow nodes and job items need a separate typed parent/child relation. Optional columns on the one native-link row cannot represent arbitrary task children and encourage assignment/native aliasing.
 - Force interrupt and stale-lease recovery must revoke linked writer claims immediately. Waiting until a replacement runner happens to acquire a lease leaves a split-brain filesystem window.
 - A real empty-job runner integration is a useful model-free proof: it exercises submission reservation, assignment leasing, native job identity, root provisioning, writer acquisition/closure, and terminal CAS without external AI infrastructure.
+- Immutable context bindings must be resolved through durable owner links, not checkpoint JSON or a parallel metadata column. Submission idempotency must inspect an existing operation before creating a candidate assignment/binding; otherwise a losing concurrent retry leaves orphan immutable records. Runner validation must compare assignment/run owner links and binding state/generation before filesystem provisioning or writer acquisition.
 
 ## Project Relevance
 These rules prevent duplicate reservations, generated-ID idempotency failures, split-brain assignment/filesystem writers, orphan directories after rollback, and migration bookkeeping that misrepresents partial schemas as complete.

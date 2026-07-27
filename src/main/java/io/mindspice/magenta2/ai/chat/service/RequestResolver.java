@@ -16,11 +16,13 @@ import io.mindspice.magenta2.ai.chat.plan.PlanService;
 import io.mindspice.magenta2.ai.config.user.AgentConfig;
 import io.mindspice.magenta2.ai.config.user.AiConfig;
 import io.mindspice.magenta2.ai.config.user.ModelConfig;
+import io.mindspice.magenta2.ai.orchestration.context.AgentContextService;
 import io.mindspice.magenta2.ai.orchestration.settings.RuntimeSettingsService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
 /**
@@ -40,6 +42,7 @@ public class RequestResolver {
     private final PlanService planService;
     private final TaskService taskService;
     private final RuntimeSettingsService runtimeSettingsService;
+    private final AgentContextService agentContextService;
 
     @Autowired
     public RequestResolver(
@@ -48,7 +51,8 @@ public class RequestResolver {
         ChatMemoryRepository chatMemoryRepository,
         @Autowired(required = false) PlanService planService,
         @Autowired(required = false) TaskService taskService,
-        @Autowired(required = false) RuntimeSettingsService runtimeSettingsService
+        @Autowired(required = false) RuntimeSettingsService runtimeSettingsService,
+        @Autowired(required = false) AgentContextService agentContextService
     ) {
         this.aiConfig = aiConfig;
         this.chatSessionMetadataRepository = chatSessionMetadataRepository;
@@ -56,13 +60,15 @@ public class RequestResolver {
         this.planService = planService;
         this.taskService = taskService;
         this.runtimeSettingsService = runtimeSettingsService;
+        this.agentContextService = agentContextService;
     }
 
     /** Package-private minimal constructor for tests where only config and metadata are needed. */
     RequestResolver(AiConfig aiConfig, ChatSessionMetadataRepository chatSessionMetadataRepository) {
-        this(aiConfig, chatSessionMetadataRepository, null, null, null, null);
+        this(aiConfig, chatSessionMetadataRepository, null, null, null, null, null);
     }
 
+    @Transactional
     public ResolvedChatRequest resolve(ChatRequest request) {
         if (request instanceof ChatRequest.MsgRequest msgRequest) {
             return resolve(
@@ -70,16 +76,19 @@ public class RequestResolver {
                 msgRequest.message(),
                 msgRequest.model(),
                 msgRequest.planningModel(),
-                msgRequest.surface()
+                msgRequest.surface(),
+                msgRequest.contextCapture()
             );
         }
         throw new IllegalArgumentException("message request is required");
     }
 
+    @Transactional
     public ResolvedChatRequest resolve(String conversationId, String message, String model, String planningModel) {
-        return resolve(conversationId, message, model, planningModel, null);
+        return resolve(conversationId, message, model, planningModel, null, null);
     }
 
+    @Transactional
     public ResolvedChatRequest resolve(
         String conversationId,
         String message,
@@ -87,8 +96,21 @@ public class RequestResolver {
         String planningModel,
         ChatSessionSurface surface
     ) {
+        return resolve(conversationId, message, model, planningModel, surface, null);
+    }
+
+    @Transactional
+    public ResolvedChatRequest resolve(
+        String conversationId,
+        String message,
+        String model,
+        String planningModel,
+        ChatSessionSurface surface,
+        String contextCapture
+    ) {
         String resolvedConversationId = StringUtils.hasText(conversationId) ? conversationId : UUID.randomUUID().toString();
         boolean newConversation = !conversationExists(resolvedConversationId);
+        String bindingKey = resolveContextBinding(resolvedConversationId, newConversation, contextCapture);
         if (newConversation) {
             chatSessionMetadataRepository.saveOriginIfAbsent(resolvedConversationId, ChatSessionOrigin.CHAT, null);
             if (surface != null) {
@@ -108,7 +130,44 @@ public class RequestResolver {
             || interactionMode(resolvedConversationId) == PlanMode.TASK) {
             selectedModel = resolvedPlanningModel(resolvedConversationId);
         }
-        return new ResolvedChatRequest(resolvedConversationId, message, selectedModel, newConversation, true);
+        return new ResolvedChatRequest(resolvedConversationId, message, selectedModel, newConversation, true, false, bindingKey);
+    }
+
+    /**
+     * Resolves the immutable context binding through the authoritative owner-link
+     * model. Chat-session metadata is not a second binding store.
+     */
+    private String resolveContextBinding(String conversationId, boolean newConversation,
+                                         String contextCapture) {
+        if (StringUtils.hasText(contextCapture)
+                && !"default".equalsIgnoreCase(contextCapture.trim())) {
+            throw new IllegalArgumentException("Unsupported context capture selector");
+        }
+        if (agentContextService == null) {
+            return null;
+        }
+        if (!newConversation) {
+            var link = agentContextService.getOwnerLink("CONVERSATION", conversationId);
+            return link.value() == null ? null : link.value().bindingKey();
+        }
+        String defaultAgentId = aiConfig == null ? null : aiConfig.defaultAgent();
+        if (!StringUtils.hasText(defaultAgentId)) {
+            throw new IllegalStateException("A server-resolved default agent is required for context capture");
+        }
+        String bindingKey = "conversation:" + conversationId;
+        agentContextService.captureFromDefault(defaultAgentId, bindingKey,
+            "conversation-capture:" + conversationId);
+        agentContextService.linkOwner("CONVERSATION", conversationId, bindingKey,
+            "conversation-owner-link:" + conversationId);
+        return bindingKey;
+    }
+
+    public String contextBindingKey(String conversationId) {
+        if (agentContextService == null || !StringUtils.hasText(conversationId)) {
+            return null;
+        }
+        var link = agentContextService.getOwnerLink("CONVERSATION", conversationId);
+        return link.value() == null ? null : link.value().bindingKey();
     }
 
     public String storedConversationModel(String conversationId) {

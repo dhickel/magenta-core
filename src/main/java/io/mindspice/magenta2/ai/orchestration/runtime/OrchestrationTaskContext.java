@@ -19,6 +19,9 @@ import org.springframework.util.StringUtils;
  * perform filesystem mutation must verify {@code writerCapability} before
  * writing. The legacy {@code hostDurableWorkspacePath} is now derived from
  * {@code taskRunLocation} when available.
+ *
+ * <p>The {@code contextBindingKey} field was added in Phase 03 to carry the
+ * immutable context binding key through orchestration contexts.
  */
 public record OrchestrationTaskContext(
     String agentId,
@@ -38,11 +41,12 @@ public record OrchestrationTaskContext(
     RunOutputLocation runOutputLocation,
     String attemptId,
     TaskRunWriteCapability writerCapability,
-    WorkspaceDescriptor workspaceDescriptor
+    WorkspaceDescriptor workspaceDescriptor,
+    String contextBindingKey
 ) {
     public static final OrchestrationTaskContext EMPTY = new OrchestrationTaskContext(
         null, null, null, null, null, null, null, null, null, null, null, null, null,
-        null, null, null, null, null);
+        null, null, null, null, null, null);
 
     /** Compatibility constructor for contexts that predate trusted descriptor carriage. */
     public OrchestrationTaskContext(
@@ -54,7 +58,21 @@ public record OrchestrationTaskContext(
     ) {
         this(agentId, agentName, jobId, jobAssignmentId, jobRunId, projectId, workspaceType,
             workspaceKey, workspaceIdentity, runType, runDisplayName, hostDurableWorkspacePath,
-            activeRuntimePath, taskRunLocation, runOutputLocation, attemptId, writerCapability, null);
+            activeRuntimePath, taskRunLocation, runOutputLocation, attemptId, writerCapability, null, null);
+    }
+
+    /** Compatibility constructor for contexts that predate context bindings. */
+    public OrchestrationTaskContext(
+        String agentId, String agentName, String jobId, String jobAssignmentId, String jobRunId,
+        String projectId, String workspaceType, String workspaceKey, String workspaceIdentity,
+        String runType, String runDisplayName, String hostDurableWorkspacePath, String activeRuntimePath,
+        TaskRunLocation taskRunLocation, RunOutputLocation runOutputLocation, String attemptId,
+        TaskRunWriteCapability writerCapability, WorkspaceDescriptor workspaceDescriptor
+    ) {
+        this(agentId, agentName, jobId, jobAssignmentId, jobRunId, projectId, workspaceType,
+            workspaceKey, workspaceIdentity, runType, runDisplayName, hostDurableWorkspacePath,
+            activeRuntimePath, taskRunLocation, runOutputLocation, attemptId, writerCapability,
+            workspaceDescriptor, null);
     }
 
     public OrchestrationTaskContext {
@@ -110,7 +128,7 @@ public record OrchestrationTaskContext(
             agentId, agentName, jobId, jobAssignmentId, jobRunId, projectId,
             workspaceType, workspaceKey, workspaceIdentity, runType, runDisplayName,
             hostDurableWorkspacePath, activeRuntimePath,
-            taskRunLocation, runOutputLocation, attemptId, writerCapability, workspaceDescriptor
+            taskRunLocation, runOutputLocation, attemptId, writerCapability, workspaceDescriptor, contextBindingKey
         );
     }
 
@@ -119,7 +137,7 @@ public record OrchestrationTaskContext(
             agentId, agentName, jobId, jobAssignmentId, jobRunId, projectId,
             workspaceType, workspaceKey, workspaceIdentity, runType, runDisplayName,
             hostDurableWorkspacePath, activeRuntimePath,
-            taskRunLocation, runOutputLocation, attemptId, writerCapability, workspaceDescriptor
+            taskRunLocation, runOutputLocation, attemptId, writerCapability, workspaceDescriptor, contextBindingKey
         );
     }
 
@@ -130,7 +148,16 @@ public record OrchestrationTaskContext(
             workspaceType, workspaceKey, workspaceIdentity, runType, runDisplayName,
             location != null ? location.confinedPath().toString() : hostDurableWorkspacePath,
             activeRuntimePath,
-            location, outputLocation, attempt, capability, workspaceDescriptor
+            location, outputLocation, attempt, capability, workspaceDescriptor, contextBindingKey
+        );
+    }
+
+    public OrchestrationTaskContext withContextBindingKey(String contextBindingKey) {
+        return new OrchestrationTaskContext(
+            agentId, agentName, jobId, jobAssignmentId, jobRunId, projectId,
+            workspaceType, workspaceKey, workspaceIdentity, runType, runDisplayName,
+            hostDurableWorkspacePath, activeRuntimePath,
+            taskRunLocation, runOutputLocation, attemptId, writerCapability, workspaceDescriptor, contextBindingKey
         );
     }
 }

@@ -634,6 +634,7 @@ class ChatServiceTest {
             memoryRepository,
             null,
             null,
+            null,
             null
         );
         ChatService chatService = new ChatService(

@@ -272,7 +272,8 @@ public class OrchestrationRunnerService {
                 taskRunLocation != null ? taskRunLocation.confinedPath().toString() : workspaceDescriptor.root().toString(),
                 null, taskRunLocation,
                 taskRunLocation == null ? null : workspaceDirectoryService.resolveRunOutput(taskRunLocation),
-                attemptId, writerCapability, workspaceDescriptor
+                attemptId, writerCapability, workspaceDescriptor,
+                text(leased.checkpoint().get("contextBindingKey"), null)
             );
 
             // Validate project membership (projectId is metadata only)
@@ -614,7 +615,7 @@ public class OrchestrationRunnerService {
             "JOB_WORK_ITEM", parent.runDisplayName(), location.confinedPath().toString(), null,
             location, workspaceDirectoryService.resolveRunOutput(location),
             lifecycle.taskRunId() + ":" + lifecycle.attemptNumber(), capability,
-            parent.workspaceDescriptor());
+            parent.workspaceDescriptor(), parent.contextBindingKey());
         return new ChildExecution(context, capability);
     }
 

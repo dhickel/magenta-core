@@ -516,7 +516,8 @@ public class WorkflowRunner {
             parent.projectId(), parent.workspaceType(), parent.workspaceKey(), parent.workspaceIdentity(),
             "WORKFLOW_CHILD", parent.runDisplayName(), location.confinedPath().toString(), null,
             location, workspaceDirectoryService.resolveRunOutput(location),
-            child.taskRunId() + ":" + child.attemptNumber(), childCapability, parent.workspaceDescriptor());
+            child.taskRunId() + ":" + child.attemptNumber(), childCapability, parent.workspaceDescriptor(),
+            parent.contextBindingKey());
         try {
             var result = runWithContext(childContext,
                 () -> workflowTaskExecutor.execute(node.planId(), inputs, conversationId, modelOverride));
@@ -853,7 +854,8 @@ public class WorkflowRunner {
             sameLifecycle ? base.runOutputLocation() : null,
             sameLifecycle ? base.attemptId() : null,
             sameLifecycle ? base.writerCapability() : null,
-            descriptor
+            descriptor,
+            base != null ? base.contextBindingKey() : null
         );
     }
 
