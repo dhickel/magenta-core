@@ -2,7 +2,7 @@
   "version": 2,
   "runId": "exec-agent-workspace-v2",
   "state": "active",
-  "revision": 2,
+  "revision": 5,
   "source": {
     "projectRoot": "/home/dhickel/Code/Java/Magenta",
     "sourcePlanPath": ".internal-dev/plans/20260727-195154-home-dhickel-code-java-magenta-internal-dev-ha",
@@ -308,19 +308,154 @@
             "model": "gpt-5.6-terra",
             "thinking": "high"
           },
-          "attempt": 1,
-          "verdict": "PASS",
           "report": "GPT-5.6-terra:high validator inspected all write targets, repaired explorer delete authorization for reserved/unknown AGENT paths, repaired file-tool mutable raw-context fallback, added held-handle primitive reauthorization hooks. Focused tests (158): PASS. Full Maven suite: PASS. Bounded startup on port 37025: PASS. Writer/fallback scans: PASS. All exit criteria met. Commit: 48854c16.",
           "changedFiles": [],
           "changedFileObservations": [],
           "outsideDeclaredTargets": [],
-          "timestamp": "2026-07-27T22:34:03.766Z"
+          "timestamp": "2026-07-27T22:34:03.766Z",
+          "attempt": 1,
+          "verdict": "PASS"
         }
       ]
     },
     {
       "phase": "phase-02-materialization-context-persistence.md",
-      "validations": []
+      "implementation": {
+        "agentModel": {
+          "provider": "deepseek",
+          "model": "deepseek-v4-pro",
+          "thinking": "max"
+        },
+        "report": "DeepSeek implementer completed: 19 files changed. 894 tests pass, bounded startup pass, migration 010 metadata-equivalent. Key deliverables: MaterializationKey with deterministic framing, 5 tables with CAS semantics, AgentMaterializationService lifecycle, AgentContextService bindings/defaults, MaterializationLocation (WorkspaceDirectoryService-only constructor).",
+        "changedFiles": [
+          "src/main/resources/db/migrations/010-agent-materialization-context.sql",
+          "src/main/resources/schema.sql",
+          "src/main/java/io/mindspice/magenta2/core/persistence/SchemaMigrationRunner.java",
+          "src/main/java/io/mindspice/magenta2/ai/orchestration/context/AgentContextService.java",
+          "src/main/java/io/mindspice/magenta2/ai/orchestration/context/AgentContextRepository.java",
+          "src/main/java/io/mindspice/magenta2/ai/orchestration/context/AgentMaterializationService.java",
+          "src/main/java/io/mindspice/magenta2/ai/orchestration/context/AgentMaterializationRepository.java",
+          "src/main/java/io/mindspice/magenta2/ai/orchestration/workspaces/WorkspaceDirectoryService.java",
+          "src/main/java/io/mindspice/magenta2/ai/orchestration/workspaces/MaterializationLocation.java",
+          "src/main/java/io/mindspice/magenta2/ai/orchestration/workspaces/WorkspacePathLayout.java",
+          "src/main/java/io/mindspice/magenta2/ai/orchestration/context/MaterializationKey.java",
+          "src/test/java/io/mindspice/magenta2/ai/orchestration/context/MaterializationKeyTest.java"
+        ],
+        "changedFileObservations": [
+          {
+            "path": "src/main/resources/db/migrations/010-agent-materialization-context.sql",
+            "status": "present",
+            "digest": "6b4139fa1e52ab5c16b2b7a6d99971722ee6a0e1f72e5e1f23e5e527cd6918b6",
+            "bytes": 6114
+          },
+          {
+            "path": "src/main/resources/schema.sql",
+            "status": "present",
+            "digest": "101d70da32dcd43689dd898671d74b01483dea436301e145a959995c7374c3d8",
+            "bytes": 71659
+          },
+          {
+            "path": "src/main/java/io/mindspice/magenta2/core/persistence/SchemaMigrationRunner.java",
+            "status": "present",
+            "digest": "1725a1b7f817b9aa4cbc123becdbcc0e0678d653242eef1fcf100ac105996604",
+            "bytes": 66226
+          },
+          {
+            "path": "src/main/java/io/mindspice/magenta2/ai/orchestration/context/AgentContextService.java",
+            "status": "present",
+            "digest": "bd662ed7287c1747efcd445b61b002c211cca9a45218e345d50ee29df0946a07",
+            "bytes": 15338
+          },
+          {
+            "path": "src/main/java/io/mindspice/magenta2/ai/orchestration/context/AgentContextRepository.java",
+            "status": "present",
+            "digest": "83789ca1099f6d2a550d0e8781cca7419aeb1a9f0fda8ca64cb2837eb21a79f9",
+            "bytes": 12197
+          },
+          {
+            "path": "src/main/java/io/mindspice/magenta2/ai/orchestration/context/AgentMaterializationService.java",
+            "status": "present",
+            "digest": "8705aefc3a61d8f416606550ef31709b140a1e8580aa4a068f41c995b1c94ed8",
+            "bytes": 14352
+          },
+          {
+            "path": "src/main/java/io/mindspice/magenta2/ai/orchestration/context/AgentMaterializationRepository.java",
+            "status": "present",
+            "digest": "0813031a515510303adcdf57ccd4534f838f46d7fd4e2a2f5cddc422ddbd4b43",
+            "bytes": 14500
+          },
+          {
+            "path": "src/main/java/io/mindspice/magenta2/ai/orchestration/workspaces/WorkspaceDirectoryService.java",
+            "status": "present",
+            "digest": "5bbfd89b0032eb4b130c61cae0e47500733156c83e2dd9294693258c578a5b29",
+            "bytes": 28632
+          },
+          {
+            "path": "src/main/java/io/mindspice/magenta2/ai/orchestration/workspaces/MaterializationLocation.java",
+            "status": "present",
+            "digest": "2af5dc4818f6ba87115cc3a35eb3de40eb3254d768a93c66b1d83ba8a6dce8f0",
+            "bytes": 3494
+          },
+          {
+            "path": "src/main/java/io/mindspice/magenta2/ai/orchestration/workspaces/WorkspacePathLayout.java",
+            "status": "present",
+            "digest": "5e30c0aa8ee3d04509f403174590db547e4245a4642c69924f47416052181ad7",
+            "bytes": 5149
+          },
+          {
+            "path": "src/main/java/io/mindspice/magenta2/ai/orchestration/context/MaterializationKey.java",
+            "status": "deleted"
+          },
+          {
+            "path": "src/test/java/io/mindspice/magenta2/ai/orchestration/context/MaterializationKeyTest.java",
+            "status": "present",
+            "digest": "13630402454119fe1b3108c040e2adaa1b462577bd38aba1c4e505079d29a41d",
+            "bytes": 9188
+          }
+        ],
+        "outsideDeclaredTargets": [
+          "src/main/java/io/mindspice/magenta2/ai/orchestration/workspaces/WorkspacePathLayout.java",
+          "src/main/java/io/mindspice/magenta2/ai/orchestration/context/MaterializationKey.java",
+          "src/test/java/io/mindspice/magenta2/ai/orchestration/context/MaterializationKeyTest.java"
+        ],
+        "timestamp": "2026-07-27T23:04:03.212Z"
+      },
+      "validations": [
+        {
+          "agentModel": {
+            "provider": "openai-codex",
+            "model": "gpt-5.6-terra",
+            "thinking": "high"
+          },
+          "attempt": 1,
+          "verdict": "BLOCKED",
+          "report": "GPT-5.6-terra:high validator: 3 criteria PASS (metadata equivalence, single MaterializationLocation constructor, no repo DDL). 3 BLOCKED: migration 010 lacks strict SQL SHA-256 key constraint (can't edit 010 because checksum would drift), missing durable idempotency for binding capture/owner links, typed unavailable/stale/non-ready resolution outcomes not implemented. Validator hardened location resolution, key identity/frame validation, atomicity/CAS guards. Recommendation: add migration 011 to add the missing constraints, implement typed resolution outcomes, then revalidate.",
+          "changedFiles": [],
+          "changedFileObservations": [],
+          "outsideDeclaredTargets": [],
+          "timestamp": "2026-07-27T23:04:09.706Z"
+        },
+        {
+          "agentModel": {
+            "provider": "openai-codex",
+            "model": "gpt-5.6-terra",
+            "thinking": "high"
+          },
+          "attempt": 2,
+          "verdict": "PASS",
+          "report": "Validator remediation passed: migration 011 rebuilds strict SHA-256 materialization-key constraints without rewriting applied 010; operation_idempotency durably converges binding capture and owner links by operation key/digest; AgentContextService returns typed UNAVAILABLE, STALE, and NON_READY resolution outcomes. Focused tests, full Maven suite, and bounded startup passed.",
+          "changedFiles": [
+            "src/main/resources/db/migrations/011-materialization-key-constraints.sql",
+            "src/main/resources/schema.sql",
+            "src/main/java/io/mindspice/magenta2/core/persistence/SchemaMigrationRunner.java",
+            "src/main/java/io/mindspice/magenta2/ai/orchestration/context/AgentContextRepository.java",
+            "src/main/java/io/mindspice/magenta2/ai/orchestration/context/AgentContextService.java"
+          ],
+          "changedFileObservations": [],
+          "outsideDeclaredTargets": [],
+          "timestamp": "2026-07-27T23:17:44.319Z"
+        }
+      ]
     },
     {
       "phase": "phase-03-immutable-binding-lifecycle.md",
@@ -345,5 +480,5 @@
   ],
   "integrationValidations": [],
   "createdAt": "2026-07-27T22:16:00.884Z",
-  "updatedAt": "2026-07-27T22:34:03.766Z"
+  "updatedAt": "2026-07-27T23:17:44.319Z"
 }

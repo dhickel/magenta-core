@@ -193,6 +193,59 @@ public final class SchemaMigrationRunner {
             "idx_reaction_dispatches_op_key", "idx_reaction_dispatches_dedupe",
             "idx_reaction_dispatches_assignment",
             "idx_reaction_dispatch_attempts_dispatch", "idx_reaction_dispatch_attempts_assignment");
+    // Migration 009 is a no-op compatibility marker; owned tables/indexes unchanged from v8.
+    private static final List<String> FOUNDATION_TABLES_V9 = FOUNDATION_TABLES_V8;
+    private static final Set<String> FOUNDATION_INDEXES_V9 = FOUNDATION_INDEXES_V8;
+    private static final List<String> FOUNDATION_TABLES_V10 = List.of(
+            "task_run_locations", "task_run_attempts", "task_run_idempotent_ops",
+            "task_run_native_links", "assignment_fence_generations", "writer_claim_generations",
+            "task_run_links", "output_publications", "skill_candidate_versions",
+            "skill_candidate_observations", "skill_exact_assignments",
+            "skill_legacy_conversion_diagnostics",
+            "artifact_extraction_documents", "artifact_lineage_edges",
+            "task_run_retention_policies", "artifact_retention_pins",
+            "active_artifact_sessions", "skill_snapshots",
+            "skill_trust_decisions", "skill_snapshot_resources",
+            "skill_activations", "skill_executable_authorizations",
+            "skill_package_operations", "skill_resource_executions",
+            "run_summaries", "run_measurements",
+            "schedule_definitions", "scheduler_claims", "schedule_firings",
+            "schedule_firing_attempts", "reaction_definitions",
+            "reaction_dispatches", "reaction_dispatch_attempts",
+            "agent_materializations", "context_defaults", "context_bindings",
+            "binding_owner_links", "materialization_operation_results");
+    private static final List<String> FOUNDATION_TABLES_V11 = List.copyOf(
+            java.util.stream.Stream.concat(FOUNDATION_TABLES_V10.stream(),
+                    java.util.stream.Stream.of("operation_idempotency")).toList());
+    private static final Set<String> FOUNDATION_INDEXES_V10 = Set.of(
+            "idx_skill_candidate_versions_lookup", "idx_skill_candidate_observations_candidate",
+            "idx_skill_candidate_observations_scan", "idx_skill_exact_assignments_target",
+            "idx_skill_exact_assignments_operation_key",
+            "idx_lineage_edges_parent", "idx_lineage_edges_child",
+            "idx_lineage_edges_task_run", "idx_retention_policies_workspace",
+            "idx_retention_pins_artifact", "idx_retention_pins_task_run",
+            "idx_retention_pins_kind", "idx_active_sessions_artifact",
+            "idx_active_sessions_token", "idx_skill_snapshots_logical_key",
+            "idx_skill_trust_decisions_candidate", "idx_skill_trust_decisions_logical_key",
+            "idx_skill_snapshot_resources_snapshot", "idx_skill_activations_task_run",
+            "idx_skill_activations_agent", "idx_skill_executable_authorizations_resource",
+            "idx_skill_package_operations_state", "idx_skill_resource_executions_task_run",
+            "idx_skill_resource_executions_resource",
+            "idx_run_summaries_workspace", "idx_run_summaries_task_run",
+            "idx_run_measurements_task_run", "idx_run_measurements_call_id",
+            "idx_run_measurements_correlation",
+            "idx_schedule_defs_agent", "idx_schedule_defs_enabled",
+            "idx_schedule_firings_schedule", "idx_schedule_firings_op_key",
+            "idx_schedule_firings_assignment",
+            "idx_schedule_firing_attempts_firing", "idx_schedule_firing_attempts_assignment",
+            "idx_reaction_defs_agent", "idx_reaction_defs_enabled_type",
+            "idx_reaction_dispatches_reaction", "idx_reaction_dispatches_root_event",
+            "idx_reaction_dispatches_op_key", "idx_reaction_dispatches_dedupe",
+            "idx_reaction_dispatches_assignment",
+            "idx_reaction_dispatch_attempts_dispatch", "idx_reaction_dispatch_attempts_assignment",
+            "idx_agent_materializations_agent", "idx_agent_materializations_key",
+            "idx_context_bindings_agent", "idx_binding_owner_links_binding");
+    private static final Set<String> FOUNDATION_INDEXES_V11 = FOUNDATION_INDEXES_V10;
 
     private static final Map<String, List<String>> FOUNDATION_COLUMNS = Map.ofEntries(
             Map.entry("task_run_locations", List.of("task_run_id", "source_kind", "source_id", "workspace_type",
@@ -278,7 +331,24 @@ public final class SchemaMigrationRunner {
             Map.entry("reaction_dispatch_attempts", List.of("attempt_id", "dispatch_id", "attempt_number",
                     "eligible_at", "attempted_at", "claim_owner", "claim_fence",
                     "outcome", "error_class", "assignment_id", "task_run_id",
-                    "native_run_id", "correlation_id", "created_at"))
+                    "native_run_id", "correlation_id", "created_at")),
+            Map.entry("agent_materializations", List.of("agent_id", "materialization_key",
+                    "materialization_kind", "source_kind", "source_id", "generation", "state",
+                    "root_relative_path", "failure_detail", "created_at", "updated_at")),
+            Map.entry("context_defaults", List.of("agent_id", "version", "selection_kind",
+                    "materialization_key", "materialization_generation",
+                    "personal_selection", "reason", "created_at", "updated_at")),
+            Map.entry("context_bindings", List.of("id", "agent_id", "binding_key",
+                    "selection_kind", "materialization_key", "materialization_generation",
+                    "personal_selection", "captured_at")),
+            Map.entry("binding_owner_links", List.of("owner_type", "owner_id",
+                    "binding_key", "created_at")),
+            Map.entry("materialization_operation_results", List.of("operation_type",
+                    "operation_key", "request_digest", "result_state",
+                    "materialization_key", "result_json", "created_at")),
+            Map.entry("operation_idempotency", List.of("operation_type", "operation_key",
+                    "request_digest", "result_state", "binding_key", "owner_type",
+                    "owner_id", "created_at"))
     );
 
 
@@ -614,7 +684,10 @@ public final class SchemaMigrationRunner {
         if (latestVersion < 1) {
             return;
         }
-        List<String> expectedTables = latestVersion >= 8 ? FOUNDATION_TABLES_V8
+        List<String> expectedTables = latestVersion >= 11 ? FOUNDATION_TABLES_V11
+                : latestVersion >= 10 ? FOUNDATION_TABLES_V10
+                : latestVersion >= 9 ? FOUNDATION_TABLES_V9
+                : latestVersion >= 8 ? FOUNDATION_TABLES_V8
                 : latestVersion >= 7 ? FOUNDATION_TABLES_V7
                 : latestVersion >= 6 ? FOUNDATION_TABLES_V6
                 : latestVersion >= 5 ? FOUNDATION_TABLES_V5
@@ -778,6 +851,60 @@ public final class SchemaMigrationRunner {
             }
             if (!rxnAttempts.contains("foreign key (dispatch_id) references reaction_dispatches")) {
                 throw new MigrationException("reaction_dispatch_attempts is missing required constraints");
+            }
+        }
+        if (latestVersion >= 10) {
+            if (!allIndexes.containsAll(FOUNDATION_INDEXES_V10)) {
+                throw new MigrationException("Missing migration-owned v10 indexes: "
+                        + FOUNDATION_INDEXES_V10.stream().filter(index -> !allIndexes.contains(index)).toList());
+            }
+            String materializations = normalized(tableSql(connection, "agent_materializations"));
+            if (!materializations.contains("unique (agent_id, materialization_key)")
+                    || !materializations.contains("materialization_kind text not null check")
+                    || !materializations.contains("source_kind text not null check")
+                    || !materializations.contains("state text not null check")
+                    || !materializations.contains("check (root_relative_path is not null")) {
+                throw new MigrationException("agent_materializations is missing required constraints");
+            }
+            String defaults = normalized(tableSql(connection, "context_defaults"));
+            if (!defaults.contains("selection_kind text not null check")
+                    || !defaults.contains("check ((selection_kind")) {
+                throw new MigrationException("context_defaults is missing required constraints");
+            }
+            String bindings = normalized(tableSql(connection, "context_bindings"));
+            if (!bindings.contains("unique (binding_key)")
+                    || !bindings.contains("check ((selection_kind")) {
+                throw new MigrationException("context_bindings is missing required constraints");
+            }
+            String ownerLinks = normalized(tableSql(connection, "binding_owner_links"));
+            if (!ownerLinks.contains("unique (owner_type, owner_id)")
+                    || !ownerLinks.contains("foreign key (binding_key) references context_bindings")) {
+                throw new MigrationException("binding_owner_links is missing required constraints");
+            }
+            String opResults = normalized(tableSql(connection, "materialization_operation_results"));
+            if (!opResults.contains("primary key (operation_type, operation_key)")
+                    || !opResults.contains("length(request_digest) = 64")
+                    || !opResults.contains("result_state text not null check")) {
+                throw new MigrationException("materialization_operation_results is missing required constraints");
+            }
+        }
+        if (latestVersion >= 11) {
+            if (!allIndexes.containsAll(FOUNDATION_INDEXES_V11)) {
+                throw new MigrationException("Missing migration-owned v11 indexes: "
+                        + FOUNDATION_INDEXES_V11.stream().filter(index -> !allIndexes.contains(index)).toList());
+            }
+            String materializations = normalized(tableSql(connection, "agent_materializations"));
+            if (!materializations.contains("length(materialization_key) = 75")
+                    || !materializations.contains("substr(materialization_key, 1, 11) = 'v1-project-'")
+                    || !materializations.contains("substr(materialization_key, 12) not glob '*[^0-9a-f]*'")) {
+                throw new MigrationException("agent_materializations is missing strict materialization-key constraints");
+            }
+            String idempotency = normalized(tableSql(connection, "operation_idempotency"));
+            if (!idempotency.contains("primary key (operation_type, operation_key)")
+                    || !idempotency.contains("operation_type in ('binding_capture', 'owner_link')")
+                    || !idempotency.contains("length(request_digest) = 64")
+                    || !idempotency.contains("result_state text not null check")) {
+                throw new MigrationException("operation_idempotency is missing required context-operation constraints");
             }
         }
         if (latestVersion >= 6) {

@@ -12,7 +12,7 @@ This package owns filesystem-first workspace identity, descriptor resolution, co
 - Lazy workspace skill child: `<agent-or-user>/.skills/`
 
 ### Responsibilities
-- `WorkspaceDirectoryService` alone constructs trusted `WorkspaceDescriptor`, `TaskRunLocation`, and `RunOutputLocation` values.
+- `WorkspaceDirectoryService` alone constructs trusted `WorkspaceDescriptor`, `TaskRunLocation`, `RunOutputLocation`, and `MaterializationLocation` values. A materialization location is recomputed only from a resolved AGENT descriptor, canonical key, and captured generation; its persisted root-relative assertion is verified before use.
 - `WorkspacePathLayout` is the sole structural segment authority.
 - Task identities use immutable definition ids and exact versioned `TaskPathKey` encoding. Display names never select or rename paths.
 - Task runs are children of `AGENT` or `USER`; `CHAT` is not task-selectable and `WorkspaceKind` remains closed.

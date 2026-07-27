@@ -62,6 +62,11 @@ public final class WorkspacePathLayout {
         return agentRoot(agentId).resolve(PROJECTS);
     }
 
+    /** Workspace-relative path to an agent's materialization directory. */
+    public static Path agentMaterializationDir(String agentId, String keySerialized) {
+        return agentProjectsDir(agentId).resolve(validateComponent(keySerialized, "materializationKey"));
+    }
+
     /** Workspace-relative reserved task root. */
     public static Path tasksRoot() {
         return Path.of(TASKS);

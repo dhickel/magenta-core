@@ -9,7 +9,7 @@ This package owns durable agent, assignment, job, project, schedule, event, and 
 - Own rebuildable run summaries, per-invocation measurements, revisioned/fenced schedules, and causation-safe reactions while native family rows remain status truth.
 - Preserve workflow `WAITING` state and resume at workflow/task boundaries.
 - Persist execution selection as `workspaceType`, `workspaceKey`, and internally derived `workspaceIdentity`.
-- Treat project ids as membership and attribution metadata only.
+- Treat project ids as membership and attribution metadata only. Agent-scoped project materializations are generation-bound supplemental context containers, never workspace roots; immutable context bindings/defaults use durable operation-key and digest idempotency.
 - Resolve one `WorkspaceDescriptor` at each execution-attempt boundary and carry that selection through tools, prompts, child work, and output publication.
 - Treat jobs as task-like executable work that owns no filesystem directory.
 

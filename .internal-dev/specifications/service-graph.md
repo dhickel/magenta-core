@@ -229,7 +229,7 @@ Each active consumer identified during repository inspection is listed with its 
 
 | owner | depends on | allowed interaction | prohibited interaction |
 | --- | --- | --- | --- |
-| `SchemaMigrationRunner` | migration resources, SQLite datasource | Apply checksum-governed contiguous resources 001-008 before dependent repositories initialize. | Repository-local duplicate DDL or accepting checksum/partial-state drift. |
+| `SchemaMigrationRunner` | migration resources, SQLite datasource | Apply checksum-governed contiguous resources 001-011 before dependent repositories initialize, including strict materialization-key validation and context-operation idempotency. | Repository-local duplicate DDL or accepting checksum/partial-state drift. |
 | `TaskRunLifecycleService` | native run repositories, assignment lease CAS, `WorkspaceDirectoryService` | Reserve native/task-run identity, attempts, operation digests, lineage, and independent writer claims; provision only trusted canonical run locations. | Treat assignment id as run id, infer identity from a path, or expose owners/fences. |
 | reserved-tree mutation policy and shell boundary | `WorkspacePathLayout`, trusted descriptor/run capability | Classify reserved structures and verify current workspace/run/fence facts at each mutation boundary. | Path-only authorization or enabling workspace-bound process execution while confinement is unavailable. |
 | `OutputArtifactService` / `ArtifactReconciliationService` | `OutputArtifactRepository`, trusted run output, current writer capability | Reserve, stage, digest, create-only publish, reconcile, and preserve legacy/non-task rows honestly. | Replace final bytes, publish from arbitrary paths, or make repositories own DDL. |

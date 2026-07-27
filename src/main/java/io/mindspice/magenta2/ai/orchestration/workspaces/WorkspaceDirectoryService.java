@@ -11,6 +11,7 @@ import java.util.Objects;
 
 import io.mindspice.magenta2.ai.config.user.AiConfig;
 import io.mindspice.magenta2.ai.orchestration.agents.AgentProfileRepository;
+import io.mindspice.magenta2.ai.orchestration.context.AgentMaterializationRepository.MaterializationKey;
 import io.mindspice.magenta2.core.util.PlainPathSegmentValidator;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
@@ -256,6 +257,90 @@ public class WorkspaceDirectoryService {
         };
         Path confined = confined(relative);
         return ensureDirectoryChain(confined);
+    }
+
+    // ── Materialization locations ──
+
+    /**
+     * Provision only the canonical project materialization root beneath an
+     * AGENT workspace. Revalidates the descriptor, verifies key agreement,
+     * and creates only {@code projects/<materialization-key>} using confined
+     * mutation primitives.
+     *
+     * @param descriptor trusted AGENT descriptor
+     * @param key        the materialization identity
+     * @param generation the expected materialization generation (≥ 1)
+     * @return the verified data-root-relative path
+     */
+    public String provisionMaterializationRoot(
+            WorkspaceDescriptor descriptor,
+            MaterializationKey key,
+            int generation) {
+        Objects.requireNonNull(descriptor, "descriptor");
+        Objects.requireNonNull(key, "key");
+        if (generation < 1) {
+            throw new IllegalArgumentException("generation must be >= 1");
+        }
+        if (descriptor.kind() != WorkspaceKind.AGENT) {
+            throw new IllegalArgumentException(
+                    "Materialization provisioning requires an AGENT descriptor");
+        }
+        validateMaterializationKey(descriptor, key);
+        validateDescriptor(descriptor);
+        WorkspaceDescriptor current = resolveForWrite(WorkspaceKind.AGENT, descriptor.key());
+
+        Path relative = WorkspacePathLayout.agentMaterializationDir(current.key(), key.serialized());
+        Path confined = confined(relative);
+
+        Path verified = ensureDirectoryChain(confined);
+        return dataRootRelative(verified);
+    }
+
+    /**
+     * Resolve a materialization location from a trusted AGENT descriptor,
+     * materialization key, and captured generation. Recomputes the canonical
+     * path from identity, validates key agreement, and verifies the canonical
+     * child is confined and non-symlink.
+     *
+     * <p>This is the sole production constructor of
+     * {@link MaterializationLocation}.
+     *
+     * @param descriptor trusted AGENT descriptor
+     * @param key        the materialization identity
+     * @param generation the captured materialization generation
+     * @return a trusted materialization location value
+     */
+    public MaterializationLocation resolveMaterializationLocation(
+            WorkspaceDescriptor descriptor,
+            MaterializationKey key,
+            int generation) {
+        Objects.requireNonNull(descriptor, "descriptor");
+        Objects.requireNonNull(key, "key");
+        if (generation < 1) {
+            throw new IllegalArgumentException("generation must be >= 1");
+        }
+        if (descriptor.kind() != WorkspaceKind.AGENT) {
+            throw new IllegalArgumentException(
+                    "Materialization location requires an AGENT descriptor");
+        }
+        validateMaterializationKey(descriptor, key);
+        validateDescriptor(descriptor);
+        WorkspaceDescriptor current = resolveForRead(WorkspaceKind.AGENT, descriptor.key());
+
+        Path relative = WorkspacePathLayout.agentMaterializationDir(current.key(), key.serialized());
+        Path confined = confined(relative);
+
+        // Verify the container exists and is a confined non-symlink directory
+        Path verified = verifyRoot(confined);
+        String relativePath = dataRootRelative(verified);
+
+        return new MaterializationLocation(current, key, generation, relativePath, verified);
+    }
+
+    private void validateMaterializationKey(WorkspaceDescriptor descriptor, MaterializationKey key) {
+        if (!descriptor.key().equals(key.agentId()) || !"project".equals(key.sourceKind())) {
+            throw new IllegalArgumentException("Materialization key does not match the AGENT descriptor");
+        }
     }
 
     private void validateTaskCapable(WorkspaceDescriptor descriptor) {

@@ -143,6 +143,36 @@ class SchemaMigrationRunnerTest {
     }
 
     @Test
+    void upgradeFrom010AppliesOnly011AndEnforcesStrictMaterializationKeys() throws Exception {
+        try (SingleConnectionDataSource dataSource = memoryDataSource()) {
+            run(dataSource, migrationsThrough010());
+            JdbcTemplate jdbc = new JdbcTemplate(dataSource);
+            assertEquals(10, jdbc.queryForObject("select count(*) from schema_migrations", Integer.class));
+            String key = "v1-PROJECT-" + "a".repeat(64);
+            jdbc.update("""
+                    insert into agent_materializations(
+                        agent_id, materialization_key, materialization_kind, source_kind, source_id,
+                        generation, state, created_at, updated_at)
+                    values ('agent-1', ?, 'PROJECT', 'project', 'project-1',
+                        1, 'PROVISIONING', 'now', 'now')
+                    """, key);
+            run(dataSource, allMigrations());
+            assertEquals(11, jdbc.queryForObject("select count(*) from schema_migrations", Integer.class));
+            assertEquals(1, jdbc.queryForObject("select count(*) from agent_materializations", Integer.class));
+            assertTrue(tableExists(jdbc, "agent_materializations"));
+            assertTrue(tableExists(jdbc, "context_bindings"));
+            assertTrue(tableExists(jdbc, "operation_idempotency"));
+            assertThrows(Exception.class, () -> jdbc.update("""
+                    insert into agent_materializations(
+                        agent_id, materialization_key, materialization_kind, source_kind, source_id,
+                        generation, state, created_at, updated_at)
+                    values ('agent-1', 'v1-PROJECT-short', 'PROJECT', 'project', 'project-1',
+                        1, 'PROVISIONING', 'now', 'now')
+                    """));
+        }
+    }
+
+    @Test
     void freshSchemaAndMigratedDatabaseHaveEquivalentOwnedMetadata() throws Exception {
         try (SingleConnectionDataSource migrated = memoryDataSource();
              SingleConnectionDataSource fresh = memoryDataSource()) {
@@ -230,7 +260,7 @@ class SchemaMigrationRunnerTest {
                     "select task_run_id, root_relative_path from output_publications where artifact_id = 'legacy-1'");
             assertEquals(null, migrated.get("task_run_id"));
             assertEquals("legacy/unavailable/legacy-1", migrated.get("root_relative_path"));
-            assertEquals(9, jdbc.queryForObject("select count(*) from schema_migrations", Integer.class));
+            assertEquals(11, jdbc.queryForObject("select count(*) from schema_migrations", Integer.class));
             assertTrue(tableExists(jdbc, "skill_candidate_versions"));
         }
     }
@@ -260,7 +290,7 @@ class SchemaMigrationRunnerTest {
 
             SchemaMigrationRunner runner = run(dataSource, allMigrations());
 
-            assertEquals(9, runner.appliedMigrations().size());
+            assertEquals(11, runner.appliedMigrations().size());
             assertTrue(tableExists(jdbc, "reaction_dispatches"));
             String bookkeepingSql = jdbc.queryForObject(
                     "select sql from sqlite_master where type='table' and name='schema_migrations'",
@@ -288,9 +318,14 @@ class SchemaMigrationRunnerTest {
                 select type || ':' || name as object_name, lower(replace(replace(sql, char(10), ' '), char(13), ' ')) as ddl
                 from sqlite_master
                 where (type = 'table' and (name like 'task_run_%'
-                        or name in ('assignment_fence_generations', 'writer_claim_generations')))
+                        or name in ('assignment_fence_generations', 'writer_claim_generations',
+                            'agent_materializations', 'context_defaults', 'context_bindings',
+                            'binding_owner_links', 'materialization_operation_results',
+                            'operation_idempotency')))
                    or (type = 'index' and (name like 'idx_task_run_%'
-                        or name = 'idx_writer_claim_generations_current'))
+                        or name = 'idx_writer_claim_generations_current'
+                        or name in ('idx_agent_materializations_agent', 'idx_agent_materializations_key',
+                            'idx_context_bindings_agent', 'idx_binding_owner_links_binding')))
                 order by object_name
                 """, rs -> {
             Map<String, String> result = new java.util.LinkedHashMap<>();
@@ -399,11 +434,33 @@ class SchemaMigrationRunnerTest {
         return new ClassPathResource("db/migrations/009-warm-database-compatibility.sql");
     }
 
-    private static Resource[] allMigrations() {
+    private static Resource materializationContext() {
+        return new ClassPathResource("db/migrations/010-agent-materialization-context.sql");
+    }
+
+    private static Resource materializationKeyConstraints() {
+        return new ClassPathResource("db/migrations/011-materialization-key-constraints.sql");
+    }
+
+    private static Resource[] migrationsThrough009() {
         return new Resource[] { foundation(), lifecycle(), publication(), scopedSkills(),
                 artifactAccessSearchRetention(), skillTrustSnapshotsPackages(),
                 runtimeSummariesMeasurements(), scheduleReactionHardening(),
                 warmDatabaseCompatibility() };
+    }
+
+    private static Resource[] migrationsThrough010() {
+        Resource[] through009 = migrationsThrough009();
+        Resource[] through010 = java.util.Arrays.copyOf(through009, through009.length + 1);
+        through010[through009.length] = materializationContext();
+        return through010;
+    }
+
+    private static Resource[] allMigrations() {
+        Resource[] through010 = migrationsThrough010();
+        Resource[] all = java.util.Arrays.copyOf(through010, through010.length + 1);
+        all[through010.length] = materializationKeyConstraints();
+        return all;
     }
 
     private static Resource resource(String name, String sql) {
