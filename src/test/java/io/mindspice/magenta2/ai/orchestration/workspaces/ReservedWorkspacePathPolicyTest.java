@@ -112,6 +112,28 @@ class ReservedWorkspacePathPolicyTest {
                 .isEqualTo(ReservedWorkspacePathPolicy.Classification.PUBLICATION_STAGING);
     }
 
+    @Test
+    void agentClassificationClosesRootCanonicalReservedAndUnknownPaths() {
+        assertThat(AgentWorkspaceArea.values()).extracting(AgentWorkspaceArea::directoryName)
+            .containsExactlyInAnyOrder(".skills", "scripts", "apps", "home", "repos", "projects", "tasks", "outputs");
+        assertThat(ReservedWorkspacePathPolicy.classify(WorkspaceKind.AGENT, "."))
+            .isEqualTo(ReservedWorkspacePathPolicy.Classification.AGENT_ROOT);
+        assertThat(ReservedWorkspacePathPolicy.classify(WorkspaceKind.AGENT, "home"))
+            .isEqualTo(ReservedWorkspacePathPolicy.Classification.AGENT_CANONICAL_AREA_ROOT);
+        assertThat(ReservedWorkspacePathPolicy.classify(WorkspaceKind.AGENT, "home/notes/todo.txt"))
+            .isEqualTo(ReservedWorkspacePathPolicy.Classification.AGENT_PERSONAL_DESCENDANT);
+        assertThat(ReservedWorkspacePathPolicy.classify(WorkspaceKind.AGENT, "repos/example/README.md"))
+            .isEqualTo(ReservedWorkspacePathPolicy.Classification.AGENT_RESERVED_TREE);
+        assertThat(ReservedWorkspacePathPolicy.classify(WorkspaceKind.AGENT, "unknown/legacy.txt"))
+            .isEqualTo(ReservedWorkspacePathPolicy.Classification.AGENT_UNKNOWN_CHILD);
+        for (String path : new String[] {".", "home", "projects/project-a", "repos/repo-a", "unknown/legacy.txt"}) {
+            assertThat(ReservedWorkspacePathPolicy.decide(
+                ReservedWorkspacePathPolicy.classify(WorkspaceKind.AGENT, path),
+                ReservedWorkspacePathPolicy.Operation.ORDINARY_MUTATION)).isEqualTo(
+                    ReservedWorkspacePathPolicy.Decision.DENY);
+        }
+    }
+
     // ── Decision matrix ──
 
     @ParameterizedTest
@@ -267,12 +289,14 @@ class ReservedWorkspacePathPolicyTest {
     @Test
     void ordinaryMutationNeverAuthorizedOnReservedTrees() {
         for (ReservedWorkspacePathPolicy.Classification c : ReservedWorkspacePathPolicy.Classification.values()) {
-            if (c != ReservedWorkspacePathPolicy.Classification.ORDINARY_CONTENT) {
-                assertThat(ReservedWorkspacePathPolicy.decide(c,
-                        ReservedWorkspacePathPolicy.Operation.ORDINARY_MUTATION))
-                        .as("ORDINARY_MUTATION must be DENY for " + c)
-                        .isEqualTo(ReservedWorkspacePathPolicy.Decision.DENY);
+            if (c == ReservedWorkspacePathPolicy.Classification.ORDINARY_CONTENT
+                    || c == ReservedWorkspacePathPolicy.Classification.AGENT_PERSONAL_DESCENDANT) {
+                continue;
             }
+            assertThat(ReservedWorkspacePathPolicy.decide(c,
+                    ReservedWorkspacePathPolicy.Operation.ORDINARY_MUTATION))
+                    .as("ORDINARY_MUTATION must be DENY for " + c)
+                    .isEqualTo(ReservedWorkspacePathPolicy.Decision.DENY);
         }
     }
 

@@ -15,6 +15,11 @@ public final class WorkspacePathLayout {
     public static final String TASKS = "tasks";
     public static final String SKILLS = ".skills";
     public static final String STAGING = "staging";
+    public static final String HOME = "home";
+    public static final String SCRIPTS = "scripts";
+    public static final String APPS = "apps";
+    public static final String REPOS = "repos";
+    public static final String PROJECTS = "projects";
 
     private static final int MAX_COMPONENT_BYTES = 255;
     private static final Pattern TASK_PATH_KEY = Pattern.compile(
@@ -33,6 +38,28 @@ public final class WorkspacePathLayout {
 
     public static Path userRoot(String name) {
         return Path.of(WORKSPACE, WorkspaceKind.USER.token(), segment(name, "userName"));
+    }
+
+    // ── AGENT canonical personal area factories ──
+
+    public static Path agentHomeDir(String agentId) {
+        return agentRoot(agentId).resolve(HOME);
+    }
+
+    public static Path agentScriptsDir(String agentId) {
+        return agentRoot(agentId).resolve(SCRIPTS);
+    }
+
+    public static Path agentAppsDir(String agentId) {
+        return agentRoot(agentId).resolve(APPS);
+    }
+
+    public static Path agentReposDir(String agentId) {
+        return agentRoot(agentId).resolve(REPOS);
+    }
+
+    public static Path agentProjectsDir(String agentId) {
+        return agentRoot(agentId).resolve(PROJECTS);
     }
 
     /** Workspace-relative reserved task root. */
@@ -85,7 +112,9 @@ public final class WorkspacePathLayout {
         String component = PlainPathSegmentValidator.requirePlainSegment(value, label);
         String lower = component.toLowerCase(Locale.ROOT);
         if (OUTPUTS.equals(lower) || TASKS.equals(lower) || SKILLS.equals(lower)
-                || STAGING.equals(lower) || WORKSPACE.equals(lower)) {
+                || STAGING.equals(lower) || WORKSPACE.equals(lower)
+                || HOME.equals(lower) || SCRIPTS.equals(lower) || APPS.equals(lower)
+                || REPOS.equals(lower) || PROJECTS.equals(lower)) {
             throw new IllegalArgumentException(label + " must not use reserved name: " + value);
         }
         requireComponentByteLength(component, label);

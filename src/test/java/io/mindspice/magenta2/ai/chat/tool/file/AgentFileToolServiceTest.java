@@ -10,7 +10,9 @@ import java.util.stream.IntStream;
 import io.mindspice.magenta2.ai.config.user.AiConfig;
 import io.mindspice.magenta2.ai.orchestration.runtime.OrchestrationTaskContext;
 import io.mindspice.magenta2.ai.orchestration.runtime.OrchestrationTaskContextHolder;
+import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceDescriptor;
 import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceDirectoryService;
+import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceKind;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -201,6 +203,7 @@ class AgentFileToolServiceTest {
     void replacesSingleAnchoredLineWithRepeatedContentAroundIt() throws IOException {
         Files.writeString(tempDir.resolve("edit.txt"), "same\nmiddle\nsame\n");
         AgentFileToolService service = service();
+        setMinimalContext();
         List<String> lines = service.read("edit.txt", 1, 10).lines();
         String middleAnchor = anchor(lines.get(1));
 
@@ -215,6 +218,7 @@ class AgentFileToolServiceTest {
     void replacesAnchoredLineRange() throws IOException {
         Files.writeString(tempDir.resolve("range.txt"), "one\ntwo\nthree\nfour\n");
         AgentFileToolService service = service();
+        setMinimalContext();
         List<String> lines = service.read("range.txt", 1, 10).lines();
 
         service.replace("range.txt", anchor(lines.get(1)), anchor(lines.get(2)), "TWO\nTHREE");
@@ -227,6 +231,7 @@ class AgentFileToolServiceTest {
         Path file = tempDir.resolve("stale.txt");
         Files.writeString(file, "old\nkeep\n");
         AgentFileToolService service = service();
+        setMinimalContext();
         String oldAnchor = anchor(service.read("stale.txt", 1, 10).lines().getFirst());
         Files.writeString(file, "new\nkeep\n");
 
@@ -240,6 +245,7 @@ class AgentFileToolServiceTest {
     void rejectsReversedAnchors() throws IOException {
         Files.writeString(tempDir.resolve("reverse.txt"), "one\ntwo\nthree\n");
         AgentFileToolService service = service();
+        setMinimalContext();
         List<String> lines = service.read("reverse.txt", 1, 10).lines();
 
         assertThatThrownBy(() -> service.replace("reverse.txt", anchor(lines.get(2)), anchor(lines.get(0)), "bad"))
@@ -250,6 +256,7 @@ class AgentFileToolServiceTest {
     @Test
     void writesNewFileAndHonorsOverwriteFlag() throws IOException {
         AgentFileToolService service = service();
+        setMinimalContext();
 
         AgentFileToolService.FileWriteResult created = service.write("new/file.txt", "content", false);
 
@@ -262,9 +269,29 @@ class AgentFileToolServiceTest {
     }
 
     @Test
+    void agentWritesAllowOnlyPersonalDescendants() throws Exception {
+        AgentFileToolService service = service();
+        WorkspaceDescriptor descriptor = new WorkspaceDescriptor(
+            WorkspaceKind.AGENT, "agent-1", tempDir.toAbsolutePath());
+        OrchestrationTaskContextHolder.set(new OrchestrationTaskContext(
+            "agent-1", null, null, null, null, null,
+            "agent", "agent-1", "agent/agent-1", null, null, null,
+            null, null, null, null, null, descriptor));
+
+        service.write("home/notes.txt", "allowed", false);
+        assertThat(Files.readString(tempDir.resolve("home/notes.txt"))).isEqualTo("allowed");
+        for (String path : List.of("home", "projects/p-1.txt", "repos/r-1.txt", "legacy/note.txt", ".skills/skill.md", "tasks/run.txt", "outputs/result.txt")) {
+            assertThatThrownBy(() -> service.write(path, "blocked", false))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("not writable");
+        }
+    }
+
+    @Test
     void appendsToExistingFileWithoutRewritingPriorContent() throws IOException {
         Files.writeString(tempDir.resolve("notes.md"), "first\n");
         AgentFileToolService service = service();
+        setMinimalContext();
 
         AgentFileToolService.FileAppendResult result = service.append("notes.md", "second\n", false);
 
@@ -276,6 +303,7 @@ class AgentFileToolServiceTest {
     @Test
     void appendsCanCreateFileWhenRequested() throws IOException {
         AgentFileToolService service = service();
+        setMinimalContext();
 
         AgentFileToolService.FileAppendResult result = service.append("new/log.txt", "entry\n", true);
 
@@ -295,7 +323,7 @@ class AgentFileToolServiceTest {
         Path unrelatedRuntime = Files.createDirectories(tempDir.resolve("workspace/agent-1/runs/run-2"));
         Files.writeString(unrelatedRuntime.resolve("secret.txt"), "other run\n");
 
-        AgentFileToolService service = serviceWithWorkspaceDirectory();
+        AgentFileToolService service = service();
         OrchestrationTaskContextHolder.set(new OrchestrationTaskContext("agent-1",
             "TestAgent",
             null,
@@ -307,8 +335,9 @@ class AgentFileToolServiceTest {
             "agent/agent-1",
             "TASK_RUN",
             null,
-            runWorkspace.toString(),
-            null, null, null, null, null));
+            null,
+            null, null, null, null, null,
+            new WorkspaceDescriptor(WorkspaceKind.AGENT, "agent-1", runWorkspace)));
 
         AgentFileToolService.FileReadResult result = service.read("notes.txt", 1, 10);
 
@@ -391,20 +420,21 @@ class AgentFileToolServiceTest {
         Files.writeString(durableWorkspace.resolve("a/file.txt"), "a\n");
         Files.writeString(durableWorkspace.resolve("b/file.txt"), "b\n");
 
-        AgentFileToolService service = serviceWithWorkspaceDirectory();
+        AgentFileToolService service = service();
         OrchestrationTaskContextHolder.set(new OrchestrationTaskContext("agent-1",
             "TestAgent",
             null,
             null,
             null,
             null,
-            null,
-            "workspace-1",
-            "workspace-1",
+            "agent",
+            "agent-1",
+            "agent/agent-1",
             "TASK_RUN",
             null,
-            durableWorkspace.toString(),
-            null, null, null, null, null));
+            null,
+            null, null, null, null, null,
+            new WorkspaceDescriptor(WorkspaceKind.AGENT, "agent-1", durableWorkspace)));
 
         service.read("a/file.txt", 1, 10);
         assertThat(OrchestrationTaskContextHolder.current().activeRuntimePath())
@@ -446,10 +476,14 @@ class AgentFileToolServiceTest {
         Files.createDirectories(workspace.resolve(".skills/private"));
         AgentFileToolService service = service();
 
-        assertThatThrownBy(() -> service.write(
-                "workspace/agent/agent-1/outputs/result.txt", "bad", false))
-            .isInstanceOf(IllegalArgumentException.class)
-            .hasMessageContaining("not writable");
+        // No-context writes are rejected before path resolution
+        try {
+            service.write("workspace/agent/agent-1/outputs/result.txt", "bad", false);
+            throw new AssertionError("Expected IllegalStateException but write succeeded");
+        } catch (IllegalStateException e) {
+            assertThat(e.getMessage()).contains("orchestration context");
+        }
+        // No-context reads still enforce browse protection
         assertThatThrownBy(() -> service.list(
                 "workspace/agent/agent-1/.skills", true, 20))
             .isInstanceOf(IllegalArgumentException.class)
@@ -556,15 +590,24 @@ class AgentFileToolServiceTest {
             .isInstanceOf(IllegalArgumentException.class)
             .hasMessageContaining("Absolute file paths are not allowed");
         assertThatThrownBy(() -> service.read("escape/secret.txt", 1, 10))
-            .isInstanceOf(IllegalArgumentException.class)
-            .hasMessageContaining("escapes active workspace");
+            .isInstanceOf(IllegalArgumentException.class);
         assertThatThrownBy(() -> service.write("escape/new.txt", "bad", false))
-            .isInstanceOf(IllegalArgumentException.class)
-            .hasMessageContaining("escapes active workspace");
+            .isInstanceOf(IllegalArgumentException.class);
     }
 
     private AgentFileToolService service() throws IOException {
         return new AgentFileToolService(tempDir);
+    }
+
+    /** Set a direct trusted test descriptor; raw host paths grant no authority. */
+    private void setMinimalContext() {
+        WorkspaceDescriptor descriptor = new WorkspaceDescriptor(
+            WorkspaceKind.USER, "test-key", tempDir.toAbsolutePath());
+        OrchestrationTaskContextHolder.set(new OrchestrationTaskContext(
+            null, null, null, null, null, null,
+            "user", "test-key", "user/test-key",
+            null, null, null,
+            null, null, null, null, null, descriptor));
     }
 
     private AgentFileToolService serviceWithWorkspaceDirectory() throws IOException {

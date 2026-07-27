@@ -49,10 +49,10 @@ public final class ConfinedPathMutationService {
     private static final int BUFFER_BYTES = 64 * 1024;
 
     public enum WriteMode { CREATE_NEW, OVERWRITE, APPEND }
-    public enum Primitive { WRITE, CREATE_DIRECTORY, MOVE, DELETE, READ }
+    public enum Primitive { WRITE, CREATE_DIRECTORY, MOVE, DELETE, READ, COPY }
 
     @FunctionalInterface
-    interface MutationHook {
+    public interface MutationHook {
         void beforePrimitive(Primitive primitive, Path root, String relativePath) throws IOException;
     }
 
@@ -63,8 +63,17 @@ public final class ConfinedPathMutationService {
         this(NO_HOOK);
     }
 
-    ConfinedPathMutationService(MutationHook hook) {
+    public ConfinedPathMutationService(MutationHook hook) {
         this.hook = Objects.requireNonNull(hook);
+    }
+
+    /** Add a boundary hook without weakening the original held-handle hook. */
+    ConfinedPathMutationService withAdditionalHook(MutationHook additional) {
+        Objects.requireNonNull(additional, "additional");
+        return new ConfinedPathMutationService((primitive, root, relative) -> {
+            hook.beforePrimitive(primitive, root, relative);
+            additional.beforePrimitive(primitive, root, relative);
+        });
     }
 
     public boolean supported(Path root) {
@@ -80,8 +89,7 @@ public final class ConfinedPathMutationService {
     public void requireSupported(Path root) {
         if (!supported(root)) {
             throw new ConfinementUnavailableException(
-                "race-resistant workspace mutation is unavailable for filesystem provider "
-                    + root.getFileSystem().provider().getClass().getName());
+                "race-resistant workspace mutation is unavailable for this filesystem provider");
         }
     }
 
@@ -134,6 +142,7 @@ public final class ConfinedPathMutationService {
         requireSupported(root);
         try (ParentHandle sourceParent = openParent(root, source, false);
              ParentHandle targetParent = openParent(root, target, false)) {
+            hook.beforePrimitive(Primitive.MOVE, root, slash(source));
             int sourceFd = LibC.INSTANCE.openat(sourceParent.fd(), source.getFileName().toString(),
                     O_RDONLY | O_CLOEXEC | O_NOFOLLOW, 0);
             if (sourceFd < 0) throw io("openat", slash(source));
@@ -203,6 +212,48 @@ public final class ConfinedPathMutationService {
         }
     }
 
+    /**
+     * Copy a regular file using held-handle primitives.
+     * Opens source without following links, checks single-link, reads
+     * bytes, and writes to destination with create-only semantics.
+     */
+    public void copy(Path root, String sourceRelative, String targetRelative) throws IOException {
+        Path source = normalizedRelative(sourceRelative);
+        Path target = normalizedRelative(targetRelative);
+        requireLeaf(source);
+        requireLeaf(target);
+        requireSupported(root);
+        byte[] bytes;
+        try (ParentHandle sourceParent = openParent(root, source, false)) {
+            hook.beforePrimitive(Primitive.READ, root, slash(source));
+            int srcFd = LibC.INSTANCE.openat(sourceParent.fd(), source.getFileName().toString(),
+                    O_RDONLY | O_CLOEXEC | O_NOFOLLOW, 0);
+            if (srcFd < 0) throw io("openat", slash(source));
+            try {
+                Stat stat = fstat(srcFd, slash(source));
+                requireRegularSingleLink(stat, slash(source));
+                if (stat.st_size.longValue() > Integer.MAX_VALUE) {
+                    throw new IOException("file is too large: " + slash(source));
+                }
+                bytes = readAll(srcFd, (int) stat.st_size.longValue(), slash(source));
+            } finally {
+                LibC.INSTANCE.close(srcFd);
+            }
+        }
+        try (ParentHandle targetParent = openParent(root, target, true)) {
+            hook.beforePrimitive(Primitive.COPY, root, slash(target));
+            int dstFd = LibC.INSTANCE.openat(targetParent.fd(), target.getFileName().toString(),
+                    O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC | O_NOFOLLOW, 0600);
+            if (dstFd < 0) throw io("openat", slash(target));
+            try {
+                writeAll(dstFd, bytes, slash(target));
+                if (LibC.INSTANCE.fsync(dstFd) != 0) throw io("fsync", slash(target));
+            } finally {
+                LibC.INSTANCE.close(dstFd);
+            }
+        }
+    }
+
     /** Provider-level hard-link probe used by preflight/read paths. */
     public void requireSingleLink(Path path) throws IOException {
         try {
@@ -220,7 +271,7 @@ public final class ConfinedPathMutationService {
 
     private ParentHandle openParent(Path root, Path relative, boolean createParents) throws IOException {
         int rootFd = LibC.INSTANCE.open(root.toString(), O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW);
-        if (rootFd < 0) throw io("open", root.toString());
+        if (rootFd < 0) throw io("open", "workspace root");
         List<Integer> opened = new ArrayList<>();
         opened.add(rootFd);
         int current = rootFd;
@@ -268,6 +319,21 @@ public final class ConfinedPathMutationService {
         if ((stat.st_mode & S_IFMT) == S_IFREG && stat.st_nlink.longValue() > 1) {
             throw new HardLinkDeniedException("multi-link file is not mutable: " + path);
         }
+    }
+
+    private byte[] readAll(int fd, int size, String path) throws IOException {
+        ByteArrayOutputStream output = new ByteArrayOutputStream(size);
+        byte[] buffer = new byte[BUFFER_BYTES];
+        int remaining = size;
+        while (remaining > 0) {
+            int toRead = Math.min(BUFFER_BYTES, remaining);
+            int read = LibC.INSTANCE.read(fd, buffer, toRead);
+            if (read < 0) throw io("read", path);
+            if (read == 0) break;
+            output.write(buffer, 0, read);
+            remaining -= read;
+        }
+        return output.toByteArray();
     }
 
     private void writeAll(int fd, byte[] bytes, String path) throws IOException {

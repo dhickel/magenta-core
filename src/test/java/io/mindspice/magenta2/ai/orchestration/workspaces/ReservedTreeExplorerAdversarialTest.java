@@ -170,18 +170,19 @@ class ReservedTreeExplorerAdversarialTest {
     void rejectsRenameIntoTasksTree() throws Exception {
         WorkspaceExplorerService explorer = explorer();
         Path root = Files.createDirectories(tempDir.resolve("agent-1"));
-        Path src = root.resolve("notes.txt");
+        Path homeDir = Files.createDirectories(root.resolve("home"));
+        Path src = homeDir.resolve("notes.txt");
         Files.writeString(src, "hello");
         Files.createDirectories(root.resolve("tasks/v1-task-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/run-1"));
         WorkspaceDescriptor descriptor = descriptor("agent-1", root);
 
-        // Rename within ordinary content is fine
-        explorer.rename(descriptor, path("notes.txt"), "notes2.txt");
-        assertThat(root.resolve("notes2.txt")).exists();
+        // Rename within personal area is fine
+        explorer.rename(descriptor, path("home/notes.txt"), "notes2.txt");
+        assertThat(homeDir.resolve("notes2.txt")).exists();
 
         // Moving into tasks should fail
         assertThatThrownBy(() ->
-                explorer.move(descriptor, path("notes2.txt"),
+                explorer.move(descriptor, path("home/notes2.txt"),
                         path("tasks/v1-task-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/run-1"), null))
                 .isInstanceOf(WorkspaceFileException.class)
                 .hasMessageContaining("protected");

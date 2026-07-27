@@ -10,7 +10,7 @@ import java.util.Locale;
  * performs only lexical classification, and never discovers workspace identity,
  * constructs roots, touches the filesystem, or performs database access.
  *
- * <h3>Classification rules</h3>
+ * <h3>Classification rules (workspace-kind-agnostic)</h3>
  * <ul>
  *   <li>{@code .skills/} and descendants → {@link Classification#SKILLS}</li>
  *   <li>{@code tasks/} exactly → {@link Classification#TASKS_ROOT}</li>
@@ -25,6 +25,21 @@ import java.util.Locale;
  *   <li>Everything else → {@link Classification#ORDINARY_CONTENT}</li>
  * </ul>
  *
+ * <h3>AGENT workspace classification (via {@link #classify(WorkspaceKind, String)})</h3>
+ * <p>When kind is {@code AGENT}, first-level children are matched against the
+ * eight canonical {@link AgentWorkspaceArea} names.  The root ({@code .}) is
+ * classified as {@link Classification#AGENT_ROOT}, a direct area child as
+ * {@link Classification#AGENT_CANONICAL_AREA_ROOT}, and deeper descendants as
+ * either {@link Classification#AGENT_PERSONAL_DESCENDANT} or
+ * {@link Classification#AGENT_RESERVED_TREE} depending on area ownership.
+ * Children that do not match any area are
+ * {@link Classification#AGENT_UNKNOWN_CHILD}.  Nested {@code .git} or
+ * {@code .gitmodules} anywhere in the path is
+ * {@link Classification#NESTED_CONTROL_MARKER}.</p>
+ *
+ * <p>{@code CHAT} and {@code USER} workspaces follow the kind-agnostic rules
+ * above; their root ({@code .}) is {@link Classification#ORDINARY_CONTENT}.</p>
+ *
  * <h3>Default posture</h3>
  * Unknown combinations and unclassifiable paths → {@link Decision#DENY}.
  */
@@ -33,8 +48,9 @@ public final class ReservedWorkspacePathPolicy {
     private ReservedWorkspacePathPolicy() {
     }
 
-    /** Closed set of reserved-tree classifications. */
+    /** Closed set of reserved-tree and agent-area classifications. */
     public enum Classification {
+        // ── Kind-agnostic ──
         /** Regular workspace content outside any reserved subtree. */
         ORDINARY_CONTENT,
         /** Workspace-root {@code outputs/} and descendants (legacy/non-task publication). */
@@ -52,7 +68,21 @@ public final class ReservedWorkspacePathPolicy {
         /** {@code tasks/<key>/<runId>/staging/} and descendants. */
         PUBLICATION_STAGING,
         /** {@code .skills/} and descendants. */
-        SKILLS
+        SKILLS,
+
+        // ── AGENT workspace only ──
+        /** The AGENT workspace root itself ({@code .}). */
+        AGENT_ROOT,
+        /** Direct child of the AGENT root that matches a canonical area name. */
+        AGENT_CANONICAL_AREA_ROOT,
+        /** Descendant of a personal canonical area ({@code home}, {@code scripts}, {@code apps}). */
+        AGENT_PERSONAL_DESCENDANT,
+        /** Descendant of a reserved canonical area ({@code repos}, {@code projects}, etc.). */
+        AGENT_RESERVED_TREE,
+        /** Direct child of the AGENT root that is not a canonical area. */
+        AGENT_UNKNOWN_CHILD,
+        /** A path that includes {@code .git} or {@code .gitmodules}. */
+        NESTED_CONTROL_MARKER
     }
 
     /** Operation classes that map to distinct authority requirements. */
@@ -77,26 +107,49 @@ public final class ReservedWorkspacePathPolicy {
     }
 
     /**
-     * Classify a normalized workspace-relative path. The path must use
-     * forward slashes, must not contain {@code ..}, {@code \0}, or
-     * absolute-prefix patterns, and must not contain URL-encoded separators.
+     * Classify a normalized workspace-relative path (kind-agnostic).
+     * Same as {@link #classify(WorkspaceKind, String)} with no kind;
+     * non-reserved-trees return {@link Classification#ORDINARY_CONTENT}.
+     */
+    public static Classification classify(String relativePath) {
+        return classifyPath(relativePath, null);
+    }
+
+    /**
+     * Classify a normalized workspace-relative path within a specific
+     * workspace kind.  For {@link WorkspaceKind#AGENT}, first-level
+     * children are matched against the eight canonical
+     * {@link AgentWorkspaceArea} names and the root is classified
+     * explicitly.  {@code CHAT} and {@code USER} use the kind-agnostic
+     * rules.
      *
-     * @param relativePath normalized workspace-relative path; {@code "."} or
-     *                     empty classifies as {@link Classification#ORDINARY_CONTENT}
+     * @param kind         workspace kind (nullable for kind-agnostic)
+     * @param relativePath normalized workspace-relative path
      * @return the classification
      * @throws IllegalArgumentException if the path contains traversal,
      *         encoded separators, or structural ambiguity
      */
-    public static Classification classify(String relativePath) {
-        String path = normalize(relativePath);
+    public static Classification classify(WorkspaceKind kind, String relativePath) {
+        return classifyPath(relativePath, kind);
+    }
 
-        // <.> or empty → ordinary
-        if (path.isEmpty() || ".".equals(path)) {
-            return Classification.ORDINARY_CONTENT;
-        }
+    private static Classification classifyPath(String relativePath, WorkspaceKind kind) {
+        String path = normalize(relativePath);
 
         // Reject encoded-separator bypasses before segment analysis
         rejectEncodedSeparators(relativePath);
+
+        // Nested control markers: .git / .gitmodules anywhere in the path
+        if (containsControlMarker(path)) {
+            return Classification.NESTED_CONTROL_MARKER;
+        }
+
+        // <.> or empty
+        if (path.isEmpty() || ".".equals(path)) {
+            return kind == WorkspaceKind.AGENT
+                ? Classification.AGENT_ROOT
+                : Classification.ORDINARY_CONTENT;
+        }
 
         String[] segments = path.split("/", -1);
 
@@ -115,7 +168,12 @@ public final class ReservedWorkspacePathPolicy {
             return classifyTasksPath(segments);
         }
 
-        // Everything else is ordinary
+        // --- AGENT-specific area classification ---
+        if (kind == WorkspaceKind.AGENT) {
+            return classifyAgentPath(segments);
+        }
+
+        // Everything else is ordinary (CHAT, USER, kind-agnostic)
         return Classification.ORDINARY_CONTENT;
     }
 
@@ -163,6 +221,28 @@ public final class ReservedWorkspacePathPolicy {
                 case SKILLS_MUTATION -> Decision.ALLOW;
                 default -> Decision.DENY;
             };
+            // ── AGENT workspace classifications ──
+            case AGENT_ROOT -> switch (operation) {
+                case BROWSE -> Decision.ALLOW;
+                default -> Decision.DENY;
+            };
+            case AGENT_CANONICAL_AREA_ROOT -> switch (operation) {
+                case BROWSE -> Decision.ALLOW;
+                default -> Decision.DENY;
+            };
+            case AGENT_PERSONAL_DESCENDANT -> switch (operation) {
+                case BROWSE, ORDINARY_MUTATION -> Decision.ALLOW;
+                default -> Decision.DENY;
+            };
+            case AGENT_RESERVED_TREE -> switch (operation) {
+                case BROWSE -> Decision.ALLOW;
+                default -> Decision.DENY;
+            };
+            case AGENT_UNKNOWN_CHILD -> switch (operation) {
+                case BROWSE -> Decision.ALLOW;
+                default -> Decision.DENY;
+            };
+            case NESTED_CONTROL_MARKER -> Decision.DENY;
         };
     }
 
@@ -240,6 +320,32 @@ public final class ReservedWorkspacePathPolicy {
             }
         }
         return trimmed;
+    }
+
+    private static Classification classifyAgentPath(String[] segments) {
+        String first = segments[0];
+        var area = AgentWorkspaceArea.fromDirectoryName(first);
+        if (area.isEmpty()) {
+            // First segment is not a canonical area → unknown root child/subtree
+            return Classification.AGENT_UNKNOWN_CHILD;
+        }
+        if (segments.length == 1) {
+            return Classification.AGENT_CANONICAL_AREA_ROOT;
+        }
+        return switch (area.get().ownership()) {
+            case PERSONAL -> Classification.AGENT_PERSONAL_DESCENDANT;
+            case RESERVED -> Classification.AGENT_RESERVED_TREE;
+        };
+    }
+
+    private static boolean containsControlMarker(String path) {
+        for (String segment : path.split("/", -1)) {
+            String lower = segment.toLowerCase(Locale.ROOT);
+            if (".git".equals(lower) || ".gitmodules".equals(lower)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static void rejectEncodedSeparators(String path) {

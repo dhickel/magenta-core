@@ -217,6 +217,47 @@ public class WorkspaceDirectoryService {
         return verifyOrAbsent(confined);
     }
 
+    // ── AGENT personal-area provisioning ──
+
+    /**
+     * Provision a canonical personal area beneath an AGENT workspace.
+     * Revalidates the descriptor, rejects reserved areas, and creates
+     * only the exact area directory chain with held handles.
+     *
+     * @param descriptor trusted AGENT descriptor (must be revalidated)
+     * @param area       must have {@link AgentWorkspaceArea.Ownership#PERSONAL}
+     * @return the verified confined directory path
+     * @throws IllegalArgumentException if the area is reserved or the
+     *         descriptor is not a valid AGENT workspace
+     */
+    public Path provisionPersonalArea(WorkspaceDescriptor descriptor, AgentWorkspaceArea area) {
+        Objects.requireNonNull(descriptor, "descriptor");
+        Objects.requireNonNull(area, "area");
+        if (area.isReserved()) {
+            throw new IllegalArgumentException(
+                "Cannot provision reserved area: " + area.directoryName());
+        }
+        if (descriptor.kind() != WorkspaceKind.AGENT) {
+            throw new IllegalArgumentException(
+                "Personal area provisioning is only valid for AGENT workspaces");
+        }
+        validateDescriptor(descriptor);
+        WorkspaceDescriptor current = resolveForWrite(WorkspaceKind.AGENT, descriptor.key());
+        if (!current.root().equals(descriptor.root())) {
+            throw new IllegalArgumentException("Descriptor root does not match its identity");
+        }
+
+        Path relative = switch (area) {
+            case HOME -> WorkspacePathLayout.agentHomeDir(current.key());
+            case SCRIPTS -> WorkspacePathLayout.agentScriptsDir(current.key());
+            case APPS -> WorkspacePathLayout.agentAppsDir(current.key());
+            default -> throw new IllegalArgumentException(
+                "Not a personal area: " + area.directoryName());
+        };
+        Path confined = confined(relative);
+        return ensureDirectoryChain(confined);
+    }
+
     private void validateTaskCapable(WorkspaceDescriptor descriptor) {
         Objects.requireNonNull(descriptor, "descriptor");
         validateDescriptor(descriptor);

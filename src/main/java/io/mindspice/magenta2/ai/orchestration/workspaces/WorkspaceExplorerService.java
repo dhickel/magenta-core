@@ -11,6 +11,7 @@ import java.nio.file.Path;
 import java.nio.file.attribute.BasicFileAttributes;
 import java.nio.file.attribute.FileTime;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
@@ -40,6 +41,7 @@ public class WorkspaceExplorerService {
     private final WorkspaceFileActionLogRepository actionLogRepository;
     private final WorkspaceDirectoryService directoryService;
     private final ConfinedPathMutationService mutations;
+    private final ThreadLocal<WorkspaceKind> heldMutationKind = new ThreadLocal<>();
 
     public WorkspaceExplorerService(
         WorkspaceFileMetadataService metadataService,
@@ -66,8 +68,11 @@ public class WorkspaceExplorerService {
         this.metadataService = metadataService;
         this.actionLogRepository = actionLogRepository;
         this.directoryService = directoryService;
-        this.mutations = mutations;
+        this.mutations = mutations.withAdditionalHook((primitive, root, relative) ->
+            reauthorizeHeldMutation(relative));
     }
+
+    private static final AgentWorkspaceArea[] AGENT_AREAS = AgentWorkspaceArea.values();
 
     /** A normalized workspace-relative path kept distinct from workspace identity. */
     public record RelativePath(String value) {
@@ -110,7 +115,14 @@ public class WorkspaceExplorerService {
     public DirectoryListing list(WorkspaceDescriptor descriptor, RelativePath path) {
         if (!Files.exists(descriptor.root(), LinkOption.NOFOLLOW_LINKS)) {
             if (".".equals(path.value())) {
+                if (descriptor.kind() == WorkspaceKind.AGENT) {
+                    return new DirectoryListing(".", syntheticAgentAreaEntries());
+                }
                 return new DirectoryListing(".", List.of());
+            }
+            // For AGENT canonical areas that don't exist yet, show empty
+            if (descriptor.kind() == WorkspaceKind.AGENT && isAgentCanonicalArea(path.value())) {
+                return new DirectoryListing(path.value(), List.of());
             }
             throw new WorkspaceFileException(WorkspaceFileException.Reason.NOT_FOUND, "path does not exist: " + path.value());
         }
@@ -118,17 +130,19 @@ public class WorkspaceExplorerService {
     }
 
     public FilePreview preview(WorkspaceDescriptor descriptor, RelativePath path) {
-        requireBrowsable(path.value());
+        requireBrowsable(descriptor.kind(), path.value());
         return preview(descriptor.root(), path);
     }
 
     public DownloadContent download(WorkspaceDescriptor descriptor, RelativePath path) {
-        requireBrowsable(path.value());
+        requireBrowsable(descriptor.kind(), path.value());
         return downloadContent(descriptor, descriptor.root(), path);
     }
 
     public FilePreview saveText(WorkspaceDescriptor descriptor, RelativePath path, String content) {
-        requireOrdinaryMutationAllowed(path.value());
+        requireOrdinaryMutationAllowed(descriptor.kind(), path.value());
+        ensureDescriptorRootForCreate(descriptor);
+        ensurePersonalAreaProvisioned(descriptor, path.value());
         FilePreview saved = saveText(descriptor, descriptor.root(), path, content);
         logAction(descriptor, "markdown".equals(saved.kind()) ? WorkspaceFileActionType.SAVE_MARKDOWN : WorkspaceFileActionType.SAVE_TEXT,
             path.value(), null, "SUCCEEDED", "{\"bytes\":" + saved.size() + "}");
@@ -136,29 +150,34 @@ public class WorkspaceExplorerService {
     }
 
     public Entry createDirectory(WorkspaceDescriptor descriptor, RelativePath path) {
-        requireOrdinaryMutationAllowed(path.value());
-        requireCreatableParent(descriptor, path);
+        requireOrdinaryMutationAllowed(descriptor.kind(), path.value());
         ensureDescriptorRootForCreate(descriptor);
+        ensurePersonalAreaProvisioned(descriptor, path.value());
+        requireCreatableParent(descriptor, path);
         Entry created = createDirectoryRoot(descriptor.root(), path);
         logAction(descriptor, WorkspaceFileActionType.CREATE_FOLDER, created.path(), null, "SUCCEEDED", "{}");
         return decorate(descriptor, created);
     }
 
     public Entry createTextFile(WorkspaceDescriptor descriptor, RelativePath parent, String fileName) {
-        requireOrdinaryMutationAllowed(childValue(parent, fileName.trim()));
+        String childPath = childValue(parent, fileName.trim());
         requireFileName(fileName, ".txt", "text");
-        requireCreatableParent(descriptor, new RelativePath(childValue(parent, fileName.trim())));
+        requireOrdinaryMutationAllowed(descriptor.kind(), childPath);
         ensureDescriptorRootForCreate(descriptor);
+        ensurePersonalAreaProvisioned(descriptor, childPath);
+        requireCreatableParent(descriptor, new RelativePath(childPath));
         Entry created = createTextFileRoot(descriptor.root(), parent, fileName);
         logAction(descriptor, WorkspaceFileActionType.CREATE_TEXT_FILE, created.path(), null, "SUCCEEDED", "{}");
         return decorate(descriptor, created);
     }
 
     public Entry createMarkdownFile(WorkspaceDescriptor descriptor, RelativePath parent, String fileName) {
-        requireOrdinaryMutationAllowed(childValue(parent, fileName.trim()));
+        String childPath = childValue(parent, fileName.trim());
         requireFileName(fileName, ".md", "markdown");
-        requireCreatableParent(descriptor, new RelativePath(childValue(parent, fileName.trim())));
+        requireOrdinaryMutationAllowed(descriptor.kind(), childPath);
         ensureDescriptorRootForCreate(descriptor);
+        ensurePersonalAreaProvisioned(descriptor, childPath);
+        requireCreatableParent(descriptor, new RelativePath(childPath));
         Entry created = createMarkdownFileRoot(descriptor.root(), parent, fileName);
         logAction(descriptor, WorkspaceFileActionType.CREATE_MARKDOWN_FILE, created.path(), null, "SUCCEEDED", "{}");
         return decorate(descriptor, created);
@@ -166,6 +185,8 @@ public class WorkspaceExplorerService {
 
     @Transactional
     public Entry rename(WorkspaceDescriptor descriptor, RelativePath source, String newName) {
+        String targetRel = computeRenameTarget(source.value(), newName);
+        reauthorizeSourceAndTarget(descriptor, source.value(), targetRel);
         Entry renamed = renameRoot(descriptor.root(), source, newName);
         metadataService.onMove(descriptor, source.value(), renamed.path());
         logAction(descriptor, WorkspaceFileActionType.RENAME, source.value(), renamed.path(), "SUCCEEDED", "{}");
@@ -174,6 +195,9 @@ public class WorkspaceExplorerService {
 
     @Transactional
     public Entry move(WorkspaceDescriptor descriptor, RelativePath source, RelativePath destination, String newName) {
+        String targetName = StringUtils.hasText(newName) ? newName.trim() : Path.of(source.value()).getFileName().toString();
+        String destPath = ".".equals(destination.value()) ? targetName : destination.value() + "/" + targetName;
+        reauthorizeSourceAndTarget(descriptor, source.value(), destPath);
         Entry moved = moveRoot(descriptor.root(), source, destination, newName);
         metadataService.onMove(descriptor, source.value(), moved.path());
         logAction(descriptor, WorkspaceFileActionType.MOVE, source.value(), moved.path(), "SUCCEEDED", "{}");
@@ -185,6 +209,9 @@ public class WorkspaceExplorerService {
         if (".".equals(source.value())) {
             throw new WorkspaceFileException(WorkspaceFileException.Reason.INVALID, "workspace root cannot be copied");
         }
+        String targetName = StringUtils.hasText(newName) ? newName.trim() : Path.of(source.value()).getFileName().toString();
+        String destPath = ".".equals(destination.value()) ? targetName : destination.value() + "/" + targetName;
+        reauthorizeSourceAndTarget(descriptor, source.value(), destPath);
         Entry copied = copyRoot(descriptor.root(), source, destination, newName);
         metadataService.onCopy(descriptor, source.value(), copied.path());
         logAction(descriptor, WorkspaceFileActionType.COPY, source.value(), copied.path(), "SUCCEEDED", "{}");
@@ -192,11 +219,13 @@ public class WorkspaceExplorerService {
     }
 
     public DeletePreflight deletePreflight(WorkspaceDescriptor descriptor, RelativePath path, DeleteStep step) {
+        requireOrdinaryMutationAllowed(descriptor.kind(), path.value());
         return deletePreflightRoot(descriptor.root(), path, step);
     }
 
     @Transactional
     public DeleteResult delete(WorkspaceDescriptor descriptor, RelativePath path, DeleteStep step) {
+        requireOrdinaryMutationAllowed(descriptor.kind(), path.value());
         DeletePreflight preflight = deletePreflightRoot(descriptor.root(), path, step);
         if (!preflight.executable()) {
             throw new WorkspaceFileException(WorkspaceFileException.Reason.INVALID,
@@ -212,7 +241,7 @@ public class WorkspaceExplorerService {
     }
 
     public Entry inspect(WorkspaceDescriptor descriptor, RelativePath path) {
-        requireBrowsable(path.value());
+        requireBrowsable(descriptor.kind(), path.value());
         if (!Files.exists(descriptor.root(), LinkOption.NOFOLLOW_LINKS) && ".".equals(path.value())) {
             return virtualRootEntry();
         }
@@ -272,18 +301,31 @@ public class WorkspaceExplorerService {
     /* ── Internal descriptor-based bridges ── */
 
     DirectoryListing list(WorkspaceDescriptor descriptor, Path root, RelativePath relativePath) {
-        requireBrowsable(relativePath.value());
+        requireBrowsable(descriptor.kind(), relativePath.value());
         Path dir = resolveExisting(root, relativePath);
         if (!Files.isDirectory(dir, LinkOption.NOFOLLOW_LINKS)) {
             throw new WorkspaceFileException(WorkspaceFileException.Reason.INVALID, "path is not a directory");
         }
         try (var stream = Files.list(dir)) {
-            List<Entry> entries = stream
+            List<Entry> physical = stream
                 .filter(path -> isBrowsable(relative(root, path)))
                 .map(path -> decorate(descriptor, entry(root, path)))
-                .sorted(Comparator.comparing(Entry::directory).reversed().thenComparing(Entry::name))
-                .toList();
-            return new DirectoryListing(relative(root, dir), entries);
+                .collect(java.util.stream.Collectors.toCollection(ArrayList::new));
+
+            // Synthesize absent AGENT canonical area entries at root
+            if (descriptor.kind() == WorkspaceKind.AGENT && ".".equals(relativePath.value())) {
+                for (AgentWorkspaceArea area : AGENT_AREAS) {
+                    if (!isAgentAreaBrowsable(area)) continue;
+                    boolean present = physical.stream()
+                        .anyMatch(e -> area.directoryName().equals(e.name()));
+                    if (!present) {
+                        physical.add(syntheticAreaEntry(area));
+                    }
+                }
+            }
+
+            physical.sort(Comparator.comparing(Entry::directory).reversed().thenComparing(Entry::name));
+            return new DirectoryListing(relative(root, dir), List.copyOf(physical));
         } catch (IOException exception) {
             throw new IllegalStateException("failed to list directory", exception);
         }
@@ -517,12 +559,13 @@ public class WorkspaceExplorerService {
     /* ── Private helpers ── */
 
     private Entry decorate(WorkspaceDescriptor descriptor, Entry entry) {
-        if (metadataService == null) return entry;
-        List<WorkspaceFileLabel> tags = metadataService.labelsForPath(descriptor, entry.path()).stream()
-            .map(WorkspaceFileLabelAssignment::label).toList();
+        List<WorkspaceFileLabel> tags = metadataService == null ? List.of()
+            : metadataService.labelsForPath(descriptor, entry.path()).stream()
+                .map(WorkspaceFileLabelAssignment::label).toList();
+        boolean mutable = isMutableByOrdinaryRoute(descriptor.kind(), entry.path());
         return new Entry(entry.name(), entry.path(), entry.directory(), entry.regularFile(), entry.size(),
             entry.createdAt(), entry.modifiedAt(), entry.fileType(), entry.sizeLabel(), entry.viewerKind(),
-            tags, entry.canView(), entry.canRename(), entry.canDelete(), entry.canCopy(), entry.canMove(), entry.canTag());
+            tags, entry.canView(), mutable, mutable, mutable, mutable, entry.canTag());
     }
 
     private void logAction(WorkspaceDescriptor descriptor, WorkspaceFileActionType type,
@@ -535,6 +578,74 @@ public class WorkspaceExplorerService {
     private Entry virtualRootEntry() {
         return new Entry(".", ".", true, false, 0, null, null, "Folder", "-", ViewerKind.UNSUPPORTED,
             List.of(), false, false, false, false, false, true);
+    }
+
+    // ── AGENT synthetic-area support ──
+
+    /** Check whether a workspace-relative path (single segment) names a canonical agent area. */
+    private boolean isAgentCanonicalArea(String relativePath) {
+        if (relativePath.indexOf('/') >= 0) return false;
+        return AgentWorkspaceArea.fromDirectoryName(relativePath).isPresent();
+    }
+
+    /** Produce synthetic entries for every canonical agent area (used when root is absent). */
+    private List<Entry> syntheticAgentAreaEntries() {
+        List<Entry> entries = new ArrayList<>(AGENT_AREAS.length);
+        for (AgentWorkspaceArea area : AGENT_AREAS) {
+            // Skip areas that are not browsable (e.g. .skills)
+            if (!isAgentAreaBrowsable(area)) continue;
+            entries.add(syntheticAreaEntry(area));
+        }
+        return entries;
+    }
+
+    /** Check whether a canonical agent area should appear in listings. */
+    private boolean isAgentAreaBrowsable(AgentWorkspaceArea area) {
+        var c = ReservedWorkspacePathPolicy.classify(
+                WorkspaceKind.AGENT, area.directoryName());
+        return ReservedWorkspacePathPolicy.decide(c,
+                ReservedWorkspacePathPolicy.Operation.BROWSE)
+                == ReservedWorkspacePathPolicy.Decision.ALLOW;
+    }
+
+    /** Build a single synthetic (non-existent) directory entry for a canonical area. */
+    private Entry syntheticAreaEntry(AgentWorkspaceArea area) {
+        String name = area.directoryName();
+        boolean personal = area.isPersonal();
+        return new Entry(name, name, true, false, 0, null, null,
+            "Folder", "-", ViewerKind.UNSUPPORTED,
+            List.of(), false,
+            false, // canRename
+            false, // canDelete
+            false, // canCopy
+            false, // canMove
+            false  // synthetic entries never expose metadata mutations
+        );
+    }
+
+    /**
+     * When writing to an AGENT personal descendant whose area root does not
+     * yet exist, lazily provision only the canonical area chain.
+     */
+    private void ensurePersonalAreaProvisioned(WorkspaceDescriptor descriptor, String relativePath) {
+        if (descriptor.kind() != WorkspaceKind.AGENT) return;
+        if (!Files.exists(descriptor.root(), LinkOption.NOFOLLOW_LINKS)) return;
+        String firstSegment = relativePath.split("/", -1)[0];
+        var area = AgentWorkspaceArea.fromDirectoryName(firstSegment);
+        if (area.isEmpty() || area.get().isReserved()) return;
+        Path areaDir = descriptor.root().resolve(firstSegment);
+        if (!Files.exists(areaDir, LinkOption.NOFOLLOW_LINKS)) {
+            if (directoryService != null) {
+                directoryService.provisionPersonalArea(descriptor, area.get());
+            } else {
+                try {
+                    new ConfinedPathMutationService().createDirectory(descriptor.root(), firstSegment);
+                } catch (IOException e) {
+                    throw new IllegalStateException(
+                        "Failed to provision personal area: " + firstSegment, e);
+                }
+            }
+        }
     }
 
     private void requireCreatableParent(WorkspaceDescriptor descriptor, RelativePath target) {
@@ -596,7 +707,7 @@ public class WorkspaceExplorerService {
                 throw new WorkspaceFileException(WorkspaceFileException.Reason.NOT_FOUND,
                     "workspace parent does not exist");
             }
-            mutations.createDirectory(parent, descriptor.root().getFileName().toString());
+            new ConfinedPathMutationService().createDirectory(parent, descriptor.root().getFileName().toString());
         } catch (IOException exception) {
             throw new IllegalStateException("failed to create workspace root", exception);
         }
@@ -687,18 +798,27 @@ public class WorkspaceExplorerService {
 
     /**
      * Require that the path is classifiable for ordinary browse without
-     * accessing hidden content. Hidden: {@code .skills}, {@code staging}.
+     * accessing hidden content. Hidden: {@code .skills}, {@code staging},
+     * control markers.
      */
     private void requireBrowsable(String relativePath) {
+        requireBrowsable(null, relativePath);
+    }
+
+    /** Kind-aware browse authorization. */
+    private void requireBrowsable(WorkspaceKind kind, String relativePath) {
         ReservedWorkspacePathPolicy.Classification c;
         try {
-            c = ReservedWorkspacePathPolicy.classify(relativePath);
+            c = kind != null
+                ? ReservedWorkspacePathPolicy.classify(kind, relativePath)
+                : ReservedWorkspacePathPolicy.classify(relativePath);
         } catch (IllegalArgumentException e) {
             throw new WorkspaceFileException(WorkspaceFileException.Reason.INVALID,
-                    e.getMessage(), e);
+                    "path is invalid", e);
         }
-        if (c == ReservedWorkspacePathPolicy.Classification.SKILLS
-                || c == ReservedWorkspacePathPolicy.Classification.PUBLICATION_STAGING) {
+        ReservedWorkspacePathPolicy.Decision d = ReservedWorkspacePathPolicy.decide(
+                c, ReservedWorkspacePathPolicy.Operation.BROWSE);
+        if (d != ReservedWorkspacePathPolicy.Decision.ALLOW) {
             throw new WorkspaceFileException(WorkspaceFileException.Reason.NOT_FOUND,
                     "path does not exist: " + relativePath);
         }
@@ -706,26 +826,75 @@ public class WorkspaceExplorerService {
 
     /**
      * Require that the path is mutable by ordinary explorer routes.
-     * Ordinary mutation is allowed only on {@code ORDINARY_CONTENT}.
-     * Workspace root (.) is also protected.
+     * Ordinary mutation is allowed only on {@code ORDINARY_CONTENT}
+     * or {@code AGENT_PERSONAL_DESCENDANT}.
      */
     private void requireOrdinaryMutationAllowed(String relativePath) {
-        if (".".equals(relativePath)) {
-            throw new WorkspaceFileException(WorkspaceFileException.Reason.INVALID,
-                    "workspace root is protected");
+        requireOrdinaryMutationAllowed(null, relativePath);
+    }
+
+    private void requireOrdinaryMutationAllowed(WorkspaceKind kind, String relativePath) {
+        if (kind != null) {
+            heldMutationKind.set(kind);
         }
         ReservedWorkspacePathPolicy.Classification c;
         try {
-            c = ReservedWorkspacePathPolicy.classify(relativePath);
+            c = kind != null
+                ? ReservedWorkspacePathPolicy.classify(kind, relativePath)
+                : ReservedWorkspacePathPolicy.classify(relativePath);
         } catch (IllegalArgumentException e) {
-            throw new WorkspaceFileException(WorkspaceFileException.Reason.INVALID,
-                    e.getMessage(), e);
+            String message = relativePath.contains("..") ? "path escapes workspace" : "path is protected";
+            throw new WorkspaceFileException(WorkspaceFileException.Reason.INVALID, message, e);
         }
         ReservedWorkspacePathPolicy.Decision d = ReservedWorkspacePathPolicy.decide(
                 c, ReservedWorkspacePathPolicy.Operation.ORDINARY_MUTATION);
         if (d != ReservedWorkspacePathPolicy.Decision.ALLOW) {
             throw new WorkspaceFileException(WorkspaceFileException.Reason.INVALID,
                     protectedTreeMessage(c));
+        }
+    }
+
+    /** Reauthorize the exact held relative target immediately before its primitive. */
+    private void reauthorizeHeldMutation(String relativePath) {
+        WorkspaceKind kind = heldMutationKind.get();
+        if (kind == null) {
+            return; // Package-private root bridges are not descriptor production routes.
+        }
+        requireOrdinaryMutationAllowed(kind, relativePath);
+    }
+
+    /** Compute the target relative path for a rename (same parent, new leaf). */
+    private String computeRenameTarget(String sourceRel, String newName) {
+        int lastSep = sourceRel.lastIndexOf('/');
+        if (lastSep < 0) return newName;
+        return sourceRel.substring(0, lastSep + 1) + newName;
+    }
+
+    /** Reauthorize both source and destination for moves, copies, renames. */
+    private void reauthorizeSourceAndTarget(WorkspaceDescriptor descriptor,
+                                            String sourceRel, String targetRel) {
+        WorkspaceKind kind = descriptor.kind();
+        heldMutationKind.set(kind);
+        // Source: check existent path is mutable
+        if (".".equals(sourceRel)) {
+            throw new WorkspaceFileException(WorkspaceFileException.Reason.INVALID,
+                "workspace root cannot be moved or copied");
+        }
+        try {
+            var srcClass = ReservedWorkspacePathPolicy.classify(kind, sourceRel);
+            var dstClass = ReservedWorkspacePathPolicy.classify(kind, targetRel);
+            if (ReservedWorkspacePathPolicy.decide(srcClass,
+                    ReservedWorkspacePathPolicy.Operation.ORDINARY_MUTATION)
+                    != ReservedWorkspacePathPolicy.Decision.ALLOW
+                    || ReservedWorkspacePathPolicy.decide(dstClass,
+                    ReservedWorkspacePathPolicy.Operation.ORDINARY_MUTATION)
+                    != ReservedWorkspacePathPolicy.Decision.ALLOW) {
+                throw new WorkspaceFileException(WorkspaceFileException.Reason.INVALID,
+                    "source or destination path is protected");
+            }
+        } catch (IllegalArgumentException exception) {
+            throw new WorkspaceFileException(WorkspaceFileException.Reason.INVALID,
+                "source or destination path is protected", exception);
         }
     }
 
@@ -738,8 +907,9 @@ public class WorkspaceExplorerService {
         try {
             ReservedWorkspacePathPolicy.Classification c =
                     ReservedWorkspacePathPolicy.classify(relative);
-            return c != ReservedWorkspacePathPolicy.Classification.SKILLS
-                    && c != ReservedWorkspacePathPolicy.Classification.PUBLICATION_STAGING;
+            return ReservedWorkspacePathPolicy.decide(c,
+                    ReservedWorkspacePathPolicy.Operation.BROWSE)
+                    == ReservedWorkspacePathPolicy.Decision.ALLOW;
         } catch (IllegalArgumentException e) {
             return false;
         }
@@ -747,10 +917,14 @@ public class WorkspaceExplorerService {
 
     /** Check whether an ordinary mutation is allowed on a relative path. */
     private boolean isMutableByOrdinaryRoute(String relative) {
-        if (".".equals(relative)) return false;
+        return isMutableByOrdinaryRoute(null, relative);
+    }
+
+    private boolean isMutableByOrdinaryRoute(WorkspaceKind kind, String relative) {
         try {
-            ReservedWorkspacePathPolicy.Classification c =
-                    ReservedWorkspacePathPolicy.classify(relative);
+            ReservedWorkspacePathPolicy.Classification c = kind == null
+                ? ReservedWorkspacePathPolicy.classify(relative)
+                : ReservedWorkspacePathPolicy.classify(kind, relative);
             return ReservedWorkspacePathPolicy.decide(c,
                     ReservedWorkspacePathPolicy.Operation.ORDINARY_MUTATION)
                     == ReservedWorkspacePathPolicy.Decision.ALLOW;
