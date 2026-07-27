@@ -31,7 +31,7 @@ phase-02-materialization-context-persistence.md
 
 ## Execution Preconditions
 
-- Start only with Phase 02 validator PASS evidence. That evidence must show typed APIs for default resolution with expected-revision CAS, immutable binding capture and lookup, materialization state/generation validation, and transactional owner links.
+- Start only with Phase 02 validator PASS evidence. That evidence must show typed APIs for default resolution with expected-version CAS, immutable binding capture and lookup, materialization state/generation validation, and transactional owner links.
 - The Phase 02 owner-link API must link conversation, assignment, native task run, workflow child, and job work item to a binding without reconstructing identity from a path or writing mutable JSON. If it cannot, stop and request an orchestration-ledger correction; do not add undeclared persistence or checkpoint substitutes.
 - One implementation agent owns every declared edit and the focused validation.
 
@@ -46,10 +46,10 @@ phase-02-materialization-context-persistence.md
 
 ## Implementation Steps
 
-1. Add a backward-compatible typed context-capture selection to new-chat requests only; it may name an allowed Phase 02 context/default selector and expected default revision, but never a path, root, canonical identity, materialization location, or caller-supplied context fact. Preserve existing `ChatRequest` construction with compatibility constructors. For assignments, consume the existing authoritative workspace pair and the dependency-owned typed capture API; do not alter `AssignmentRequest`, encode selection in `input`, or infer it from project metadata.
+1. Add a backward-compatible typed context-capture selection to new-chat requests only; it may name an allowed Phase 02 context/default selector and expected default version, but never a path, root, canonical identity, materialization location, or caller-supplied context fact. Preserve existing `ChatRequest` construction with compatibility constructors. For assignments, consume the existing authoritative workspace pair and the dependency-owned typed capture API; do not alter `AssignmentRequest`, encode selection in `input`, or infer it from project metadata.
 2. Resolve the agent identity server-side. For a first conversation, use the Phase 02 unique conversation/binding owner-link transaction rather than check-then-insert: capture the binding, create the conversation metadata/owner link, and return the single winner. For later turns, load that binding and reject any conflicting explicit capture selection; never resolve current defaults for an already bound conversation.
 3. Replace path-derived chat setup with the resolved binding's trusted facts while retaining `workspace/chat/<conversationId>/` only for CHAT-local file behavior. The materialization binding is supplemental context and must not turn a chat root into an execution workspace or replace the selected execution descriptor.
-4. At assignment submission, capture and persist an assignment owner link to one binding. Validate membership, the caller's applicable expected default revision, materialization readiness, and captured generation before queue dispatch. The durable link—not a checkpoint map, path, or current default—supplies the `contextBindingId` association for later lifecycle work.
+4. At assignment submission, capture and persist an assignment owner link to one binding. Validate membership, the caller's applicable expected default version, materialization readiness, and captured generation before queue dispatch. The durable link—not a checkpoint map, path, or current default—supplies the `contextBindingId` association for later lifecycle work.
 5. Make operation-key convergence, binding capture, assignment insert, lifecycle reservation, and typed owner links one transactional decision. For a new key, resolve/capture once, construct the canonical digest, and persist the operation result. For an existing key, load its stored binding facts first, verify compatible retry intent against them, and return the recorded assignment/run; a different operation type, selection, source, lineage, or normalized input conflicts. Never create filesystem state in either transaction.
 6. Link every native task-run reservation and lineage record to its exact assignment binding through the Phase 02 owner-link model. Runtime obtains materialization facts from that binding separately from the selected `WorkspaceDescriptor`; a binding must not replace `workspaceType`/`workspaceKey`, canonical descriptor identity, or trusted run-location construction.
 7. On runner startup, require matching assignment and run binding links, revalidate binding state and generation, and resolve/provision only the recorded trusted task-run location. Acquire the current assignment lease and writer fence before model or tool work, recheck cancellation and capability state at mutation boundaries, and fail closed without provisioning when validation or acquisition fails.
@@ -66,7 +66,7 @@ if existing exists:
     verifyCompatibleRetryIntent(request, existing.binding)
     return existing.recordedResult
 
-binding = captureImmutableBinding(resolvedServerFacts, expectedDefaultRevision)
+binding = captureImmutableBinding(resolvedServerFacts, expectedDefaultVersion)
 digest = canonicalDigest(binding, source, selection, lineage, normalizedInput)
 persist(binding, ownerLinks, reservation, operationResult(digest))
 ```
@@ -76,7 +76,7 @@ The real implementation must make the lookup/insert race-safe with the dependenc
 ## Validation
 
 - Add focused coverage for concurrent first turns: exactly one conversation binding/owner link wins, compatible repetition returns it, and conflicting explicit selection is rejected.
-- Cover default CAS races and changes after capture. Existing conversations, assignments, runs, resumes, and children must retain their binding; stale revisions, non-ready materializations, revoked bindings, and stale generations cause no assignment, lifecycle, or filesystem mutation.
+- Cover default CAS races and changes after capture. Existing conversations, assignments, runs, resumes, and children must retain their binding; stale versions, non-ready materializations, revoked bindings, and stale generations cause no assignment, lifecycle, or filesystem mutation.
 - Cover operation type/key convergence and contradiction with the stored binding, including retries after a default changes. Assert no duplicate binding, owner link, assignment, native run, or task-run reservation.
 - Cover assignment-to-run matching, restart, cancellation, lease-plus-writer-fence acquisition, and runner failure before provisioning/model/tool work when a link, state, generation, lease, writer fence, or cancellation check is invalid.
 - Cover resume reuse, retry/replay new binding, workflow-child and job-work-item owner links, and rejection of legacy rows lacking an unambiguous binding/run relationship.
