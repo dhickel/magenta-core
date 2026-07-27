@@ -13,6 +13,7 @@ import io.mindspice.magenta2.ai.orchestration.context.AgentContextRepository.Con
 import io.mindspice.magenta2.ai.orchestration.context.AgentContextRepository.ContextDefault;
 import io.mindspice.magenta2.ai.orchestration.context.AgentContextRepository.ContextOperationStatus;
 import io.mindspice.magenta2.ai.orchestration.context.AgentContextRepository.OwnerLinkOperation;
+import io.mindspice.magenta2.ai.orchestration.context.AgentContextRepository.AssignmentSubmissionOperation;
 import io.mindspice.magenta2.ai.orchestration.context.AgentContextRepository.PersonalSelection;
 import io.mindspice.magenta2.ai.orchestration.context.AgentContextRepository.SelectionKind;
 import io.mindspice.magenta2.ai.orchestration.context.AgentMaterializationRepository.MaterializationKey;
@@ -80,6 +81,19 @@ public class AgentContextService {
     }
 
     @Transactional
+    public ContextDefault initializeDefaultToPersonal(String agentId, PersonalSelection personalSelection,
+                                                      String reason) {
+        Objects.requireNonNull(agentId, "agentId");
+        Objects.requireNonNull(personalSelection, "personalSelection");
+        if (agentId.isBlank()) throw new IllegalArgumentException("agentId is required");
+        Instant now = Instant.now();
+        ContextDefault defaultRecord = new ContextDefault(agentId, 1, SelectionKind.PERSONAL,
+                null, null, personalSelection, reason, now, now);
+        contextRepository.insertDefault(defaultRecord);
+        return contextRepository.findDefaultByAgent(agentId).orElseThrow();
+    }
+
+    @Transactional
     public boolean updateDefaultToPersonal(String agentId, int expectedVersion,
                                            PersonalSelection personalSelection, String reason) {
         Objects.requireNonNull(agentId);
@@ -116,6 +130,19 @@ public class AgentContextService {
 
                 defaultRecord.materializationKey(), defaultRecord.materializationGeneration(),
                 defaultRecord.personalSelection());
+    }
+
+    /**
+     * Captures a binding on every assignment/chat boundary. An agent without a
+     * configured project default uses the server-owned personal HOME selection;
+     * it never leaves the owner unbound or accepts caller context facts.
+     */
+    @Transactional
+    public ContextBinding captureDefaultOrPersonalHome(String agentId, String bindingKey, String operationKey) {
+        if (contextRepository.findDefaultByAgent(agentId).isPresent()) {
+            return captureFromDefault(agentId, bindingKey, operationKey);
+        }
+        return capturePersonal(agentId, bindingKey, PersonalSelection.HOME, operationKey);
     }
 
     /** Compatibility entry point: the immutable binding key is its operation key. */
@@ -188,6 +215,20 @@ public class AgentContextService {
                     }
                     return operation.binding();
                 }).orElse(null);
+    }
+
+    // ── Assignment submission operation ──
+
+    @Transactional
+    public AssignmentSubmissionOperation beginAssignmentSubmission(String operationKey, String requestDigest) {
+        return contextRepository.beginAssignmentSubmission(operationKey, requestDigest);
+    }
+
+    @Transactional
+    public void completeAssignmentSubmission(String operationKey, String requestDigest,
+                                             String bindingKey, String assignmentId, String taskRunId) {
+        contextRepository.completeAssignmentSubmission(operationKey, requestDigest,
+                bindingKey, assignmentId, taskRunId);
     }
 
     // ── Binding resolution ──

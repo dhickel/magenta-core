@@ -831,14 +831,6 @@ public class WorkflowRunner {
         return workspaceDirectoryService.resolveForWrite(kind, run.workspaceKey());
     }
 
-    private Path descriptorRoot(WorkflowRun run) {
-        OrchestrationTaskContext context = OrchestrationTaskContextHolder.current();
-        if (context != null && StringUtils.hasText(context.hostDurableWorkspacePath())) {
-            return Path.of(context.hostDurableWorkspacePath());
-        }
-        return descriptorForRun(run).root();
-    }
-
     private OrchestrationTaskContext executionContextFor(WorkflowRun run, OrchestrationTaskContext base) {
         WorkspaceDescriptor descriptor = descriptorForRun(run);
         boolean sameLifecycle = base != null && base.taskRunLocation() != null

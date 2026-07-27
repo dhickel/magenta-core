@@ -144,18 +144,23 @@ public class RequestResolver {
             throw new IllegalArgumentException("Unsupported context capture selector");
         }
         if (agentContextService == null) {
+            // Lightweight compatibility fixtures do not wire context persistence.
+            // A real application always has the service and therefore captures a binding.
             return null;
         }
         if (!newConversation) {
             var link = agentContextService.getOwnerLink("CONVERSATION", conversationId);
-            return link.value() == null ? null : link.value().bindingKey();
+            if (link.outcome() != AgentContextService.ContextOutcome.AVAILABLE || link.value() == null) {
+                throw new IllegalStateException("Existing conversation has no immutable binding owner link");
+            }
+            return link.value().bindingKey();
         }
         String defaultAgentId = aiConfig == null ? null : aiConfig.defaultAgent();
         if (!StringUtils.hasText(defaultAgentId)) {
             throw new IllegalStateException("A server-resolved default agent is required for context capture");
         }
         String bindingKey = "conversation:" + conversationId;
-        agentContextService.captureFromDefault(defaultAgentId, bindingKey,
+        agentContextService.captureDefaultOrPersonalHome(defaultAgentId, bindingKey,
             "conversation-capture:" + conversationId);
         agentContextService.linkOwner("CONVERSATION", conversationId, bindingKey,
             "conversation-owner-link:" + conversationId);
@@ -167,7 +172,8 @@ public class RequestResolver {
             return null;
         }
         var link = agentContextService.getOwnerLink("CONVERSATION", conversationId);
-        return link.value() == null ? null : link.value().bindingKey();
+        return link.outcome() == AgentContextService.ContextOutcome.AVAILABLE && link.value() != null
+            ? link.value().bindingKey() : null;
     }
 
     public String storedConversationModel(String conversationId) {

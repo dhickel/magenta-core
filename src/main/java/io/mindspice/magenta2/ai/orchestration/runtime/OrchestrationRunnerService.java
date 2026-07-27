@@ -22,6 +22,8 @@ import io.mindspice.magenta2.ai.execution.MagentaWorkExecutor;
 import io.mindspice.magenta2.ai.orchestration.agents.AgentProfile;
 import io.mindspice.magenta2.ai.orchestration.agents.AgentProfileService;
 import io.mindspice.magenta2.ai.orchestration.agents.AgentProfileStatus;
+import io.mindspice.magenta2.ai.orchestration.context.AgentContextRepository.SelectionKind;
+import io.mindspice.magenta2.ai.orchestration.context.AgentContextService;
 
 import io.mindspice.magenta2.ai.orchestration.workflow.WorkflowNodeRun;
 import io.mindspice.magenta2.ai.orchestration.workflow.WorkflowExecutionObserver;
@@ -69,6 +71,7 @@ public class OrchestrationRunnerService {
     private final RootRelativePathService rootRelativePathService;
     private final AgentProfileService agentProfileService;
     private final TaskRunLifecycleService taskRunLifecycleService;
+    private final AgentContextService agentContextService;
 
     private final MagentaWorkExecutor executor;
     private final Duration leaseDuration;
@@ -93,7 +96,7 @@ public class OrchestrationRunnerService {
     ) {
         this(repository, assignmentService, jobService, taskService, workflowService, null, inboxService,
             eventService, null, null, null, null, null, executor,
-            DEFAULT_LEASE_DURATION.toSeconds(), DEFAULT_HEARTBEAT_INTERVAL.toSeconds(), null);
+            DEFAULT_LEASE_DURATION.toSeconds(), DEFAULT_HEARTBEAT_INTERVAL.toSeconds(), null, null);
     }
 
     @Autowired
@@ -114,7 +117,8 @@ public class OrchestrationRunnerService {
         MagentaWorkExecutor executor,
         @Value("${magenta.orchestration.lease-seconds:300}") long leaseSeconds,
         @Value("${magenta.orchestration.heartbeat-seconds:60}") long heartbeatSeconds,
-        @Autowired(required = false) TaskRunLifecycleService taskRunLifecycleService
+        @Autowired(required = false) TaskRunLifecycleService taskRunLifecycleService,
+        @Autowired(required = false) AgentContextService agentContextService
     ) {
         this.repository = repository;
         this.assignmentService = assignmentService;
@@ -135,6 +139,7 @@ public class OrchestrationRunnerService {
         this.leaseDuration = secondsOrDefault(leaseSeconds, DEFAULT_LEASE_DURATION);
         this.heartbeatInterval = secondsOrDefault(heartbeatSeconds, DEFAULT_HEARTBEAT_INTERVAL);
         this.taskRunLifecycleService = taskRunLifecycleService;
+        this.agentContextService = agentContextService;
         this.assignmentService.registerLocalInterruptHandler(this::cancelLocalAssignment);
     }
 
@@ -221,6 +226,7 @@ public class OrchestrationRunnerService {
                     "Assignment has no reserved native task-run identity");
             }
             try {
+                validateImmutableBinding(leased, taskRunId, workspaceDescriptor);
                 LifecycleResult lifecycleResult = taskRunLifecycleService.findById(taskRunId);
                 int attemptNumber = integer(leased.checkpoint().get("attemptNumber"),
                     lifecycleResult.attemptNumber());
@@ -273,7 +279,7 @@ public class OrchestrationRunnerService {
                 null, taskRunLocation,
                 taskRunLocation == null ? null : workspaceDirectoryService.resolveRunOutput(taskRunLocation),
                 attemptId, writerCapability, workspaceDescriptor,
-                text(leased.checkpoint().get("contextBindingKey"), null)
+                bindingKeyForAssignment(leased)
             );
 
             // Validate project membership (projectId is metadata only)
@@ -321,6 +327,58 @@ public class OrchestrationRunnerService {
             OrchestrationTaskContextHolder.clear();
             if (heartbeat != null) heartbeat.cancel(false);
         }
+    }
+
+    /** Durable owner links, never the mutable checkpoint, authorize a run binding. */
+    private void validateImmutableBinding(WorkAssignment assignment, String taskRunId,
+                                          WorkspaceDescriptor selectedDescriptor) {
+        if (agentContextService == null) {
+            throw new IllegalStateException("Immutable context binding service is unavailable");
+        }
+        String bindingKey = bindingKeyForAssignment(assignment);
+        var assignmentLink = agentContextService.getOwnerLink("ASSIGNMENT", assignment.id());
+        var runLink = agentContextService.getOwnerLink("TASK_RUN", taskRunId);
+        if (assignmentLink.outcome() != AgentContextService.ContextOutcome.AVAILABLE || assignmentLink.value() == null
+                || runLink.outcome() != AgentContextService.ContextOutcome.AVAILABLE || runLink.value() == null
+                || !bindingKey.equals(assignmentLink.value().bindingKey())
+                || !bindingKey.equals(runLink.value().bindingKey())) {
+            throw new IllegalStateException("Assignment and task run do not share a durable immutable binding");
+        }
+        String checkpointKey = text(assignment.checkpoint().get("contextBindingKey"), null);
+        if (StringUtils.hasText(checkpointKey) && !bindingKey.equals(checkpointKey)) {
+            throw new IllegalStateException("Mutable assignment checkpoint disagrees with durable binding owner link");
+        }
+        if (!assignment.id().equals(taskRunLifecycleService.findAssignmentId(taskRunId))) {
+            throw new IllegalStateException("Task run is not owned by its assignment");
+        }
+        var binding = agentContextService.getBinding(bindingKey);
+        if (binding.outcome() != AgentContextService.ContextOutcome.AVAILABLE || binding.value() == null
+                || !assignment.agentId().equals(binding.value().agentId())) {
+            throw new IllegalStateException("Assignment binding is unavailable or belongs to another agent");
+        }
+        if (binding.value().selectionKind() == SelectionKind.MATERIALIZATION) {
+            WorkspaceDescriptor agentDescriptor = workspaceDirectoryService.resolveForRead(
+                WorkspaceKind.AGENT, binding.value().agentId());
+            var resolution = agentContextService.resolveBinding(agentDescriptor, bindingKey);
+            if (resolution.outcome() != AgentContextService.ContextOutcome.AVAILABLE) {
+                throw new IllegalStateException("Assignment binding is stale, revoked, or not ready: "
+                    + resolution.outcome());
+            }
+        }
+        if (!selectedDescriptor.identity().equals(assignment.workspaceIdentity())) {
+            throw new IllegalStateException("Selected descriptor does not match persisted assignment selection");
+        }
+    }
+
+    private String bindingKeyForAssignment(WorkAssignment assignment) {
+        if (agentContextService == null) {
+            throw new IllegalStateException("Immutable context binding service is unavailable");
+        }
+        var link = agentContextService.getOwnerLink("ASSIGNMENT", assignment.id());
+        if (link.outcome() != AgentContextService.ContextOutcome.AVAILABLE || link.value() == null) {
+            throw new IllegalStateException("Assignment has no durable immutable binding owner link");
+        }
+        return link.value().bindingKey();
     }
 
     private WorkspaceDescriptor resolveWorkspaceDescriptor(WorkAssignment assignment) {

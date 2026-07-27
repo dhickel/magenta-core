@@ -928,9 +928,18 @@ public class PlanService {
                 throw new IllegalArgumentException("CHAT workspaces are not task-selectable");
             }
             String inputDigest = taskRunLifecycleService.canonicalInputDigest(cleanInputs);
-            taskRunLifecycleService.reserve(LifecycleReservationRequest.reuseNative(
+            if (context.taskRunLocation() != null && context.writerCapability() != null) {
+                // A plan delegated by workflow work is a real child, not merely a
+                // copied context key. reserveChild creates durable owner links.
+                var child = taskRunLifecycleService.reserveChild(context.taskRunLocation().taskRunId(),
+                    "WORKFLOW_CHILD", "delegated-plan:" + context.taskRunLocation().taskRunId() + ":" + runId,
+                    "delegated-plan:" + runId, TaskSourceKind.TASK, definition.id(), runId, inputDigest);
+                runId = child.taskRunId();
+            } else {
+                taskRunLifecycleService.reserve(LifecycleReservationRequest.reuseNative(
                     "plan-submission:" + UUID.randomUUID(), TaskSourceKind.TASK, definition.id(),
                     kind, workspaceKey, runId, context.jobAssignmentId(), inputDigest));
+            }
         }
 
         return planRepository.saveRun(new PlanRun(

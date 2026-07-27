@@ -14,6 +14,7 @@ import java.util.UUID;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
+import io.mindspice.magenta2.ai.orchestration.context.AgentContextService;
 import io.mindspice.magenta2.ai.orchestration.workspaces.TaskIdentity;
 import io.mindspice.magenta2.ai.orchestration.workspaces.TaskPathKey;
 import io.mindspice.magenta2.ai.orchestration.workspaces.TaskRunLocation;
@@ -33,12 +34,22 @@ public class TaskRunLifecycleService {
     private final JdbcTemplate jdbc;
     private final ObjectMapper objectMapper;
     private final WorkspaceDirectoryService workspaceDirectoryService;
+    private final AgentContextService agentContextService;
 
     public TaskRunLifecycleService(JdbcTemplate jdbc, ObjectMapper objectMapper,
                                    WorkspaceDirectoryService workspaceDirectoryService) {
+        this(jdbc, objectMapper, workspaceDirectoryService, null);
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public TaskRunLifecycleService(JdbcTemplate jdbc, ObjectMapper objectMapper,
+                                   WorkspaceDirectoryService workspaceDirectoryService,
+                                   @org.springframework.beans.factory.annotation.Autowired(required = false)
+                                   AgentContextService agentContextService) {
         this.jdbc = jdbc;
         this.objectMapper = objectMapper.copy().findAndRegisterModules();
         this.workspaceDirectoryService = workspaceDirectoryService;
+        this.agentContextService = agentContextService;
     }
 
     @Transactional
@@ -120,6 +131,7 @@ public class TaskRunLifecycleService {
             operationKey, childKind, childSourceId, parent.workspaceKind(), parent.workspaceKey(),
             childNativeRunId, childNativeRunId, findAssignmentId(parentTaskRunId),
             null, null, inputDigest));
+        linkChildBinding(parentTaskRunId, child.taskRunId(), linkType);
         jdbc.update("""
                 insert into task_run_links(parent_task_run_id, child_task_run_id, link_type, link_key, created_at)
                 values (?, ?, ?, ?, ?)
@@ -133,6 +145,29 @@ public class TaskRunLifecycleService {
             throw new OperationConflictException("Child link key already owns another task run");
         }
         return child;
+    }
+
+    /** Copies the parent binding to both the child task-run and its typed lineage owner. */
+    private void linkChildBinding(String parentTaskRunId, String childTaskRunId, String linkType) {
+        if (agentContextService == null) {
+            return; // isolated lifecycle fixtures do not have the Phase 03 context domain.
+        }
+        var parent = agentContextService.getOwnerLink("TASK_RUN", parentTaskRunId);
+        if (parent.outcome() != AgentContextService.ContextOutcome.AVAILABLE || parent.value() == null) {
+            throw new IllegalStateException("Parent task run has no immutable binding owner link");
+        }
+        String bindingKey = parent.value().bindingKey();
+        agentContextService.linkOwner("TASK_RUN", childTaskRunId, bindingKey,
+            "child-task-run-binding:" + childTaskRunId);
+        agentContextService.linkOwner(linkType, childTaskRunId, bindingKey,
+            "child-binding:" + linkType + ":" + childTaskRunId);
+        var taskLink = agentContextService.getOwnerLink("TASK_RUN", childTaskRunId);
+        var typedLink = agentContextService.getOwnerLink(linkType, childTaskRunId);
+        if (taskLink.value() == null || typedLink.value() == null
+                || !bindingKey.equals(taskLink.value().bindingKey())
+                || !bindingKey.equals(typedLink.value().bindingKey())) {
+            throw new IllegalStateException("Child binding owner links are incomplete or incompatible");
+        }
     }
 
     @Transactional

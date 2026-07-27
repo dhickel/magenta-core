@@ -3,7 +3,7 @@
 This package owns chat use-case behavior.
 
 ### Responsibilities
-- Resolve conversation ids, selected models, prompts, context compaction, memory, streaming behavior, and history conversion.
+- Resolve conversation ids, selected models, prompts, context compaction, memory, streaming behavior, and history conversion. New persisted conversations use immutable context owner links when the context domain is wired; existing conversations must resolve through that durable link rather than session metadata.
 - Consume Agent Skills catalog and activation state from dedicated skill-domain services when skills are enabled.
 - Read default runtime agent model, prompt, tool, compaction, and context-buffer choices through orchestration services when they are available.
 - Coordinate chat plan-mode entry, exit, and saved-plan execution through the plan service.

@@ -6,6 +6,7 @@ import java.time.Instant;
 import java.util.Optional;
 
 import io.mindspice.magenta2.ai.orchestration.context.AgentMaterializationRepository.MaterializationKey;
+import org.springframework.dao.DataAccessException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Transactional;
@@ -170,6 +171,79 @@ public class AgentContextRepository {
         return new OwnerLinkOperation(ContextOperationStatus.CREATED, current);
     }
 
+    // ── Assignment submission idempotency ──
+
+    /**
+     * Reserves the one transactional decision for an assignment submission.
+     * The caller must capture a binding only after receiving {@code CREATED}.
+     */
+    public AssignmentSubmissionOperation beginAssignmentSubmission(String operationKey, String requestDigest) {
+        Instant now = Instant.now();
+        int inserted = updateWithBusyRetry("""
+                insert or ignore into assignment_binding_operations(
+                    operation_key, request_digest, operation_state, created_at, updated_at)
+                values (?, ?, 'RESERVED', ?, ?)
+                """, operationKey, requestDigest, now.toString(), now.toString());
+        AssignmentSubmissionRow operation = findAssignmentSubmission(operationKey);
+        if (operation == null) {
+            throw new IllegalStateException("Assignment submission operation was not recorded");
+        }
+        if (!operation.requestDigest().equals(requestDigest)) {
+            return new AssignmentSubmissionOperation(ContextOperationStatus.CONFLICT,
+                    operation.bindingKey(), operation.assignmentId(), operation.taskRunId());
+        }
+        if (inserted == 1) {
+            return new AssignmentSubmissionOperation(ContextOperationStatus.CREATED, null, null, null);
+        }
+        if (!"COMPLETED".equals(operation.state())) {
+            throw new IllegalStateException("Assignment submission operation has no completed result");
+        }
+        return new AssignmentSubmissionOperation(ContextOperationStatus.REPLAYED,
+                operation.bindingKey(), operation.assignmentId(), operation.taskRunId());
+    }
+
+    public void completeAssignmentSubmission(String operationKey, String requestDigest,
+                                             String bindingKey, String assignmentId, String taskRunId) {
+        int updated = jdbcTemplate.update("""
+                update assignment_binding_operations
+                set operation_state = 'COMPLETED', binding_key = ?, assignment_id = ?, task_run_id = ?, updated_at = ?
+                where operation_key = ? and request_digest = ? and operation_state = 'RESERVED'
+                """, bindingKey, assignmentId, taskRunId, Instant.now().toString(), operationKey, requestDigest);
+        if (updated != 1) {
+            throw new IllegalStateException("Assignment submission operation reservation was lost");
+        }
+    }
+
+    private int updateWithBusyRetry(String sql, Object... arguments) {
+        DataAccessException lastFailure = null;
+        for (int attempt = 0; attempt < 40; attempt++) {
+            try {
+                return jdbcTemplate.update(sql, arguments);
+            } catch (DataAccessException failure) {
+                if (!String.valueOf(failure.getMessage()).contains("SQLITE_BUSY") || attempt == 39) {
+                    throw failure;
+                }
+                lastFailure = failure;
+                try {
+                    Thread.sleep(25L);
+                } catch (InterruptedException interrupted) {
+                    Thread.currentThread().interrupt();
+                    throw failure;
+                }
+            }
+        }
+        throw lastFailure;
+    }
+
+    private AssignmentSubmissionRow findAssignmentSubmission(String operationKey) {
+        return jdbcTemplate.query("""
+                select request_digest, operation_state, binding_key, assignment_id, task_run_id
+                from assignment_binding_operations where operation_key = ?
+                """, rs -> rs.next() ? new AssignmentSubmissionRow(
+                        rs.getString(1), rs.getString(2), rs.getString(3), rs.getString(4), rs.getString(5)) : null,
+                operationKey);
+    }
+
     // ── Durable context-operation idempotency ──
 
     private BindingCaptureOperation replayBinding(ContextOperation operation, String requestDigest) {
@@ -293,6 +367,10 @@ public class AgentContextRepository {
 
     public record BindingCaptureOperation(ContextOperationStatus status, ContextBinding binding) { }
     public record OwnerLinkOperation(ContextOperationStatus status, BindingOwnerLink ownerLink) { }
+    public record AssignmentSubmissionOperation(ContextOperationStatus status, String bindingKey,
+                                                String assignmentId, String taskRunId) { }
+    private record AssignmentSubmissionRow(String requestDigest, String state, String bindingKey,
+                                           String assignmentId, String taskRunId) { }
     private record ContextOperation(String operationType, String operationKey, String requestDigest,
                                     String bindingKey, String ownerType, String ownerId) { }
 
