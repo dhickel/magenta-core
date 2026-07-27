@@ -58,4 +58,8 @@ public sealed interface ChatStreamEvent {
     record Error(
         String message
     ) implements ChatStreamEvent {}
+
+    record OutputsChanged(
+        String conversationId
+    ) implements ChatStreamEvent {}
 }

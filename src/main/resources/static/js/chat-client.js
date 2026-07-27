@@ -1211,6 +1211,12 @@
                     updateStreamPlanStatus(data);
                     return;
                 }
+                if (event.name === 'outputs_changed') {
+                    if (shouldUpdateConversationUi() && data.conversationId === activeConversationId()) {
+                        await loadActiveFiles();
+                    }
+                    return;
+                }
                 if (event.name === 'context') {
                     if (!shouldUpdateConversationUi()) {
                         return;
@@ -1498,6 +1504,12 @@
                     appendPendingUserMessage(data.text || '');
                     updateContextUsageIfPresent(data.contextUsage);
                     updateStreamPlanStatus(data);
+                    return;
+                }
+                if (event.name === 'outputs_changed') {
+                    if (data.conversationId === activeConversationId()) {
+                        await loadActiveFiles();
+                    }
                     return;
                 }
                 if (event.name === 'context') {

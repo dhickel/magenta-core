@@ -1,0 +1,282 @@
+{
+  "version": 2,
+  "runId": "exec-phase-10-closeout",
+  "state": "blocked",
+  "revision": 1,
+  "source": {
+    "projectRoot": "/home/dhickel/Code/Java/Magenta",
+    "sourcePlanPath": ".internal-dev/plans/20260720-004112-home-dhickel-code-java-magenta-internal-dev-ha",
+    "sourcePlanningRunId": "20260720-004112-home-dhickel-code-java-magenta-internal-dev-ha",
+    "aggregateDigest": "09ae9f1e62f1d0f7e79b52089ab4fbaf46c22375975a0d9f36de89c52299cdd5",
+    "files": [
+      {
+        "path": "concepts.md",
+        "sha256": "6528faef8545108054114a788a263f075577a0f236ffe0033732762e93e0da01",
+        "bytes": 18524
+      },
+      {
+        "path": "orchestration.md",
+        "sha256": "bc9b665caebcd05113380484ed9d6dce1f859e1e4c7f573d589cb739947f16cd",
+        "bytes": 6702
+      },
+      {
+        "path": "phase-01-contract-path-migration-foundation.md",
+        "sha256": "ffb61ce7180d813eaa9b0c280b06be107a2a92cbc4c8afccebb622859e96f315",
+        "bytes": 13994
+      },
+      {
+        "path": "phase-02-run-lifecycle-fencing.md",
+        "sha256": "963ca06b6566a40d985ea97bad91f6929241e340d79684c1d1afaff8a286ffb5",
+        "bytes": 16983
+      },
+      {
+        "path": "phase-03-reserved-tree-confinement.md",
+        "sha256": "271d3bc86c33b8872e3e69587070c58bdc5c205636b7000cc28b0e4d66abcd99",
+        "bytes": 15660
+      },
+      {
+        "path": "phase-04-artifact-publication-reconciliation.md",
+        "sha256": "87376459ed4fe3d45a22ee0765df344f36858d7b9ae6ecbdf10060b58e5123be",
+        "bytes": 15740
+      },
+      {
+        "path": "phase-05-artifact-access-search-retention.md",
+        "sha256": "cc37a99f9cd5d98c2817fd81356ce4621da186717d4231bad51580451df03989",
+        "bytes": 5528
+      },
+      {
+        "path": "phase-06-scoped-skill-resolution.md",
+        "sha256": "1330b9e28933699f5d9902ff7431e1a510f30939062a11fb44905638b74f1d66",
+        "bytes": 14546
+      },
+      {
+        "path": "phase-07-skill-trust-snapshots-packages.md",
+        "sha256": "985ff774841aecdc341568ef3bb429d5f723e6894fc64e38a3171fcd314a2c53",
+        "bytes": 18250
+      },
+      {
+        "path": "phase-08-runtime-summaries-measurements.md",
+        "sha256": "bab68ea94ef5f6940a163cac83aac526cce10c68d91ca2a2f96209927a0e9eec",
+        "bytes": 14429
+      },
+      {
+        "path": "phase-09-schedule-reaction-hardening.md",
+        "sha256": "1065ebed7a0de1968e15f528142252e179b2f51324eb4907b48a7e1b789e2832",
+        "bytes": 15606
+      },
+      {
+        "path": "phase-10-operational-ui-integration-closeout.md",
+        "sha256": "634f82660f9bf006f156dfa564cae1da45796e2bbf37c8ac6d37f04f7355438e",
+        "bytes": 14084
+      }
+    ]
+  },
+  "frozen": {
+    "scopeSize": "large",
+    "phases": [
+      "phase-01-contract-path-migration-foundation.md",
+      "phase-02-run-lifecycle-fencing.md",
+      "phase-03-reserved-tree-confinement.md",
+      "phase-04-artifact-publication-reconciliation.md",
+      "phase-05-artifact-access-search-retention.md",
+      "phase-06-scoped-skill-resolution.md",
+      "phase-07-skill-trust-snapshots-packages.md",
+      "phase-08-runtime-summaries-measurements.md",
+      "phase-09-schedule-reaction-hardening.md",
+      "phase-10-operational-ui-integration-closeout.md"
+    ],
+    "dependencies": {
+      "phase-01-contract-path-migration-foundation.md": [],
+      "phase-02-run-lifecycle-fencing.md": [
+        "phase-01-contract-path-migration-foundation.md"
+      ],
+      "phase-03-reserved-tree-confinement.md": [
+        "phase-02-run-lifecycle-fencing.md"
+      ],
+      "phase-04-artifact-publication-reconciliation.md": [
+        "phase-03-reserved-tree-confinement.md"
+      ],
+      "phase-05-artifact-access-search-retention.md": [
+        "phase-04-artifact-publication-reconciliation.md"
+      ],
+      "phase-06-scoped-skill-resolution.md": [
+        "phase-03-reserved-tree-confinement.md"
+      ],
+      "phase-07-skill-trust-snapshots-packages.md": [
+        "phase-03-reserved-tree-confinement.md",
+        "phase-06-scoped-skill-resolution.md"
+      ],
+      "phase-08-runtime-summaries-measurements.md": [
+        "phase-02-run-lifecycle-fencing.md",
+        "phase-04-artifact-publication-reconciliation.md",
+        "phase-07-skill-trust-snapshots-packages.md"
+      ],
+      "phase-09-schedule-reaction-hardening.md": [
+        "phase-02-run-lifecycle-fencing.md",
+        "phase-08-runtime-summaries-measurements.md"
+      ],
+      "phase-10-operational-ui-integration-closeout.md": [
+        "phase-05-artifact-access-search-retention.md",
+        "phase-07-skill-trust-snapshots-packages.md",
+        "phase-08-runtime-summaries-measurements.md",
+        "phase-09-schedule-reaction-hardening.md"
+      ]
+    },
+    "waves": {
+      "phase-01-contract-path-migration-foundation.md": 1,
+      "phase-02-run-lifecycle-fencing.md": 2,
+      "phase-03-reserved-tree-confinement.md": 3,
+      "phase-04-artifact-publication-reconciliation.md": 4,
+      "phase-05-artifact-access-search-retention.md": 5,
+      "phase-06-scoped-skill-resolution.md": 4,
+      "phase-07-skill-trust-snapshots-packages.md": 5,
+      "phase-08-runtime-summaries-measurements.md": 6,
+      "phase-09-schedule-reaction-hardening.md": 7,
+      "phase-10-operational-ui-integration-closeout.md": 8
+    },
+    "goals": {
+      "phase-01-contract-path-migration-foundation.md": "lock superseding contracts and trusted migration/run-path foundations",
+      "phase-02-run-lifecycle-fencing.md": "idempotent run operations, attempts, links, assignment fences, and writer claims",
+      "phase-03-reserved-tree-confinement.md": "structural protections and truthful fail-closed executable boundaries",
+      "phase-04-artifact-publication-reconciliation.md": "run-local create-only publication with idempotency, integrity, and recovery",
+      "phase-05-artifact-access-search-retention.md": "authorization-first artifact lifecycle plus its focused HTMX surface",
+      "phase-06-scoped-skill-resolution.md": "deterministic scoped candidates and exact-version assignment",
+      "phase-07-skill-trust-snapshots-packages.md": "immutable trusted activation and its control-plane UI",
+      "phase-08-runtime-summaries-measurements.md": "truthful runtime facts, health/audit APIs, and focused UI",
+      "phase-09-schedule-reaction-hardening.md": "fenced automation semantics and focused management UI",
+      "phase-10-operational-ui-integration-closeout.md": "compose the final cross-domain surface and complete repository closeout"
+    },
+    "targets": {
+      "phase-01-contract-path-migration-foundation.md": [
+        ".internal-dev/specifications/architecture.md",
+        "src/main/java/io/mindspice/magenta2/core/persistence/SchemaMigrationRunner.java",
+        "src/main/java/io/mindspice/magenta2/ai/orchestration/workspaces/WorkspacePathLayout.java",
+        "src/main/resources/schema.sql"
+      ],
+      "phase-02-run-lifecycle-fencing.md": [
+        "src/main/java/io/mindspice/magenta2/ai/orchestration/runtime/TaskRunLifecycleService.java",
+        "src/main/java/io/mindspice/magenta2/ai/orchestration/runtime/OrchestrationRuntimeRepository.java",
+        "src/main/java/io/mindspice/magenta2/ai/chat/plan/PlanRepository.java",
+        "src/main/java/io/mindspice/magenta2/ai/orchestration/workflow/WorkflowRepository.java"
+      ],
+      "phase-03-reserved-tree-confinement.md": [
+        "src/main/java/io/mindspice/magenta2/ai/orchestration/workspaces/ReservedWorkspacePathPolicy.java",
+        "src/main/java/io/mindspice/magenta2/ai/orchestration/workspaces/WorkspaceExplorerService.java",
+        "src/main/java/io/mindspice/magenta2/ai/chat/tool/file/AgentFileToolService.java",
+        "src/main/java/io/mindspice/magenta2/ai/chat/tool/shell/AgentShellToolService.java"
+      ],
+      "phase-04-artifact-publication-reconciliation.md": [
+        "src/main/java/io/mindspice/magenta2/ai/orchestration/workspaces/OutputArtifactService.java",
+        "src/main/java/io/mindspice/magenta2/ai/orchestration/workspaces/OutputArtifactRepository.java",
+        "src/main/java/io/mindspice/magenta2/ai/orchestration/workspaces/ArtifactReconciliationService.java",
+        "src/main/resources/db/migrations/004-artifact-publication.sql"
+      ],
+      "phase-05-artifact-access-search-retention.md": [
+        "src/main/java/io/mindspice/magenta2/ai/orchestration/workspaces/ArtifactSearchService.java",
+        "src/main/java/io/mindspice/magenta2/ai/orchestration/workspaces/ArtifactPreviewService.java",
+        "src/main/java/io/mindspice/magenta2/ai/orchestration/workspaces/TaskRunRetentionService.java",
+        "src/main/java/io/mindspice/magenta2/api/web/OutputController.java",
+        "src/main/java/io/mindspice/magenta2/api/web/ArtifactFragments.java"
+      ],
+      "phase-06-scoped-skill-resolution.md": [
+        "src/main/java/io/mindspice/magenta2/ai/skills/SkillScopeDiscoveryService.java",
+        "src/main/java/io/mindspice/magenta2/ai/skills/SkillResolutionService.java",
+        "src/main/java/io/mindspice/magenta2/ai/skills/AgentSkillCatalogService.java",
+        "src/main/java/io/mindspice/magenta2/ai/skills/AgentSkillAssignmentRepository.java"
+      ],
+      "phase-07-skill-trust-snapshots-packages.md": [
+        "src/main/java/io/mindspice/magenta2/ai/skills/SkillTrustService.java",
+        "src/main/java/io/mindspice/magenta2/ai/skills/SkillSnapshotRepository.java",
+        "src/main/java/io/mindspice/magenta2/ai/skills/AgentSkillActivationService.java",
+        "src/main/java/io/mindspice/magenta2/api/web/SkillController.java",
+        "src/main/java/io/mindspice/magenta2/api/web/SkillFragments.java"
+      ],
+      "phase-08-runtime-summaries-measurements.md": [
+        "src/main/java/io/mindspice/magenta2/ai/orchestration/runtime/RunSummaryService.java",
+        "src/main/java/io/mindspice/magenta2/ai/orchestration/runtime/RunMeasurementRepository.java",
+        "src/main/java/io/mindspice/magenta2/ai/chat/service/ChatService.java",
+        "src/main/java/io/mindspice/magenta2/api/web/RuntimeController.java",
+        "src/main/java/io/mindspice/magenta2/api/web/RuntimeHealthFragments.java"
+      ],
+      "phase-09-schedule-reaction-hardening.md": [
+        "src/main/java/io/mindspice/magenta2/ai/orchestration/runtime/ScheduleService.java",
+        "src/main/java/io/mindspice/magenta2/ai/orchestration/runtime/EventReactionService.java",
+        "src/main/java/io/mindspice/magenta2/ai/orchestration/runtime/OrchestrationEventService.java",
+        "src/main/java/io/mindspice/magenta2/api/web/AgentOrchestrationController.java",
+        "src/main/java/io/mindspice/magenta2/api/web/ScheduleReactionFragments.java"
+      ],
+      "phase-10-operational-ui-integration-closeout.md": [
+        "src/main/java/io/mindspice/magenta2/api/web/RunOperationsFragments.java",
+        "src/main/java/io/mindspice/magenta2/api/web/OrchestrationController.java",
+        "src/main/java/io/mindspice/magenta2/api/web/WorkspaceExplorerFragments.java",
+        "src/main/resources/static/css/orchestration.css",
+        ".internal-dev/specifications",
+        ".internal-dev/knowledge",
+        ".internal-dev/changelogs",
+        "docs"
+      ]
+    },
+    "implementationModel": {
+      "provider": "deepseek",
+      "model": "deepseek-v4-pro",
+      "thinking": "max"
+    },
+    "validationModel": {
+      "provider": "openai-codex",
+      "model": "gpt-5.6-sol",
+      "thinking": "medium"
+    }
+  },
+  "phases": [
+    {
+      "phase": "phase-01-contract-path-migration-foundation.md",
+      "validations": []
+    },
+    {
+      "phase": "phase-02-run-lifecycle-fencing.md",
+      "validations": []
+    },
+    {
+      "phase": "phase-03-reserved-tree-confinement.md",
+      "validations": []
+    },
+    {
+      "phase": "phase-04-artifact-publication-reconciliation.md",
+      "validations": []
+    },
+    {
+      "phase": "phase-05-artifact-access-search-retention.md",
+      "validations": []
+    },
+    {
+      "phase": "phase-06-scoped-skill-resolution.md",
+      "validations": []
+    },
+    {
+      "phase": "phase-07-skill-trust-snapshots-packages.md",
+      "validations": []
+    },
+    {
+      "phase": "phase-08-runtime-summaries-measurements.md",
+      "validations": []
+    },
+    {
+      "phase": "phase-09-schedule-reaction-hardening.md",
+      "validations": []
+    },
+    {
+      "phase": "phase-10-operational-ui-integration-closeout.md",
+      "validations": []
+    }
+  ],
+  "integrationValidations": [],
+  "createdAt": "2026-07-20T20:19:15.949Z",
+  "updatedAt": "2026-07-20T20:19:24.095Z",
+  "blocker": {
+    "reason": "Phase 10 did not begin implementation. The required orchestrate workflow mandates an atomic preflight and exactly one implementation agent using deepseek/deepseek-v4-pro at max, followed by independent openai-codex/gpt-5.6-sol medium validation. This session exposes no subagent_spawn, subagent_poll, subagent_status, or subagent_cancel tools, so the required model/tool preflight and delegated implementation cannot be run. Per the fixed model contract, direct implementation or model substitution is prohibited. Plan validation passed before this blocker was recorded.",
+    "timestamp": "2026-07-20T20:19:24.095Z",
+    "changedFileObservations": [],
+    "outsideDeclaredTargets": []
+  },
+  "terminalAt": "2026-07-20T20:19:24.095Z"
+}

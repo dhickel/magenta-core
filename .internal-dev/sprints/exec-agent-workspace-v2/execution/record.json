@@ -1,0 +1,349 @@
+{
+  "version": 2,
+  "runId": "exec-agent-workspace-v2",
+  "state": "active",
+  "revision": 2,
+  "source": {
+    "projectRoot": "/home/dhickel/Code/Java/Magenta",
+    "sourcePlanPath": ".internal-dev/plans/20260727-195154-home-dhickel-code-java-magenta-internal-dev-ha",
+    "sourcePlanningRunId": "20260727-195154-home-dhickel-code-java-magenta-internal-dev-ha",
+    "aggregateDigest": "271c6245593672961ae37f10c4aeecbb2547f676423313a1b2434a0d07513ece",
+    "files": [
+      {
+        "path": "concepts.md",
+        "sha256": "c6733110504705649aaccf8ec5f8fd0fd974bd90337b6c09cd68e670c4af0ca2",
+        "bytes": 11717
+      },
+      {
+        "path": "orchestration.md",
+        "sha256": "5ae2c35d66444176229e46f6bdfe28e7570250551fb2cb10287bc83ed3b6b085",
+        "bytes": 6867
+      },
+      {
+        "path": "phase-01-agent-workspace-policy.md",
+        "sha256": "94270682e41130f3dac88eb608760ad6b4ebea418fc69f3aed0c2b89a955363b",
+        "bytes": 11673
+      },
+      {
+        "path": "phase-02-materialization-context-persistence.md",
+        "sha256": "53e9c3289cecda08c76223bd6755b24bdb9da6fda9452f79e9f28004e38295f2",
+        "bytes": 14682
+      },
+      {
+        "path": "phase-03-immutable-binding-lifecycle.md",
+        "sha256": "43a9c2f6eb42d40541a822cd778beefb6f5074b31212e47230d06bd2fab88349",
+        "bytes": 10858
+      },
+      {
+        "path": "phase-04-prompt-skills-context.md",
+        "sha256": "f0d54e7ffd3f23f5b9e9594c7b4300d6bb494298345636d93eced0a82f265ea6",
+        "bytes": 13386
+      },
+      {
+        "path": "phase-05-restricted-system-chat.md",
+        "sha256": "c3bb45245a4385242465654a99ff94cddec96e1ea329d39b4cfd4136132004ad",
+        "bytes": 13525
+      },
+      {
+        "path": "phase-06-api-agent-console.md",
+        "sha256": "deb41db78919eabd1e844acc6101884d28d57b183c5bae5b62b33436cd92f334",
+        "bytes": 15321
+      },
+      {
+        "path": "phase-07-documentation-integration.md",
+        "sha256": "70558776477e60a7210a40b33a881fec17d824b23d652143ef7600ed90b2a7aa",
+        "bytes": 11440
+      }
+    ]
+  },
+  "frozen": {
+    "scopeSize": "large",
+    "phases": [
+      "phase-01-agent-workspace-policy.md",
+      "phase-02-materialization-context-persistence.md",
+      "phase-03-immutable-binding-lifecycle.md",
+      "phase-04-prompt-skills-context.md",
+      "phase-05-restricted-system-chat.md",
+      "phase-06-api-agent-console.md",
+      "phase-07-documentation-integration.md"
+    ],
+    "dependencies": {
+      "phase-01-agent-workspace-policy.md": [],
+      "phase-02-materialization-context-persistence.md": [
+        "phase-01-agent-workspace-policy.md"
+      ],
+      "phase-03-immutable-binding-lifecycle.md": [
+        "phase-02-materialization-context-persistence.md"
+      ],
+      "phase-04-prompt-skills-context.md": [
+        "phase-03-immutable-binding-lifecycle.md"
+      ],
+      "phase-05-restricted-system-chat.md": [
+        "phase-03-immutable-binding-lifecycle.md",
+        "phase-04-prompt-skills-context.md"
+      ],
+      "phase-06-api-agent-console.md": [
+        "phase-04-prompt-skills-context.md",
+        "phase-05-restricted-system-chat.md"
+      ],
+      "phase-07-documentation-integration.md": [
+        "phase-06-api-agent-console.md"
+      ]
+    },
+    "waves": {
+      "phase-01-agent-workspace-policy.md": 1,
+      "phase-02-materialization-context-persistence.md": 2,
+      "phase-03-immutable-binding-lifecycle.md": 3,
+      "phase-04-prompt-skills-context.md": 4,
+      "phase-05-restricted-system-chat.md": 5,
+      "phase-06-api-agent-console.md": 6,
+      "phase-07-documentation-integration.md": 7
+    },
+    "goals": {
+      "phase-01-agent-workspace-policy.md": "enforce the closed AGENT root and ordinary writer policy",
+      "phase-02-materialization-context-persistence.md": "persist generation-safe materializations, defaults, and immutable binding snapshots",
+      "phase-03-immutable-binding-lifecycle.md": "capture and carry immutable context through conversations, assignments, runs, and lineage",
+      "phase-04-prompt-skills-context.md": "inject trusted binding policy and generation-bound untrusted guidance and skills",
+      "phase-05-restricted-system-chat.md": "provide fixed-profile read-only system chat and audited queue proposals",
+      "phase-06-api-agent-console.md": "expose thin versioned APIs and independent HTMX agent-console hosts",
+      "phase-07-documentation-integration.md": "reconcile contracts and run final cross-domain validation"
+    },
+    "targets": {
+      "phase-01-agent-workspace-policy.md": [
+        "src/main/java/io/mindspice/magenta2/ai/orchestration/workspaces/AgentWorkspaceArea.java",
+        "src/main/java/io/mindspice/magenta2/ai/orchestration/workspaces/WorkspacePathLayout.java",
+        "src/main/java/io/mindspice/magenta2/ai/orchestration/workspaces/WorkspaceDirectoryService.java",
+        "src/main/java/io/mindspice/magenta2/ai/orchestration/workspaces/ReservedWorkspacePathPolicy.java",
+        "src/main/java/io/mindspice/magenta2/ai/orchestration/workspaces/ConfinedPathMutationService.java",
+        "src/main/java/io/mindspice/magenta2/ai/orchestration/workspaces/WorkspaceExplorerService.java",
+        "src/main/java/io/mindspice/magenta2/ai/chat/tool/file/AgentFileToolService.java"
+      ],
+      "phase-02-materialization-context-persistence.md": [
+        "src/main/resources/db/migrations/010-agent-materialization-context.sql",
+        "src/main/resources/schema.sql",
+        "src/main/java/io/mindspice/magenta2/core/persistence/SchemaMigrationRunner.java",
+        "src/main/java/io/mindspice/magenta2/ai/orchestration/context/AgentContextService.java",
+        "src/main/java/io/mindspice/magenta2/ai/orchestration/context/AgentContextRepository.java",
+        "src/main/java/io/mindspice/magenta2/ai/orchestration/context/AgentMaterializationService.java",
+        "src/main/java/io/mindspice/magenta2/ai/orchestration/context/AgentMaterializationRepository.java",
+        "src/main/java/io/mindspice/magenta2/ai/orchestration/workspaces/WorkspaceDirectoryService.java",
+        "src/main/java/io/mindspice/magenta2/ai/orchestration/workspaces/MaterializationLocation.java"
+      ],
+      "phase-03-immutable-binding-lifecycle.md": [
+        "src/main/java/io/mindspice/magenta2/ai/chat/model/ChatRequest.java",
+        "src/main/java/io/mindspice/magenta2/ai/chat/service/RequestResolver.java",
+        "src/main/java/io/mindspice/magenta2/ai/chat/service/ChatService.java",
+        "src/main/java/io/mindspice/magenta2/ai/orchestration/runtime/AssignmentService.java",
+        "src/main/java/io/mindspice/magenta2/ai/orchestration/runtime/TaskRunLifecycleService.java",
+        "src/main/java/io/mindspice/magenta2/ai/orchestration/runtime/OrchestrationRunnerService.java",
+        "src/main/java/io/mindspice/magenta2/ai/orchestration/workflow/WorkflowRunner.java",
+        "src/main/java/io/mindspice/magenta2/ai/chat/plan/PlanService.java",
+        "src/main/java/io/mindspice/magenta2/ai/orchestration/runtime/JobService.java"
+      ],
+      "phase-04-prompt-skills-context.md": [
+        "src/main/java/io/mindspice/magenta2/ai/chat/service/turn/TrustedContextPolicyAssembler.java",
+        "src/main/java/io/mindspice/magenta2/ai/chat/service/turn/PromptContextAssembler.java",
+        "src/main/java/io/mindspice/magenta2/ai/orchestration/workspaces/AgentsMdResolver.java",
+        "src/main/java/io/mindspice/magenta2/ai/orchestration/workspaces/WorkspaceMdResolver.java",
+        "src/main/java/io/mindspice/magenta2/ai/skills/MaterializationSkillAuthority.java",
+        "src/main/java/io/mindspice/magenta2/ai/skills/SkillResolutionContext.java",
+        "src/main/java/io/mindspice/magenta2/ai/skills/SkillScopeDiscoveryService.java",
+        "src/main/java/io/mindspice/magenta2/ai/skills/SkillTrustService.java"
+      ],
+      "phase-05-restricted-system-chat.md": [
+        "src/main/resources/db/migrations/011-system-chat-proposals.sql",
+        "src/main/resources/schema.sql",
+        "src/main/java/io/mindspice/magenta2/core/persistence/SchemaMigrationRunner.java",
+        "src/main/java/io/mindspice/magenta2/ai/chat/service/ChatInvocationProfile.java",
+        "src/main/java/io/mindspice/magenta2/ai/chat/service/ChatService.java",
+        "src/main/java/io/mindspice/magenta2/ai/chat/system/SystemChatService.java",
+        "src/main/java/io/mindspice/magenta2/ai/chat/system/SystemChatToolRegistry.java",
+        "src/main/java/io/mindspice/magenta2/ai/chat/system/SystemChatActionProposalService.java",
+        "src/main/java/io/mindspice/magenta2/ai/orchestration/settings/RuntimeSettingsService.java"
+      ],
+      "phase-06-api-agent-console.md": [
+        "src/main/java/io/mindspice/magenta2/api/web/AgentContextController.java",
+        "src/main/java/io/mindspice/magenta2/api/web/SystemChatController.java",
+        "src/main/java/io/mindspice/magenta2/api/web/AgentContextFragments.java",
+        "src/main/java/io/mindspice/magenta2/api/web/SystemChatFragments.java",
+        "src/main/java/io/mindspice/magenta2/api/web/WorkspaceExplorerFragments.java",
+        "src/main/java/io/mindspice/magenta2/api/web/OrchestrationController.java",
+        "src/main/resources/static/css/orchestration.css",
+        "src/main/resources/static/js/orchestration/htmx-errors.js",
+        "src/main/resources/static/js/orchestration/system-chat.js"
+      ],
+      "phase-07-documentation-integration.md": [
+        ".internal-dev/specifications/architecture.md",
+        ".internal-dev/specifications/service-graph.md",
+        ".internal-dev/specifications/services.md",
+        ".internal-dev/specifications/api.md",
+        ".internal-dev/specifications/web.md",
+        ".internal-dev/specifications/simplypages.md",
+        ".internal-dev/specifications/decisions.md",
+        ".internal-dev/specifications/deferred-features.md",
+        "docs/technical/architecture.md",
+        "docs/technical/data-model.md",
+        "docs/technical/security.md",
+        "docs/technical/workspaces-tools-outputs.md",
+        "docs/end-user/agents.md",
+        "docs/end-user/projects-and-workspaces.md",
+        "docs/end-user/chat.md",
+        ".internal-dev/changelogs/2026-07-27-agent-workspace-establishment.md"
+      ]
+    },
+    "implementationModel": {
+      "provider": "deepseek",
+      "model": "deepseek-v4-pro",
+      "thinking": "max"
+    },
+    "validationModel": {
+      "provider": "openai-codex",
+      "model": "gpt-5.6-terra",
+      "thinking": "high"
+    }
+  },
+  "phases": [
+    {
+      "phase": "phase-01-agent-workspace-policy.md",
+      "implementation": {
+        "agentModel": {
+          "provider": "deepseek",
+          "model": "deepseek-v4-pro",
+          "thinking": "max"
+        },
+        "report": "Implementation completed by deepseek-v4-pro:max subagent plus GPT-5.6-terra:high validator review-and-repair. 13 files changed (959 insertions, 189 deletions). Key deliverables: AgentWorkspaceArea enum (8 areas with PERSONAL/RESERVED classification), ReservedWorkspacePathPolicy AGENT classifications, WorkspacePathLayout personal-area factories, WorkspaceDirectoryService personal provisioning, WorkspaceExplorerService synthetic entries and per-mutation reauthorization, ConfinedPathMutationService held-handle read/copy support, AgentFileToolService data-root fallback removal. Focused tests (158), full suite, and bounded startup all pass.",
+        "changedFiles": [
+          "src/main/java/io/mindspice/magenta2/ai/orchestration/workspaces/AgentWorkspaceArea.java",
+          "src/main/java/io/mindspice/magenta2/ai/orchestration/workspaces/WorkspacePathLayout.java",
+          "src/main/java/io/mindspice/magenta2/ai/orchestration/workspaces/WorkspaceDirectoryService.java",
+          "src/main/java/io/mindspice/magenta2/ai/orchestration/workspaces/ReservedWorkspacePathPolicy.java",
+          "src/main/java/io/mindspice/magenta2/ai/orchestration/workspaces/ConfinedPathMutationService.java",
+          "src/main/java/io/mindspice/magenta2/ai/orchestration/workspaces/WorkspaceExplorerService.java",
+          "src/main/java/io/mindspice/magenta2/ai/chat/tool/file/AgentFileToolService.java",
+          "src/test/java/io/mindspice/magenta2/ai/chat/tool/file/AgentFileToolServiceTest.java",
+          "src/test/java/io/mindspice/magenta2/ai/orchestration/workspaces/ReservedTreeExplorerAdversarialTest.java",
+          "src/test/java/io/mindspice/magenta2/ai/orchestration/workspaces/ReservedWorkspacePathPolicyTest.java",
+          "src/test/java/io/mindspice/magenta2/ai/orchestration/workspaces/WorkspaceExplorerServiceTest.java"
+        ],
+        "changedFileObservations": [
+          {
+            "path": "src/main/java/io/mindspice/magenta2/ai/orchestration/workspaces/AgentWorkspaceArea.java",
+            "status": "present",
+            "digest": "3f0e41ee6d1cf6b9f47698c6ca0a0c091ca05e421bfd0cf7ca142e0cf551fbd8",
+            "bytes": 2766
+          },
+          {
+            "path": "src/main/java/io/mindspice/magenta2/ai/orchestration/workspaces/WorkspacePathLayout.java",
+            "status": "present",
+            "digest": "16015567abef980ffb847cf8b4f68acd8c11358299e00010fa089dd8555d6441",
+            "bytes": 4873
+          },
+          {
+            "path": "src/main/java/io/mindspice/magenta2/ai/orchestration/workspaces/WorkspaceDirectoryService.java",
+            "status": "present",
+            "digest": "16eb281346959d5e2488e2c8d39c70cf1aa551702e732df0bb1acdc9d984e22d",
+            "bytes": 24810
+          },
+          {
+            "path": "src/main/java/io/mindspice/magenta2/ai/orchestration/workspaces/ReservedWorkspacePathPolicy.java",
+            "status": "present",
+            "digest": "788951235aa36a1229f8d2979740d2a513ae99d984691cc31b8ee21db39a617d",
+            "bytes": 14999
+          },
+          {
+            "path": "src/main/java/io/mindspice/magenta2/ai/orchestration/workspaces/ConfinedPathMutationService.java",
+            "status": "present",
+            "digest": "a26bc49ebd3d568023344edc8e7e1ed97e9081b5afd5357c2f4060cc32da2178",
+            "bytes": 20089
+          },
+          {
+            "path": "src/main/java/io/mindspice/magenta2/ai/orchestration/workspaces/WorkspaceExplorerService.java",
+            "status": "present",
+            "digest": "24297fb23ea308cae82e6ff1984b1dc694dd2f8e233cff4ea318a824ebd86fa7",
+            "bytes": 56686
+          },
+          {
+            "path": "src/main/java/io/mindspice/magenta2/ai/chat/tool/file/AgentFileToolService.java",
+            "status": "present",
+            "digest": "03b436ff85bdc06494c02dfb4cb53501b11dcd1e6539112a17717784404568f9",
+            "bytes": 43715
+          },
+          {
+            "path": "src/test/java/io/mindspice/magenta2/ai/chat/tool/file/AgentFileToolServiceTest.java",
+            "status": "present",
+            "digest": "36d364629f68557482f59baf0ab384f17b4b0f0dc8c7806f1127b113bef1b2de",
+            "bytes": 28195
+          },
+          {
+            "path": "src/test/java/io/mindspice/magenta2/ai/orchestration/workspaces/ReservedTreeExplorerAdversarialTest.java",
+            "status": "present",
+            "digest": "8be75f59b9ab346162718de0758dcaa7de0bd72f5c5caadb1f66ff683e010e18",
+            "bytes": 20159
+          },
+          {
+            "path": "src/test/java/io/mindspice/magenta2/ai/orchestration/workspaces/ReservedWorkspacePathPolicyTest.java",
+            "status": "present",
+            "digest": "b01df72dd78ed534d2e0869e11e8ba0b123113675b69db67f74e7a1e1287017b",
+            "bytes": 16320
+          },
+          {
+            "path": "src/test/java/io/mindspice/magenta2/ai/orchestration/workspaces/WorkspaceExplorerServiceTest.java",
+            "status": "present",
+            "digest": "47d25089d64cc29c0119b48fb0fc16aa6fc6d89d8eb42e75bfe51d554a45cd0c",
+            "bytes": 15347
+          }
+        ],
+        "outsideDeclaredTargets": [
+          "src/test/java/io/mindspice/magenta2/ai/chat/tool/file/AgentFileToolServiceTest.java",
+          "src/test/java/io/mindspice/magenta2/ai/orchestration/workspaces/ReservedTreeExplorerAdversarialTest.java",
+          "src/test/java/io/mindspice/magenta2/ai/orchestration/workspaces/ReservedWorkspacePathPolicyTest.java",
+          "src/test/java/io/mindspice/magenta2/ai/orchestration/workspaces/WorkspaceExplorerServiceTest.java"
+        ],
+        "timestamp": "2026-07-27T22:33:59.290Z"
+      },
+      "validations": [
+        {
+          "agentModel": {
+            "provider": "openai-codex",
+            "model": "gpt-5.6-terra",
+            "thinking": "high"
+          },
+          "attempt": 1,
+          "verdict": "PASS",
+          "report": "GPT-5.6-terra:high validator inspected all write targets, repaired explorer delete authorization for reserved/unknown AGENT paths, repaired file-tool mutable raw-context fallback, added held-handle primitive reauthorization hooks. Focused tests (158): PASS. Full Maven suite: PASS. Bounded startup on port 37025: PASS. Writer/fallback scans: PASS. All exit criteria met. Commit: 48854c16.",
+          "changedFiles": [],
+          "changedFileObservations": [],
+          "outsideDeclaredTargets": [],
+          "timestamp": "2026-07-27T22:34:03.766Z"
+        }
+      ]
+    },
+    {
+      "phase": "phase-02-materialization-context-persistence.md",
+      "validations": []
+    },
+    {
+      "phase": "phase-03-immutable-binding-lifecycle.md",
+      "validations": []
+    },
+    {
+      "phase": "phase-04-prompt-skills-context.md",
+      "validations": []
+    },
+    {
+      "phase": "phase-05-restricted-system-chat.md",
+      "validations": []
+    },
+    {
+      "phase": "phase-06-api-agent-console.md",
+      "validations": []
+    },
+    {
+      "phase": "phase-07-documentation-integration.md",
+      "validations": []
+    }
+  ],
+  "integrationValidations": [],
+  "createdAt": "2026-07-27T22:16:00.884Z",
+  "updatedAt": "2026-07-27T22:34:03.766Z"
+}

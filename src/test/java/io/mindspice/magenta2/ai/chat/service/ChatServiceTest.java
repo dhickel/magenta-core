@@ -996,6 +996,70 @@ class ChatServiceTest {
             .containsExactly("hello from side panel", "Agent answer");
     }
 
+    @Test
+    void fileMutatingToolNamesContainsExpectedTools() {
+        assertThat(ChatService.FILE_MUTATING_TOOL_NAMES)
+            .containsExactlyInAnyOrder("file_write", "file_append", "file_replace", "file_delete");
+    }
+
+    @Test
+    void fileWriteToolProducesOutputsChangedStreamSignal() {
+        JdbcTemplate jdbcTemplate = jdbcTemplate();
+        ObjectMapper objectMapper = new ObjectMapper();
+        ChatMemoryRepository memoryRepository = new ChatMemoryRepository(jdbcTemplate, objectMapper);
+        ChatSessionMetadataRepository metadataRepository = new ChatSessionMetadataRepository(jdbcTemplate);
+        ToolTranscriptService transcriptService = new ToolTranscriptService(objectMapper);
+        ContextUsageTracker usageTracker = new ContextUsageTracker();
+
+        FileWriteThenFinalChatModel chatModel = new FileWriteThenFinalChatModel();
+        ChatModelRouter router = new TestChatModelRouter(chatModel);
+        AiConfig config = aiConfig(Path.of("."), List.of("file_write"));
+        ContextManagementAdvisor contextAdvisor = new ContextManagementAdvisor(
+            memoryRepository,
+            config,
+            router,
+            new CharacterTokenEstimator(),
+            usageTracker,
+            transcriptService,
+            null
+        );
+
+        ToolCallingManager toolCallingManager = new SuccessToolCallingManager();
+        ChatToolRegistry toolRegistry = new ChatToolRegistry(
+            List.of(new NamedToolCallback("file_write")), List.of()
+        );
+
+        ChatService chatService = new ChatService(
+            new RepositoryBackedChatMemory(memoryRepository),
+            memoryRepository,
+            metadataRepository,
+            new ChatMarkdownRenderer(),
+            config,
+            contextAdvisor,
+            usageTracker,
+            router,
+            toolCallingManager,
+            toolRegistry,
+            transcriptService,
+            null
+        );
+
+        var messages = chatService.stream(
+            new ResolvedChatRequest("conv-1", "write a file", "main")
+        ).collectList().block();
+
+        assertThat(messages).isNotNull();
+        assertThat(messages).anySatisfy(msg -> {
+            assertThat(msg.role()).isEqualTo("outputs_changed");
+            assertThat(msg.text()).isEqualTo("conv-1");
+        });
+        // Read-only tools do not produce outputs_changed signals
+        long outputsChangedCount = messages.stream()
+            .filter(msg -> "outputs_changed".equals(msg.role()))
+            .count();
+        assertThat(outputsChangedCount).isEqualTo(1);
+    }
+
     private JdbcTemplate jdbcTemplate() {
         SingleConnectionDataSource dataSource = new SingleConnectionDataSource("jdbc:sqlite::memory:?foreign_keys=true", true);
         return new JdbcTemplate(dataSource);
@@ -1290,6 +1354,62 @@ class ChatServiceTest {
         @Override
         public String call(String toolInput) {
             return "{\"ok\":true}";
+        }
+    }
+
+    private static final class FileWriteThenFinalChatModel implements ChatModel {
+        private final AtomicInteger calls = new AtomicInteger();
+
+        @Override
+        public org.springframework.ai.chat.model.ChatResponse call(Prompt prompt) {
+            if (calls.getAndIncrement() == 0) {
+                AssistantMessage toolCallMessage = AssistantMessage.builder()
+                    .content("")
+                    .toolCalls(List.of(new AssistantMessage.ToolCall(
+                        "call-1",
+                        "function",
+                        "file_write",
+                        "{\"path\":\"output.md\",\"content\":\"hello\"}"
+                    )))
+                    .build();
+                return new org.springframework.ai.chat.model.ChatResponse(
+                    List.of(new Generation(toolCallMessage))
+                );
+            }
+            return new org.springframework.ai.chat.model.ChatResponse(List.of(
+                new Generation(new AssistantMessage("done"))
+            ));
+        }
+    }
+
+    private static final class SuccessToolCallingManager implements ToolCallingManager {
+        @Override
+        public List<ToolDefinition> resolveToolDefinitions(ToolCallingChatOptions options) {
+            return List.of(new DefaultToolDefinition(
+                "file_write", "Write a file", "{\"type\":\"object\"}"
+            ));
+        }
+
+        @Override
+        public ToolExecutionResult executeToolCalls(
+            Prompt prompt,
+            org.springframework.ai.chat.model.ChatResponse response
+        ) {
+            AssistantMessage assistantMessage = response.getResult().getOutput();
+            AssistantMessage.ToolCall toolCall = assistantMessage.getToolCalls().getFirst();
+            ToolResponseMessage toolResponse = ToolResponseMessage.builder()
+                .responses(List.of(new ToolResponseMessage.ToolResponse(
+                    toolCall.id(),
+                    toolCall.name(),
+                    "{\"ok\":true,\"path\":\"output.md\"}"
+                )))
+                .build();
+            List<Message> history = new java.util.ArrayList<>(prompt.getInstructions());
+            history.add(assistantMessage);
+            history.add(toolResponse);
+            return ToolExecutionResult.builder()
+                .conversationHistory(history)
+                .build();
         }
     }
 

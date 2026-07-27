@@ -129,6 +129,10 @@ public class ChatService {
     private static final String BEGIN_PLAN_MESSAGE = "The user is ready to plan. The backend has collected the opening answers; continue planning from that seed context.";
     private static final String CONTINUE_PLAN_MESSAGE = "The user opened an existing plan in planning chat. Review the loaded structured state and ask the next focused question needed to improve or complete the plan.";
 
+    static final Set<String> FILE_MUTATING_TOOL_NAMES = Set.of(
+        "file_write", "file_append", "file_replace", "file_delete"
+    );
+
     private final ChatMemory chatMemory;
     private final ChatMemoryRepository chatMemoryRepository;
     private final ChatSessionMetadataRepository chatSessionMetadataRepository;
@@ -1730,6 +1734,13 @@ public class ChatService {
 
         if (s.toolMessageConsumer != null) {
             pendingToolMessages.forEach(s.toolMessageConsumer);
+            for (ToolTranscriptEntry entry : toolTranscriptEntries) {
+                if (FILE_MUTATING_TOOL_NAMES.contains(entry.toolName())) {
+                    s.toolMessageConsumer.accept(new ChatMessage(
+                        "outputs_changed", s.request.conversationId(), null, null
+                    ));
+                }
+            }
         }
 
         if (s.mode == PlanMode.EXECUTE_PLAN && planService != null

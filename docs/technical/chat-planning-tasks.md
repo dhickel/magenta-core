@@ -27,7 +27,9 @@ Session metadata includes:
 5. Streams model output and tool activity.
 6. Persists assistant messages, audit events, context usage, and any plan/task state changes.
 
-Streaming events are represented by `ChatStreamEvent` and sent over `/api/chat/stream`. Expected event names are `start`, `chunk`, `tool`, `system`, `interrupt`, `context`, `done`, and `error`.
+Streaming events are represented by `ChatStreamEvent` and sent over `/api/chat/stream` and `/api/chat/{conversationId}/plan/execute/stream`. Expected event names are `start`, `chunk`, `tool`, `system`, `interrupt`, `context`, `outputs_changed`, `done`, and `error`.
+
+`outputs_changed` is a side-channel invalidation signal carrying only `conversationId`. It is emitted mid-stream after a recognized file-mutating tool (`file_write`, `file_append`, `file_replace`, or `file_delete`) returns a completed, attributable result. The browser client uses this to refresh the Outputs panel while the model continues working, without waiting for stream completion. This is additive and ignored by consumers that do not recognize it. The existing terminal refresh on `done` and error recovery remains intact as a fallback.
 
 ## Anonymous Chat Planning
 

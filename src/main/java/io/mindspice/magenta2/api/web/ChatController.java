@@ -196,6 +196,14 @@ public class ChatController {
                     return;
                 }
                 try {
+                    if ("outputs_changed".equalsIgnoreCase(message.role())) {
+                        ChatStreamSupport.sendSseEvent(
+                            emitter,
+                            "outputs_changed",
+                            new ChatStreamEvent.OutputsChanged(resolvedRequest.conversationId())
+                        );
+                        return;
+                    }
                     if ("tool".equalsIgnoreCase(message.role())) {
                         ChatStreamSupport.sendSseEvent(
                             emitter,
@@ -345,7 +353,8 @@ public class ChatController {
             return false;
         }
         String role = message.role();
-        return "tool".equalsIgnoreCase(role)
+        return "outputs_changed".equalsIgnoreCase(role)
+            || "tool".equalsIgnoreCase(role)
             || "user".equalsIgnoreCase(role)
             || "system".equalsIgnoreCase(role);
     }
