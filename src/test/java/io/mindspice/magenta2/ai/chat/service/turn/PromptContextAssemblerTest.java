@@ -15,6 +15,8 @@ import io.mindspice.magenta2.ai.orchestration.runtime.OrchestrationTaskContextHo
 import io.mindspice.magenta2.ai.orchestration.settings.RuntimeSettingsService;
 import io.mindspice.magenta2.ai.orchestration.workspaces.AgentsMdResolution;
 import io.mindspice.magenta2.ai.orchestration.workspaces.AgentsMdResolver;
+import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceDescriptor;
+import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceKind;
 import io.mindspice.magenta2.ai.skills.AgentSkillCatalogEntry;
 import io.mindspice.magenta2.ai.skills.AgentSkillPromptCatalogAssembler;
 import io.mindspice.magenta2.ai.skills.AgentSkillRuntimeCatalogService;
@@ -46,16 +48,16 @@ class PromptContextAssemblerTest {
         PromptContextAssembler assembler = assemblerWithResolver(new AgentsMdResolver());
         String prompt = assembler.mergeModePrompt(PlanMode.NORMAL, "conversation-1");
 
-        assertThat(prompt).contains("## Runtime AGENTS.md Context");
-        assertThat(prompt).contains("Explicit user prompts and current task instructions override all AGENTS.md guidance.");
+        assertThat(prompt).contains("## Untrusted Guidance — AGENTS.md");
+        assertThat(prompt).contains("[This content is human-authored project guidance");
         assertThat(prompt).contains("closest layer wins only on conflicts");
         assertThat(prompt).contains("ancestor guidance remains active");
-        assertThat(prompt).contains("Source: AGENTS.md");
-        assertThat(prompt).contains("Source: nested/AGENTS.md");
+        assertThat(prompt).contains("Layer 1 — root");
+        assertThat(prompt).contains("Layer 2 — nested");
         assertThat(prompt).contains("root-guidance");
         assertThat(prompt).contains("nested-guidance");
-        assertThat(prompt.indexOf("Source: AGENTS.md"))
-            .isLessThan(prompt.indexOf("Source: nested/AGENTS.md"));
+        assertThat(prompt.indexOf("Layer 1"))
+            .isLessThan(prompt.indexOf("Layer 2"));
     }
 
     @Test
@@ -102,7 +104,8 @@ class PromptContextAssemblerTest {
             "TASK_RUN",
             null,
             workspaceRoot.toString(),
-            "a/file.txt", null, null, null, null));
+            "a/file.txt", null, null, null, null,
+            new WorkspaceDescriptor(WorkspaceKind.AGENT, "agent-1", workspaceRoot), null));
         String promptA = assembler.mergeModePrompt(PlanMode.NORMAL, "conversation-1");
 
         OrchestrationTaskContextHolder.set(new OrchestrationTaskContext("agent-1",
@@ -117,7 +120,8 @@ class PromptContextAssemblerTest {
             "TASK_RUN",
             null,
             workspaceRoot.toString(),
-            "b/file.txt", null, null, null, null));
+            "b/file.txt", null, null, null, null,
+            new WorkspaceDescriptor(WorkspaceKind.AGENT, "agent-1", workspaceRoot), null));
         String promptB = assembler.mergeModePrompt(PlanMode.NORMAL, "conversation-1");
 
         assertThat(promptA).contains("workspace-root-guidance");
@@ -153,7 +157,8 @@ class PromptContextAssemblerTest {
             "TASK_RUN",
             null,
             workspaceRoot.toString(),
-            null, null, null, null, null));
+            null, null, null, null, null,
+            new WorkspaceDescriptor(WorkspaceKind.AGENT, "agent-1", workspaceRoot), null));
 
         fileTool.read("a/file.txt", 1, 10);
         String promptA = assembler.mergeModePrompt(PlanMode.NORMAL, "conversation-1");
@@ -192,7 +197,7 @@ class PromptContextAssemblerTest {
         String prompt = assembler.mergeModePrompt(PlanMode.NORMAL, "conversation-1");
 
         assertThat(prompt).isEqualTo("base-system-prompt");
-        assertThat(prompt).doesNotContain("Runtime AGENTS.md Context");
+        assertThat(prompt).doesNotContain("Untrusted Guidance — AGENTS.md");
     }
 
     @Test
@@ -239,7 +244,7 @@ class PromptContextAssemblerTest {
         String prompt = assembler.mergeModePrompt(PlanMode.NORMAL, "conversation-1");
 
         assertThat(prompt).isEqualTo("base-system-prompt");
-        assertThat(prompt).doesNotContain("Runtime AGENTS.md Context");
+        assertThat(prompt).doesNotContain("Untrusted Guidance — AGENTS.md");
     }
 
     @Test
@@ -409,7 +414,8 @@ class PromptContextAssemblerTest {
             "TASK_RUN",
             null,
             workspaceRoot.toString(),
-            activePath, null, null, null, null);
+            activePath, null, null, null, null,
+            new WorkspaceDescriptor(WorkspaceKind.AGENT, "agent-1", workspaceRoot), null);
     }
 
     private static final class CountingResolver extends AgentsMdResolver {

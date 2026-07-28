@@ -20,11 +20,19 @@ public record SkillResolutionContext(
     /** Agent id for assignment resolution. */
     String agentId,
 
-    /** Project id for assignment resolution and project-scope discovery. */
+    /** Project id for assignment specificity and attribution only. */
     String projectId,
 
-    /** Authoritative project root descriptor, only when proven. */
-    ProjectRootAuthority projectRootAuthority,
+    /**
+     * Trusted materialization skill authority bound to the captured
+     * materialization id and generation. Replaces the legacy project-root
+     * authority so scope discovery and approval carry exact owner,
+     * generation, kind, and root-relative identity.
+     *
+     * <p>Project id is retained only for assignment specificity and
+     * attribution; it grants no filesystem or skill authority.
+     */
+    MaterializationSkillAuthority materializationSkillAuthority,
 
     /** Job id for assignment specificity. */
     String jobId,
@@ -54,8 +62,13 @@ public record SkillResolutionContext(
                 && boundAgentWorkspace.kind() != io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceKind.AGENT) {
             throw new IllegalArgumentException("boundAgentWorkspace must be AGENT");
         }
-        if (projectRootAuthority != null && !Objects.equals(projectId, projectRootAuthority.projectId())) {
-            throw new IllegalArgumentException("project root authority must match projectId");
+        if (materializationSkillAuthority != null
+                && !Objects.equals(projectId, materializationSkillAuthority.projectId())) {
+            throw new IllegalArgumentException("materialization skill authority must match projectId");
+        }
+        if (materializationSkillAuthority != null
+                && !Objects.equals(agentId, materializationSkillAuthority.agentId())) {
+            throw new IllegalArgumentException("materialization skill authority must match agentId");
         }
     }
 
@@ -63,27 +76,10 @@ public record SkillResolutionContext(
         if (value != null) requireIdentifier(value, label);
     }
 
-    private static void requireIdentifier(String value, String label) {
+    static void requireIdentifier(String value, String label) {
         Objects.requireNonNull(value, label);
         if (!IDENTIFIER.matcher(value).matches() || value.contains("..")) {
             throw new IllegalArgumentException(label + " is not a canonical identifier");
-        }
-    }
-
-    /**
-     * Record for a proven authoritative project root. Discovery is disabled
-     * without one.
-     */
-    public record ProjectRootAuthority(
-        String projectId,
-        WorkspaceDescriptor descriptor
-    ) {
-        public ProjectRootAuthority {
-            requireIdentifier(projectId, "projectId");
-            Objects.requireNonNull(descriptor, "descriptor");
-            if (descriptor.kind() == io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceKind.CHAT) {
-                throw new IllegalArgumentException("project root authority cannot use CHAT");
-            }
         }
     }
 }

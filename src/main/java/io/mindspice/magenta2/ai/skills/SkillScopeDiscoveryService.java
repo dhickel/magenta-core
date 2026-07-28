@@ -59,10 +59,8 @@ public class SkillScopeDiscoveryService {
                 || samePhysicalRoot(context.boundAgentWorkspace(), context.effectiveWorkspace()) ? List.of()
                 : discoverWorkspace(SkillScope.BOUND_AGENT, context.boundAgentWorkspace().identity(),
                         context.boundAgentWorkspace(), scanTime);
-        List<DiscoveredCandidate> project = context.projectRootAuthority() == null ? List.of()
-                : discoverWorkspace(SkillScope.PROJECT,
-                        "project/" + context.projectRootAuthority().projectId(),
-                        context.projectRootAuthority().descriptor(), scanTime);
+        List<DiscoveredCandidate> project = context.materializationSkillAuthority() == null ? List.of()
+                : discoverMaterializationScope(context.materializationSkillAuthority(), scanTime);
         List<DiscoveredCandidate> global = discoverGlobal(scanTime);
 
         Map<String, CandidateObservation> observations = new LinkedHashMap<>();
@@ -73,6 +71,62 @@ public class SkillScopeDiscoveryService {
         }
         return new ScopeDiscoveryResult(candidates(workspace), candidates(bound), candidates(project),
                 candidates(global), Map.copyOf(observations), scanId, scanTime);
+    }
+
+    /**
+     * Discover materialization-scoped {@code .skills} through the exact
+     * captured materialization authority. Resolves the materialization
+     * location on every use, verifying owner, generation, readiness,
+     * and confinement before opening the {@code .skills} directory.
+     *
+     * <p>A mismatch, stale generation, missing location, revoked/non-ready
+     * state, or confinement failure produces an empty result (typed
+     * unavailable). The caller must not silently substitute the effective
+     * workspace, bound-agent root, project metadata, or a lower-precedence
+     * root.
+     */
+    private List<DiscoveredCandidate> discoverMaterializationScope(
+            MaterializationSkillAuthority authority, Instant scanTime) {
+        try {
+            var agentDescriptor = workspaceDirectoryService.resolveForRead(
+                    WorkspaceKind.AGENT, authority.agentId());
+            var location = workspaceDirectoryService.resolveMaterializationLocation(
+                    agentDescriptor, authority.materializationKey(),
+                    authority.capturedGeneration());
+
+            // Verify confinement
+            Path skillsRoot = location.confinedPath().resolve(".skills").normalize();
+            if (!skillsRoot.startsWith(location.confinedPath())) {
+                log.warn("Materialization .skills escapes root for {}",
+                        authority.serializedKey());
+                return List.of();
+            }
+
+            if (!Files.isDirectory(skillsRoot, LinkOption.NOFOLLOW_LINKS)
+                    || Files.isSymbolicLink(skillsRoot)) {
+                return List.of();
+            }
+
+            // Encode materialization identity for trust-service re-resolution:
+            // mat/<agentId>/<serializedKey>/<capturedGeneration>
+            String rootId = "mat/" + authority.agentId() + "/"
+                    + authority.serializedKey() + "/" + authority.capturedGeneration();
+            List<DiscoveredCandidate> result = new ArrayList<>();
+            try (Stream<Path> stream = Files.list(skillsRoot)) {
+                stream.filter(path -> path.getFileName().toString().endsWith(".md"))
+                        .sorted(Comparator.comparing(path -> path.getFileName().toString()))
+                        .forEach(path -> {
+                            DiscoveredCandidate candidate = discoverFlatSkill(
+                                    SkillScope.PROJECT, rootId, skillsRoot, path, scanTime);
+                            if (candidate != null) result.add(candidate);
+                        });
+            }
+            return List.copyOf(result);
+        } catch (IllegalArgumentException | IllegalStateException | IOException e) {
+            log.debug("Materialization skill authority is unavailable for {}",
+                    authority.serializedKey());
+            return List.of();
+        }
     }
 
     private List<DiscoveredCandidate> discoverWorkspace(SkillScope scope, String rootId,

@@ -22,6 +22,7 @@ import java.util.stream.Stream;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.mindspice.magenta2.ai.orchestration.context.AgentMaterializationRepository;
 import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceDirectoryService;
 import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceDescriptor;
 import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceKind;
@@ -260,9 +261,8 @@ public class SkillTrustService {
         Path markdownFile;
 
         if (candidate.provenance() == SkillProvenance.WORKSPACE_FLAT) {
-            // Flat workspace skill: a single .md file
-            WorkspaceDescriptor descriptor = resolveWorkspaceDescriptor(candidate.authoritativeRootId());
-            Path skillsRoot = workspaceDirectoryService.resolveSkillsRoot(descriptor);
+            // Flat workspace or materialization skill: a single .md file
+            Path skillsRoot = resolveSkillsRoot(candidate.authoritativeRootId());
             if (skillsRoot == null) throw new IllegalArgumentException("Skills root not found");
             markdownFile = skillsRoot.resolve(candidate.logicalKey() + ".md").normalize();
             if (!markdownFile.startsWith(skillsRoot))
@@ -288,7 +288,7 @@ public class SkillTrustService {
         try {
             markdownBytes = Files.readAllBytes(markdownFile);
         } catch (IOException e) {
-            throw new IllegalArgumentException("Failed to read SKILL.md: " + e.getMessage(), e);
+            throw new IllegalArgumentException("Failed to read SKILL.md", e);
         }
         String markdown = new String(markdownBytes, StandardCharsets.UTF_8);
 
@@ -325,7 +325,7 @@ public class SkillTrustService {
                         relative, resourceType, (int) size, sha256(content), content));
                 }
             } catch (Exception e) {
-                throw new IllegalArgumentException("Failed to walk package tree: " + e.getMessage(), e);
+                throw new IllegalArgumentException("Failed to walk package tree", e);
             }
         }
 
@@ -359,9 +359,25 @@ public class SkillTrustService {
 
     // ── Helper methods ──
 
-    private WorkspaceDescriptor resolveWorkspaceDescriptor(String authoritativeRootId) {
+    /**
+     * Resolve a workspace descriptor or materialization location from the
+     * candidate's authoritative root id.
+     *
+     * <p>Ordinary workspace ids use {@code agent/<id>} or {@code user/<name>}.
+     * Materialization-scoped ids use
+     * {@code mat/<agentId>/<serializedKey>/<capturedGeneration>} and require
+     * re-resolution through the materialization and directory services.
+     */
+    private Path resolveSkillsRoot(String authoritativeRootId) {
         if (!authoritativeRootId.contains("/"))
-            throw new IllegalArgumentException("Invalid workspace authority: " + authoritativeRootId);
+            throw new IllegalArgumentException("Invalid authority: " + authoritativeRootId);
+
+        // Materialization-scoped: mat/<agentId>/<serializedKey>/<generation>
+        if (authoritativeRootId.startsWith("mat/")) {
+            return resolveMaterializationSkillsRoot(authoritativeRootId);
+        }
+
+        // Ordinary workspace: <kind>/<key>
         int slash = authoritativeRootId.indexOf('/');
         String kind = authoritativeRootId.substring(0, slash);
         String key = authoritativeRootId.substring(slash + 1);
@@ -370,7 +386,48 @@ public class SkillTrustService {
             case "user" -> WorkspaceKind.USER;
             default -> throw new IllegalArgumentException("Invalid workspace kind: " + kind);
         };
-        return workspaceDirectoryService.resolveForRead(wk, key);
+        WorkspaceDescriptor descriptor = workspaceDirectoryService.resolveForRead(wk, key);
+        return workspaceDirectoryService.resolveSkillsRoot(descriptor);
+    }
+
+    /**
+     * Re-resolve a materialization-scoped skills root from the candidate's
+     * encoded authority. Verifies owner, generation, readiness, and
+     * confinement before returning the {@code .skills} directory path.
+     */
+    private Path resolveMaterializationSkillsRoot(String rootId) {
+        // Parse: mat/<agentId>/<serializedKey>/<capturedGeneration>
+        String[] parts = rootId.split("/", 4);
+        if (parts.length != 4) {
+            throw new IllegalArgumentException(
+                    "Malformed materialization authority: " + rootId);
+        }
+        String agentId = parts[1];
+        String serializedKey = parts[2];
+        int capturedGeneration;
+        try {
+            capturedGeneration = Integer.parseInt(parts[3]);
+        } catch (NumberFormatException e) {
+            throw new IllegalArgumentException(
+                    "Invalid generation in materialization authority: " + rootId);
+        }
+
+        var key = AgentMaterializationRepository.MaterializationKey.fromSerialized(
+                agentId, serializedKey);
+
+        // Re-resolve through directory service — verifies owner, generation, readiness
+        var agentDescriptor = workspaceDirectoryService.resolveForRead(
+                WorkspaceKind.AGENT, agentId);
+        var location = workspaceDirectoryService.resolveMaterializationLocation(
+                agentDescriptor, key, capturedGeneration);
+
+        Path skillsRoot = location.confinedPath().resolve(".skills").normalize();
+        if (!skillsRoot.startsWith(location.confinedPath())) {
+            throw new IllegalArgumentException(
+                    "Materialization .skills escapes root: " + rootId);
+        }
+
+        return skillsRoot;
     }
 
     private void validateConfined(Path root, Path child) {
@@ -380,7 +437,7 @@ public class SkillTrustService {
             if (!realChild.startsWith(realRoot))
                 throw new IllegalArgumentException("Path escapes root");
         } catch (IOException e) {
-            throw new IllegalArgumentException("Failed to validate path confinement: " + e.getMessage(), e);
+            throw new IllegalArgumentException("Failed to validate path confinement", e);
         }
     }
 

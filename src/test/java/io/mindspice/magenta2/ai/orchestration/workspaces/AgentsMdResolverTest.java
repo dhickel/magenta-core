@@ -133,7 +133,8 @@ class AgentsMdResolverTest {
             agentRoot.resolve("outputs").toString(),
             null,
             agentRoot.toString(),
-            null, null, null, null, null);
+            null, null, null, null, null,
+            new WorkspaceDescriptor(WorkspaceKind.AGENT, "agent-1", agentRoot), null);
 
         Optional<AgentsMdResolution> result = new AgentsMdResolver().resolveForContext(context, "nested/file.txt");
 
@@ -144,7 +145,7 @@ class AgentsMdResolverTest {
     }
 
     @Test
-    void resolvesAgentEffectiveWorkspaceWhenNoOwnerRootIsProvided() throws Exception {
+    void resolvesDescriptorBoundWorkspaceWithoutUsingLegacyHostRoot() throws Exception {
         Path workspaceRoot = Files.createDirectories(tempDir.resolve("workspace/agent/agent-1"));
         Path nested = Files.createDirectories(workspaceRoot.resolve("docs"));
         writeAgents(workspaceRoot, "workspace-root");
@@ -161,7 +162,8 @@ class AgentsMdResolverTest {
             workspaceRoot.resolve("runs/run-1/outputs").toString(),
             null,
             workspaceRoot.toString(),
-            null, null, null, null, null);
+            null, null, null, null, null,
+            new WorkspaceDescriptor(WorkspaceKind.AGENT, "agent-1", workspaceRoot), null);
 
         Optional<AgentsMdResolution> result = new AgentsMdResolver().resolveForContext(context, "docs/file.txt");
 
