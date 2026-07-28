@@ -1357,4 +1357,203 @@ final class WorkspaceExplorerFragments {
     private static String agentModalButton(String label, String encodedAgentId, String action, String path) {
         return agentButton(label, "hx-get", agentFilesRoute(encodedAgentId, "/modal/" + action + "?path=" + url(path)), "#" + AGENT_MODAL_ID, "innerHTML");
     }
+
+    // ── Conceptual Files-area navigation ──
+
+    /** Renders the conceptual navigation bar for the agent Files tab.
+     *  Areas: Skills, Scripts, Apps, Home, Stored Items, Projects, Tasks, Outputs. */
+    static String filesAreaNav(String encodedAgentId, String activeArea) {
+        StringBuilder nav = new StringBuilder();
+        nav.append("<nav class=\"agent-files-nav\" aria-label=\"Workspace areas\">");
+
+        String[] areas = {"Skills", "Scripts", "Apps", "Home", "Stored Items", "Projects", "Tasks", "Outputs"};
+        String[] targets = {"skills", "scripts", "apps", "home", "repos", "projects", "tasks", "outputs"};
+        boolean[] writable = {false, false, false, true, false, false, false, false};
+
+        for (int i = 0; i < areas.length; i++) {
+            if (i == 4) {
+                // Separator before Stored Items
+                nav.append("<span class=\"nav-separator\"></span>");
+            }
+            String area = areas[i];
+            String target = targets[i];
+            boolean isActive = target.equals(activeArea);
+            nav.append("<button type=\"button\" class=\"button button-secondary small")
+                    .append(isActive ? " active" : "")
+                    .append("\" hx-get=\"/agents/_detail/")
+                    .append(encodedAgentId)
+                    .append("/files/area/")
+                    .append(target)
+                    .append("\" hx-target=\"#")
+                    .append(AGENT_SHELL_ID)
+                    .append("\" hx-swap=\"outerHTML\">")
+                    .append(area)
+                    .append("</button>");
+        }
+        nav.append("</nav>");
+        return nav.toString();
+    }
+
+    /** Render an unprovisioned/empty state for a conceptual area. */
+    static String filesAreaEmpty(String encodedAgentId, String area, String description) {
+        return """
+            <div id="%s" class="workspace-file-explorer-shell agent-files-operations-shell">
+              %s
+              <div class="agent-files-operations-layout">
+                <section class="agent-files-browser-panel" aria-label="%s">
+                  <div class="workspace-file-pathbar">%s</div>
+                  <div class="workspace-file-explorer-layout">
+                    <div id="%s" class="workspace-file-table-region">
+                      <div class="orch-status">
+                        <p>%s</p>
+                        <p class="orch-muted">%s</p>
+                      </div>
+                    </div>
+                    <aside id="%s" class="workspace-file-inspector-pane">
+                      <h4>%s</h4>
+                      <p>%s</p>
+                    </aside>
+                  </div>
+                  <div id="%s"></div>
+                </section>
+                <aside id="%s" class="run-operations-panel run-state-loading"
+                       hx-get="/agents/_detail/%s/runs?limit=25" hx-trigger="load" hx-swap="outerHTML"
+                       aria-label="Task run operations">
+                  <p>Loading task run metadata…</p>
+                </aside>
+              </div>
+            </div>
+            """.formatted(
+            AGENT_SHELL_ID,
+            filesAreaNav(encodedAgentId, area),
+            escape(area),
+            escape(area),
+            AGENT_LIST_ID,
+            escape(description),
+            escape("This area has not been provisioned."),
+            AGENT_INSPECTOR_ID,
+            escape(area),
+            escape(description),
+            AGENT_MODAL_ID,
+            RunOperationsFragments.GROUPS_ID,
+            encodedAgentId
+        );
+    }
+
+    /** Render the Projects conceptual area from context/materialization facts. */
+    static String filesAreaProjects(String encodedAgentId, String message) {
+        return """
+            <div id="%s" class="workspace-file-explorer-shell agent-files-operations-shell">
+              %s
+              <div class="agent-files-operations-layout">
+                <section class="agent-files-browser-panel" aria-label="Projects">
+                  <div class="workspace-file-pathbar">Projects</div>
+                  <div class="workspace-file-explorer-layout">
+                    <div id="%s" class="workspace-file-table-region">
+                      %s
+                    </div>
+                    <aside id="%s" class="workspace-file-inspector-pane">
+                      <h4>Projects</h4>
+                      <p>Captured context and materialization containers for this agent.</p>
+                      <p class="orch-muted">Use the Context tab to view and manage defaults and bindings.</p>
+                    </aside>
+                  </div>
+                  <div id="%s"></div>
+                </section>
+                <aside id="%s" class="run-operations-panel run-state-loading"
+                       hx-get="/agents/_detail/%s/runs?limit=25" hx-trigger="load" hx-swap="outerHTML"
+                       aria-label="Task run operations">
+                  <p>Loading task run metadata…</p>
+                </aside>
+              </div>
+            </div>
+            """.formatted(
+            AGENT_SHELL_ID,
+            filesAreaNav(encodedAgentId, "projects"),
+            AGENT_LIST_ID,
+            message != null ? "<div class=\"orch-status\">" + escape(message) + "</div>"
+                    : "<p class=\"orch-muted\">Context materialization facts are loaded through the Context panel.</p>",
+            AGENT_INSPECTOR_ID,
+            AGENT_MODAL_ID,
+            RunOperationsFragments.GROUPS_ID,
+            encodedAgentId
+        );
+    }
+
+    /** Render the Tasks conceptual area as a read-only lifecycle view. */
+    static String filesAreaTasks(String encodedAgentId) {
+        return """
+            <div id="%s" class="workspace-file-explorer-shell agent-files-operations-shell">
+              %s
+              <div class="agent-files-operations-layout">
+                <section class="agent-files-browser-panel" aria-label="Tasks">
+                  <div class="workspace-file-pathbar">Tasks</div>
+                  <div class="workspace-file-explorer-layout">
+                    <div id="%s" class="workspace-file-table-region">
+                      <p class="orch-muted">Task, workflow, and job run directories are listed below.</p>
+                      <p class="orch-muted">Runtime-managed task and output files are read-only.</p>
+                    </div>
+                    <aside id="%s" class="workspace-file-inspector-pane">
+                      <h4>Tasks</h4>
+                      <p>Lifecycle-owned task run directories.</p>
+                      <p class="orch-muted">These are managed by the execution runtime and are not user-editable.</p>
+                    </aside>
+                  </div>
+                  <div id="%s"></div>
+                </section>
+                <aside id="%s" class="run-operations-panel run-state-loading"
+                       hx-get="/agents/_detail/%s/runs?limit=25" hx-trigger="load" hx-swap="outerHTML"
+                       aria-label="Task run operations">
+                  <p>Loading task run metadata…</p>
+                </aside>
+              </div>
+            </div>
+            """.formatted(
+            AGENT_SHELL_ID,
+            filesAreaNav(encodedAgentId, "tasks"),
+            AGENT_LIST_ID,
+            AGENT_INSPECTOR_ID,
+            AGENT_MODAL_ID,
+            RunOperationsFragments.GROUPS_ID,
+            encodedAgentId
+        );
+    }
+
+    /** Render the Outputs conceptual area as a read-only publication view. */
+    static String filesAreaOutputs(String encodedAgentId) {
+        return """
+            <div id="%s" class="workspace-file-explorer-shell agent-files-operations-shell">
+              %s
+              <div class="agent-files-operations-layout">
+                <section class="agent-files-browser-panel" aria-label="Outputs">
+                  <div class="workspace-file-pathbar">Outputs</div>
+                  <div class="workspace-file-explorer-layout">
+                    <div id="%s" class="workspace-file-table-region">
+                      <p class="orch-muted">Published output artifacts are available through the Outputs tab.</p>
+                    </div>
+                    <aside id="%s" class="workspace-file-inspector-pane">
+                      <h4>Outputs</h4>
+                      <p>Publication-owned output directories.</p>
+                      <p class="orch-muted">Outputs are managed by the artifact publication system.</p>
+                    </aside>
+                  </div>
+                  <div id="%s"></div>
+                </section>
+                <aside id="%s" class="run-operations-panel run-state-loading"
+                       hx-get="/agents/_detail/%s/runs?limit=25" hx-trigger="load" hx-swap="outerHTML"
+                       aria-label="Task run operations">
+                  <p>Loading task run metadata…</p>
+                </aside>
+              </div>
+            </div>
+            """.formatted(
+            AGENT_SHELL_ID,
+            filesAreaNav(encodedAgentId, "outputs"),
+            AGENT_LIST_ID,
+            AGENT_INSPECTOR_ID,
+            AGENT_MODAL_ID,
+            RunOperationsFragments.GROUPS_ID,
+            encodedAgentId
+        );
+    }
 }

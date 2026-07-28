@@ -157,7 +157,7 @@ class SchemaMigrationRunnerTest {
                         1, 'PROVISIONING', 'now', 'now')
                     """, key);
             run(dataSource, allMigrations());
-            assertEquals(11, jdbc.queryForObject("select count(*) from schema_migrations", Integer.class));
+            assertEquals(13, jdbc.queryForObject("select count(*) from schema_migrations", Integer.class));
             assertEquals(1, jdbc.queryForObject("select count(*) from agent_materializations", Integer.class));
             assertTrue(tableExists(jdbc, "agent_materializations"));
             assertTrue(tableExists(jdbc, "context_bindings"));
@@ -260,7 +260,7 @@ class SchemaMigrationRunnerTest {
                     "select task_run_id, root_relative_path from output_publications where artifact_id = 'legacy-1'");
             assertEquals(null, migrated.get("task_run_id"));
             assertEquals("legacy/unavailable/legacy-1", migrated.get("root_relative_path"));
-            assertEquals(11, jdbc.queryForObject("select count(*) from schema_migrations", Integer.class));
+            assertEquals(13, jdbc.queryForObject("select count(*) from schema_migrations", Integer.class));
             assertTrue(tableExists(jdbc, "skill_candidate_versions"));
         }
     }
@@ -290,7 +290,7 @@ class SchemaMigrationRunnerTest {
 
             SchemaMigrationRunner runner = run(dataSource, allMigrations());
 
-            assertEquals(11, runner.appliedMigrations().size());
+            assertEquals(13, runner.appliedMigrations().size());
             assertTrue(tableExists(jdbc, "reaction_dispatches"));
             String bookkeepingSql = jdbc.queryForObject(
                     "select sql from sqlite_master where type='table' and name='schema_migrations'",
@@ -321,11 +321,14 @@ class SchemaMigrationRunnerTest {
                         or name in ('assignment_fence_generations', 'writer_claim_generations',
                             'agent_materializations', 'context_defaults', 'context_bindings',
                             'binding_owner_links', 'materialization_operation_results',
-                            'operation_idempotency')))
+                            'operation_idempotency', 'assignment_binding_operations',
+                            'system_chat_action_proposals')))
                    or (type = 'index' and (name like 'idx_task_run_%'
                         or name = 'idx_writer_claim_generations_current'
                         or name in ('idx_agent_materializations_agent', 'idx_agent_materializations_key',
-                            'idx_context_bindings_agent', 'idx_binding_owner_links_binding')))
+                            'idx_context_bindings_agent', 'idx_binding_owner_links_binding',
+                            'idx_assignment_binding_operations_assignment',
+                            'idx_system_chat_proposals_conversation', 'idx_system_chat_proposals_agent')))
                 order by object_name
                 """, rs -> {
             Map<String, String> result = new java.util.LinkedHashMap<>();
@@ -456,10 +459,20 @@ class SchemaMigrationRunnerTest {
         return through010;
     }
 
+    private static Resource assignmentBindingOperations() {
+        return new ClassPathResource("db/migrations/012-assignment-binding-operations.sql");
+    }
+
+    private static Resource systemChatProposals() {
+        return new ClassPathResource("db/migrations/013-system-chat-proposals.sql");
+    }
+
     private static Resource[] allMigrations() {
         Resource[] through010 = migrationsThrough010();
-        Resource[] all = java.util.Arrays.copyOf(through010, through010.length + 1);
+        Resource[] all = java.util.Arrays.copyOf(through010, through010.length + 3);
         all[through010.length] = materializationKeyConstraints();
+        all[through010.length + 1] = assignmentBindingOperations();
+        all[through010.length + 2] = systemChatProposals();
         return all;
     }
 

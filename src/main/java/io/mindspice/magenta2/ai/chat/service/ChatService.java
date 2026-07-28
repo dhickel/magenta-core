@@ -465,16 +465,19 @@ public class ChatService {
         if (!(request instanceof ChatRequest.MsgRequest msgRequest)) {
             throw new IllegalArgumentException("message request is required");
         }
+        rejectSystemChatConversation(msgRequest.conversationId());
         ResolvedChatRequest resolvedRequest = requestResolver.resolve(msgRequest);
         return chat(resolvedRequest);
     }
 
     public ChatResponse.MsgResponse chat(String conversationId, String message, String model) {
+        rejectSystemChatConversation(conversationId);
         ResolvedChatRequest resolvedRequest = requestResolver.resolve(conversationId, message, model, null);
         return chat(resolvedRequest);
     }
 
     private ChatResponse.MsgResponse chat(ResolvedChatRequest resolvedRequest) {
+        rejectSystemChatConversation(resolvedRequest.conversationId());
         return chat(resolvedRequest, null, null);
     }
 
@@ -540,6 +543,7 @@ public class ChatService {
         if (request == null) {
             throw new IllegalArgumentException("message request is required");
         }
+        rejectSystemChatConversation(request.conversationId());
         String model = StringUtils.hasText(request.model()) ? request.model() : agent.defaultModel();
         if (!StringUtils.hasText(model)) {
             model = defaultModel();
@@ -588,6 +592,17 @@ public class ChatService {
         }
     }
 
+    private void rejectSystemChatConversation(String conversationId) {
+        if (conversationId == null || !StringUtils.hasText(conversationId)) {
+            return;
+        }
+        var origin = chatSessionMetadataRepository.findOrigin(conversationId);
+        if (origin.isPresent() && origin.get() == ChatSessionOrigin.SYSTEM_CHAT) {
+            throw new IllegalArgumentException(
+                    "System chat conversations cannot be used through public chat endpoints");
+        }
+    }
+
     private String approvedPlanExecutionMessage(String conversationId, boolean cleanContext) {
         String markdown = planService.approvalMarkdown(conversationId);
         String files = "";
@@ -626,6 +641,9 @@ public class ChatService {
     }
 
     public ResolvedChatRequest resolve(ChatRequest request) {
+        if (request instanceof ChatRequest.MsgRequest messageRequest) {
+            rejectSystemChatConversation(messageRequest.conversationId());
+        }
         return requestResolver.resolve(request);
     }
 
@@ -634,6 +652,7 @@ public class ChatService {
     }
 
     public Flux<ChatMessage> stream(ResolvedChatRequest request, ActiveTurn activeTurn) {
+        rejectSystemChatConversation(request.conversationId());
         if (turnCoordinator != null) {
             return Flux.defer(() -> {
                 Semaphore lock = streamLocks.computeIfAbsent(
@@ -1001,6 +1020,7 @@ public class ChatService {
     }
 
     public ResolvedChatRequest resolveSavedPlanExecution(String conversationId, boolean clearContext) {
+        rejectSystemChatConversation(conversationId);
         requirePlanService();
         String model = planService.executionModel(conversationId);
         if (!StringUtils.hasText(model)) {
@@ -1216,6 +1236,7 @@ public class ChatService {
         return chatSessionMetadataRepository.findBrowserConversationIds().stream()
             .map(this::session)
             .filter(session -> session.origin() != ChatSessionOrigin.AGENT_CHAT)
+            .filter(session -> session.origin() != ChatSessionOrigin.SYSTEM_CHAT)
             .filter(session -> !session.archived())
             .filter(session -> interactionMode(session.conversationId()) == PlanMode.NORMAL)
             .sorted(java.util.Comparator

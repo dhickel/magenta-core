@@ -3,6 +3,7 @@ package io.mindspice.magenta2.ai.orchestration.context;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.time.Instant;
+import java.util.List;
 import java.util.Optional;
 
 import io.mindspice.magenta2.ai.orchestration.context.AgentMaterializationRepository.MaterializationKey;
@@ -76,6 +77,12 @@ public class AgentContextRepository {
         return jdbcTemplate.query(
                 "select * from context_bindings where binding_key = ?",
                 rs -> rs.next() ? Optional.of(bindingFromRow(rs)) : Optional.empty(), bindingKey);
+    }
+
+    public List<ContextBinding> findBindingsByAgent(String agentId) {
+        return jdbcTemplate.query(
+                "select * from context_bindings where agent_id = ? order by captured_at desc",
+                (rs, rowNum) -> bindingFromRow(rs), agentId);
     }
 
     /** Direct insert for fixtures and non-retriable internal maintenance. */

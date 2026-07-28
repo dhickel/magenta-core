@@ -129,6 +129,8 @@ public class OrchestrationController {
     private static final String AGENT_CHAT_JS = "/js/orchestration/agent-chat.js?v=2";
     private static final String PLANS_JS = "/js/orchestration/plans.js?v=4";
     private static final String PROJECTS_JS = "/js/orchestration/projects.js?v=3";
+    private static final String HTMX_ERRORS_JS = "/js/orchestration/htmx-errors.js?v=1";
+    private static final String SYSTEM_CHAT_JS = "/js/orchestration/system-chat.js?v=1";
     private static final ObjectMapper JSON = new ObjectMapper().findAndRegisterModules();
 
     private final ChatService chatService;
@@ -309,6 +311,7 @@ public class OrchestrationController {
             .withChild(dashboardChatBand())
             .withChild(dashboardStatusStrip())
             .withChild(dashboardMainLayout())
+            .withChild(moduleScript(HTMX_ERRORS_JS))
             .withChild(moduleScript(DASHBOARD_JS));
         return renderPage(body, "/dashboard");
     }
@@ -320,7 +323,9 @@ public class OrchestrationController {
                     .withClass("dashboard-chat-label")
                     .withInnerText("System Chat"))
                 .withChild(new Div().withClass("dashboard-chat-band-inner")
-                    .withChild(new Paragraph("Use the existing chat flow for system-level planning and operations."))
+                    .withChild(new Paragraph("System chat is available from each agent's detail page."))
+                    .withChild(new Paragraph("Navigate to an agent and open the System Chat tab to start a restricted system conversation.")
+                        .withClass("orch-muted-note"))
                     .withChild(new HtmlTag("a")
                         .withAttribute("href", "/chat")
                         .withClass("orch-primary")
@@ -5380,8 +5385,10 @@ public class OrchestrationController {
             .withChild(Header.H1("Agent: " + (agent.name() != null ? agent.name() : agent.id())))
             .withChild(new Paragraph("Profile, queue, inbox, workspace, and history."))
             .withChild(agentDetailLayout(agent))
+            .withChild(moduleScript(HTMX_ERRORS_JS))
             .withChild(moduleScript(AGENTS_JS))
-            .withChild(moduleScript(AGENT_CHAT_JS));
+            .withChild(moduleScript(AGENT_CHAT_JS))
+            .withChild(moduleScript(SYSTEM_CHAT_JS));
         return renderPage(body, "/agents/" + agentId);
     }
 
@@ -5407,7 +5414,7 @@ public class OrchestrationController {
                 .withChild(agentChatPanel(agent.id())))
             .withChild(new Div().withClass("entity-detail-layout entity-detail-layout-full")
                 .withChild(new Div().withClass("entity-detail-main")
-                    .withChild(tabNav(agent.id(), "dashboard", "profile", "queue", "inbox", "jobs", "schedules", "reactions", "files", "outputs", "exec", "history", "submit"))
+                    .withChild(tabNav(agent.id(), "dashboard", "profile", "queue", "inbox", "jobs", "schedules", "reactions", "context", "files", "outputs", "system-chat", "exec", "history", "submit"))
                     .withChild(new Div().withClass("agent-profile-loader-marker")
                         .withAttribute("hidden", "hidden")
                         .withAttribute("hx-get", "/agents/_editor/" + escapeAttr(agent.id())))
@@ -5561,6 +5568,34 @@ public class OrchestrationController {
         card.withAttribute("hx-swap", "innerHTML");
         card.withAttribute("style", "cursor:pointer");
         return card;
+    }
+
+    @GetMapping("/agents/_detail/{agentId}/context")
+    @ResponseBody
+    public String agentContextTab(@PathVariable String agentId) {
+        String encoded = URLEncoder.encode(agentId, StandardCharsets.UTF_8);
+        return new Div().withId("agent-context-panel")
+            .withClass("orch-panel agent-context-panel")
+            .withAttribute("hx-get", "/api/agents/" + encoded + "/context/panel")
+            .withAttribute("hx-trigger", "load")
+            .withAttribute("hx-target", "#agent-context-panel")
+            .withAttribute("hx-swap", "outerHTML")
+            .withChild(new Paragraph("Loading context…").withClass("orch-muted"))
+            .render();
+    }
+
+    @GetMapping("/agents/_detail/{agentId}/system-chat")
+    @ResponseBody
+    public String agentSystemChatTab(@PathVariable String agentId) {
+        String encoded = URLEncoder.encode(agentId, StandardCharsets.UTF_8);
+        return new Div().withId("system-chat-panel")
+            .withClass("orch-panel system-chat-panel")
+            .withAttribute("hx-get", "/api/agents/" + encoded + "/system-chat/panel")
+            .withAttribute("hx-trigger", "load")
+            .withAttribute("hx-target", "#system-chat-panel")
+            .withAttribute("hx-swap", "outerHTML")
+            .withChild(new Paragraph("Loading system chat…").withClass("orch-muted"))
+            .render();
     }
 
     @GetMapping("/agents/_detail/{agentId}/queue")
@@ -6394,7 +6429,11 @@ public class OrchestrationController {
             WorkspaceExplorerService.DirectoryListing listing = explorer.list(descriptor,
                 explorer.normalizeRelativePath("."));
             String encodedAgentId = URLEncoder.encode(agentId, StandardCharsets.UTF_8);
-            return WorkspaceExplorerFragments.agentShell(encodedAgentId, listing, null, null);
+            String shell = WorkspaceExplorerFragments.agentShell(encodedAgentId, listing, null, null);
+            String nav = WorkspaceExplorerFragments.filesAreaNav(encodedAgentId, "home");
+            // Insert nav after the shell opening div
+            return shell.replace("class=\"workspace-file-explorer-shell agent-files-operations-shell\">",
+                    "class=\"workspace-file-explorer-shell agent-files-operations-shell\" data-active-area=\"home\">" + nav);
         } catch (WorkspaceResolutionException e) {
             response.setStatus(HttpServletResponse.SC_NOT_FOUND);
             return WorkspaceExplorerFragments.agentListError("Agent not found.");
@@ -6402,6 +6441,128 @@ public class OrchestrationController {
             response.setStatus(fileErrorStatus(e));
             return WorkspaceExplorerFragments.agentListError(e.getMessage());
         }
+    }
+
+    // ── Conceptual Files-area navigation routes ──
+
+    @GetMapping("/agents/_detail/{agentId}/files/area/{area}")
+    @ResponseBody
+    public String agentFilesArea(@PathVariable String agentId, @PathVariable String area,
+                                  HttpServletResponse response) {
+        String encodedAgentId = URLEncoder.encode(agentId, StandardCharsets.UTF_8);
+        WorkspaceExplorerService explorer = workspaceExplorerService();
+        WorkspaceDirectoryService dirService = workspaceDirectoryService();
+
+        return switch (area) {
+            case "skills" -> {
+                yield WorkspaceExplorerFragments.filesAreaEmpty(encodedAgentId, "skills",
+                        "Skills are managed through the Skills panel.");
+            }
+            case "scripts" -> {
+                try {
+                    WorkspaceDescriptor descriptor = dirService.resolveForRead(WorkspaceKind.AGENT, agentId);
+                    WorkspaceExplorerService.RelativePath scriptsPath = explorer.normalizeRelativePath("scripts");
+                    WorkspaceExplorerService.DirectoryListing listing;
+                    try {
+                        listing = explorer.list(descriptor, scriptsPath);
+                    } catch (WorkspaceFileException e) {
+                        if (e.reason() == WorkspaceFileException.Reason.NOT_FOUND) {
+                            yield WorkspaceExplorerFragments.filesAreaEmpty(encodedAgentId, "scripts",
+                                    "Script storage area. Create a 'scripts' directory to get started.");
+                        }
+                        throw e;
+                    }
+                    String shell = WorkspaceExplorerFragments.agentShell(encodedAgentId, listing, null, null);
+                    String nav = WorkspaceExplorerFragments.filesAreaNav(encodedAgentId, "scripts");
+                    yield shell.replace("class=\"workspace-file-explorer-shell agent-files-operations-shell\">",
+                            "class=\"workspace-file-explorer-shell agent-files-operations-shell\" data-active-area=\"scripts\">" + nav);
+                } catch (WorkspaceFileException e) {
+                    yield WorkspaceExplorerFragments.filesAreaEmpty(encodedAgentId, "scripts",
+                            "Scripts area: " + e.getMessage());
+                } catch (RuntimeException e) {
+                    yield WorkspaceExplorerFragments.filesAreaEmpty(encodedAgentId, "scripts",
+                            "Unable to list scripts area.");
+                }
+            }
+            case "apps" -> {
+                try {
+                    WorkspaceDescriptor descriptor = dirService.resolveForRead(WorkspaceKind.AGENT, agentId);
+                    WorkspaceExplorerService.RelativePath appsPath = explorer.normalizeRelativePath("apps");
+                    WorkspaceExplorerService.DirectoryListing listing;
+                    try {
+                        listing = explorer.list(descriptor, appsPath);
+                    } catch (WorkspaceFileException e) {
+                        if (e.reason() == WorkspaceFileException.Reason.NOT_FOUND) {
+                            yield WorkspaceExplorerFragments.filesAreaEmpty(encodedAgentId, "apps",
+                                    "App storage area. Create an 'apps' directory to get started.");
+                        }
+                        throw e;
+                    }
+                    String shell = WorkspaceExplorerFragments.agentShell(encodedAgentId, listing, null, null);
+                    String nav = WorkspaceExplorerFragments.filesAreaNav(encodedAgentId, "apps");
+                    yield shell.replace("class=\"workspace-file-explorer-shell agent-files-operations-shell\">",
+                            "class=\"workspace-file-explorer-shell agent-files-operations-shell\" data-active-area=\"apps\">" + nav);
+                } catch (WorkspaceFileException e) {
+                    yield WorkspaceExplorerFragments.filesAreaEmpty(encodedAgentId, "apps",
+                            "Apps area: " + e.getMessage());
+                } catch (RuntimeException e) {
+                    yield WorkspaceExplorerFragments.filesAreaEmpty(encodedAgentId, "apps",
+                            "Unable to list apps area.");
+                }
+            }
+            case "home" -> {
+                try {
+                    WorkspaceDescriptor descriptor = dirService.resolveForRead(WorkspaceKind.AGENT, agentId);
+                    WorkspaceExplorerService.DirectoryListing listing = explorer.list(descriptor,
+                            explorer.normalizeRelativePath("."));
+                    String shell = WorkspaceExplorerFragments.agentShell(encodedAgentId, listing, null, null);
+                    String nav = WorkspaceExplorerFragments.filesAreaNav(encodedAgentId, "home");
+                    yield shell.replace("class=\"workspace-file-explorer-shell agent-files-operations-shell\">",
+                            "class=\"workspace-file-explorer-shell agent-files-operations-shell\" data-active-area=\"home\">" + nav);
+                } catch (WorkspaceFileException e) {
+                    yield WorkspaceExplorerFragments.agentEmptyRoot(encodedAgentId);
+                } catch (RuntimeException e) {
+                    yield WorkspaceExplorerFragments.agentListError(e.getMessage());
+                }
+            }
+            case "repos" -> {
+                try {
+                    WorkspaceDescriptor descriptor = dirService.resolveForRead(WorkspaceKind.AGENT, agentId);
+                    WorkspaceExplorerService.RelativePath reposPath = explorer.normalizeRelativePath("repos");
+                    WorkspaceExplorerService.DirectoryListing listing;
+                    try {
+                        listing = explorer.list(descriptor, reposPath);
+                    } catch (WorkspaceFileException e) {
+                        if (e.reason() == WorkspaceFileException.Reason.NOT_FOUND) {
+                            yield WorkspaceExplorerFragments.filesAreaEmpty(encodedAgentId, "repos",
+                                    "Stored Items: user-managed storage outside Magenta.");
+                        }
+                        throw e;
+                    }
+                    String shell = WorkspaceExplorerFragments.agentShell(encodedAgentId, listing, null, null);
+                    String nav = WorkspaceExplorerFragments.filesAreaNav(encodedAgentId, "repos");
+                    yield shell.replace("class=\"workspace-file-explorer-shell agent-files-operations-shell\">",
+                            "class=\"workspace-file-explorer-shell agent-files-operations-shell\" data-active-area=\"repos\">" + nav);
+                } catch (WorkspaceFileException e) {
+                    yield WorkspaceExplorerFragments.filesAreaEmpty(encodedAgentId, "repos",
+                            "Stored Items: " + e.getMessage());
+                } catch (RuntimeException e) {
+                    yield WorkspaceExplorerFragments.filesAreaEmpty(encodedAgentId, "repos",
+                            "Unable to list stored items.");
+                }
+            }
+            case "projects" -> {
+                yield WorkspaceExplorerFragments.filesAreaProjects(encodedAgentId,
+                        "Project materializations are captured context containers. View details in the Context tab.");
+            }
+            case "tasks" -> {
+                yield WorkspaceExplorerFragments.filesAreaTasks(encodedAgentId);
+            }
+            case "outputs" -> {
+                yield WorkspaceExplorerFragments.filesAreaOutputs(encodedAgentId);
+            }
+            default -> WorkspaceExplorerFragments.agentListError("Unknown area: " + area);
+        };
     }
 
     @GetMapping("/agents/_detail/{agentId}/files/list")
@@ -7948,13 +8109,14 @@ public class OrchestrationController {
     }
 
     private Component assignmentContextMeta(WorkAssignment assignment) {
-        Div meta = new Div().withClass("orch-meta");
-        meta.withChild(new HtmlTag("span").withInnerText("Run name: " + displayValue(assignment.runDisplayName())));
-        meta.withChild(new HtmlTag("span").withInnerText("Project: " + displayValue(assignment.projectId())));
-        meta.withChild(new HtmlTag("span").withInnerText("Effective workspace: "
+        Div meta = new Div().withClass("assignment-context-meta");
+        meta.withChild(new HtmlTag("span").withInnerText("Run: " + displayValue(assignment.runDisplayName())));
+        if (StringUtils.hasText(assignment.projectId())) {
+            meta.withChild(new HtmlTag("span").withChild(
+                new HtmlTag("code").withInnerText(assignment.projectId())));
+        }
+        meta.withChild(new HtmlTag("span").withInnerText("Workspace: "
             + effectiveWorkspaceLabel(assignment.workspaceType(), assignment.workspaceKey())));
-        meta.withChild(new HtmlTag("span").withInnerText("Workspace identity: "
-            + displayValue(assignment.workspaceIdentity())));
         return meta;
     }
 

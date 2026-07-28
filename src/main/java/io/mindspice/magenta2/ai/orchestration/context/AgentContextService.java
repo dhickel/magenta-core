@@ -5,6 +5,7 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
 import java.util.HexFormat;
+import java.util.List;
 import java.util.Objects;
 
 import io.mindspice.magenta2.ai.orchestration.context.AgentContextRepository.BindingCaptureOperation;
@@ -294,6 +295,11 @@ public class AgentContextService {
     public ContextLookup<ContextBinding> getBinding(String bindingKey) {
         ContextBinding binding = contextRepository.findByBindingKey(bindingKey).orElse(null);
         return binding == null ? ContextLookup.unavailable() : ContextLookup.available(binding);
+    }
+
+    /** List all bindings for an agent (read-only). */
+    public List<ContextBinding> listBindings(String agentId) {
+        return contextRepository.findBindingsByAgent(agentId);
     }
 
     // ── Owner links ──

@@ -217,6 +217,12 @@ public final class SchemaMigrationRunner {
     private static final List<String> FOUNDATION_TABLES_V11 = List.copyOf(
             java.util.stream.Stream.concat(FOUNDATION_TABLES_V10.stream(),
                     java.util.stream.Stream.of("operation_idempotency")).toList());
+    private static final List<String> FOUNDATION_TABLES_V12 = List.copyOf(
+            java.util.stream.Stream.concat(FOUNDATION_TABLES_V11.stream(),
+                    java.util.stream.Stream.of("assignment_binding_operations")).toList());
+    private static final List<String> FOUNDATION_TABLES_V13 = List.copyOf(
+            java.util.stream.Stream.concat(FOUNDATION_TABLES_V12.stream(),
+                    java.util.stream.Stream.of("system_chat_action_proposals")).toList());
     private static final Set<String> FOUNDATION_INDEXES_V10 = Set.of(
             "idx_skill_candidate_versions_lookup", "idx_skill_candidate_observations_candidate",
             "idx_skill_candidate_observations_scan", "idx_skill_exact_assignments_target",
@@ -246,6 +252,15 @@ public final class SchemaMigrationRunner {
             "idx_agent_materializations_agent", "idx_agent_materializations_key",
             "idx_context_bindings_agent", "idx_binding_owner_links_binding");
     private static final Set<String> FOUNDATION_INDEXES_V11 = FOUNDATION_INDEXES_V10;
+    private static final Set<String> FOUNDATION_INDEXES_V12 = java.util.Set.copyOf(
+            java.util.stream.Stream.concat(FOUNDATION_INDEXES_V11.stream(),
+                    java.util.stream.Stream.of("idx_assignment_binding_operations_assignment"))
+                    .collect(java.util.stream.Collectors.toSet()));
+    private static final Set<String> FOUNDATION_INDEXES_V13 = java.util.Set.copyOf(
+            java.util.stream.Stream.concat(FOUNDATION_INDEXES_V12.stream(),
+                    java.util.stream.Stream.of("idx_system_chat_proposals_conversation",
+                            "idx_system_chat_proposals_agent"))
+                    .collect(java.util.stream.Collectors.toSet()));
 
     private static final Map<String, List<String>> FOUNDATION_COLUMNS = Map.ofEntries(
             Map.entry("task_run_locations", List.of("task_run_id", "source_kind", "source_id", "workspace_type",
@@ -348,7 +363,15 @@ public final class SchemaMigrationRunner {
                     "materialization_key", "result_json", "created_at")),
             Map.entry("operation_idempotency", List.of("operation_type", "operation_key",
                     "request_digest", "result_state", "binding_key", "owner_type",
-                    "owner_id", "created_at"))
+                    "owner_id", "created_at")),
+            Map.entry("assignment_binding_operations", List.of("operation_key", "request_digest",
+                    "operation_state", "binding_key", "assignment_id", "task_run_id",
+                    "created_at", "updated_at")),
+            Map.entry("system_chat_action_proposals", List.of("id", "conversation_id", "agent_id",
+                    "target_kind", "target_id", "action", "expected_state_or_revision",
+                    "canonical_payload_digest", "operation_key", "proposal_state",
+                    "confirmation_operation_key", "linked_operation_id", "confirmed_at",
+                    "audit_facts_json", "created_at", "updated_at"))
     );
 
 
@@ -684,7 +707,9 @@ public final class SchemaMigrationRunner {
         if (latestVersion < 1) {
             return;
         }
-        List<String> expectedTables = latestVersion >= 11 ? FOUNDATION_TABLES_V11
+        List<String> expectedTables = latestVersion >= 13 ? FOUNDATION_TABLES_V13
+                : latestVersion >= 12 ? FOUNDATION_TABLES_V12
+                : latestVersion >= 11 ? FOUNDATION_TABLES_V11
                 : latestVersion >= 10 ? FOUNDATION_TABLES_V10
                 : latestVersion >= 9 ? FOUNDATION_TABLES_V9
                 : latestVersion >= 8 ? FOUNDATION_TABLES_V8
@@ -905,6 +930,34 @@ public final class SchemaMigrationRunner {
                     || !idempotency.contains("length(request_digest) = 64")
                     || !idempotency.contains("result_state text not null check")) {
                 throw new MigrationException("operation_idempotency is missing required context-operation constraints");
+            }
+        }
+        if (latestVersion >= 12) {
+            if (!allIndexes.containsAll(FOUNDATION_INDEXES_V12)) {
+                throw new MigrationException("Missing migration-owned v12 indexes: "
+                        + FOUNDATION_INDEXES_V12.stream().filter(index -> !allIndexes.contains(index)).toList());
+            }
+            String assignmentBindingOps = normalized(tableSql(connection, "assignment_binding_operations"));
+            if (!assignmentBindingOps.contains("operation_key text primary key")
+                    || !assignmentBindingOps.contains("length(request_digest) = 64")
+                    || !assignmentBindingOps.contains("operation_state text not null check")
+                    || !assignmentBindingOps.contains("operation_state in ('reserved', 'completed')")) {
+                throw new MigrationException("assignment_binding_operations is missing required constraints");
+            }
+        }
+        if (latestVersion >= 13) {
+            if (!allIndexes.containsAll(FOUNDATION_INDEXES_V13)) {
+                throw new MigrationException("Missing migration-owned v13 indexes: "
+                        + FOUNDATION_INDEXES_V13.stream().filter(index -> !allIndexes.contains(index)).toList());
+            }
+            String proposals = normalized(tableSql(connection, "system_chat_action_proposals"));
+            if (!proposals.contains("unique (operation_key)")
+                    || !proposals.contains("unique (target_kind, target_id, action, canonical_payload_digest)")
+                    || !proposals.contains("action text not null check")
+                    || !proposals.contains("'pause', 'resume', 'retry', 'replay', 'cancel'")
+                    || !proposals.contains("proposal_state text not null check")
+                    || !proposals.contains("length(canonical_payload_digest) = 64")) {
+                throw new MigrationException("system_chat_action_proposals is missing required constraints");
             }
         }
         if (latestVersion >= 6) {

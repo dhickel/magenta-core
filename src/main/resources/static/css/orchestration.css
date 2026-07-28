@@ -3392,3 +3392,378 @@
         min-width: 38rem;
     }
 }
+
+/* ── Phase 06: Agent Context Panel ── */
+
+.agent-context-panel {
+    border: 1px solid #cdd8e6;
+    border-radius: 5px;
+    background: #fff;
+    padding: 0.75rem 1rem;
+    max-height: 60vh;
+    overflow-y: auto;
+}
+
+.context-section {
+    margin-bottom: 0.75rem;
+}
+
+.context-section h4 {
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: #3b4a5e;
+    margin: 0 0 0.35rem 0;
+    padding-bottom: 0.25rem;
+    border-bottom: 1px solid #e7ecf3;
+}
+
+.context-facts {
+    display: grid;
+    grid-template-columns: max-content 1fr;
+    gap: 0.15rem 0.5rem;
+    margin: 0;
+    font-size: 0.78rem;
+}
+
+.context-facts dt {
+    font-weight: 600;
+    color: #5a6d82;
+}
+
+.context-facts dd {
+    margin: 0;
+    color: #2c3a4d;
+}
+
+/* ── Phase 06: System Chat Panel ── */
+
+.system-chat-panel {
+    border: 1px solid #cdd8e6;
+    border-radius: 5px;
+    background: #fff;
+    display: flex;
+    flex-direction: column;
+    max-height: 65vh;
+}
+
+.system-chat-panel .orch-panel-heading {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.5rem 0.75rem;
+    border-bottom: 1px solid #e7ecf3;
+}
+
+.system-chat-panel .orch-panel-heading h3 {
+    margin: 0;
+    font-size: 0.9rem;
+    color: #3b4a5e;
+}
+
+.system-chat-history {
+    flex: 1;
+    overflow-y: auto;
+    padding: 0.5rem 0.75rem;
+    min-height: 8rem;
+    max-height: 32rem;
+    background: #fafbfc;
+}
+
+.system-chat-msg {
+    margin-bottom: 0.6rem;
+    padding: 0.4rem 0.6rem;
+    border-radius: 5px;
+    max-width: 90%;
+}
+
+.system-chat-msg-user {
+    background: #e8f0fe;
+    margin-left: auto;
+    border: 1px solid #c4d7f2;
+}
+
+.system-chat-msg-assistant {
+    background: #f4f6f9;
+    margin-right: auto;
+    border: 1px solid #dfe4ed;
+}
+
+.system-chat-msg-role {
+    font-size: 0.68rem;
+    font-weight: 600;
+    color: #5a6d82;
+    margin-bottom: 0.15rem;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+}
+
+.system-chat-msg-text {
+    font-size: 0.82rem;
+    color: #2c3a4d;
+    line-height: 1.4;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
+.system-chat-input-form {
+    display: flex;
+    gap: 0.35rem;
+    padding: 0.5rem 0.75rem;
+    border-top: 1px solid #e7ecf3;
+    background: #fff;
+}
+
+.system-chat-input-form input[type="text"] {
+    flex: 1;
+    font-size: 0.82rem;
+    padding: 0.35rem 0.5rem;
+    border: 1px solid #cdd8e6;
+    border-radius: 4px;
+}
+
+.system-chat-stream-status {
+    font-size: 0.72rem;
+    color: #6b7889;
+    padding: 0.15rem 0.75rem 0.4rem 0.75rem;
+    min-height: 1.2rem;
+}
+
+.system-chat-proposals {
+    border: 1px solid #cdd8e6;
+    border-radius: 5px;
+    background: #fff;
+    margin-top: 0.5rem;
+    padding: 0.5rem 0.75rem;
+}
+
+/* ── Phase 06: Files Area Navigation ── */
+
+.agent-files-nav {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.3rem;
+    padding: 0.4rem 0.5rem;
+    border-bottom: 1px solid #e7ecf3;
+    background: #fafbfc;
+    border-radius: 4px 4px 0 0;
+}
+
+.agent-files-nav button,
+.agent-files-nav .nav-chip {
+    font-size: 0.75rem;
+    padding: 0.2rem 0.5rem;
+    border: 1px solid #cdd8e6;
+    border-radius: 4px;
+    background: #fff;
+    color: #3b4a5e;
+    cursor: pointer;
+    transition: background 0.15s ease;
+}
+
+.agent-files-nav button:hover,
+.agent-files-nav .nav-chip:hover {
+    background: #e8f0fe;
+    border-color: #b0c8e8;
+}
+
+.agent-files-nav button.active {
+    background: #2c5282;
+    color: #fff;
+    border-color: #2c5282;
+}
+
+.agent-files-nav .nav-separator {
+    width: 1px;
+    background: #cdd8e6;
+    margin: 0 0.15rem;
+    align-self: stretch;
+}
+
+/* ── Phase 06: Queue row enrichment ── */
+
+.assignment-context-meta {
+    font-size: 0.7rem;
+    color: #6b7889;
+    margin-top: 0.15rem;
+}
+
+.assignment-context-meta code {
+    font-size: 0.68rem;
+    background: #f4f6f9;
+    padding: 0.05rem 0.25rem;
+    border-radius: 3px;
+    color: #3b4a5e;
+}
+
+/* ── Phase 06: Compact operational tables ── */
+
+.orch-table.compact {
+    font-size: 0.75rem;
+    width: 100%;
+    border-collapse: collapse;
+}
+
+.orch-table.compact th {
+    font-size: 0.7rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    color: #5a6d82;
+    padding: 0.3rem 0.4rem;
+    border-bottom: 2px solid #cdd8e6;
+    text-align: left;
+}
+
+.orch-table.compact td {
+    padding: 0.25rem 0.4rem;
+    border-bottom: 1px solid #eef2f7;
+    vertical-align: top;
+}
+
+.orch-table.compact tr:hover td {
+    background: #f8fafc;
+}
+
+/* ── Context form styling ── */
+
+.orch-form-stack {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+}
+
+.orch-form-stack label {
+    font-size: 0.78rem;
+    font-weight: 500;
+    color: #3b4a5e;
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+}
+
+.orch-input,
+.orch-select {
+    font-size: 0.8rem;
+    padding: 0.3rem 0.45rem;
+    border: 1px solid #cdd8e6;
+    border-radius: 4px;
+    color: #2c3a4d;
+    background: #fff;
+}
+
+.orch-input:focus,
+.orch-select:focus {
+    outline: none;
+    border-color: #6b9bd2;
+    box-shadow: 0 0 0 2px rgba(107, 155, 210, 0.15);
+}
+
+.orch-muted {
+    color: #8a97a9;
+    font-size: 0.78rem;
+    font-style: italic;
+}
+
+.orch-actions {
+    display: flex;
+    gap: 0.4rem;
+    margin-top: 0.3rem;
+}
+
+/* ── Operational status chips ── */
+
+.orch-status-chip {
+    display: inline-block;
+    font-size: 0.68rem;
+    font-weight: 600;
+    padding: 0.1rem 0.4rem;
+    border-radius: 3px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+.orch-status-chip.active {
+    background: #e6ffed;
+    color: #1a6b3c;
+    border: 1px solid #b7dfc3;
+}
+
+.orch-status-chip.disabled {
+    background: #ffeef0;
+    color: #9b2c2c;
+    border: 1px solid #e5c5c8;
+}
+
+.orch-chip {
+    display: inline-block;
+    font-size: 0.68rem;
+    font-weight: 600;
+    padding: 0.1rem 0.4rem;
+    border-radius: 3px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    background: #f4f6f9;
+    color: #5a6d82;
+    border: 1px solid #dfe4ed;
+}
+
+/* ── Error states ── */
+
+.orch-status-error {
+    background: #fff5f5;
+    color: #9b2c2c;
+    border: 1px solid #fed7d7;
+    padding: 0.4rem 0.6rem;
+    border-radius: 4px;
+    font-size: 0.78rem;
+    margin-bottom: 0.5rem;
+}
+
+.orch-status {
+    background: #f4f6f9;
+    color: #3b4a5e;
+    border: 1px solid #dfe4ed;
+    padding: 0.4rem 0.6rem;
+    border-radius: 4px;
+    font-size: 0.78rem;
+    margin-bottom: 0.5rem;
+}
+
+/* ── Dashboard system chat referral replacement ── */
+
+.dashboard-chat-band .orch-muted-note {
+    font-size: 0.78rem;
+    color: #6b7889;
+}
+
+/* ── Mobile stacking for operational panels ── */
+
+@media (max-width: 900px) {
+    .system-chat-panel {
+        max-height: 50vh;
+    }
+
+    .system-chat-history {
+        max-height: 20rem;
+    }
+
+    .agent-files-nav {
+        flex-wrap: wrap;
+        gap: 0.2rem;
+        padding: 0.3rem;
+    }
+
+    .agent-files-nav button {
+        font-size: 0.7rem;
+        padding: 0.15rem 0.35rem;
+    }
+
+    .orch-table.compact {
+        font-size: 0.7rem;
+    }
+
+    .orch-table.compact th,
+    .orch-table.compact td {
+        padding: 0.2rem 0.3rem;
+    }
+}
