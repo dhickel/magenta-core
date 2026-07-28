@@ -118,18 +118,21 @@ public class SystemChatActionProposalService {
     }
 
     /**
-     * Only an explicit user-confirmation adapter may call this method. It must supply
-     * the proposal's bound agent and exact target; mismatches fail before control-plane use.
+     * Confirms one exact, user-visible proposal identity. The client must echo the
+     * proposal's canonical digest; the service derives the lifecycle operation key
+     * from that immutable identity instead of accepting a caller-generated key.
      */
     @Transactional
-    public ConfirmResult confirmProposal(String proposalId, String agentId, String targetId,
-                                         String confirmationOperationKey, boolean explicitUserConfirmation) {
-        if (!explicitUserConfirmation || blank(proposalId) || blank(agentId) || blank(targetId)
-                || blank(confirmationOperationKey)) return ConfirmResult.unavailable(proposalId);
-        ProposalRow proposal = findById(proposalId);
-        if (proposal == null || !agentId.equals(proposal.agentId()) || !targetId.equals(proposal.targetId())) {
+    public ConfirmResult confirmProposal(String proposalId, String agentId, String canonicalDigest,
+                                         boolean explicitUserConfirmation) {
+        if (!explicitUserConfirmation || blank(proposalId) || blank(agentId) || blank(canonicalDigest)) {
             return ConfirmResult.unavailable(proposalId);
         }
+        ProposalRow proposal = findById(proposalId);
+        if (proposal == null || !agentId.equals(proposal.agentId()) || !canonicalDigest.equals(proposal.digest())) {
+            return ConfirmResult.unavailable(proposalId);
+        }
+        String confirmationOperationKey = confirmationOperationKey(proposal);
         if ("CONFIRMED".equals(proposal.state())) {
             if (!confirmationOperationKey.equals(proposal.confirmationOperationKey())) throw new ProposalConflictException();
             return new ConfirmResult(proposal.id(), "CONFIRMED", proposal.linkedOperationId());
@@ -140,12 +143,12 @@ public class SystemChatActionProposalService {
         int claimed = jdbc.update("""
                 update system_chat_action_proposals
                 set proposal_state = 'CONFIRMING', confirmation_operation_key = ?, updated_at = ?
-                where id = ? and proposal_state = 'PENDING'
-                """, confirmationOperationKey, Instant.now().toString(), proposalId);
+                where id = ? and canonical_payload_digest = ? and proposal_state = 'PENDING'
+                """, confirmationOperationKey, Instant.now().toString(), proposalId, canonicalDigest);
         if (claimed != 1) return ConfirmResult.unavailable(proposalId);
 
         try {
-            WorkAssignment assignment = assignmentService.get(targetId);
+            WorkAssignment assignment = assignmentService.get(proposal.targetId());
             if (!agentId.equals(assignment.agentId())
                     || !proposal.expectedState().equals(assignment.status().name())
                     || !meaningful(proposal.action(), assignment.status())) {
@@ -153,7 +156,7 @@ public class SystemChatActionProposalService {
                 return new ConfirmResult(proposalId, "STALE", null);
             }
             // This is the existing agent-scoped lifecycle control plane and retains its own checks.
-            executeLifecycleAction(agentId, targetId, proposal.action(), confirmationOperationKey);
+            executeLifecycleAction(agentId, proposal.targetId(), proposal.action(), confirmationOperationKey);
             mark(proposalId, "CONFIRMED", confirmationOperationKey, confirmationOperationKey, "confirmed");
             return new ConfirmResult(proposalId, "CONFIRMED", confirmationOperationKey);
         } catch (RuntimeException exception) {
@@ -211,7 +214,7 @@ public class SystemChatActionProposalService {
                 where agent_id = ? and conversation_id = ?
                 order by created_at desc
                 """, agentId, conversationId).stream()
-                .map(row -> new ProposalListRow(row.id(), row.action(), row.targetId(), row.state(),
+                .map(row -> new ProposalListRow(row.id(), row.action(), row.targetId(), row.digest(), row.state(),
                         row.createdAt() != null ? Instant.parse(row.createdAt()) : Instant.EPOCH))
                 .toList();
     }
@@ -261,6 +264,10 @@ public class SystemChatActionProposalService {
             return HexFormat.of().formatHex(digest.digest());
         } catch (NoSuchAlgorithmException exception) { throw new IllegalStateException(exception); }
     }
+    private static String confirmationOperationKey(ProposalRow proposal) {
+        return "system-proposal-confirm:" + proposal.id() + ":" + proposal.digest();
+    }
+
     private static String normalizeAction(String action) {
         if (action == null || !VALID_ACTIONS.contains(action.toUpperCase(java.util.Locale.ROOT))) {
             throw new IllegalArgumentException("Unsupported proposal action");
@@ -291,7 +298,7 @@ public class SystemChatActionProposalService {
                                String createdAt) {
         CreateResult asCreateResult() { return new CreateResult(id, action, targetId, state); }
     }
-    public record ProposalListRow(String proposalId, String action, String targetId,
+    public record ProposalListRow(String proposalId, String action, String targetId, String canonicalDigest,
                                   String state, java.time.Instant createdAt) {}
     private static final class ProposalConflictException extends IllegalStateException { }
 }

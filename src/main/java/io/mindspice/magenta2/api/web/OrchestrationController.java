@@ -6429,11 +6429,7 @@ public class OrchestrationController {
             WorkspaceExplorerService.DirectoryListing listing = explorer.list(descriptor,
                 explorer.normalizeRelativePath("."));
             String encodedAgentId = URLEncoder.encode(agentId, StandardCharsets.UTF_8);
-            String shell = WorkspaceExplorerFragments.agentShell(encodedAgentId, listing, null, null);
-            String nav = WorkspaceExplorerFragments.filesAreaNav(encodedAgentId, "home");
-            // Insert nav after the shell opening div
-            return shell.replace("class=\"workspace-file-explorer-shell agent-files-operations-shell\">",
-                    "class=\"workspace-file-explorer-shell agent-files-operations-shell\" data-active-area=\"home\">" + nav);
+            return WorkspaceExplorerFragments.agentShell(encodedAgentId, listing, null, null, "home");
         } catch (WorkspaceResolutionException e) {
             response.setStatus(HttpServletResponse.SC_NOT_FOUND);
             return WorkspaceExplorerFragments.agentListError("Agent not found.");
@@ -6472,10 +6468,7 @@ public class OrchestrationController {
                         }
                         throw e;
                     }
-                    String shell = WorkspaceExplorerFragments.agentShell(encodedAgentId, listing, null, null);
-                    String nav = WorkspaceExplorerFragments.filesAreaNav(encodedAgentId, "scripts");
-                    yield shell.replace("class=\"workspace-file-explorer-shell agent-files-operations-shell\">",
-                            "class=\"workspace-file-explorer-shell agent-files-operations-shell\" data-active-area=\"scripts\">" + nav);
+                    yield WorkspaceExplorerFragments.agentShell(encodedAgentId, listing, null, null, "scripts");
                 } catch (WorkspaceFileException e) {
                     yield WorkspaceExplorerFragments.filesAreaEmpty(encodedAgentId, "scripts",
                             "Scripts area: " + e.getMessage());
@@ -6498,10 +6491,7 @@ public class OrchestrationController {
                         }
                         throw e;
                     }
-                    String shell = WorkspaceExplorerFragments.agentShell(encodedAgentId, listing, null, null);
-                    String nav = WorkspaceExplorerFragments.filesAreaNav(encodedAgentId, "apps");
-                    yield shell.replace("class=\"workspace-file-explorer-shell agent-files-operations-shell\">",
-                            "class=\"workspace-file-explorer-shell agent-files-operations-shell\" data-active-area=\"apps\">" + nav);
+                    yield WorkspaceExplorerFragments.agentShell(encodedAgentId, listing, null, null, "apps");
                 } catch (WorkspaceFileException e) {
                     yield WorkspaceExplorerFragments.filesAreaEmpty(encodedAgentId, "apps",
                             "Apps area: " + e.getMessage());
@@ -6515,10 +6505,7 @@ public class OrchestrationController {
                     WorkspaceDescriptor descriptor = dirService.resolveForRead(WorkspaceKind.AGENT, agentId);
                     WorkspaceExplorerService.DirectoryListing listing = explorer.list(descriptor,
                             explorer.normalizeRelativePath("."));
-                    String shell = WorkspaceExplorerFragments.agentShell(encodedAgentId, listing, null, null);
-                    String nav = WorkspaceExplorerFragments.filesAreaNav(encodedAgentId, "home");
-                    yield shell.replace("class=\"workspace-file-explorer-shell agent-files-operations-shell\">",
-                            "class=\"workspace-file-explorer-shell agent-files-operations-shell\" data-active-area=\"home\">" + nav);
+                    yield WorkspaceExplorerFragments.agentShell(encodedAgentId, listing, null, null, "home");
                 } catch (WorkspaceFileException e) {
                     yield WorkspaceExplorerFragments.agentEmptyRoot(encodedAgentId);
                 } catch (RuntimeException e) {
@@ -6539,10 +6526,7 @@ public class OrchestrationController {
                         }
                         throw e;
                     }
-                    String shell = WorkspaceExplorerFragments.agentShell(encodedAgentId, listing, null, null);
-                    String nav = WorkspaceExplorerFragments.filesAreaNav(encodedAgentId, "repos");
-                    yield shell.replace("class=\"workspace-file-explorer-shell agent-files-operations-shell\">",
-                            "class=\"workspace-file-explorer-shell agent-files-operations-shell\" data-active-area=\"repos\">" + nav);
+                    yield WorkspaceExplorerFragments.agentShell(encodedAgentId, listing, null, null, "repos");
                 } catch (WorkspaceFileException e) {
                     yield WorkspaceExplorerFragments.filesAreaEmpty(encodedAgentId, "repos",
                             "Stored Items: " + e.getMessage());

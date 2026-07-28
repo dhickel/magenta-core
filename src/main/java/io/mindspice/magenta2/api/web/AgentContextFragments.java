@@ -1,7 +1,5 @@
 package io.mindspice.magenta2.api.web;
 
-import java.net.URLEncoder;
-import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
@@ -14,270 +12,225 @@ import io.mindspice.magenta2.ai.orchestration.context.AgentContextRepository.Per
 import io.mindspice.magenta2.ai.orchestration.context.AgentContextRepository.SelectionKind;
 import io.mindspice.magenta2.ai.orchestration.context.AgentMaterializationRepository.MaterializationRecord;
 import io.mindspice.magenta2.ai.orchestration.context.AgentMaterializationRepository.MaterializationState;
+import io.mindspice.simplypages.components.Div;
+import io.mindspice.simplypages.components.Paragraph;
+import io.mindspice.simplypages.components.forms.Button;
+import io.mindspice.simplypages.components.forms.Form;
+import io.mindspice.simplypages.core.Component;
+import io.mindspice.simplypages.core.HtmlTag;
 
-/**
- * HTMX fragment renderer for the agent context panel. Receives only
- * authorized secret-free records; exposes no absolute paths, credentials,
- * or internal claim details.
- */
+/** Stateless SimplyPages renderer for secret-free agent-context records. */
 final class AgentContextFragments {
-
     static final String CONTEXT_PANEL_ID = "agent-context-panel";
     private static final DateTimeFormatter TIME_FORMAT = DateTimeFormatter
-            .ofPattern("yyyy-MM-dd HH:mm", Locale.ROOT)
-            .withZone(ZoneId.systemDefault());
+            .ofPattern("yyyy-MM-dd HH:mm", Locale.ROOT).withZone(ZoneId.systemDefault());
 
     private AgentContextFragments() {}
 
-    static String contextSummary(
-            String encodedAgentId,
-            ContextDefault defaultRecord,
-            List<ContextBinding> bindings,
-            List<MaterializationRecord> materializations,
-            String message) {
-        StringBuilder html = new StringBuilder();
-        html.append("<div id=\"").append(CONTEXT_PANEL_ID).append("\" class=\"orch-panel agent-context-panel\">");
-        html.append("<div class=\"orch-panel-heading\">");
-        html.append("<h3>Agent Context</h3>");
-        html.append("<button type=\"button\" class=\"button button-secondary small\""
-                + " hx-get=\"/api/agents/").append(encodedAgentId).append("/context/panel\""
-                + " hx-target=\"#").append(CONTEXT_PANEL_ID).append("\" hx-swap=\"outerHTML\">Refresh</button>");
-        html.append("</div>");
-
-        if (message != null && !message.isBlank()) {
-            html.append("<div class=\"orch-status\">").append(escape(message)).append("</div>");
-        }
-
-        // Default section
-        html.append("<section class=\"context-section\"><h4>Default</h4>");
-        if (defaultRecord != null) {
-            html.append("<dl class=\"context-facts\">");
-            html.append("<dt>Kind</dt><dd>").append(escape(defaultRecord.selectionKind().name())).append("</dd>");
-            if (defaultRecord.selectionKind() == SelectionKind.MATERIALIZATION && defaultRecord.materializationKey() != null) {
-                html.append("<dt>Project</dt><dd><code>").append(escape(defaultRecord.materializationKey().serialized())).append("</code></dd>");
-                html.append("<dt>Generation</dt><dd>").append(defaultRecord.materializationGeneration()).append("</dd>");
-            } else if (defaultRecord.selectionKind() == SelectionKind.PERSONAL && defaultRecord.personalSelection() != null) {
-                html.append("<dt>Area</dt><dd>").append(escape(defaultRecord.personalSelection().name())).append("</dd>");
-            }
-            html.append("<dt>Version</dt><dd>").append(defaultRecord.version()).append("</dd>");
-            html.append("<dt>Reason</dt><dd>").append(escape(defaultRecord.reason())).append("</dd>");
-            html.append("</dl>");
-        } else {
-            html.append("<p class=\"orch-muted\">No context default configured.</p>");
-        }
-        html.append("</section>");
-
-        // Materializations section
-        html.append("<section class=\"context-section\"><h4>Materializations</h4>");
-        if (materializations != null && !materializations.isEmpty()) {
-            html.append("<table class=\"orch-table compact\"><thead><tr>"
-                    + "<th>Key</th><th>State</th><th>Generation</th><th>Updated</th></tr></thead><tbody>");
-            for (MaterializationRecord m : materializations) {
-                html.append("<tr>")
-                        .append("<td><code>").append(escape(m.materializationKey().serialized())).append("</code></td>")
-                        .append("<td>").append(stateChip(m.state())).append("</td>")
-                        .append("<td>").append(m.generation()).append("</td>")
-                        .append("<td>").append(time(m.updatedAt())).append("</td>")
-                        .append("</tr>");
-            }
-            html.append("</tbody></table>");
-        } else {
-            html.append("<p class=\"orch-muted\">No materializations.</p>");
-        }
-        html.append("</section>");
-
-        // Bindings section
-        html.append("<section class=\"context-section\"><h4>Bindings</h4>");
-        if (bindings != null && !bindings.isEmpty()) {
-            html.append("<table class=\"orch-table compact\"><thead><tr>"
-                    + "<th>Binding Key</th><th>Kind</th><th>Captured</th></tr></thead><tbody>");
-            for (ContextBinding b : bindings) {
-                html.append("<tr>")
-                        .append("<td><code>").append(escape(truncateKey(b.bindingKey()))).append("</code></td>")
-                        .append("<td>").append(escape(b.selectionKind() != null ? b.selectionKind().name() : "—")).append("</td>")
-                        .append("<td>").append(time(b.capturedAt())).append("</td>")
-                        .append("</tr>");
-            }
-            html.append("</tbody></table>");
-        } else {
-            html.append("<p class=\"orch-muted\">No bindings captured.</p>");
-        }
-        html.append("</section>");
-
-        html.append("</div>");
-        return html.toString();
+    static String contextSummary(String encodedAgentId, ContextDefault defaultRecord,
+                                 List<ContextBinding> bindings, List<MaterializationRecord> materializations,
+                                 String message) {
+        Div panel = panel("Agent Context", encodedAgentId, "/context/panel", "Refresh");
+        if (message != null && !message.isBlank()) panel.withChild(status(message, false));
+        panel.withChild(defaultSection(defaultRecord));
+        panel.withChild(materializationSection(materializations));
+        panel.withChild(bindingSection(bindings));
+        return panel.render();
     }
 
     static String defaultEditor(String encodedAgentId, ContextDefault currentDefault,
-                                 List<MaterializationRecord> readyMaterializations,
-                                 String message, boolean error) {
-        StringBuilder html = new StringBuilder();
-        html.append("<div id=\"").append(CONTEXT_PANEL_ID).append("\" class=\"orch-panel agent-context-panel\">");
-        html.append("<div class=\"orch-panel-heading\"><h3>Context Default</h3></div>");
-
-        if (message != null && !message.isBlank()) {
-            html.append("<div class=\"").append(error ? "orch-status-error" : "orch-status").append("\">")
-                    .append(escape(message)).append("</div>");
+                                List<MaterializationRecord> readyMaterializations,
+                                String message, boolean error) {
+        Div panel = panel("Context Default", null, null, null);
+        if (message != null && !message.isBlank()) panel.withChild(status(message, error));
+        Form form = Form.create();
+        form.withClass("orch-form-stack").withAttribute("data-htmx-error-swap", "true")
+                .hxPut(route(encodedAgentId, "/defaults")).hxTarget("#" + CONTEXT_PANEL_ID).hxSwap("outerHTML");
+        form.withChild(hidden("expectedVersion", String.valueOf(currentDefault == null ? 0 : currentDefault.version())));
+        form.withChild(label("Kind", select("selectionKind", List.of(
+                option("MATERIALIZATION", "Materialization (Project)", selected(currentDefault, SelectionKind.MATERIALIZATION)),
+                option("PERSONAL", "Personal", selected(currentDefault, SelectionKind.PERSONAL))))));
+        form.withChild(label("Project Key", input("text", "materializationKey", "agent/project-key",
+                currentDefault != null && currentDefault.materializationKey() != null
+                        ? currentDefault.materializationKey().serialized() : null)));
+        form.withChild(label("Generation", input("number", "materializationGeneration", null,
+                currentDefault != null && currentDefault.materializationGeneration() != null
+                        ? String.valueOf(currentDefault.materializationGeneration()) : null)
+                .withAttribute("min", "1")));
+        HtmlTag personal = new HtmlTag("select").withAttribute("name", "personalSelection").withClass("orch-select");
+        for (PersonalSelection selection : PersonalSelection.values()) {
+            personal.withChild(option(selection.name(), selection.name(), currentDefault != null
+                    && selection == currentDefault.personalSelection()));
         }
-
-        html.append("<form class=\"orch-form-stack\" data-htmx-error-swap=\"true\""
-                + " hx-put=\"/api/agents/").append(encodedAgentId).append("/context/defaults\""
-                + " hx-target=\"#").append(CONTEXT_PANEL_ID).append("\" hx-swap=\"outerHTML\">");
-
-        // Expected version (hidden)
-        html.append("<input type=\"hidden\" name=\"expectedVersion\" value=\"")
-                .append(currentDefault != null ? currentDefault.version() : 0).append("\">");
-
-        // Selection kind
-        html.append("<label>Kind<select name=\"selectionKind\" class=\"orch-select\">");
-        String currentKind = currentDefault != null && currentDefault.selectionKind() != null
-                ? currentDefault.selectionKind().name() : "";
-        html.append("<option value=\"MATERIALIZATION\"").append("MATERIALIZATION".equals(currentKind) ? " selected" : "")
-                .append(">Materialization (Project)</option>");
-        html.append("<option value=\"PERSONAL\"").append("PERSONAL".equals(currentKind) ? " selected" : "")
-                .append(">Personal</option>");
-        html.append("</select></label>");
-
-        // Materialization key (for materialization kind)
-        html.append("<label>Project Key<input type=\"text\" name=\"materializationKey\""
-                + " placeholder=\"agent/project-key\" class=\"orch-input\""
-                + " value=\"").append(currentDefault != null && currentDefault.materializationKey() != null
-                ? escapeAttr(currentDefault.materializationKey().serialized()) : "").append("\"></label>");
-
-        // Materialization generation
-        html.append("<label>Generation<input type=\"number\" name=\"materializationGeneration\""
-                + " class=\"orch-input\" min=\"1\""
-                + " value=\"").append(currentDefault != null ? currentDefault.materializationGeneration() : "").append("\"></label>");
-
-        // Personal selection
-        html.append("<label>Personal Area<select name=\"personalSelection\" class=\"orch-select\">");
-        String currentPersonal = currentDefault != null && currentDefault.personalSelection() != null
-                ? currentDefault.personalSelection().name() : "";
-        for (PersonalSelection ps : PersonalSelection.values()) {
-            html.append("<option value=\"").append(ps.name()).append("\"")
-                    .append(ps.name().equals(currentPersonal) ? " selected" : "")
-                    .append(">").append(ps.name()).append("</option>");
-        }
-        html.append("</select></label>");
-
-        // Reason
-        html.append("<label>Reason<input type=\"text\" name=\"reason\" class=\"orch-input\""
-                + " placeholder=\"Why this default?\" required></label>");
-
-        // Operation key (for idempotency)
-        html.append("<label>Operation Key<input type=\"text\" name=\"operationKey\" class=\"orch-input\""
-                + " placeholder=\"optional idempotency key\"></label>");
-
-        html.append("<div class=\"orch-actions\">");
-        html.append("<button type=\"submit\" class=\"button orch-primary\">Update Default</button>");
-        html.append("<button type=\"button\" class=\"button button-secondary\""
-                + " hx-get=\"/api/agents/").append(encodedAgentId).append("/context/panel\""
-                + " hx-target=\"#").append(CONTEXT_PANEL_ID).append("\" hx-swap=\"outerHTML\">Cancel</button>");
-        html.append("</div>");
-
-        html.append("</form>");
-
-        // Ready materializations reference
+        form.withChild(label("Personal Area", personal));
+        form.withChild(label("Reason", input("text", "reason", "Why this default?", null)
+                .withAttribute("required", "required")));
+        form.withChild(label("Operation Key", input("text", "operationKey", "optional idempotency key", null)));
+        form.withChild(new Div().withClass("orch-actions")
+                .withChild(Button.create("Update Default").withClass("orch-primary").withAttribute("type", "submit"))
+                .withChild(Button.create("Cancel").withClass("button-secondary").withAttribute("type", "button")
+                        .hxGet(route(encodedAgentId, "/panel")).hxTarget("#" + CONTEXT_PANEL_ID).hxSwap("outerHTML")));
+        panel.withChild(form);
         if (readyMaterializations != null && !readyMaterializations.isEmpty()) {
-            html.append("<section class=\"context-section\"><h4>Available Projects</h4>");
-            html.append("<table class=\"orch-table compact\"><thead><tr><th>Key</th><th>Gen</th></tr></thead><tbody>");
-            for (MaterializationRecord m : readyMaterializations) {
-                html.append("<tr><td><code>").append(escape(m.materializationKey().serialized()))
-                        .append("</code></td><td>").append(m.generation()).append("</td></tr>");
+            HtmlTag table = table("Key", "Gen");
+            HtmlTag body = new HtmlTag("tbody");
+            for (MaterializationRecord record : readyMaterializations) {
+                body.withChild(row(code(record.materializationKey().serialized()), text(String.valueOf(record.generation()))));
             }
-            html.append("</tbody></table></section>");
+            panel.withChild(section("Available Projects", table.withChild(body)));
         }
-
-        html.append("</div>");
-        return html.toString();
+        return panel.render();
     }
 
     static String materializationList(String encodedAgentId, List<MaterializationRecord> records, String message) {
-        StringBuilder html = new StringBuilder();
-        html.append("<div id=\"").append(CONTEXT_PANEL_ID).append("\" class=\"orch-panel agent-context-panel\">");
-        html.append("<div class=\"orch-panel-heading\">");
-        html.append("<h3>Materializations</h3>");
-        html.append("<button type=\"button\" class=\"button button-secondary small\""
-                + " hx-get=\"/api/agents/").append(encodedAgentId).append("/context/panel\""
-                + " hx-target=\"#").append(CONTEXT_PANEL_ID).append("\" hx-swap=\"outerHTML\">Back</button>");
-        html.append("</div>");
-
-        if (message != null && !message.isBlank()) {
-            html.append("<div class=\"orch-status\">").append(escape(message)).append("</div>");
-        }
-
+        Div panel = panel("Materializations", encodedAgentId, "/context/panel", "Back");
+        if (message != null && !message.isBlank()) panel.withChild(status(message, false));
         if (records == null || records.isEmpty()) {
-            html.append("<p class=\"orch-muted\">No materializations exist for this agent.</p>");
+            panel.withChild(new Paragraph("No materializations exist for this agent.").withClass("orch-muted"));
         } else {
-            html.append("<table class=\"orch-table compact\"><thead><tr>"
-                    + "<th>Key</th><th>State</th><th>Gen</th><th>Created</th><th>Updated</th></tr></thead><tbody>");
-            for (MaterializationRecord m : records) {
-                html.append("<tr>")
-                        .append("<td><code>").append(escape(m.materializationKey().serialized())).append("</code></td>")
-                        .append("<td>").append(stateChip(m.state())).append("</td>")
-                        .append("<td>").append(m.generation()).append("</td>")
-                        .append("<td>").append(time(m.createdAt())).append("</td>")
-                        .append("<td>").append(time(m.updatedAt())).append("</td>")
-                        .append("</tr>");
+            HtmlTag table = table("Key", "State", "Gen", "Created", "Updated");
+            HtmlTag body = new HtmlTag("tbody");
+            for (MaterializationRecord record : records) {
+                body.withChild(row(code(record.materializationKey().serialized()), stateChip(record.state()),
+                        text(String.valueOf(record.generation())), text(time(record.createdAt())), text(time(record.updatedAt()))));
             }
-            html.append("</tbody></table>");
+            panel.withChild(table.withChild(body));
         }
-
-        // Provision form
-        html.append("<section class=\"context-section\"><h4>Provision Project</h4>");
-        html.append("<form class=\"orch-form-stack\" data-htmx-error-swap=\"true\""
-                + " hx-post=\"/api/agents/").append(encodedAgentId).append("/context/materializations\""
-                + " hx-target=\"#").append(CONTEXT_PANEL_ID).append("\" hx-swap=\"outerHTML\">");
-        html.append("<label>Project Key<input type=\"text\" name=\"projectKey\" class=\"orch-input\""
-                + " placeholder=\"e.g. my-project\" required></label>");
-        html.append("<label>Operation Key<input type=\"text\" name=\"operationKey\" class=\"orch-input\""
-                + " placeholder=\"optional\"></label>");
-        html.append("<div class=\"orch-actions\">");
-        html.append("<button type=\"submit\" class=\"button orch-primary\">Provision</button>");
-        html.append("</div>");
-        html.append("</form></section>");
-
-        html.append("</div>");
-        return html.toString();
+        Form form = Form.create();
+        form.withClass("orch-form-stack").withAttribute("data-htmx-error-swap", "true")
+                .hxPost(route(encodedAgentId, "/materializations")).hxTarget("#" + CONTEXT_PANEL_ID).hxSwap("outerHTML");
+        form.withChild(label("Project Key", input("text", "projectKey", "e.g. my-project", null)
+                .withAttribute("required", "required")));
+        form.withChild(label("Operation Key", input("text", "operationKey", "optional", null)));
+        form.withChild(new Div().withClass("orch-actions")
+                .withChild(Button.create("Provision").withClass("orch-primary").withAttribute("type", "submit")));
+        panel.withChild(section("Provision Project", form));
+        return panel.render();
     }
 
     static String errorPanel(String encodedAgentId, String title, String message) {
-        return "<div id=\"" + CONTEXT_PANEL_ID + "\" class=\"orch-panel agent-context-panel\">"
-                + "<div class=\"orch-panel-heading\"><h3>" + escape(title) + "</h3></div>"
-                + "<div class=\"orch-status-error\">" + escape(message) + "</div>"
-                + "<button type=\"button\" class=\"button button-secondary\""
-                + " hx-get=\"/api/agents/" + encodedAgentId + "/context/panel\""
-                + " hx-target=\"#" + CONTEXT_PANEL_ID + "\" hx-swap=\"outerHTML\">Retry</button>"
-                + "</div>";
+        return panel(title, encodedAgentId, "/context/panel", "Retry")
+                .withChild(status(message, true)).render();
     }
 
-    private static String stateChip(MaterializationState state) {
-        if (state == null) return "<span class=\"orch-chip\">UNKNOWN</span>";
+    private static Div defaultSection(ContextDefault defaultRecord) {
+        if (defaultRecord == null) return section("Default", new Paragraph("No context default configured.").withClass("orch-muted"));
+        Div facts = new Div().withClass("context-facts")
+                .withChild(fact("Kind", defaultRecord.selectionKind().name()));
+        if (defaultRecord.selectionKind() == SelectionKind.MATERIALIZATION && defaultRecord.materializationKey() != null) {
+            facts.withChild(fact("Project", code(defaultRecord.materializationKey().serialized())))
+                    .withChild(fact("Generation", String.valueOf(defaultRecord.materializationGeneration())));
+        } else if (defaultRecord.personalSelection() != null) {
+            facts.withChild(fact("Area", defaultRecord.personalSelection().name()));
+        }
+        facts.withChild(fact("Version", String.valueOf(defaultRecord.version())))
+                .withChild(fact("Reason", defaultRecord.reason()));
+        return section("Default", facts);
+    }
+
+    private static Div materializationSection(List<MaterializationRecord> records) {
+        if (records == null || records.isEmpty()) return section("Materializations", new Paragraph("No materializations.").withClass("orch-muted"));
+        HtmlTag table = table("Key", "State", "Generation", "Updated");
+        HtmlTag body = new HtmlTag("tbody");
+        for (MaterializationRecord record : records) {
+            body.withChild(row(code(record.materializationKey().serialized()), stateChip(record.state()),
+                    text(String.valueOf(record.generation())), text(time(record.updatedAt()))));
+        }
+        return section("Materializations", table.withChild(body));
+    }
+
+    private static Div bindingSection(List<ContextBinding> bindings) {
+        if (bindings == null || bindings.isEmpty()) return section("Bindings", new Paragraph("No bindings captured.").withClass("orch-muted"));
+        HtmlTag table = table("Binding Key", "Kind", "Captured");
+        HtmlTag body = new HtmlTag("tbody");
+        for (ContextBinding binding : bindings) {
+            body.withChild(row(code(truncateKey(binding.bindingKey())), text(binding.selectionKind().name()), text(time(binding.capturedAt()))));
+        }
+        return section("Bindings", table.withChild(body));
+    }
+
+    private static Div panel(String title, String encodedAgentId, String refreshPath, String refreshLabel) {
+        Div panel = new Div().withId(CONTEXT_PANEL_ID).withClass("orch-panel agent-context-panel");
+        Div heading = new Div().withClass("orch-panel-heading").withChild(new HtmlTag("h3").withInnerText(title));
+        if (encodedAgentId != null && refreshPath != null) {
+            heading.withChild(Button.create(refreshLabel).withClass("button-secondary small")
+                    .hxGet(route(encodedAgentId, refreshPath)).hxTarget("#" + CONTEXT_PANEL_ID).hxSwap("outerHTML"));
+        }
+        return panel.withChild(heading);
+    }
+
+    private static Div section(String title, Component content) {
+        return new Div().withClass("context-section").withChild(new HtmlTag("h4").withInnerText(title)).withChild(content);
+    }
+
+    private static Component status(String value, boolean error) {
+        return new Div().withClass(error ? "orch-status-error" : "orch-status").withInnerText(value == null ? "" : value);
+    }
+
+    private static HtmlTag table(String... headings) {
+        HtmlTag row = new HtmlTag("tr");
+        for (String heading : headings) row.withChild(new HtmlTag("th").withInnerText(heading));
+        return new HtmlTag("table").withClass("orch-table compact").withChild(new HtmlTag("thead").withChild(row));
+    }
+
+    private static HtmlTag row(Component... cells) {
+        HtmlTag row = new HtmlTag("tr");
+        for (Component cell : cells) row.withChild(new HtmlTag("td").withChild(cell));
+        return row;
+    }
+
+    private static Div fact(String label, String value) {
+        return fact(label, text(value));
+    }
+
+    private static Div fact(String label, Component value) {
+        return new Div().withClass("context-fact")
+                .withChild(new HtmlTag("span").withClass("context-fact-label").withInnerText(label))
+                .withChild(new HtmlTag("span").withClass("context-fact-value").withChild(value));
+    }
+
+    private static HtmlTag label(String value, Component input) {
+        return new HtmlTag("label").withInnerText(value).withChild(input);
+    }
+
+    private static HtmlTag input(String type, String name, String placeholder, String value) {
+        HtmlTag input = new HtmlTag("input").withAttribute("type", type).withAttribute("name", name).withClass("orch-input");
+        if (placeholder != null) input.withAttribute("placeholder", placeholder);
+        if (value != null) input.withAttribute("value", value);
+        return input;
+    }
+
+    private static HtmlTag hidden(String name, String value) {
+        return new HtmlTag("input").withAttribute("type", "hidden").withAttribute("name", name).withAttribute("value", value);
+    }
+
+    private static HtmlTag select(String name, List<HtmlTag> options) {
+        HtmlTag select = new HtmlTag("select").withAttribute("name", name).withClass("orch-select");
+        options.forEach(select::withChild);
+        return select;
+    }
+
+    private static HtmlTag option(String value, String label, boolean selected) {
+        HtmlTag option = new HtmlTag("option").withAttribute("value", value).withInnerText(label);
+        return selected ? option.withAttribute("selected", "selected") : option;
+    }
+
+    private static boolean selected(ContextDefault current, SelectionKind kind) {
+        return current != null && current.selectionKind() == kind;
+    }
+
+    private static Component stateChip(MaterializationState state) {
         String css = switch (state) {
             case READY -> "orch-status-chip active";
+            case FAILED, REVOKED -> "orch-status-chip disabled";
             case PROVISIONING -> "orch-chip";
-            case FAILED -> "orch-status-chip disabled";
-            case REVOKED -> "orch-status-chip disabled";
         };
-        return "<span class=\"" + css + "\">" + escape(state.name()) + "</span>";
+        return new HtmlTag("span").withClass(css).withInnerText(state.name());
     }
 
-    private static String time(Instant instant) {
-        return instant == null ? "—" : TIME_FORMAT.format(instant);
-    }
-
-    private static String escape(String value) {
-        if (value == null) return "";
-        return value.replace("&", "&amp;").replace("<", "&lt;")
-                .replace(">", "&gt;").replace("\"", "&quot;").replace("'", "&#39;");
-    }
-
-    private static String escapeAttr(String value) {
-        return escape(value);
-    }
-
-    private static String truncateKey(String key) {
-        if (key == null) return "—";
-        return key.length() > 48 ? key.substring(0, 45) + "…" : key;
-    }
+    private static Component code(String value) { return new HtmlTag("code").withInnerText(value == null ? "" : value); }
+    private static Component text(String value) { return new HtmlTag("span").withInnerText(value == null ? "—" : value); }
+    private static String route(String agentId, String suffix) { return "/api/agents/" + agentId + "/context" + suffix; }
+    private static String time(Instant instant) { return instant == null ? "—" : TIME_FORMAT.format(instant); }
+    private static String truncateKey(String key) { return key != null && key.length() > 48 ? key.substring(0, 45) + "…" : key; }
 }

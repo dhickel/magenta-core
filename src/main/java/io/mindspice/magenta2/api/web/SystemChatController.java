@@ -6,7 +6,6 @@ import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
-import java.util.UUID;
 
 import io.mindspice.magenta2.ai.chat.system.SystemChatActionProposalService;
 import io.mindspice.magenta2.ai.chat.system.SystemChatActionProposalService.ConfirmResult;
@@ -62,7 +61,7 @@ class SystemChatController {
             return SystemChatFragments.panel(encode(agentId), null, false);
         }
         try {
-            var result = systemChatService.resolveProfile();
+            var result = systemChatService.resolveProfile(agentId);
             return SystemChatFragments.panel(encode(agentId),
                     result.conversationId(), result.available());
         } catch (RuntimeException e) {
@@ -80,7 +79,7 @@ class SystemChatController {
             return SystemChatFragments.history(encode(agentId), List.of());
         }
         try {
-            var result = systemChatService.resolveProfile();
+            var result = systemChatService.resolveProfile(agentId);
             if (!result.available()) {
                 return SystemChatFragments.history(encode(agentId), List.of());
             }
@@ -108,7 +107,7 @@ class SystemChatController {
             return completeWithError(emitter, "Message is empty or too large");
         }
 
-        var result = systemChatService.resolveProfile();
+        var result = systemChatService.resolveProfile(agentId);
         if (!result.available()) {
             return completeWithError(emitter, "System chat is unavailable");
         }
@@ -123,7 +122,7 @@ class SystemChatController {
         }
 
         try {
-            var invocationResult = systemChatService.invoke(message);
+            var invocationResult = systemChatService.invoke(agentId, message);
             if (!invocationResult.available()) {
                 emitter.send(SseEmitter.event()
                         .name("error")
@@ -177,7 +176,7 @@ class SystemChatController {
             return SystemChatFragments.proposals(encode(agentId), List.of());
         }
         try {
-            var result = systemChatService.resolveProfile();
+            var result = systemChatService.resolveProfile(agentId);
             if (!result.available()) {
                 return SystemChatFragments.proposals(encode(agentId), List.of());
             }
@@ -197,7 +196,7 @@ class SystemChatController {
             return ResponseEntity.status(404).body(Map.of("reason", "Agent not found"));
         }
         try {
-            var result = systemChatService.resolveProfile();
+            var result = systemChatService.resolveProfile(agentId);
             if (!result.available()) {
                 return ResponseEntity.ok(Map.of("agentId", agentId, "available", false, "proposals", List.of()));
             }
@@ -218,27 +217,24 @@ class SystemChatController {
     @ResponseBody
     public String confirmProposal(@PathVariable String agentId,
                                   @PathVariable String proposalId,
+                                  @RequestParam("digest") String canonicalDigest,
                                   HttpServletResponse response) {
         if (!agentExists(agentId)) {
             response.setStatus(404);
             return SystemChatFragments.proposals(encode(agentId), List.of());
         }
         try {
-            var result = systemChatService.resolveProfile();
+            var result = systemChatService.resolveProfile(agentId);
             if (!result.available()) {
                 response.setStatus(503);
                 return SystemChatFragments.proposals(encode(agentId), List.of());
             }
 
-            String targetId = extractTargetId(agentId, proposalId);
-            if (targetId == null) {
-                response.setStatus(404);
-                return SystemChatFragments.proposals(encode(agentId), loadProposals(agentId, result.conversationId()));
-            }
-
-            String confirmationKey = "confirm:" + proposalId + ":" + UUID.randomUUID();
             ConfirmResult confirmResult = proposalService.confirmProposal(
-                    proposalId, agentId, targetId, confirmationKey, true);
+                    proposalId, agentId, canonicalDigest, true);
+            if ("UNAVAILABLE".equals(confirmResult.state())) {
+                response.setStatus(409);
+            }
 
             var proposals = loadProposals(agentId, result.conversationId());
             return SystemChatFragments.proposals(encode(agentId), proposals);
@@ -246,7 +242,7 @@ class SystemChatController {
             log.debug("Proposal confirmation failed for agent {}", agentId, e);
             response.setStatus(409);
             try {
-                var result = systemChatService.resolveProfile();
+                var result = systemChatService.resolveProfile(agentId);
                 var proposals = result.available() ? loadProposals(agentId, result.conversationId()) : List.<SystemChatFragments.ProposalRecord>of();
                 return SystemChatFragments.proposals(encode(agentId), proposals);
             } catch (RuntimeException ignored) {
@@ -265,30 +261,13 @@ class SystemChatController {
         }
     }
 
-    private String extractTargetId(String agentId, String proposalId) {
-        // Query the proposal row to find the target assignment id
-        try {
-            var result = systemChatService.resolveProfile();
-            if (!result.available()) return null;
-            var proposals = loadProposals(agentId, result.conversationId());
-            for (var p : proposals) {
-                if (p.proposalId().equals(proposalId)) {
-                    return p.targetId();
-                }
-            }
-            return null;
-        } catch (RuntimeException e) {
-            return null;
-        }
-    }
-
     private List<SystemChatFragments.ProposalRecord> loadProposals(String agentId, String conversationId) {
         // Proposals for the system chat conversation; the proposal service
         // uses conversation-scoped queries. We list by agent/proposal state.
         try {
             return proposalService.listProposals(agentId, conversationId).stream()
                     .map(p -> new SystemChatFragments.ProposalRecord(
-                            p.proposalId(), p.action(), p.targetId(), p.state(), p.createdAt()))
+                            p.proposalId(), p.action(), p.targetId(), p.canonicalDigest(), p.state(), p.createdAt()))
                     .toList();
         } catch (RuntimeException e) {
             log.debug("Failed to load proposals for agent {}", agentId, e);

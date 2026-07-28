@@ -2,6 +2,7 @@ package io.mindspice.magenta2.api.web;
 
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -9,19 +10,14 @@ import io.mindspice.magenta2.ai.orchestration.agents.AgentProfileService;
 import io.mindspice.magenta2.ai.orchestration.context.AgentContextRepository.ContextBinding;
 import io.mindspice.magenta2.ai.orchestration.context.AgentContextRepository.ContextDefault;
 import io.mindspice.magenta2.ai.orchestration.context.AgentContextRepository.PersonalSelection;
+import io.mindspice.magenta2.ai.orchestration.context.AgentContextRepository.SelectionKind;
 import io.mindspice.magenta2.ai.orchestration.context.AgentContextService;
-import io.mindspice.magenta2.ai.orchestration.context.AgentMaterializationRepository;
+import io.mindspice.magenta2.ai.orchestration.context.AgentContextService.ContextSnapshot;
+import io.mindspice.magenta2.ai.orchestration.context.AgentContextService.DefaultUpdateRequest;
 import io.mindspice.magenta2.ai.orchestration.context.AgentMaterializationRepository.MaterializationKey;
-import io.mindspice.magenta2.ai.orchestration.context.AgentMaterializationRepository.MaterializationRecord;
-import io.mindspice.magenta2.ai.orchestration.context.AgentMaterializationRepository.MaterializationState;
-import io.mindspice.magenta2.ai.orchestration.context.AgentMaterializationService;
-import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceDescriptor;
-import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceDirectoryService;
-import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceKind;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Controller;
 import org.springframework.util.StringUtils;
@@ -35,12 +31,7 @@ import org.springframework.web.bind.annotation.ResponseBody;
 
 import jakarta.servlet.http.HttpServletResponse;
 
-/**
- * Thin agent-scoped REST and HTMX adapter for captured context,
- * materializations, defaults, and immutable bindings. Never resolves
- * filesystem roots, constructs descriptors, infers bindings, or
- * implements authorization.
- */
+/** Thin agent-scoped adapter; context services own persistence, descriptors, and mutations. */
 @Controller
 @RequestMapping("/api/agents/{agentId}/context")
 class AgentContextController {
@@ -48,93 +39,47 @@ class AgentContextController {
 
     private final AgentProfileService agentProfileService;
     private final AgentContextService contextService;
-    private final AgentMaterializationService materializationService;
-    private final AgentMaterializationRepository materializationRepository;
-    private final WorkspaceDirectoryService directoryService;
 
-    AgentContextController(AgentProfileService agentProfileService,
-                           AgentContextService contextService,
-                           AgentMaterializationService materializationService,
-                           AgentMaterializationRepository materializationRepository,
-                           WorkspaceDirectoryService directoryService) {
+    AgentContextController(AgentProfileService agentProfileService, AgentContextService contextService) {
         this.agentProfileService = agentProfileService;
         this.contextService = contextService;
-        this.materializationService = materializationService;
-        this.materializationRepository = materializationRepository;
-        this.directoryService = directoryService;
     }
-
-    // ── JSON summary ──
 
     @GetMapping(produces = "application/json")
     @ResponseBody
     public ResponseEntity<Map<String, Object>> summary(@PathVariable String agentId) {
         if (!agentExists(agentId)) return notFound();
-        var defaultRecord = contextService.getDefault(agentId);
-        var materializations = materializationRepository.findByAgent(agentId);
-        return ResponseEntity.ok(Map.of(
-                "agentId", agentId,
-                "default", defaultRecord.outcome().name(),
-                "defaultRecord", defaultRecord.value() != null ? Map.of(
-                        "version", defaultRecord.value().version(),
-                        "selectionKind", defaultRecord.value().selectionKind().name(),
-                        "materializationKey", defaultRecord.value().materializationKey() != null
-                                ? defaultRecord.value().materializationKey().serialized() : null,
-                        "materializationGeneration", defaultRecord.value().materializationGeneration(),
-                        "personalSelection", defaultRecord.value().personalSelection() != null
-                                ? defaultRecord.value().personalSelection().name() : null
-                ) : null,
-                "materializationCount", materializations.size()
-        ));
+        ContextSnapshot snapshot = contextService.snapshot(agentId);
+        Map<String, Object> response = new LinkedHashMap<>();
+        response.put("agentId", agentId);
+        response.put("default", snapshot.defaultRecord() == null ? "UNAVAILABLE" : "AVAILABLE");
+        response.put("defaultRecord", defaultPayload(snapshot.defaultRecord()));
+        response.put("materializationCount", snapshot.materializations().size());
+        return ResponseEntity.ok(response);
     }
-
-    // ── HTMX panel ──
 
     @GetMapping("/panel")
     @ResponseBody
     public String contextPanel(@PathVariable String agentId, HttpServletResponse response) {
-        if (!agentExists(agentId)) {
-            response.setStatus(404);
-            return AgentContextFragments.errorPanel(encode(agentId), "Not Found", "Agent not found.");
-        }
+        if (!agentExists(agentId)) return error(response, 404, agentId, "Not Found", "Agent not found.");
         try {
-            var defaultRecord = contextService.getDefault(agentId);
-            var materializations = materializationRepository.findByAgentAndState(agentId, MaterializationState.READY);
-            // Bindings are looked up individually; provide empty list for summary view
-            return AgentContextFragments.contextSummary(encode(agentId),
-                    defaultRecord.value(),
-                    List.of(),
-                    materializations,
-                    null);
-        } catch (RuntimeException e) {
-            log.debug("Context panel unavailable for agent {}", agentId, e);
-            response.setStatus(503);
-            return AgentContextFragments.errorPanel(encode(agentId), "Unavailable",
-                    "Context data is temporarily unavailable.");
+            return summaryFragment(agentId, contextService.snapshot(agentId), null);
+        } catch (RuntimeException exception) {
+            log.debug("Context panel unavailable for agent {}", agentId, exception);
+            return error(response, 503, agentId, "Unavailable", "Context data is temporarily unavailable.");
         }
     }
-
-    // ── Defaults ──
 
     @GetMapping(path = "/defaults", produces = "application/json")
     @ResponseBody
     public ResponseEntity<Map<String, Object>> getDefault(@PathVariable String agentId) {
         if (!agentExists(agentId)) return notFound();
-        var defaultRecord = contextService.getDefault(agentId);
-        if (defaultRecord.value() == null) {
-            return ResponseEntity.ok(Map.of("agentId", agentId, "available", false));
-        }
-        ContextDefault d = defaultRecord.value();
-        return ResponseEntity.ok(Map.of(
-                "agentId", agentId,
-                "available", true,
-                "version", d.version(),
-                "selectionKind", d.selectionKind().name(),
-                "materializationKey", d.materializationKey() != null ? d.materializationKey().serialized() : null,
-                "materializationGeneration", d.materializationGeneration(),
-                "personalSelection", d.personalSelection() != null ? d.personalSelection().name() : null,
-                "reason", d.reason()
-        ));
+        ContextDefault defaultRecord = contextService.getDefault(agentId).value();
+        Map<String, Object> response = new LinkedHashMap<>();
+        response.put("agentId", agentId);
+        response.put("available", defaultRecord != null);
+        if (defaultRecord != null) response.putAll(defaultPayload(defaultRecord));
+        return ResponseEntity.ok(response);
     }
 
     @PutMapping("/defaults")
@@ -145,134 +90,72 @@ class AgentContextController {
                                 @RequestParam(required = false) String materializationKey,
                                 @RequestParam(required = false, defaultValue = "0") int materializationGeneration,
                                 @RequestParam(required = false) String personalSelection,
-                                @RequestParam String reason,
+                                @RequestParam(required = false) String reason,
                                 @RequestParam(required = false) String operationKey,
                                 HttpServletResponse response) {
-        if (!agentExists(agentId)) {
-            response.setStatus(404);
-            return AgentContextFragments.errorPanel(encode(agentId), "Not Found", "Agent not found.");
-        }
+        if (!agentExists(agentId)) return error(response, 404, agentId, "Not Found", "Agent not found.");
         try {
-            if ("MATERIALIZATION".equalsIgnoreCase(selectionKind)) {
-                if (!StringUtils.hasText(materializationKey)) {
-                    response.setStatus(400);
-                    return AgentContextFragments.defaultEditor(encode(agentId), null,
-                            materializationRepository.findByAgentAndState(agentId, MaterializationState.READY),
-                            "Materialization key is required for MATERIALIZATION kind.", true);
-                }
-                MaterializationKey key = MaterializationKey.fromSerialized(agentId, materializationKey);
-                try {
-                    contextService.updateDefault(agentId, expectedVersion, key,
-                            materializationGeneration, reason);
-                } catch (IllegalStateException e) {
-                    response.setStatus(409);
-                    return AgentContextFragments.defaultEditor(encode(agentId),
-                            contextService.getDefault(agentId).value(),
-                            materializationRepository.findByAgentAndState(agentId, MaterializationState.READY),
-                            "Conflict: " + e.getMessage(), true);
-                }
-            } else if ("PERSONAL".equalsIgnoreCase(selectionKind)) {
-                if (!StringUtils.hasText(personalSelection)) {
-                    response.setStatus(400);
-                    return AgentContextFragments.defaultEditor(encode(agentId), null,
-                            materializationRepository.findByAgentAndState(agentId, MaterializationState.READY),
-                            "Personal selection is required for PERSONAL kind.", true);
-                }
-                PersonalSelection ps;
-                try {
-                    ps = PersonalSelection.valueOf(personalSelection.toUpperCase());
-                } catch (IllegalArgumentException e) {
-                    response.setStatus(400);
-                    return AgentContextFragments.defaultEditor(encode(agentId), null,
-                            materializationRepository.findByAgentAndState(agentId, MaterializationState.READY),
-                            "Invalid personal selection: " + personalSelection, true);
-                }
-                try {
-                    contextService.updateDefaultToPersonal(agentId, expectedVersion, ps, reason);
-                } catch (IllegalStateException e) {
-                    response.setStatus(409);
-                    return AgentContextFragments.defaultEditor(encode(agentId),
-                            contextService.getDefault(agentId).value(),
-                            materializationRepository.findByAgentAndState(agentId, MaterializationState.READY),
-                            "Conflict: " + e.getMessage(), true);
-                }
-            } else {
-                response.setStatus(400);
-                return AgentContextFragments.defaultEditor(encode(agentId), null,
-                        materializationRepository.findByAgentAndState(agentId, MaterializationState.READY),
-                        "Invalid selection kind: " + selectionKind, true);
-            }
-
-            // Success: re-render the full panel
-            var defaultRecord = contextService.getDefault(agentId);
-            return AgentContextFragments.contextSummary(encode(agentId),
-                    defaultRecord.value(), List.of(),
-                    materializationRepository.findByAgentAndState(agentId, MaterializationState.READY),
-                    "Default updated.");
-        } catch (IllegalArgumentException e) {
+            SelectionKind kind = SelectionKind.valueOf(selectionKind.toUpperCase());
+            MaterializationKey key = kind == SelectionKind.MATERIALIZATION
+                    ? MaterializationKey.fromSerialized(agentId, required(materializationKey, "Materialization key")) : null;
+            PersonalSelection personal = kind == SelectionKind.PERSONAL
+                    ? PersonalSelection.valueOf(required(personalSelection, "Personal selection").toUpperCase()) : null;
+            contextService.updateDefault(new DefaultUpdateRequest(agentId, expectedVersion, kind, key,
+                    kind == SelectionKind.MATERIALIZATION ? materializationGeneration : null,
+                    personal, reason, operationKey));
+            return summaryFragment(agentId, contextService.snapshot(agentId), "Default updated.");
+        } catch (AgentContextService.OperationConflictException exception) {
+            response.setStatus(409);
+            return AgentContextFragments.defaultEditor(encode(agentId), contextService.getDefault(agentId).value(),
+                    contextService.readyMaterializations(agentId), "Conflict: " + exception.getMessage(), true);
+        } catch (IllegalArgumentException exception) {
             response.setStatus(400);
-            return AgentContextFragments.errorPanel(encode(agentId), "Invalid Request", e.getMessage());
-        } catch (RuntimeException e) {
-            log.debug("Default update failed for agent {}", agentId, e);
-            response.setStatus(503);
-            return AgentContextFragments.errorPanel(encode(agentId), "Unavailable",
-                    "Default update is temporarily unavailable.");
+            return AgentContextFragments.defaultEditor(encode(agentId), contextService.getDefault(agentId).value(),
+                    contextService.readyMaterializations(agentId), "Invalid: " + exception.getMessage(), true);
+        } catch (RuntimeException exception) {
+            log.debug("Default update failed for agent {}", agentId, exception);
+            return error(response, 503, agentId, "Unavailable", "Default update is temporarily unavailable.");
         }
     }
 
     @GetMapping("/defaults/edit")
     @ResponseBody
     public String editDefault(@PathVariable String agentId, HttpServletResponse response) {
-        if (!agentExists(agentId)) {
-            response.setStatus(404);
-            return AgentContextFragments.errorPanel(encode(agentId), "Not Found", "Agent not found.");
-        }
+        if (!agentExists(agentId)) return error(response, 404, agentId, "Not Found", "Agent not found.");
         try {
-            var defaultRecord = contextService.getDefault(agentId);
-            return AgentContextFragments.defaultEditor(encode(agentId),
-                    defaultRecord.value(),
-                    materializationRepository.findByAgentAndState(agentId, MaterializationState.READY),
-                    null, false);
-        } catch (RuntimeException e) {
-            log.debug("Default editor unavailable for agent {}", agentId, e);
-            response.setStatus(503);
-            return AgentContextFragments.errorPanel(encode(agentId), "Unavailable",
-                    "Default editor is temporarily unavailable.");
+            return AgentContextFragments.defaultEditor(encode(agentId), contextService.getDefault(agentId).value(),
+                    contextService.readyMaterializations(agentId), null, false);
+        } catch (RuntimeException exception) {
+            log.debug("Default editor unavailable for agent {}", agentId, exception);
+            return error(response, 503, agentId, "Unavailable", "Default editor is temporarily unavailable.");
         }
     }
 
-    // ── Materializations ──
-
     @GetMapping(path = "/materializations", produces = "application/json")
     @ResponseBody
-    public ResponseEntity<?> listMaterializations(@PathVariable String agentId) {
+    public ResponseEntity<Map<String, Object>> listMaterializations(@PathVariable String agentId) {
         if (!agentExists(agentId)) return notFound();
-        var records = materializationRepository.findByAgent(agentId);
-        List<Map<String, Object>> list = records.stream().map(r -> Map.<String, Object>of(
-                "key", r.materializationKey().serialized(),
-                "state", r.state().name(),
-                "generation", r.generation(),
-                "sourceKind", r.sourceKind(),
-                "sourceId", r.sourceId()
-        )).toList();
-        return ResponseEntity.ok(Map.of("agentId", agentId, "materializations", list));
+        List<Map<String, Object>> records = contextService.materializations(agentId).stream().map(record -> {
+            Map<String, Object> payload = new LinkedHashMap<>();
+            payload.put("key", record.materializationKey().serialized());
+            payload.put("state", record.state().name());
+            payload.put("generation", record.generation());
+            payload.put("sourceKind", record.sourceKind());
+            payload.put("sourceId", record.sourceId());
+            return payload;
+        }).toList();
+        return ResponseEntity.ok(Map.of("agentId", agentId, "materializations", records));
     }
 
     @GetMapping("/materializations/panel")
     @ResponseBody
     public String materializationsPanel(@PathVariable String agentId, HttpServletResponse response) {
-        if (!agentExists(agentId)) {
-            response.setStatus(404);
-            return AgentContextFragments.errorPanel(encode(agentId), "Not Found", "Agent not found.");
-        }
+        if (!agentExists(agentId)) return error(response, 404, agentId, "Not Found", "Agent not found.");
         try {
-            var records = materializationRepository.findByAgent(agentId);
-            return AgentContextFragments.materializationList(encode(agentId), records, null);
-        } catch (RuntimeException e) {
-            log.debug("Materialization list unavailable for agent {}", agentId, e);
-            response.setStatus(503);
-            return AgentContextFragments.errorPanel(encode(agentId), "Unavailable",
-                    "Materialization data is temporarily unavailable.");
+            return AgentContextFragments.materializationList(encode(agentId), contextService.materializations(agentId), null);
+        } catch (RuntimeException exception) {
+            log.debug("Materialization list unavailable for agent {}", agentId, exception);
+            return error(response, 503, agentId, "Unavailable", "Materialization data is temporarily unavailable.");
         }
     }
 
@@ -282,65 +165,83 @@ class AgentContextController {
                                            @RequestParam String projectKey,
                                            @RequestParam(required = false) String operationKey,
                                            HttpServletResponse response) {
-        if (!agentExists(agentId)) {
-            response.setStatus(404);
-            return AgentContextFragments.errorPanel(encode(agentId), "Not Found", "Agent not found.");
-        }
+        if (!agentExists(agentId)) return error(response, 404, agentId, "Not Found", "Agent not found.");
         try {
-            WorkspaceDescriptor descriptor = directoryService.resolveForRead(WorkspaceKind.AGENT, agentId);
-            MaterializationKey key = MaterializationKey.forProject(agentId, projectKey);
-            materializationService.provision(descriptor, key);
-            var records = materializationRepository.findByAgent(agentId);
-            return AgentContextFragments.materializationList(encode(agentId), records,
+            contextService.provisionProject(agentId, projectKey, operationKey);
+            return AgentContextFragments.materializationList(encode(agentId), contextService.materializations(agentId),
                     "Provisioned successfully.");
-        } catch (IllegalArgumentException e) {
-            response.setStatus(400);
-            return AgentContextFragments.materializationList(encode(agentId),
-                    materializationRepository.findByAgent(agentId),
-                    "Invalid: " + e.getMessage());
-        } catch (IllegalStateException e) {
+        } catch (IllegalStateException exception) {
             response.setStatus(409);
-            return AgentContextFragments.materializationList(encode(agentId),
-                    materializationRepository.findByAgent(agentId),
-                    "Conflict: " + e.getMessage());
-        } catch (RuntimeException e) {
-            log.debug("Materialization provision failed for agent {}", agentId, e);
-            response.setStatus(503);
-            return AgentContextFragments.errorPanel(encode(agentId), "Unavailable",
-                    "Provision is temporarily unavailable: " + e.getMessage());
+            return AgentContextFragments.materializationList(encode(agentId), contextService.materializations(agentId),
+                    "Conflict: " + exception.getMessage());
+        } catch (IllegalArgumentException exception) {
+            response.setStatus(400);
+            return AgentContextFragments.materializationList(encode(agentId), contextService.materializations(agentId),
+                    "Invalid: " + exception.getMessage());
+        } catch (RuntimeException exception) {
+            log.debug("Materialization provision failed for agent {}", agentId, exception);
+            return error(response, 503, agentId, "Unavailable", "Provision is temporarily unavailable.");
         }
     }
-
-    // ── Bindings (read-only) ──
 
     @GetMapping(path = "/bindings", produces = "application/json")
     @ResponseBody
-    public ResponseEntity<?> listBindings(@PathVariable String agentId) {
+    public ResponseEntity<Map<String, Object>> listBindings(@PathVariable String agentId) {
         if (!agentExists(agentId)) return notFound();
-        var records = contextService.listBindings(agentId);
-        List<Map<String, Object>> list = records.stream().map(b -> Map.<String, Object>of(
-                "bindingKey", b.bindingKey(),
-                "selectionKind", b.selectionKind().name(),
-                "materializationKey", b.materializationKey() != null ? b.materializationKey().serialized() : null,
-                "materializationGeneration", b.materializationGeneration(),
-                "personalSelection", b.personalSelection() != null ? b.personalSelection().name() : null,
-                "capturedAt", b.capturedAt().toString()
-        )).toList();
-        return ResponseEntity.ok(Map.of("agentId", agentId, "bindings", list));
+        List<Map<String, Object>> bindings = contextService.listBindings(agentId).stream()
+                .map(AgentContextController::bindingPayload).toList();
+        return ResponseEntity.ok(Map.of("agentId", agentId, "bindings", bindings));
     }
 
-    // ── helpers ──
+    private String summaryFragment(String agentId, ContextSnapshot snapshot, String message) {
+        return AgentContextFragments.contextSummary(encode(agentId), snapshot.defaultRecord(), snapshot.bindings(),
+                snapshot.materializations(), message);
+    }
 
     private boolean agentExists(String agentId) {
         try {
-            return agentProfileService.get(agentId) != null;
-        } catch (RuntimeException e) {
+            agentProfileService.get(agentId);
+            return true;
+        } catch (RuntimeException exception) {
             return false;
         }
     }
 
-    private ResponseEntity<Map<String, Object>> notFound() {
+    private static Map<String, Object> defaultPayload(ContextDefault record) {
+        if (record == null) return null;
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("version", record.version());
+        payload.put("selectionKind", record.selectionKind().name());
+        payload.put("materializationKey", record.materializationKey() == null ? null : record.materializationKey().serialized());
+        payload.put("materializationGeneration", record.materializationGeneration());
+        payload.put("personalSelection", record.personalSelection() == null ? null : record.personalSelection().name());
+        payload.put("reason", record.reason());
+        return payload;
+    }
+
+    private static Map<String, Object> bindingPayload(ContextBinding binding) {
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("bindingKey", binding.bindingKey());
+        payload.put("selectionKind", binding.selectionKind().name());
+        payload.put("materializationKey", binding.materializationKey() == null ? null : binding.materializationKey().serialized());
+        payload.put("materializationGeneration", binding.materializationGeneration());
+        payload.put("personalSelection", binding.personalSelection() == null ? null : binding.personalSelection().name());
+        payload.put("capturedAt", binding.capturedAt().toString());
+        return payload;
+    }
+
+    private static String required(String value, String label) {
+        if (!StringUtils.hasText(value)) throw new IllegalArgumentException(label + " is required");
+        return value;
+    }
+
+    private static ResponseEntity<Map<String, Object>> notFound() {
         return ResponseEntity.status(404).body(Map.of("reason", "Agent not found"));
+    }
+
+    private static String error(HttpServletResponse response, int status, String agentId, String title, String message) {
+        response.setStatus(status);
+        return AgentContextFragments.errorPanel(encode(agentId), title, message);
     }
 
     private static String encode(String value) {

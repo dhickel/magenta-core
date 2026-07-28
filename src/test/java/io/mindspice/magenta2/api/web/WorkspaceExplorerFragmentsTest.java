@@ -60,13 +60,27 @@ class WorkspaceExplorerFragmentsTest {
         String viewer = WorkspaceExplorerFragments.agentViewer("agent-1",
             new WorkspaceExplorerService.FilePreview(taskFile.path(), 7, true, "content", false, "text"));
 
-        assertThat(shell).contains("result.txt", "Read-only runtime path")
+        assertThat(shell).contains("result.txt", "Runtime-managed task and output files are read-only")
             .doesNotContain("New Folder", "/modal/rename?path=", "/modal/delete?path=");
         assertThat(viewer).contains("data-read-only=\"true\"", "Runtime-managed task and output files are read-only")
             .doesNotContain("hx-put=", "Save File");
         assertThat(WorkspaceExplorerFragments.isReadOnlyRuntimePath("tasks/run-1")).isTrue();
         assertThat(WorkspaceExplorerFragments.isReadOnlyRuntimePath("outputs/report.md")).isTrue();
+        assertThat(WorkspaceExplorerFragments.isReadOnlyRuntimePath("repos/imported-report.md")).isTrue();
         assertThat(WorkspaceExplorerFragments.isReadOnlyRuntimePath("notes/report.md")).isFalse();
+    }
+
+    @Test
+    void storedItemsNeverRenderMutationControls() {
+        WorkspaceExplorerService.Entry entry = new WorkspaceExplorerService.Entry(
+            "archive.txt", "repos/archive.txt", false, true, 12, Instant.EPOCH, Instant.EPOCH,
+            "Text", "12 B", WorkspaceExplorerService.ViewerKind.TEXT, List.of(), true, true, true, true, true, true
+        );
+        String html = WorkspaceExplorerFragments.agentShell("agent-1",
+            new WorkspaceExplorerService.DirectoryListing("repos", List.of(entry)), entry, entry.path());
+
+        assertThat(html).contains("Stored Items are read-only")
+            .doesNotContain("New Folder", "/modal/rename?path=", "/modal/delete?path=", "Add Tag", "Save File");
     }
 
     @Test

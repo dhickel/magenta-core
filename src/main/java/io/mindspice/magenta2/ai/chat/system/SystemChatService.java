@@ -1,12 +1,9 @@
 package io.mindspice.magenta2.ai.chat.system;
 
-import java.util.List;
-
 import io.mindspice.magenta2.ai.chat.model.ChatSessionOrigin;
 import io.mindspice.magenta2.ai.chat.repository.ChatSessionMetadataRepository;
 import io.mindspice.magenta2.ai.chat.service.ChatInvocationProfile;
 import io.mindspice.magenta2.ai.chat.service.ChatModelRouter;
-import io.mindspice.magenta2.ai.orchestration.agents.AgentProfile;
 import io.mindspice.magenta2.ai.orchestration.agents.AgentProfileService;
 import io.mindspice.magenta2.ai.orchestration.context.AgentContextService;
 import io.mindspice.magenta2.ai.orchestration.context.AgentContextService.BindingResolution;
@@ -68,11 +65,10 @@ public class SystemChatService {
 
     /** Resolves a profile only from server-owned settings, binding, and agent facts. */
     @Transactional
-    public SystemChatResult resolveProfile() {
+    public SystemChatResult resolveProfile(String agentId) {
         if (!runtimeSettingsService.systemChatEnabled()) {
             return SystemChatResult.unavailable();
         }
-        String agentId = resolveAgentId();
         String model = runtimeSettingsService.systemChatModel();
         if (!StringUtils.hasText(agentId) || !StringUtils.hasText(model)) {
             return SystemChatResult.unavailable();
@@ -113,11 +109,11 @@ public class SystemChatService {
      * have no caller-supplied authority path.
      */
     @Transactional
-    public InvocationResult invoke(String message) {
-        if (!StringUtils.hasText(message)) {
+    public InvocationResult invoke(String agentId, String message) {
+        if (!StringUtils.hasText(agentId) || !StringUtils.hasText(message)) {
             return InvocationResult.unavailable();
         }
-        SystemChatResult resolved = resolveProfile();
+        SystemChatResult resolved = resolveProfile(agentId);
         if (!resolved.available()) {
             return InvocationResult.unavailable();
         }
@@ -160,11 +156,6 @@ public class SystemChatService {
         agentContextService.linkOwner("CONVERSATION", conversationId, bindingKey,
                 "system-chat-owner-link:" + agentId);
         return conversationId;
-    }
-
-    private String resolveAgentId() {
-        AgentProfile agent = runtimeSettingsService.defaultAgentProfile();
-        return agent == null ? null : agent.id();
     }
 
     private static String redactModelResponse(String response) {

@@ -729,6 +729,16 @@ final class WorkspaceExplorerFragments {
         WorkspaceExplorerService.Entry inspected,
         String selectedPath
     ) {
+        return agentShell(encodedAgentId, listing, inspected, selectedPath, null);
+    }
+
+    static String agentShell(
+        String encodedAgentId,
+        WorkspaceExplorerService.DirectoryListing listing,
+        WorkspaceExplorerService.Entry inspected,
+        String selectedPath,
+        String activeArea
+    ) {
         String currentPath = pathOrRoot(listing.path());
         String selected = selectedPath == null || selectedPath.isBlank()
             ? inspected == null ? null : inspected.path() : selectedPath;
@@ -742,7 +752,8 @@ final class WorkspaceExplorerFragments {
             base, url(currentPath), AGENT_MODAL_ID,
             base, url(currentPath), AGENT_MODAL_ID);
         return """
-            <div id="%s" class="workspace-file-explorer-shell agent-files-operations-shell">
+            <div id="%s" class="workspace-file-explorer-shell agent-files-operations-shell"%s>
+              %s
               <div class="agent-files-operations-layout">
                 <section class="agent-files-browser-panel" aria-label="Workspace files">
                   <div class="workspace-file-explorer-toolbar">
@@ -769,6 +780,8 @@ final class WorkspaceExplorerFragments {
             </div>
             """.formatted(
             AGENT_SHELL_ID,
+            activeArea == null ? "" : " data-active-area=\"" + escapeAttribute(activeArea) + "\"",
+            activeArea == null ? "" : filesAreaNav(encodedAgentId, activeArea),
             agentUpButton(listing, encodedAgentId),
             base, url(currentPath),
             selected == null ? "" : "&selected=" + url(selected),
@@ -850,7 +863,7 @@ final class WorkspaceExplorerFragments {
             """.formatted(
             agentTags(encodedAgentId, entry.path(), entry.tags(), true),
             agentFilesRoute(encodedAgentId, ""), AGENT_INSPECTOR_ID, escapeAttribute(entry.path()))
-            : "<div class=\"workspace-file-entry-tags\">Read-only runtime path</div>";
+            : "<div class=\"workspace-file-entry-tags\">" + escape(readOnlyPathMessage(entry.path())) + "</div>";
         String mutationActions = mutable
             ? agentModalButton("Rename", encodedAgentId, "rename", entry.path())
                 + agentModalButton("Delete", encodedAgentId, "delete", entry.path())
@@ -1331,10 +1344,18 @@ final class WorkspaceExplorerFragments {
     private static String agentReadOnlyText(WorkspaceExplorerService.FilePreview preview) {
         return """
             <div class="workspace-file-viewer" data-viewer-kind="text" data-read-only="true">
-              <div class="workspace-file-status">Runtime-managed task and output files are read-only.</div>
+              <div class="workspace-file-status">%s</div>
               <pre class="workspace-file-read-only-text">%s</pre>
             </div>
-            """.formatted(escape(preview.content() == null ? "" : preview.content()));
+            """.formatted(escape(readOnlyPathMessage(preview.path())),
+            escape(preview.content() == null ? "" : preview.content()));
+    }
+
+    private static String readOnlyPathMessage(String path) {
+        String normalized = pathOrRoot(path);
+        return "repos".equals(normalized) || normalized.startsWith("repos/")
+                ? "Stored Items are read-only in the agent Files tab."
+                : "Runtime-managed task and output files are read-only.";
     }
 
     private static String agentDownloadLink(String apiPrefix, String path) {
@@ -1345,7 +1366,8 @@ final class WorkspaceExplorerFragments {
     static boolean isReadOnlyRuntimePath(String path) {
         String normalized = pathOrRoot(path);
         return "outputs".equals(normalized) || normalized.startsWith("outputs/")
-            || "tasks".equals(normalized) || normalized.startsWith("tasks/");
+            || "tasks".equals(normalized) || normalized.startsWith("tasks/")
+            || "repos".equals(normalized) || normalized.startsWith("repos/");
     }
 
     private static String agentButton(String label, String hxVerb, String route, String target, String swap) {

@@ -22,6 +22,7 @@ import io.mindspice.magenta2.ai.orchestration.context.AgentMaterializationReposi
 import io.mindspice.magenta2.ai.orchestration.context.AgentMaterializationRepository.MaterializationState;
 import io.mindspice.magenta2.ai.orchestration.workspaces.MaterializationLocation;
 import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceDescriptor;
+import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceDirectoryService;
 import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceKind;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -43,13 +44,16 @@ public class AgentContextService {
     private final AgentContextRepository contextRepository;
     private final AgentMaterializationRepository materializationRepository;
     private final AgentMaterializationService materializationService;
+    private final WorkspaceDirectoryService workspaceDirectoryService;
 
     public AgentContextService(AgentContextRepository contextRepository,
                                AgentMaterializationRepository materializationRepository,
-                               AgentMaterializationService materializationService) {
+                               AgentMaterializationService materializationService,
+                               WorkspaceDirectoryService workspaceDirectoryService) {
         this.contextRepository = Objects.requireNonNull(contextRepository);
         this.materializationRepository = Objects.requireNonNull(materializationRepository);
         this.materializationService = Objects.requireNonNull(materializationService);
+        this.workspaceDirectoryService = Objects.requireNonNull(workspaceDirectoryService);
     }
 
     // ── Defaults ──
@@ -109,6 +113,110 @@ public class AgentContextService {
         ContextDefault defaultRecord = contextRepository.findDefaultByAgent(agentId).orElse(null);
         return defaultRecord == null
                 ? ContextLookup.unavailable() : ContextLookup.available(defaultRecord);
+    }
+
+    /** Returns the complete secret-free read model required by context web adapters. */
+    public ContextSnapshot snapshot(String agentId) {
+        return new ContextSnapshot(getDefault(agentId).value(), listBindings(agentId),
+                materializationRepository.findByAgent(agentId));
+    }
+
+    public List<MaterializationRecord> materializations(String agentId) {
+        return materializationRepository.findByAgent(agentId);
+    }
+
+    public List<MaterializationRecord> readyMaterializations(String agentId) {
+        return materializationRepository.findByAgentAndState(agentId, MaterializationState.READY);
+    }
+
+    /**
+     * Applies a context default exactly once for the requested version. A retry
+     * with the same canonical request returns {@code REPLAYED}; a divergent
+     * retry or stale version is a conflict. The optional operation key is
+     * validated at this service boundary rather than ignored by the web layer.
+     */
+    @Transactional
+    public DefaultUpdateResult updateDefault(DefaultUpdateRequest request) {
+        Objects.requireNonNull(request, "request");
+        requireOperationKey(request.operationKey());
+        ContextDefault current = contextRepository.findDefaultByAgent(request.agentId()).orElse(null);
+        if (current == null) {
+            if (request.expectedVersion() != 0) {
+                throw new OperationConflictException("Context default version is stale");
+            }
+            ContextDefault created = requestedDefault(request, 1);
+            try {
+                contextRepository.insertDefault(created);
+                return new DefaultUpdateResult(ContextOperationStatus.CREATED, created);
+            } catch (RuntimeException race) {
+                ContextDefault replay = contextRepository.findDefaultByAgent(request.agentId()).orElse(null);
+                if (sameDefault(replay, request) && replay.version() == 1) {
+                    return new DefaultUpdateResult(ContextOperationStatus.REPLAYED, replay);
+                }
+                throw race;
+            }
+        }
+        if (sameDefault(current, request) && current.version() == request.expectedVersion() + 1) {
+            return new DefaultUpdateResult(ContextOperationStatus.REPLAYED, current);
+        }
+        if (current.version() != request.expectedVersion()) {
+            throw new OperationConflictException("Context default version is stale");
+        }
+        ContextDefault replacement = requestedDefault(request, current.version() + 1);
+        if (contextRepository.updateDefault(request.agentId(), request.expectedVersion(), replacement)) {
+            return new DefaultUpdateResult(ContextOperationStatus.CREATED, replacement);
+        }
+        ContextDefault replay = contextRepository.findDefaultByAgent(request.agentId()).orElse(null);
+        if (sameDefault(replay, request) && replay.version() == request.expectedVersion() + 1) {
+            return new DefaultUpdateResult(ContextOperationStatus.REPLAYED, replay);
+        }
+        throw new OperationConflictException("Context default update conflicted");
+    }
+
+    /** Resolves the descriptor and materialization lifecycle inside the service boundary. */
+    public MaterializationLocation provisionProject(String agentId, String projectId, String operationKey) {
+        operationKey(agentId, projectId, operationKey);
+        WorkspaceDescriptor descriptor = workspaceDirectoryService.resolveForRead(WorkspaceKind.AGENT, agentId);
+        MaterializationRecord record = materializationService.registerProject(descriptor, projectId);
+        return materializationService.provision(descriptor, record.materializationKey());
+    }
+
+    private ContextDefault requestedDefault(DefaultUpdateRequest request, int version) {
+        Instant now = Instant.now();
+        if (request.selectionKind() == SelectionKind.MATERIALIZATION) {
+            Objects.requireNonNull(request.materializationKey(), "materializationKey");
+            Objects.requireNonNull(request.materializationGeneration(), "materializationGeneration");
+            requireReadyMaterialization(request.agentId(), request.materializationKey(), request.materializationGeneration());
+            return new ContextDefault(request.agentId(), version, SelectionKind.MATERIALIZATION,
+                    request.materializationKey(), request.materializationGeneration(), null,
+                    request.reason(), now, now);
+        }
+        if (request.selectionKind() == SelectionKind.PERSONAL) {
+            Objects.requireNonNull(request.personalSelection(), "personalSelection");
+            return new ContextDefault(request.agentId(), version, SelectionKind.PERSONAL,
+                    null, null, request.personalSelection(), request.reason(), now, now);
+        }
+        throw new IllegalArgumentException("Context selection kind is required");
+    }
+
+    private static boolean sameDefault(ContextDefault current, DefaultUpdateRequest request) {
+        return current != null && current.selectionKind() == request.selectionKind()
+                && Objects.equals(current.materializationKey(), request.materializationKey())
+                && Objects.equals(current.materializationGeneration(), request.materializationGeneration())
+                && current.personalSelection() == request.personalSelection()
+                && Objects.equals(current.reason(), request.reason());
+    }
+
+    private static void requireOperationKey(String operationKey) {
+        if (operationKey != null && operationKey.length() > 255) {
+            throw new IllegalArgumentException("Operation key exceeds 255 characters");
+        }
+    }
+
+    private static String operationKey(String agentId, String projectId, String operationKey) {
+        requireOperationKey(operationKey);
+        return operationKey == null || operationKey.isBlank()
+                ? "context-materialization:" + agentId + ":" + projectId : operationKey.trim();
     }
 
     // ── Binding capture ──
@@ -379,6 +487,21 @@ public class AgentContextService {
             throw new IllegalStateException("SHA-256 unavailable", exception);
         }
     }
+
+    public record ContextSnapshot(ContextDefault defaultRecord, List<ContextBinding> bindings,
+                                  List<MaterializationRecord> materializations) { }
+
+    public record DefaultUpdateRequest(String agentId, int expectedVersion, SelectionKind selectionKind,
+                                       MaterializationKey materializationKey, Integer materializationGeneration,
+                                       PersonalSelection personalSelection, String reason, String operationKey) {
+        public DefaultUpdateRequest {
+            if (agentId == null || agentId.isBlank() || expectedVersion < 0 || selectionKind == null) {
+                throw new IllegalArgumentException("Context default update is incomplete or invalid");
+            }
+        }
+    }
+
+    public record DefaultUpdateResult(ContextOperationStatus status, ContextDefault defaultRecord) { }
 
     public enum ContextOutcome { AVAILABLE, UNAVAILABLE, STALE, NON_READY }
 
