@@ -135,12 +135,10 @@ public class WorkflowController {
                 request == null || request.priority() == null ? PUBLIC_SUBMIT_PRIORITY : request.priority(),
                 normalize(request == null ? null : request.modelOverride()),
                 normalize(request == null ? null : request.projectId()),
-                normalize(request == null ? null : request.workspaceId()),
-                normalize(request == null ? null : request.selectedWorkAreaId()),
-                normalize(request == null ? null : request.outputRouteType()),
-                normalize(request == null ? null : request.outputWorkAreaId()),
-                normalize(request == null ? null : request.outputDirectRelativePath()),
-                Map.of("workflowId", workflowId)
+                normalize(request == null ? null : request.workspaceType()),
+                normalize(request == null ? null : request.workspaceKey()),
+                Map.of("workflowId", workflowId),
+                normalize(request == null ? null : request.operationKey())
             ));
         } catch (IllegalArgumentException exception) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, exception.getMessage());
@@ -159,7 +157,9 @@ public class WorkflowController {
                 "workflowId", workflowId,
                 "runDisplayName", displayValue(assignment.runDisplayName()),
                 "status", assignment.status().name(),
-                "priority", assignment.priority()
+                "priority", assignment.priority(),
+                "taskRunId", displayValue(String.valueOf(assignment.checkpoint().get("taskRunId"))),
+                "operationKey", displayValue(String.valueOf(assignment.checkpoint().get("lifecycleOperationKey")))
             ));
             SseStreamLifecycle.completeQuietly(emitter);
         } catch (IllegalArgumentException exception) {
@@ -269,24 +269,29 @@ public class WorkflowController {
         String agentId,
         String jobId,
         String projectId,
-        String workspaceId,
-        String selectedWorkAreaId,
-        String outputRouteType,
-        String outputWorkAreaId,
-        String outputDirectRelativePath,
+        String workspaceType,
+        String workspaceKey,
         String runDisplayName,
         String modelOverride,
-        Integer priority
+        Integer priority,
+        String operationKey
     ) {
+        public WorkflowRunRequest(
+            String agentId, String jobId, String projectId, String workspaceType,
+            String workspaceKey, String runDisplayName, String modelOverride, Integer priority
+        ) {
+            this(agentId, jobId, projectId, workspaceType, workspaceKey, runDisplayName,
+                modelOverride, priority, null);
+        }
+
         public WorkflowRunRequest(
             String agentId,
             String jobId,
             String projectId,
-            String workspaceId,
             String modelOverride,
             Integer priority
         ) {
-            this(agentId, jobId, projectId, workspaceId, null, null, null, null, null, modelOverride, priority);
+            this(agentId, jobId, projectId, null, null, null, modelOverride, priority, null);
         }
     }
 

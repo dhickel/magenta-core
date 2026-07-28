@@ -32,10 +32,10 @@ public class RuntimeSettingsService {
             aiConfig.resolvedSummaryModelKey(),
             aiConfig.resolvedCompactionModelKey(),
             aiConfig.resolvedContextBufferPercent(),
-            aiConfig.resolvedDefaultModelKey(),
             null,
             null,
-            aiConfig.resolvedContextBufferPercent(),
+            null,
+            null,
             true,
             -1,
             false
@@ -121,37 +121,13 @@ public class RuntimeSettingsService {
         }
     }
 
+    /**
+     * Resolves only the explicitly configured system-chat model. Normal chat
+     * defaults are deliberately not a fallback authority for this capability.
+     */
     public String systemChatModel() {
-        RuntimeSettings settings = get();
-        String key = StringUtils.hasText(settings.systemChatModel())
-            ? settings.systemChatModel()
-            : settings.defaultModel();
-        return remoteModelName(StringUtils.hasText(key) ? key : aiConfig.resolvedDefaultModelKey());
-    }
-
-    public String systemChatPrompt() {
-        RuntimeSettings settings = get();
-        if (StringUtils.hasText(settings.systemChatPrompt())) {
-            return settings.systemChatPrompt();
-        }
-        return defaultSystemPrompt();
-    }
-
-    public java.util.List<String> systemChatApprovedTools() {
-        RuntimeSettings settings = get();
-        if (StringUtils.hasText(settings.systemChatApprovedTools())) {
-            return java.util.Arrays.stream(settings.systemChatApprovedTools().split(","))
-                .map(String::trim)
-                .filter(value -> !value.isEmpty())
-                .toList();
-        }
-        return approvedTools();
-    }
-
-    public int systemChatContextLimit() {
-        RuntimeSettings settings = get();
-        Integer limit = settings.systemChatContextLimit();
-        return limit == null ? contextBufferPercent() : limit;
+        String key = get().systemChatModel();
+        return StringUtils.hasText(key) ? remoteModelName(key) : null;
     }
 
     public boolean systemChatEnabled() {
@@ -209,12 +185,17 @@ public class RuntimeSettingsService {
         return legacyDefaultModelKey();
     }
 
-    private String remoteModelName(String modelKey) {
-        ModelConfig model = aiConfig.models().get(modelKey);
-        if (model == null) {
-            throw new IllegalArgumentException("Unknown configured model: " + modelKey);
+    private String remoteModelName(String modelReference) {
+        ModelConfig model = aiConfig.models().get(modelReference);
+        if (model != null) {
+            return model.remoteModelName();
         }
-        return model.remoteModelName();
+        boolean configuredRemoteName = aiConfig.models().values().stream()
+            .anyMatch(config -> modelReference.equals(config.remoteModelName()));
+        if (configuredRemoteName) {
+            return modelReference;
+        }
+        throw new IllegalArgumentException("Unknown configured model: " + modelReference);
     }
 
     private String keyForModelOrRemoteName(String value) {

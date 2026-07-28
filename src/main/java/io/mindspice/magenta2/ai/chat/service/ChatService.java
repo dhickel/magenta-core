@@ -18,6 +18,8 @@ import java.io.IOException;
 import java.io.PrintWriter;
 import java.io.StringWriter;
 import java.nio.file.Path;
+import java.time.Duration;
+import java.time.Instant;
 
 import org.springframework.web.client.ResourceAccessException;
 
@@ -44,6 +46,9 @@ import io.mindspice.magenta2.ai.chat.repository.AuditRepository;
 import io.mindspice.magenta2.ai.chat.repository.ChatSessionMetadataRepository;
 import io.mindspice.magenta2.ai.chat.service.turn.PromptContextAssembler;
 import io.mindspice.magenta2.ai.chat.service.turn.TerminalTurnRepair;
+import io.mindspice.magenta2.ai.chat.service.turn.TrustedContextPolicyAssembler;
+import io.mindspice.magenta2.ai.chat.service.turn.TrustedContextPolicyAssembler.TrustedPolicyResult;
+import io.mindspice.magenta2.ai.chat.service.turn.TurnContext;
 import io.mindspice.magenta2.ai.chat.service.turn.ToolAccessPolicy;
 import io.mindspice.magenta2.ai.chat.service.turn.TurnAuditWriter;
 import io.mindspice.magenta2.ai.chat.service.turn.TurnDiagnostic;
@@ -58,12 +63,23 @@ import io.mindspice.magenta2.ai.config.user.AgentConfig;
 import io.mindspice.magenta2.ai.config.user.AiConfig;
 import io.mindspice.magenta2.ai.config.user.ModelConfig;
 import io.mindspice.magenta2.ai.orchestration.agents.AgentProfile;
+import io.mindspice.magenta2.ai.orchestration.context.AgentContextService;
+import io.mindspice.magenta2.ai.orchestration.context.AgentContextService.BindingResolution;
+import io.mindspice.magenta2.ai.orchestration.context.AgentContextService.ContextOutcome;
+import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceDescriptor;
+import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceDirectoryService;
+import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceKind;
 import io.mindspice.magenta2.ai.execution.ActiveTurnPhase;
 import io.mindspice.magenta2.ai.execution.ActiveTurnRegistry.ActiveTurn;
 import io.mindspice.magenta2.ai.execution.ConversationTurnCoordinator;
 import io.mindspice.magenta2.ai.execution.MagentaWorkRequest;
 import io.mindspice.magenta2.ai.orchestration.runtime.OrchestrationTaskContext;
 import io.mindspice.magenta2.ai.orchestration.runtime.OrchestrationTaskContextHolder;
+import io.mindspice.magenta2.ai.orchestration.runtime.RunMeasurementRepository;
+import io.mindspice.magenta2.ai.orchestration.runtime.RunMeasurementRepository.MeasurementCompleteness;
+import io.mindspice.magenta2.ai.orchestration.runtime.RunMeasurementRepository.MeasurementKind;
+import io.mindspice.magenta2.ai.orchestration.runtime.RunMeasurementRepository.MeasurementOutcome;
+import io.mindspice.magenta2.ai.orchestration.runtime.RunMeasurementRepository.RunMeasurement;
 import io.mindspice.magenta2.ai.orchestration.settings.RuntimeSettingsService;
 import io.mindspice.magenta2.ai.orchestration.workspaces.AgentsMdResolver;
 import io.mindspice.magenta2.ai.skills.AgentSkillActivationService;
@@ -74,6 +90,7 @@ import org.springframework.ai.chat.client.ChatClientResponse;
 import org.springframework.ai.chat.memory.ChatMemory;
 import io.mindspice.magenta2.ai.chat.repository.ChatMemoryRepository;
 import org.springframework.ai.chat.messages.AssistantMessage;
+import org.springframework.ai.deepseek.DeepSeekAssistantMessage;
 import org.springframework.ai.chat.messages.Message;
 import org.springframework.ai.chat.messages.SystemMessage;
 import org.springframework.ai.chat.messages.ToolResponseMessage;
@@ -121,6 +138,10 @@ public class ChatService {
     private static final String BEGIN_PLAN_MESSAGE = "The user is ready to plan. The backend has collected the opening answers; continue planning from that seed context.";
     private static final String CONTINUE_PLAN_MESSAGE = "The user opened an existing plan in planning chat. Review the loaded structured state and ask the next focused question needed to improve or complete the plan.";
 
+    static final Set<String> FILE_MUTATING_TOOL_NAMES = Set.of(
+        "file_write", "file_append", "file_replace", "file_delete"
+    );
+
     private final ChatMemory chatMemory;
     private final ChatMemoryRepository chatMemoryRepository;
     private final ChatSessionMetadataRepository chatSessionMetadataRepository;
@@ -144,6 +165,7 @@ public class ChatService {
     private final ChatFileService chatFileService;
     private final ChatPendingMessageService chatPendingMessageService;
     private final AgentSkillActivationService agentSkillActivationService;
+    private final RunMeasurementRepository measurementRepo;
     private final Set<String> toolUnsupportedModels = ConcurrentHashMap.newKeySet();
     private final Map<String, Semaphore> streamLocks = new ConcurrentHashMap<>();
 
@@ -152,6 +174,12 @@ public class ChatService {
     private final ToolAccessPolicy toolAccessPolicy;
     private final TerminalTurnRepair turnRepair;
     private final TurnAuditWriter turnAuditWriter;
+
+    // Setter-injected to preserve lightweight constructor fixtures while the
+    // production service always resolves immutable bindings before a turn.
+    private AgentContextService agentContextService;
+    private WorkspaceDirectoryService workspaceDirectoryService;
+    private final ThreadLocal<TrustedPolicyResult> activeTrustedPolicies = new ThreadLocal<>();
 
     public ChatService(
         ChatMemory chatMemory,
@@ -166,6 +194,7 @@ public class ChatService {
             chatSessionMetadataRepository,
             chatMarkdownRenderer,
             aiConfig,
+            null,
             null,
             null,
             null,
@@ -244,6 +273,7 @@ public class ChatService {
             agentsMdResolver,
             null,
             null,
+            null,
             null
         );
     }
@@ -283,8 +313,9 @@ public class ChatService {
             null,
             null,
             aiConfig != null && chatSessionMetadataRepository != null
-                ? new RequestResolver(aiConfig, chatSessionMetadataRepository, chatMemoryRepository, planService, null, null)
+                ? new RequestResolver(aiConfig, chatSessionMetadataRepository, chatMemoryRepository, planService, null, null, null)
                 : null,
+            null,
             null,
             null,
             null,
@@ -323,7 +354,8 @@ public class ChatService {
         @Autowired(required = false) AgentsMdResolver agentsMdResolver,
         @Autowired(required = false) AgentSkillRuntimeCatalogService skillRuntimeCatalogService,
         @Autowired(required = false) AgentSkillPromptCatalogAssembler skillPromptCatalogAssembler,
-        @Autowired(required = false) AgentSkillActivationService agentSkillActivationService
+        @Autowired(required = false) AgentSkillActivationService agentSkillActivationService,
+        @Autowired(required = false) RunMeasurementRepository measurementRepo
     ) {
         this.chatMemory = chatMemory;
         this.chatMemoryRepository = chatMemoryRepository;
@@ -348,6 +380,7 @@ public class ChatService {
         this.chatFileService = chatFileService;
         this.chatPendingMessageService = chatPendingMessageService;
         this.agentSkillActivationService = agentSkillActivationService;
+        this.measurementRepo = measurementRepo;
 
         // Initialize extracted turn components
         this.promptAssembler = new PromptContextAssembler(
@@ -362,6 +395,13 @@ public class ChatService {
         this.toolAccessPolicy = new ToolAccessPolicy(chatToolRegistry, planService, taskService, skillRuntimeCatalogService);
         this.turnRepair = new TerminalTurnRepair(planService, taskService);
         this.turnAuditWriter = new TurnAuditWriter(auditService, auditRepository);
+    }
+
+    @Autowired(required = false)
+    void setTrustedContextServices(AgentContextService agentContextService,
+                                   WorkspaceDirectoryService workspaceDirectoryService) {
+        this.agentContextService = agentContextService;
+        this.workspaceDirectoryService = workspaceDirectoryService;
     }
 
     public ChatService(
@@ -416,6 +456,7 @@ public class ChatService {
             null,
             null,
             null,
+            null,
             null
         );
     }
@@ -424,16 +465,19 @@ public class ChatService {
         if (!(request instanceof ChatRequest.MsgRequest msgRequest)) {
             throw new IllegalArgumentException("message request is required");
         }
+        rejectSystemChatConversation(msgRequest.conversationId());
         ResolvedChatRequest resolvedRequest = requestResolver.resolve(msgRequest);
         return chat(resolvedRequest);
     }
 
     public ChatResponse.MsgResponse chat(String conversationId, String message, String model) {
+        rejectSystemChatConversation(conversationId);
         ResolvedChatRequest resolvedRequest = requestResolver.resolve(conversationId, message, model, null);
         return chat(resolvedRequest);
     }
 
     private ChatResponse.MsgResponse chat(ResolvedChatRequest resolvedRequest) {
+        rejectSystemChatConversation(resolvedRequest.conversationId());
         return chat(resolvedRequest, null, null);
     }
 
@@ -471,7 +515,9 @@ public class ChatService {
         }
         boolean installedChatContext = turnContext == null
             && installChatFileContextIfNeeded(resolvedRequest.conversationId(), previousContext);
+        TrustedPolicyResult previousPolicy = activeTrustedPolicies.get();
         try {
+            installTrustedPolicy(resolvedRequest);
             List<ToolCallback> approvedTools = approvedTools(resolvedRequest, approvedToolNames);
             if (!approvedTools.isEmpty() && supportsTools(resolvedRequest.model())) {
                 try {
@@ -485,6 +531,7 @@ public class ChatService {
             }
             return plainChat(resolvedRequest);
         } finally {
+            restoreTrustedPolicy(previousPolicy);
             restoreContext(previousContext, installedTurnContext || installedChatContext);
         }
     }
@@ -496,20 +543,22 @@ public class ChatService {
         if (request == null) {
             throw new IllegalArgumentException("message request is required");
         }
+        rejectSystemChatConversation(request.conversationId());
         String model = StringUtils.hasText(request.model()) ? request.model() : agent.defaultModel();
         if (!StringUtils.hasText(model)) {
             model = defaultModel();
         }
-        ResolvedChatRequest resolvedRequest = requestResolver.resolve(new ChatRequest.MsgRequest(
+        ResolvedChatRequest resolvedRequest = requestResolver.resolveForAgent(new ChatRequest.MsgRequest(
             request.conversationId(),
             request.message(),
             model,
             request.planningModel()
-        ));
+        ), agent.id());
         markAgentConversation(resolvedRequest.conversationId(), agent.id());
         OrchestrationTaskContext turnContext = new OrchestrationTaskContext(
-            agent.id(), agent.name(), null, null,
-            resolvedRequest.conversationId(), "AGENT_CHAT", null, null
+            agent.id(), agent.name(), null, null, null, null,
+            null, null, null, "AGENT_CHAT", null, null, null,
+            null, null, null, null, null, resolvedRequest.contextBindingKey()
         );
         List<String> agentApprovedTools = agent.approvedTools() == null ? List.of() : agent.approvedTools();
         return chat(resolvedRequest, agentApprovedTools, turnContext);
@@ -521,8 +570,10 @@ public class ChatService {
         }
         try {
             Path dir = planService.chatFileDirectory(conversationId).toRealPath();
+            String bindingKey = requestResolver == null ? null : requestResolver.contextBindingKey(conversationId);
             OrchestrationTaskContextHolder.set(new OrchestrationTaskContext(
-                null, null, null, null, conversationId, "CHAT", dir.toString(), dir.toString()
+                null, null, null, null, null, null, null, null, null, "CHAT", null, dir.toString(), null,
+                null, null, null, null, null, bindingKey
             ));
             return true;
         } catch (RuntimeException | IOException ignored) {
@@ -538,6 +589,17 @@ public class ChatService {
             OrchestrationTaskContextHolder.clear();
         } else {
             OrchestrationTaskContextHolder.set(previousContext);
+        }
+    }
+
+    private void rejectSystemChatConversation(String conversationId) {
+        if (conversationId == null || !StringUtils.hasText(conversationId)) {
+            return;
+        }
+        var origin = chatSessionMetadataRepository.findOrigin(conversationId);
+        if (origin.isPresent() && origin.get() == ChatSessionOrigin.SYSTEM_CHAT) {
+            throw new IllegalArgumentException(
+                    "System chat conversations cannot be used through public chat endpoints");
         }
     }
 
@@ -579,6 +641,9 @@ public class ChatService {
     }
 
     public ResolvedChatRequest resolve(ChatRequest request) {
+        if (request instanceof ChatRequest.MsgRequest messageRequest) {
+            rejectSystemChatConversation(messageRequest.conversationId());
+        }
         return requestResolver.resolve(request);
     }
 
@@ -587,6 +652,7 @@ public class ChatService {
     }
 
     public Flux<ChatMessage> stream(ResolvedChatRequest request, ActiveTurn activeTurn) {
+        rejectSystemChatConversation(request.conversationId());
         if (turnCoordinator != null) {
             return Flux.defer(() -> {
                 Semaphore lock = streamLocks.computeIfAbsent(
@@ -610,8 +676,19 @@ public class ChatService {
         return Flux.defer(() -> {
             OrchestrationTaskContext previousContext = OrchestrationTaskContextHolder.current();
             boolean installedChatContext = installChatFileContextIfNeeded(request.conversationId(), previousContext);
-            return streamNowWithContext(request, activeTurn)
-                .doFinally(signal -> restoreContext(previousContext, installedChatContext));
+            TrustedPolicyResult previousPolicy = activeTrustedPolicies.get();
+            try {
+                installTrustedPolicy(request);
+                return streamNowWithContext(request, activeTurn)
+                    .doFinally(signal -> {
+                        restoreTrustedPolicy(previousPolicy);
+                        restoreContext(previousContext, installedChatContext);
+                    });
+            } catch (RuntimeException exception) {
+                restoreTrustedPolicy(previousPolicy);
+                restoreContext(previousContext, installedChatContext);
+                return Flux.error(exception);
+            }
         });
     }
 
@@ -943,6 +1020,7 @@ public class ChatService {
     }
 
     public ResolvedChatRequest resolveSavedPlanExecution(String conversationId, boolean clearContext) {
+        rejectSystemChatConversation(conversationId);
         requirePlanService();
         String model = planService.executionModel(conversationId);
         if (!StringUtils.hasText(model)) {
@@ -1043,14 +1121,16 @@ public class ChatService {
         requireTaskService();
         ResolvedTaskExecution execution = resolveTaskExecution(taskId, inputValues, conversationId, modelOverride);
         return Flux.create(sink -> {
-            sink.next(TaskExecutionEvent.started(execution.conversationId(), execution.runId()));
-            TaskRun started = taskService.getRun(execution.runId());
-            if (started.status() != TaskRunStatus.RUNNING) {
-                sink.next(TaskExecutionEvent.finished(execution.conversationId(), started));
-                sink.complete();
-                return;
-            }
+            TrustedPolicyResult previousPolicy = activeTrustedPolicies.get();
             try {
+                installTrustedPolicy(execution.request());
+                sink.next(TaskExecutionEvent.started(execution.conversationId(), execution.runId()));
+                TaskRun started = taskService.getRun(execution.runId());
+                if (started.status() != TaskRunStatus.RUNNING) {
+                    sink.next(TaskExecutionEvent.finished(execution.conversationId(), started));
+                    sink.complete();
+                    return;
+                }
                 ChatMessage finalMessage = toolChatMessageWithRetry(
                     execution.request(),
                     approvedTools(execution.request()),
@@ -1076,6 +1156,8 @@ public class ChatService {
                 }
                 sink.next(TaskExecutionEvent.finished(execution.conversationId(), current));
                 sink.complete();
+            } finally {
+                restoreTrustedPolicy(previousPolicy);
             }
         });
     }
@@ -1154,6 +1236,7 @@ public class ChatService {
         return chatSessionMetadataRepository.findBrowserConversationIds().stream()
             .map(this::session)
             .filter(session -> session.origin() != ChatSessionOrigin.AGENT_CHAT)
+            .filter(session -> session.origin() != ChatSessionOrigin.SYSTEM_CHAT)
             .filter(session -> !session.archived())
             .filter(session -> interactionMode(session.conversationId()) == PlanMode.NORMAL)
             .sorted(java.util.Comparator
@@ -1559,7 +1642,15 @@ public class ChatService {
 
     private void handleInvokeModel(ToolLoopState s) {
         phase(s.activeTurn, ActiveTurnPhase.MODEL_CALL);
-        s.response = chatModelRouter.chatModel(s.request.model()).call(s.prompt);
+        Instant startedAt = Instant.now();
+        String invocationId = reserveMeasurement(s, MeasurementKind.MODEL, s.request.model());
+        try {
+            s.response = chatModelRouter.chatModel(s.request.model()).call(s.prompt);
+            completeModelMeasurement(invocationId, s, startedAt);
+        } catch (Exception e) {
+            completeModelMeasurementFailure(invocationId, s, startedAt, e);
+            throw e;
+        }
         s.phase = TurnPhase.EVALUATE;
     }
 
@@ -1616,12 +1707,19 @@ public class ChatService {
 
         phase(s.activeTurn, ActiveTurnPhase.TOOL_CALL);
         int promptMessageCount = s.prompt.getInstructions().size();
+        Instant toolsStartedAt = Instant.now();
+        Map<String, String> toolInvocationIds = reserveToolMeasurements(s);
         ToolExecutionResult toolExecutionResult;
         try {
             toolExecutionResult = toolCallingManager.executeToolCalls(s.prompt, s.response);
+            completeToolMeasurements(toolInvocationIds, s, toolExecutionResult, toolsStartedAt);
         } catch (ToolExecutionException exception) {
+            failToolMeasurements(toolInvocationIds, s, toolsStartedAt, exception);
             handleToolExecutionFailure(s, exception);
             return;
+        } catch (Exception exception) {
+            failToolMeasurements(toolInvocationIds, s, toolsStartedAt, exception);
+            throw exception;
         }
         List<ToolTranscriptEntry> toolTranscriptEntries = toolTranscriptEntries(s.response, toolExecutionResult);
         List<ChatMessage> pendingToolMessages = new ArrayList<>();
@@ -1698,6 +1796,13 @@ public class ChatService {
 
         if (s.toolMessageConsumer != null) {
             pendingToolMessages.forEach(s.toolMessageConsumer);
+            for (ToolTranscriptEntry entry : toolTranscriptEntries) {
+                if (FILE_MUTATING_TOOL_NAMES.contains(entry.toolName())) {
+                    s.toolMessageConsumer.accept(new ChatMessage(
+                        "outputs_changed", s.request.conversationId(), null, null
+                    ));
+                }
+            }
         }
 
         if (s.mode == PlanMode.EXECUTE_PLAN && planService != null
@@ -2068,19 +2173,15 @@ public class ChatService {
     private ToolCallingChatOptions toolOptions(String model, List<ToolCallback> approvedTools) {
         ToolCallingChatOptions options = StringUtils.hasText(model)
             ? chatModelRouter.toolCallingOptions(model)
-            : new DefaultToolCallingChatOptions();
-        options.setInternalToolExecutionEnabled(false);
-        options.setToolCallbacks(approvedTools);
-        return options;
+            : DefaultToolCallingChatOptions.builder().build();
+        return options.mutate().toolCallbacks(approvedTools).build();
     }
 
     private ToolCallingChatOptions toolFinalOptions(String model) {
         ToolCallingChatOptions options = StringUtils.hasText(model)
             ? chatModelRouter.toolCallingOptions(model)
-            : new DefaultToolCallingChatOptions();
-        options.setInternalToolExecutionEnabled(false);
-        options.setToolCallbacks(List.of());
-        return options;
+            : DefaultToolCallingChatOptions.builder().build();
+        return options.mutate().toolCallbacks(List.of()).build();
     }
 
     private SystemMessage toolUseAbortControlMessage(ToolUseAbort abort) {
@@ -2307,7 +2408,7 @@ public class ChatService {
         prompt = prompt.user(request.message());
 
         if (StringUtils.hasText(request.model())) {
-            prompt = prompt.options(chatModelRouter.chatOptions(request.model()));
+            prompt = prompt.options(chatModelRouter.chatOptions(request.model()).mutate());
         }
         return prompt;
     }
@@ -2318,7 +2419,93 @@ public class ChatService {
 
     String effectiveSystemPrompt(ResolvedChatRequest request) {
         PlanMode mode = interactionMode(request.conversationId());
-        return promptAssembler.mergeModePrompt(mode, request.conversationId());
+        TrustedPolicyResult policy = activeTrustedPolicies.get();
+        if (policy == null) {
+            policy = resolveTrustedPolicy(request);
+        }
+        if (policy == null) {
+            // Compatibility fixtures without context persistence still use the
+            // typed composition path; production never reaches this branch.
+            return promptAssembler.mergeModePrompt(mode, request.conversationId(), null);
+        }
+
+        TurnContext turn = new TurnContext();
+        turn.resolvedRequest(request);
+        turn.interactionMode(mode);
+        promptAssembler.assemble(turn, policy);
+        if (turn.terminalBindingFailure()) {
+            throw new TrustedContextUnavailableException();
+        }
+        return turn.systemPrompt();
+    }
+
+    /**
+     * Resolve the immutable binding once at the turn boundary, before tool
+     * selection or model construction. Lightweight legacy fixtures omit both
+     * services and retain their no-policy behavior; a partially wired runtime
+     * fails closed instead.
+     */
+    private void installTrustedPolicy(ResolvedChatRequest request) {
+        TrustedPolicyResult current = resolveTrustedPolicy(request);
+        if (current != null) {
+            activeTrustedPolicies.set(current);
+            if (current.isTerminal()) {
+                throw new TrustedContextUnavailableException();
+            }
+        }
+    }
+
+    private void restoreTrustedPolicy(TrustedPolicyResult previous) {
+        if (previous == null) {
+            activeTrustedPolicies.remove();
+        } else {
+            activeTrustedPolicies.set(previous);
+        }
+    }
+
+    private TrustedPolicyResult resolveTrustedPolicy(ResolvedChatRequest request) {
+        if (agentContextService == null && workspaceDirectoryService == null) {
+            return null;
+        }
+        if (agentContextService == null || workspaceDirectoryService == null) {
+            return TrustedPolicyResult.terminal(ContextOutcome.UNAVAILABLE);
+        }
+
+        String bindingKey = request.contextBindingKey();
+        OrchestrationTaskContext runtimeContext = OrchestrationTaskContextHolder.current();
+        if (!StringUtils.hasText(bindingKey) && runtimeContext != null) {
+            bindingKey = runtimeContext.contextBindingKey();
+        }
+        if (!StringUtils.hasText(bindingKey)) {
+            return TrustedPolicyResult.terminal(ContextOutcome.UNAVAILABLE);
+        }
+
+        var bindingLookup = agentContextService.getBinding(bindingKey);
+        if (bindingLookup.outcome() != ContextOutcome.AVAILABLE || bindingLookup.value() == null) {
+            return TrustedPolicyResult.terminal(ContextOutcome.UNAVAILABLE);
+        }
+        try {
+            WorkspaceDescriptor agentDescriptor = workspaceDirectoryService.resolveForRead(
+                    WorkspaceKind.AGENT, bindingLookup.value().agentId());
+            WorkspaceDescriptor executionDescriptor = runtimeContext != null
+                    && runtimeContext.workspaceDescriptor() != null
+                    ? runtimeContext.workspaceDescriptor() : agentDescriptor;
+            if (executionDescriptor.kind() == WorkspaceKind.CHAT) {
+                return TrustedPolicyResult.terminal(ContextOutcome.UNAVAILABLE);
+            }
+            BindingResolution bindingResolution = agentContextService.resolveBinding(
+                    agentDescriptor, bindingLookup.value());
+            return TrustedContextPolicyAssembler.create(executionDescriptor, bindingResolution).assemble();
+        } catch (IllegalArgumentException | IllegalStateException exception) {
+            logger.debug("Trusted context could not be resolved for a chat turn");
+            return TrustedPolicyResult.terminal(ContextOutcome.UNAVAILABLE);
+        }
+    }
+
+    private static final class TrustedContextUnavailableException extends IllegalStateException {
+        private TrustedContextUnavailableException() {
+            super("The selected context is unavailable. This turn did not run.");
+        }
     }
 
     private PlanMode interactionMode(String conversationId) {
@@ -2426,6 +2613,12 @@ public class ChatService {
         }
         // OpenAI/DeepSeek: AssistantMessage properties under "reasoningContent"
         org.springframework.ai.chat.messages.AssistantMessage output = generation.getOutput();
+        if (output instanceof DeepSeekAssistantMessage deepSeekMessage) {
+            String reasoning = deepSeekMessage.getReasoningContent();
+            if (StringUtils.hasText(reasoning)) {
+                return reasoning;
+            }
+        }
         if (output != null && output.getMetadata() != null) {
             String reasoning = stringValue(output.getMetadata().get("reasoningContent"));
             return reasoning;
@@ -2472,6 +2665,184 @@ public class ChatService {
     }
 
     private record MalformedToolCall(String id, String name, String arguments, String parserMessage) {
+    }
+
+    // ── Measurement Instrumentation ──
+
+    private String reserveMeasurement(ToolLoopState s, MeasurementKind kind, String modelOrToolName) {
+        if (measurementRepo == null) return null;
+        OrchestrationTaskContext ctx = OrchestrationTaskContextHolder.current();
+        if (ctx == null || ctx.taskRunLocation() == null) return null;
+        String taskRunId = ctx.taskRunId();
+        int attemptNumber = ctx.attemptNumber();
+        if (taskRunId == null || attemptNumber < 1) return null;
+        String invocationId = taskRunId + "/" + kind.name().toLowerCase() + "/" + UUID.randomUUID();
+        String callId = kind == MeasurementKind.MODEL
+                ? s.request.conversationId() + "/model/" + System.currentTimeMillis()
+                : s.request.conversationId() + "/tools/" + System.currentTimeMillis();
+        try {
+            measurementRepo.reserve(RunMeasurement.reserve(
+                    invocationId, taskRunId, attemptNumber, kind, callId, null));
+            return invocationId;
+        } catch (Exception e) {
+            logger.warn("Failed to reserve measurement {}: {}", invocationId, e.getMessage());
+            return null;
+        }
+    }
+
+    private Map<String, String> reserveToolMeasurements(ToolLoopState s) {
+        Map<String, String> ids = new java.util.LinkedHashMap<>();
+        if (measurementRepo == null) return ids;
+        OrchestrationTaskContext ctx = OrchestrationTaskContextHolder.current();
+        if (ctx == null || ctx.taskRunLocation() == null) return ids;
+        String taskRunId = ctx.taskRunId();
+        int attemptNumber = ctx.attemptNumber();
+        if (taskRunId == null || attemptNumber < 1) return ids;
+        List<org.springframework.ai.chat.messages.AssistantMessage.ToolCall> toolCalls =
+                s.response.getResult().getOutput().getToolCalls();
+        for (var tc : toolCalls) {
+            String invocationId = taskRunId + "/tool/" + tc.id();
+            try {
+                measurementRepo.reserve(RunMeasurement.reserve(
+                        invocationId, taskRunId, attemptNumber,
+                        MeasurementKind.TOOL, tc.id(), null));
+                ids.put(tc.id(), invocationId);
+            } catch (Exception e) {
+                logger.warn("Failed to reserve tool measurement {}: {}", invocationId, e.getMessage());
+            }
+        }
+        return ids;
+    }
+
+    private void completeModelMeasurement(String invocationId, ToolLoopState s, Instant startedAt) {
+        if (invocationId == null || measurementRepo == null) return;
+        Instant completedAt = Instant.now();
+        long elapsedMs = Duration.between(startedAt, completedAt).toMillis();
+        try {
+            org.springframework.ai.chat.model.ChatResponse response = s.response;
+            Integer inputTokens = null;
+            Integer outputTokens = null;
+            Integer totalTokens = null;
+            String provider = null;
+            if (response != null && response.getMetadata() != null) {
+                var metadata = response.getMetadata();
+                if (metadata.containsKey("usage")) {
+                    Object usage = metadata.get("usage");
+                    if (usage instanceof Map<?, ?> usageMap) {
+                        inputTokens = intFromMap(usageMap, "prompt_tokens", "input_tokens");
+                        outputTokens = intFromMap(usageMap, "completion_tokens", "output_tokens");
+                        totalTokens = intFromMap(usageMap, "total_tokens");
+                    }
+                }
+                if (metadata.containsKey("provider")) {
+                    provider = String.valueOf(metadata.get("provider"));
+                }
+            }
+            RunMeasurement reserved = measurementRepo.findById(invocationId).orElse(null);
+            if (reserved == null) return;
+            measurementRepo.complete(reserved.complete(
+                    MeasurementOutcome.SUCCEEDED, MeasurementCompleteness.COMPLETE,
+                    startedAt, completedAt, (int) elapsedMs,
+                    provider, s.request.model(), null,
+                    inputTokens, outputTokens, totalTokens,
+                    null, null, null, null, null, null));
+        } catch (Exception e) {
+            logger.warn("Failed to complete model measurement {}: {}", invocationId, e.getMessage());
+        }
+    }
+
+    private void completeModelMeasurementFailure(String invocationId, ToolLoopState s,
+                                                   Instant startedAt, Exception error) {
+        if (invocationId == null || measurementRepo == null) return;
+        Instant completedAt = Instant.now();
+        long elapsedMs = Duration.between(startedAt, completedAt).toMillis();
+        try {
+            RunMeasurement reserved = measurementRepo.findById(invocationId).orElse(null);
+            if (reserved == null) return;
+            measurementRepo.complete(reserved.complete(
+                    MeasurementOutcome.FAILED, MeasurementCompleteness.COMPLETE,
+                    startedAt, completedAt, (int) elapsedMs,
+                    null, s.request.model(), null,
+                    null, null, null,
+                    null, null, null, null, null,
+                    error.getMessage() != null ? error.getMessage() : "model call failed"));
+        } catch (Exception e) {
+            logger.warn("Failed to record model measurement failure {}: {}", invocationId, e.getMessage());
+        }
+    }
+
+    private void completeToolMeasurements(Map<String, String> invocationIds, ToolLoopState s,
+                                            ToolExecutionResult toolExecutionResult, Instant startedAt) {
+        if (invocationIds.isEmpty() || measurementRepo == null) return;
+        Instant completedAt = Instant.now();
+        Map<String, MeasurementOutcome> outcomes = toolResponseOutcomes(toolExecutionResult);
+        for (var tc : s.response.getResult().getOutput().getToolCalls()) {
+            String invocationId = invocationIds.get(tc.id());
+            if (invocationId == null) continue;
+            try {
+                RunMeasurement reserved = measurementRepo.findById(invocationId).orElse(null);
+                if (reserved == null) continue;
+                MeasurementOutcome outcome = outcomes.getOrDefault(tc.id(), MeasurementOutcome.SUCCEEDED);
+                long elapsedMs = Duration.between(startedAt, completedAt).toMillis();
+                measurementRepo.complete(reserved.complete(
+                        outcome, MeasurementCompleteness.COMPLETE,
+                        startedAt, completedAt, (int) elapsedMs,
+                        null, null, tc.name(),
+                        null, null, null,
+                        null, null, null, null, null, null));
+            } catch (Exception e) {
+                logger.warn("Failed to complete tool measurement {}: {}", invocationId, e.getMessage());
+            }
+        }
+    }
+
+    private void failToolMeasurements(Map<String, String> invocationIds, ToolLoopState s,
+                                        Instant startedAt, Exception error) {
+        if (invocationIds.isEmpty() || measurementRepo == null) return;
+        Instant completedAt = Instant.now();
+        for (var entry : invocationIds.entrySet()) {
+            try {
+                RunMeasurement reserved = measurementRepo.findById(entry.getValue()).orElse(null);
+                if (reserved == null) continue;
+                long elapsedMs = Duration.between(startedAt, completedAt).toMillis();
+                measurementRepo.complete(reserved.complete(
+                        MeasurementOutcome.FAILED, MeasurementCompleteness.COMPLETE,
+                        startedAt, completedAt, (int) elapsedMs,
+                        null, null, null,
+                        null, null, null,
+                        null, null, null, null, null,
+                        error.getMessage() != null ? error.getMessage() : "tool execution failed"));
+            } catch (Exception e) {
+                logger.warn("Failed to record tool measurement failure {}: {}", entry.getValue(), e.getMessage());
+            }
+        }
+    }
+
+    private static Map<String, MeasurementOutcome> toolResponseOutcomes(
+            ToolExecutionResult toolExecutionResult) {
+        Map<String, MeasurementOutcome> outcomes = new java.util.LinkedHashMap<>();
+        if (toolExecutionResult == null || toolExecutionResult.conversationHistory() == null) {
+            return outcomes;
+        }
+        for (var message : toolExecutionResult.conversationHistory()) {
+            if (message instanceof org.springframework.ai.chat.messages.ToolResponseMessage trm) {
+                for (var response : trm.getResponses()) {
+                    outcomes.put(response.id(), MeasurementOutcome.SUCCEEDED);
+                }
+            }
+        }
+        return outcomes;
+    }
+
+    private static Integer intFromMap(Map<?, ?> map, String... keys) {
+        for (String key : keys) {
+            Object value = map.get(key);
+            if (value instanceof Number num) return num.intValue();
+            if (value instanceof String s && org.springframework.util.StringUtils.hasText(s)) {
+                try { return Integer.parseInt(s); } catch (NumberFormatException ignored) { }
+            }
+        }
+        return null;
     }
 
     private static final class ToolLoopState {

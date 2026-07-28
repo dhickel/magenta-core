@@ -4,10 +4,7 @@ import java.time.Instant;
 
 public record WorkspaceFileActionRecord(
     String id,
-    String workspaceId,
-    WorkspaceOwnerType ownerType,
-    String ownerId,
-    String workAreaId,
+    String workspaceIdentity,
     String actorType,
     String actorId,
     WorkspaceFileActionType actionType,

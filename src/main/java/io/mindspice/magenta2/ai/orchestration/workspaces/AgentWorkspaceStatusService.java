@@ -14,42 +14,46 @@ import org.springframework.util.StringUtils;
 
 /**
  * Produces workspace health/activity read models for agents.
- * Reports filesystem-derived workspace facts.
+ * Resolves the canonical descriptor without creating its root.
+ * Derives output counts from OutputArtifactRepository and
+ * assignment state from {@link AssignmentService}.
  */
 @Service
 public class AgentWorkspaceStatusService {
     private static final Logger log = LoggerFactory.getLogger(AgentWorkspaceStatusService.class);
 
     private final WorkspaceDirectoryService directoryService;
-    private final WorkspaceService workspaceService;
-    private final WorkspaceLeaseService leaseService;
     private final OutputArtifactService outputArtifactService;
     private final AssignmentService assignmentService;
 
     public AgentWorkspaceStatusService(
         WorkspaceDirectoryService directoryService,
-        WorkspaceService workspaceService,
-        WorkspaceLeaseService leaseService,
         OutputArtifactService outputArtifactService,
         AssignmentService assignmentService
     ) {
         this.directoryService = directoryService;
-        this.workspaceService = workspaceService;
-        this.leaseService = leaseService;
         this.outputArtifactService = outputArtifactService;
         this.assignmentService = assignmentService;
     }
 
     /**
      * Produce a workspace status snapshot for a single agent.
-     * Prefers deterministic query/update over an always-on file watcher.
+     * Resolves the canonical descriptor without creating the root.
      */
     public AgentWorkspaceStatus statusFor(String agentId) {
         if (!StringUtils.hasText(agentId)) {
             throw new IllegalArgumentException("agentId is required");
         }
 
-        Path workspacePath = directoryService.agentWorkspace(agentId);
+        WorkspaceDescriptor descriptor;
+        try {
+            descriptor = directoryService.resolveForRead(
+                    WorkspaceKind.AGENT, agentId);
+        } catch (WorkspaceResolutionException e) {
+            return AgentWorkspaceStatus.error(agentId, e.getMessage());
+        }
+
+        Path workspacePath = descriptor.root();
         boolean exists = Files.isDirectory(workspacePath);
         boolean writable = exists && Files.isWritable(workspacePath);
 
@@ -59,9 +63,9 @@ public class AgentWorkspaceStatusService {
         if (!writable) {
             return new AgentWorkspaceStatus(
                 agentId,
-                "agents/" + agentId + "/workspace",
+                descriptor.identity(),
                 WorkspaceHealth.READ_ONLY,
-                true, false, 0, 0, List.of(), 0, 0, null,
+                true, false, 0, 0, 0, null,
                 "Workspace exists but is not writable"
             );
         }
@@ -74,36 +78,11 @@ public class AgentWorkspaceStatusService {
             activeRunCount = 0;
         }
 
-        int activeLeaseCount;
-        List<String> linkedProjectIds;
-        try {
-            Workspace ws = workspaceService.agentWorkspace(agentId, null);
-            activeLeaseCount = workspaceService.activeLeases(ws.id()).size();
-            linkedProjectIds = workspaceService.links(ws.id()).stream()
-                .filter(link -> link.linkType() == WorkspaceLinkType.PATH && link.target().contains("projects/"))
-                .map(link -> {
-                    String target = link.target();
-                    int idx = target.lastIndexOf("projects/");
-                    if (idx >= 0) {
-                        String sub = target.substring(idx + "projects/".length());
-                        int slash = sub.indexOf('/');
-                        return slash > 0 ? sub.substring(0, slash) : sub;
-                    }
-                    return link.label();
-                })
-                .distinct()
-                .toList();
-        } catch (Exception e) {
-            log.debug("Failed to query workspace metadata for agent {}: {}", agentId, e.getMessage());
-            activeLeaseCount = 0;
-            linkedProjectIds = List.of();
-        }
-
         long outputArtifactCount;
         long outputBytes;
         try {
             List<RunOutputArtifact> artifacts = outputArtifactService.query(
-                OutputArtifactQuery.of(agentId, null, null, null, null, null, null, 200));
+                OutputArtifactQuery.of(agentId, null, null, null, null, null, null, null, null, 200));
             outputArtifactCount = artifacts.size();
             outputBytes = artifacts.stream()
                 .mapToLong(a -> {
@@ -124,12 +103,11 @@ public class AgentWorkspaceStatusService {
         Instant lastActivity = null;
         try {
             List<RunOutputArtifact> recent = outputArtifactService.query(
-                OutputArtifactQuery.of(agentId, null, null, null, null, null, null, 1));
+                OutputArtifactQuery.of(agentId, null, null, null, null, null, null, null, null, 1));
             if (!recent.isEmpty() && recent.getFirst().createdAt() != null) {
                 lastActivity = recent.getFirst().createdAt();
             }
         } catch (Exception ignored) {
-            // leave null
         }
 
         WorkspaceHealth health;
@@ -144,13 +122,11 @@ public class AgentWorkspaceStatusService {
 
         return new AgentWorkspaceStatus(
             agentId,
-            "agents/" + agentId + "/workspace",
+            descriptor.identity(),
             health,
             true,
             true,
             activeRunCount,
-            activeLeaseCount,
-            linkedProjectIds,
             outputArtifactCount,
             outputBytes,
             lastActivity,

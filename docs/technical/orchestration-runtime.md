@@ -23,16 +23,16 @@ Core fields:
 
 - `agent_id`, optional `job_id` and `job_item_id`.
 - `assignment_type`: task, workflow, job, or other runtime work type.
-- `priority`, `status`, `model_override`, first-class `project_id`, compatibility `workspace_id`, `effective_workspace_id`, and `effective_workspace_kind`.
+- `priority`, `status`, `model_override`, first-class `project_id`, `workspace_type`, `workspace_key`, and internally derived `workspace_identity`.
 - `current_item_index`, `checkpoint_json`, input/output/evidence JSON.
 - `error_text`, lease owner/expires, progress/heartbeat timestamps.
 - Created, updated, started, completed timestamps.
 
 `AssignmentService` owns creation, queue reads, retained history reads, lifecycle transitions, deletion, purge, diagnostics, transcript lookup, and assignment-to-conversation links.
 
-`projectId` selects project-scoped execution and the project workspace. `workspaceId` remains compatibility metadata for older callers and UI references; it is not interpreted as project context. New assignments persist first-class project/effective workspace fields and still keep `input.projectId` for compatibility with older records and consumers.
+`projectId` is membership and attribution metadata only. Execution selection uses the nullable-together `workspaceType`/`workspaceKey` pair; omission selects the bound agent. Canonical identity is derived internally.
 
-`AssignmentService.AssignmentSummary` is the UI-facing read model for queue/history/project context. It exposes assignment id, agent/job ids, status, `projectId`, compatibility `workspaceId`, effective workspace id/kind/display path, workspace blocker details, linked run ids, and lifecycle timestamps.
+`AssignmentService.AssignmentSummary` is the UI-facing read model for queue/history/project context. It exposes assignment id, agent/job ids, status, `projectId`, typed workspace selection and identity, linked run ids, and lifecycle timestamps.
 
 ## Queue Lifecycle
 
@@ -47,13 +47,13 @@ Status values are represented by `OrchestrationStatus`. Lifecycle controls inclu
 
 The runtime stores retained terminal history separately from active queue reads. History can be purged by age through assignment history APIs and settings.
 
-Assignments waiting on project workspace leases can be requeued after the blocking lease clears through assignment service/operator actions. The UI should show the blocker rather than implying lease release is immediate.
+Assignment queue leases coordinate runner ownership. Filesystem workspace lease blocking and workspace-blocked requeue behavior are not part of active execution.
 
 ## Leases and Progress
 
 Assignment queue leasing is DB-backed and independent from filesystem workspace leases. Assignment lease fields (`lease_owner`, `lease_expires_at`, progress and heartbeat timestamps) allow runner ownership and stale-run diagnostics.
 
-Workspace writable leases are a separate concept in `workspace_leases`; see [Workspaces, Tools, and Outputs](workspaces-tools-outputs.md).
+Obsolete filesystem lease tables may remain in existing databases but are inert for active execution.
 
 ## Execution Boundaries
 
@@ -65,7 +65,9 @@ Workspace writable leases are a separate concept in `workspace_leases`; see [Wor
 
 The runtime does not attempt token-level or partial model response resume. Durable recovery is at task, workflow, and job item boundaries using assignment checkpoints and run records.
 
-Every assignment resolves one effective durable workspace before execution: project workspace when `projectId` is present, otherwise the executing agent workspace. Run staging remains separate from final promoted outputs.
+Every execution attempt resolves one descriptor from its persisted `workspaceType`/`workspaceKey` selection. Task, workflow, and job submission reserves the immutable native run id as `taskRunId` before queue dispatch. The runner then loads that reservation, provisions `tasks/<taskPathKey>/<taskRunId>/` through `WorkspaceDirectoryService`, acquires a monotonic writer claim independent from the assignment lease, and carries the descriptor, trusted locations, attempt, and opaque capability through execution. Lifecycle setup fails closed.
+
+Operation keys are scoped by operation type. A supplied key retries one submission; omitted keys are generated uniquely so two intentional submissions with identical definitions and inputs remain separate. Resume reuses the run/location and opens a new attempt. Operator retry/replay create new lineage-linked sibling runs. Workflow task children and job work items also receive typed links and sibling lifecycle roots. File, output, checkpoint, terminal, force-interrupt, and stale-lease paths verify current fences; responses never expose paths, owners, fence generations, or tokens. Native run tables remain status truth. Run-local artifact publication is active with reservation, staging, digest/size verification, create-only promotion, reconciliation, and retention safety. Host shell/process execution remains fail-closed because process confinement and process-tree revocation are not proven.
 
 ## Jobs
 
@@ -76,9 +78,9 @@ There are two job-related schemas:
 
 Current public job APIs use `JobDefinition` and `JobWorkItem`. Public job execution submits `AssignmentType.JOB_RUN`. Job items can reference tasks or workflows, include model override and priority, and persist retry count plus continue-on-failure policy. Empty job submissions are valid no-op executions: the assignment-owned `job_runs` row moves to `COMPLETED` with an empty item-run list.
 
-User-facing jobs are task-like executable work bound to an agent, project, and Work Area. Jobs do not own directories, persistent workspaces, or multi-task container filesystem state. During execution, model-facing `outputs/` resolves to the current run-local output staging directory; backend completion, validation, or promotion writes final outputs to the bound Work Area or project output destination. The compatibility `workspaceId` field remains available on definitions and submissions.
+User-facing jobs are task-like executable work bound to an agent and optional project metadata. Definitions and runs persist workspace type, key, and canonical identity. Jobs own no directory and create no eager output tree.
 
-`JobExecutionSummary` is the stable read model for operator views. It bridges job definition, assignment id/status, agent/project labels, compatibility workspace id, effective workspace id/kind/path, Work Area/output context, job run id/status, child run ids, output count, and lifecycle timestamps. Legacy rows may still expose compatibility job workspace/path fields. It covers both the pending gap after assignment creation and the later state after a `job_runs` row exists.
+`JobExecutionSummary` bridges the definition, assignment, agent/project attribution, typed workspace selection, job run status, child run ids, output count, and lifecycle timestamps. It exposes no compatibility workspace id or host path.
 
 Job recurrence/start behavior is assignment-routed. Recurrence firing enqueues `JOB_RUN` assignments and advances recurrence timestamps; direct job run allocation is reserved for assignment-owned runner execution.
 
@@ -95,23 +97,21 @@ Keep these separate. They have different recipients, lifecycle flags, and use ca
 
 ## Schedules
 
-`ScheduleService` owns `agent_schedules` and `schedule_firings`.
-
-Schedules include agent id, optional job id, assignment template JSON, cron expression, timezone, enabled flag, next run time, and timestamps. `schedule_firings` de-duplicates assignment creation for the same schedule/due time.
+`ScheduleService` owns revisioned `schedule_definitions`, `scheduler_claims`, `schedule_firings`, and `schedule_firing_attempts`. A firing identity includes schedule id, revision, slot instant, and timezone. Operation-key digest idempotency and claim fences prevent duplicate enqueue for the same fact; retry/recovery attempts remain append-only audit. Timezone, DST gap/overlap, and misfire semantics are explicit. Simulation is pure and creates no firing, assignment, tool call, artifact, or external mutation.
 
 API routes under `/api/agents/{agentId}/schedules` are gated by `magenta.features.schedules-enabled`; disabled routes return `404`.
 
 ## Event Reactions
 
-`EventReactionService` owns `agent_event_reactions`; `OrchestrationEventService` owns `orchestration_events`.
+`EventReactionService` owns revisioned `reaction_definitions`, `reaction_dispatches`, and `reaction_dispatch_attempts`; `OrchestrationEventService` owns source events. Dispatch identity uses persisted event/reaction/revision/causation facts with operation-key digest idempotency. Root-event, parent, depth, rate, and dedupe checks suppress loops and storms before external work is enqueued. Simulation is non-executing and does not create dispatch audit rows.
 
-Reactions match event type and optional filter JSON, then apply an action type such as assignment creation from a stored assignment template. API routes under `/api/agents/{agentId}/event-reactions` are gated by `magenta.features.reactions-enabled`; disabled routes return `404`.
+API routes under `/api/agents/{agentId}/event-reactions` are gated by `magenta.features.reactions-enabled`; disabled routes return `404`.
 
 ## Projects
 
-`ProjectService` owns projects, memberships, events, and project workspace summaries.
+`ProjectService` owns projects, memberships, events, and project-network gating.
 
-Projects are durable shared workspace, membership, and visibility abstractions. They are not executable work units and no longer require a permanent owner agent. `ownerAgentId` remains a nullable legacy compatibility field on project records and create payloads. Work executes through an agent with optional `projectId`; project-scoped work uses the project workspace as the effective durable workspace.
+Projects are durable membership, tracking, and visibility abstractions. They are not executable work units and do not select or allocate execution filesystems. `ownerAgentId` remains nullable legacy project metadata.
 
 ## Runtime Settings
 
@@ -120,7 +120,7 @@ Projects are durable shared workspace, membership, and visibility abstractions. 
 - Default agent/model.
 - Planning, summary, and compaction model choices.
 - Context buffer percent.
-- System chat model, prompt, approved tools, context limit, and enabled flag.
+- System-chat enabled state and model. Legacy stored prompt, approved-tool, and context-limit values do not affect the fixed server-owned system-chat profile.
 - Assignment history auto-purge days.
 
 The settings service falls back to legacy file config where persisted values are unset.
@@ -129,6 +129,8 @@ The settings service falls back to legacy file config where persisted values are
 
 Operational surfaces expose:
 
+- Files-adjacent bounded run groups and on-demand detail through `RunOperationsFragments`; `OrchestrationController` scopes agent/type/key before querying `RunSummaryService`, while `WorkspaceExplorerService` remains filesystem-only.
+- Rebuildable summaries, normalized health, per-invocation model/tool measurements, attempts, exact skill/artifact/causation audit, and explicit partial/unavailable states.
 - Queue and retained assignment history.
 - Assignment diagnostics and audit transcript fragments.
 - Inbox message counts and actions.

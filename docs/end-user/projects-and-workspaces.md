@@ -1,99 +1,124 @@
 # Projects And Workspaces
 
-Use `/projects` to organize work around a project record and inspect its workspace, linked agents, jobs, and outputs.
+Magenta uses a filesystem-first workspace model. Workspaces are owned by agents, chats, or users and live directly under the application data root. Projects provide shared membership and attribution context but do not own filesystem roots.
 
-## Page Layout
+## Workspace Model
 
-The projects page has:
+Three closed workspace kinds exist:
 
-- A sidebar with **New Project** and project rows.
-- An editor for project fields.
-- Existing-project sections for workspace, network, agents, active jobs, recent outputs, and advanced metadata.
+| Kind | Identity | Location | Behavior |
+| --- | --- | --- | --- |
+| **Agent** | `agent/<agentId>` | `workspace/agent/<agentId>/` | Created lazily when the agent exists. Reads empty until files are written. |
+| **Chat** | `chat/<conversationId>` | `workspace/chat/<conversationId>/` | Created lazily when the conversation exists. Reads empty until files are written. |
+| **User** | `user/<name>` | `workspace/user/<name>/` | Must be explicitly created before use. Missing roots return 404. |
 
-## Create A Project
+Agent and chat workspaces do not require prior explicit creation. If the entity exists, successful file-producing operations create the physical root when needed. User workspaces are the exception: they must be created through the API or UI before any file or execution operation targets them.
+
+Each workspace can contain a reserved legacy/non-task `outputs/` directory. New task, workflow, and job runs are canonical children at `tasks/<taskPathKey>/<taskRunId>/`; their `outputs/` and `staging/` children are lazy and publication-owned. Explorer mutations cannot modify reserved output, task, staging, or skill structures.
+
+## Agent Workspace Areas
+
+Each agent workspace recognizes nine conceptual areas in the Files tab:
+
+| Area | Purpose | Mutability |
+| --- | --- | --- |
+| `.skills` | Agent skill files | Delegates to skill-owned view |
+| `scripts` | Script storage | Confined read/write (storage only, no execution) |
+| `apps` | Application storage | Confined read/write (storage only, no execution) |
+| `home` | Personal files | Confined read/write |
+| `repos` | User-managed external storage | Read-only from Magenta; no Magenta provisioning or mutation |
+| `projects` | Materialized project context | Delegates to context/materialization panel |
+| `tasks` | Task run child directories | Read-only lifecycle/model |
+| `outputs` | Legacy publication | Read-only publication model |
+| Unknown children | Existing content not in recognized areas | Read-only; no implicit migration or write grant |
+
+Conceptual area navigation is non-materializing: selecting an area does not create absent directories. An absent or empty area renders a controlled empty state.
+
+## Agent Materialization (Project Context)
+
+Project materializations are agent-local context containers. A materialization may be provisioned for a project, producing a `READY` local container beneath the agent workspace. `READY` means only that the canonical location is safely available, not that the project's files have been acquired. An empty `READY` container is normal and is truthfully distinguished from an unavailable or failed materialization.
+
+Materialization state is visible in the agent's **Context** panel at `/agents/{agentId}`. The context default can select a materialization (project context) or a personal area (`HOME`, `SCRIPTS`, or `APPS`). Changing the default affects only future work; existing captures retain their original selection.
+
+## Project Membership
+
+Use `/projects` to organize work around a project record, manage agent memberships, and inspect project events. Projects are metadata and membership context. They do not create workspace directories, acquire filesystem leases, or own materialized links.
+
+### Create A Project
 
 1. Open `/projects`.
 2. Select **New Project**.
 3. Fill **Name**.
-4. Optionally choose a **Legacy Initial Agent**.
-5. Optionally fill description and Git repo URL.
-6. Choose manager type and default model if needed.
-7. Save.
+4. Optionally fill description and Git repo URL.
+5. Choose manager type and default model if needed.
+6. Save.
 
-Projects are shared workspaces, not executable work units. The legacy initial agent field is compatibility metadata and can be blank. Add agents as members when they need to work with the project.
+### Edit A Project
 
-## Edit A Project
+Select a project from the sidebar. You can update name, description, Git repo URL, manager type, and default model. Deleting a project is destructive and is blocked while active assignments, jobs, or runs still reference it.
 
-Select a project from the sidebar. You can update:
+### Project Members
 
-- Name.
-- Description.
-- Git repo URL.
-- Manager type.
-- Default model.
+The agents section lists assigned members and roles. Use HTMX controls to add a member, choose a role, or remove a member. Membership removal is guarded while the agent has active assignments.
 
-Deleting a project is destructive. Magenta blocks deletion while active assignments, leases, jobs, or runs still reference the project. Confirm the project is no longer active before deleting it.
+## Agent Files Tab
 
-## Workspace Section
-
-For existing projects, the workspace section shows:
-
-- Legacy initial agent, when compatibility metadata exists.
-- Root kind.
-- Display path.
-- Member/link count.
-- Lease ID.
-- Mounted agent.
-- Release requested state.
-
-If a lease is active, the UI may show **Request release after current turn**. This requests release after the current agent turn rather than immediately breaking active work.
-
-## Work Area File Explorer
-
-Avatar Work Areas expose a confined file explorer for agent or project workspace files. The explorer is a details/list view, not a card grid. It shows table columns for name, file type, size, created timestamp, last modified timestamp, tags, and row actions. Selecting a row updates a separate inspector panel with metadata, full tags, and available operations.
+Each agent's operational console at `/agents/{agentId}` has a **Files** tab. It combines a neutral explorer bound only to `workspace/agent/<agentId>/` with an independently loaded Task Runs panel. Persistence-backed run metadata is never queried by the filesystem explorer service.
 
 The explorer supports:
 
-- Work Area-confined folder navigation through toolbar and breadcrumb controls;
-- creating folders, `.txt` files, and `.md` files;
-- Markdown viewing with Rendered and Text tabs;
-- plain text raw viewing/editing;
-- contained image viewing and safe download links;
-- custom tags and note labels for files and directories;
-- rename, delete confirmation, copy, and move operations.
+- Folder navigation with toolbar and breadcrumb controls.
+- Creating folders, `.txt` files, and `.md` files.
+- Markdown viewing with Rendered and Text tabs.
+- Plain text viewing and editing.
+- Image viewing and download links.
+- Custom tags and note labels for files and directories.
+- Rename, delete confirmation, copy, and move operations.
 
-Copy and move require a destination directory and remain under the selected Work Area. Unsupported or binary files do not show a row View action. The backend rejects traversal, absolute paths, symlink path components, unsafe text-edit extensions, oversized text saves, protected Home/system Work Areas, active Work Area descendants, and Work Areas referenced by queued or running assignment metadata.
+All operations stay confined to the agent's workspace root. The explorer rejects traversal, absolute paths, symlink path components, workspace-root mutation, and modification of reserved `tasks/`, `.skills/`, run-local `outputs/`/`staging/`, or legacy workspace-root `outputs/` structures.
 
-## Project Network And Memberships
+The Files tab uses HTMX for CRUD operations with out-of-band list, inspector, and modal refreshes. JavaScript is limited to narrow interactions where it is the simpler path.
 
-The project network section shows linked agents. The agents section lists assigned members and roles, and provides HTMX controls to add a member, choose a role, or remove a member.
+## User Workspaces
 
-Membership removal is guarded while that agent has active assignments or holds the active project workspace lease. If removal fails, let the active work complete, cancel it, or requeue workspace-blocked assignments after the lease clears.
+User workspaces are explicitly created directories under `workspace/user/`. Names must be valid plain path segments (nonblank, no slashes, no drive syntax, no encoded path syntax). Existing user workspaces appear as valid execution workspace overrides when submitted work offers workspace choice.
 
-## Active Jobs And Outputs
+User workspace management operations:
+- **List**: `GET /api/workspace/user` returns all valid, confined, non-symlink user workspace directories.
+- **Create**: `POST /api/workspace/user` with `{"name": "string"}`. Returns `201` on success, `400` on invalid name, `409` on collision.
 
-The active jobs section lists jobs associated with the project and links to the real job detail page. The recent outputs section lists output artifacts attributed to the project workspace.
+Root rename and destructive root deletion are unavailable for user workspaces.
 
-Use `/jobs` for job editing and `/outputs` for full artifact filtering, inline viewing, and downloads.
+## Execution Workspace Selection
 
-## Workspace Relationship To Agents And Jobs
+When submitting tasks, workflows, or jobs, execution payloads carry `workspaceType` and `workspaceKey` together:
 
-Projects provide shared context and a durable workspace. Agents execute assignments. When a task, workflow, or job submission includes a project, the project workspace is the effective durable workspace for files and outputs. Without a project, the executing agent workspace is used.
+- Both omitted: defaults to the bound agent's workspace.
+- Only one present: invalid (`400`).
+- `workspaceType=agent`, `workspaceKey=X`: X must match the bound agent.
+- `workspaceType=user`, `workspaceKey=X`: user workspace must exist; overrides agent default.
+- `workspaceType=chat`: rejected.
 
-During execution, `outputs/` means the active run's staging area. After backend completion, validation, or promotion, project-scoped output artifacts appear under project filters and are promoted to the selected project or Work Area output destination. Jobs do not own separate workspace directories.
+The UI workspace selection control presents the bound-agent default and only declared existing user-workspace overrides. Chat is never selectable.
 
-The normal user workflow is to browse and edit project directories and Work Areas. Internal agent workspace roots, run staging, and system output structures are diagnostic surfaces rather than normal project management controls.
+For an end-to-end walkthrough, see [Getting Started with Workspaces, Tasks, and Outputs](getting-started-workspaces-tasks-outputs.md).
 
-Workspace leases indicate active ownership or use. A lease is an orchestration/runtime coordination record; it is not the same thing as a container, though container-backed execution may use the workspace while the lease is held.
+## Outputs
+
+New task-run publication reserves collision-safe names beneath `tasks/<taskPathKey>/<taskRunId>/outputs/`, stages bytes under the same trusted run, verifies writer capability, and promotes create-only. Chat publication remains separately confined to chat output locations. Existing workspace-root `outputs/` is legacy/non-task data and is not moved. Durable task, job, run, project, agent, and canonical workspace attribution remains queryable; project ids never select a filesystem root.
+
+## What Changed
+
+The Avatar dashboard, DB-backed Work Areas, generic filesystem workspace records, project roots, filesystem leases, run staging, aliases, and starter files are removed. Legacy user files and obsolete database structures remain untouched on disk but are inactive. This is a non-migration cutover: current code does not open, migrate, alias, or delete legacy trees.
 
 ## Common Errors
 
 - **Name is required**: every project needs a name.
 - **No agents exist**: create an agent before creating a project.
 - **Project not found**: the project was deleted or the page is stale.
-- **Workspace: ...**: workspace summary failed; inspect runtime configuration or logs.
-- **Release Requested: true**: release has been requested and should complete after the current turn can drain.
+- **User workspace not found**: create the user workspace first.
+- **Invalid workspace name**: names must be plain path segments without slashes, dots-only, or encoded syntax.
 
 ## Alpha Limits
 
-Project CRUD and membership editing are available in the Projects UI. Project workspace lease controls remain limited to release requests and inspection there; deeper file operations are handled through the Avatar Work Area file explorer. Some project summary panels display raw member, lease, run, or job IDs for traceability. Searchable selectors are used in related job/project fields where available, but exact workspace and lease diagnostics may still require reading displayed IDs.
+Project CRUD and membership editing are available in the Projects UI. The agent Files tab is the primary workspace browser surface. Some project summary panels may still display raw member, run, or job IDs for traceability. Searchable selectors are used where available.

@@ -4,10 +4,7 @@ import java.time.Instant;
 
 public record WorkspaceFileLabelAssignment(
     String id,
-    String workspaceId,
-    WorkspaceOwnerType ownerType,
-    String ownerId,
-    String rootRelativePath,
+    String workspaceIdentity,
     String fileRelativePath,
     WorkspaceFileLabel label,
     String metadataJson,

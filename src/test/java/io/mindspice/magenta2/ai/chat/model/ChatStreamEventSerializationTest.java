@@ -124,4 +124,14 @@ class ChatStreamEventSerializationTest {
 
         assertThat(json.get("message").asText()).isEqualTo("Something went wrong");
     }
+
+    @Test
+    void outputsChangedEventSerializesConversationId() throws Exception {
+        ChatStreamEvent.OutputsChanged event = new ChatStreamEvent.OutputsChanged("conversation-1");
+
+        JsonNode json = mapper.readTree(mapper.writeValueAsString(event));
+
+        assertThat(json.get("conversationId").asText()).isEqualTo("conversation-1");
+        assertThat(json.size()).isEqualTo(1);
+    }
 }

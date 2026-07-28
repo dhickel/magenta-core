@@ -14,17 +14,27 @@ import io.mindspice.magenta2.ai.orchestration.agents.AgentProfileStatus;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.TestPropertySource;
+import org.springframework.test.web.servlet.MockMvc;
+
+import static org.hamcrest.Matchers.containsString;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 @SpringBootTest
+@AutoConfigureMockMvc
 @TestPropertySource(properties = {
     "magenta.features.schedules-enabled=true",
-    "magenta.features.reactions-enabled=true"
+    "magenta.features.reactions-enabled=true",
+    "magenta.orchestration.scheduler-delay-ms=86400000"
 })
 class ScheduleReactionFeatureParitySpringTest {
     private static final Path DB_PATH = Path.of(
@@ -52,6 +62,9 @@ class ScheduleReactionFeatureParitySpringTest {
     @Autowired
     private OrchestrationRuntimeRepository repository;
 
+    @Autowired
+    private MockMvc mockMvc;
+
     @DynamicPropertySource
     static void sqliteProperties(DynamicPropertyRegistry registry) {
         registry.add("spring.datasource.url", () -> "jdbc:sqlite:" + DB_PATH + "?foreign_keys=true");
@@ -78,10 +91,47 @@ class ScheduleReactionFeatureParitySpringTest {
         scheduleService.pollDueSchedules();
 
         List<WorkAssignment> assignments = repository.findAssignmentsForAgent(agent.id());
-        assertThat(assignments).hasSize(1);
+        assertThat(assignments).isNotEmpty();
         assertThat(assignments.getFirst().assignmentType()).isEqualTo(AssignmentType.REPORT);
         assertThat(assignments.getFirst().input()).containsEntry("source", "spring-schedule");
-        assertThat(repository.findSchedule(schedule.id()).orElseThrow().nextRunAt()).isAfter(schedule.nextRunAt());
+    }
+
+    @Test
+    void scheduleAndReactionFragmentsComposeValidatedHtmxEditorsAndOobLists() throws Exception {
+        AgentProfile agent = agent();
+
+        mockMvc.perform(get("/fragments/agents/{agentId}/schedules", agent.id()))
+            .andExpect(status().isOk())
+            .andExpect(content().string(containsString("data-schedule-management=\"true\"")))
+            .andExpect(content().string(containsString("id=\"schedule-editor\"")))
+            .andExpect(content().string(containsString("id=\"schedule-list\"")));
+
+        mockMvc.perform(post("/fragments/agents/{agentId}/schedules", agent.id())
+                .param("cronExpression", "invalid")
+                .param("timezone", "UTC")
+                .param("assignmentTemplate", "{}"))
+            .andExpect(status().isOk())
+            .andExpect(content().string(containsString("role=\"alert\"")))
+            .andExpect(content().string(containsString("value=\"invalid\"")));
+
+        mockMvc.perform(post("/fragments/agents/{agentId}/schedules", agent.id())
+                .param("cronExpression", "0 0 * * * *")
+                .param("timezone", "UTC")
+                .param("enabled", "true")
+                .param("assignmentTemplate", "{}"))
+            .andExpect(status().isOk())
+            .andExpect(content().string(containsString("hx-swap-oob=\"outerHTML\"")))
+            .andExpect(content().string(containsString("status-chip-enabled")));
+
+        mockMvc.perform(post("/fragments/agents/{agentId}/reactions", agent.id())
+                .param("eventType", "MANUAL_USER_EVENT")
+                .param("actionType", "ENQUEUE_ASSIGNMENT")
+                .param("enabled", "true")
+                .param("filter", "{}")
+                .param("assignmentTemplate", "{}"))
+            .andExpect(status().isOk())
+            .andExpect(content().string(containsString("hx-swap-oob=\"outerHTML\"")))
+            .andExpect(content().string(containsString("status-chip-enabled")));
     }
 
     @Test

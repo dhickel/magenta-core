@@ -40,7 +40,7 @@ public class OrchestrationRunService {
     }
 
     private WorkAssignment createAssignment(AssignmentType type, Map<String, Object> input, OrchestrationRunContext context) {
-        OrchestrationRunContext effective = context == null ? new OrchestrationRunContext(null, null, null, null, null) : context;
+        OrchestrationRunContext effective = context == null ? new OrchestrationRunContext(null, null, null, null, null, null, null) : context;
         JobDefinition job = StringUtils.hasText(effective.jobId()) ? jobService.getDefinition(effective.jobId()) : null;
         String agentId = StringUtils.hasText(effective.agentId())
             ? effective.agentId()
@@ -48,9 +48,6 @@ public class OrchestrationRunService {
         if (!StringUtils.hasText(agentId)) {
             throw new IllegalArgumentException("agentId is required for orchestration-context runs");
         }
-        String workspaceId = StringUtils.hasText(effective.workspaceId())
-            ? effective.workspaceId()
-            : job == null ? null : job.workspaceId();
         return assignmentService.create(new AssignmentRequest(
             agentId,
             effective.jobId(),
@@ -59,7 +56,8 @@ public class OrchestrationRunService {
             effective.priority(),
             effective.modelOverride(),
             effective.projectId(),
-            workspaceId,
+            effective.workspaceType(),
+            effective.workspaceKey(),
             input
         ));
     }

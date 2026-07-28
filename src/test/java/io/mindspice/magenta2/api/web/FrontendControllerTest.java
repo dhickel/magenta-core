@@ -36,7 +36,7 @@ class FrontendControllerTest {
         assertThat(html).doesNotContain("/js/alpha-security.js?v=1");
         assertThat(html).contains("Magenta Portal");
         assertThat(html).contains("/chat");
-        assertThat(html).contains("/avatar");
+        assertThat(html).doesNotContain("/avatar");
         assertThat(html).contains("/dashboard");
         assertPrimaryTopNav(html);
         assertThat(html).contains("/webjars/htmx.org/dist/htmx.min.js");

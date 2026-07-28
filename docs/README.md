@@ -14,9 +14,11 @@ End-user docs:
 
 - [End-user index](end-user/00-index.md)
 - [Quickstart](end-user/quickstart.md)
+- [Getting Started with Workspaces, Tasks, and Outputs](end-user/getting-started-workspaces-tasks-outputs.md)
+- [Task Run Monitoring](end-user/task-run-monitoring.md)
+- [Schedules and Reactions](end-user/schedules-and-reactions.md)
 - [Chat](end-user/chat.md)
 - [Dashboard](end-user/dashboard.md)
-- [Avatar Dashboard](end-user/avatar-dashboard.md)
 - [Plans and Tasks](end-user/plans-and-tasks.md)
 - [Workflows](end-user/workflows.md)
 - [Jobs](end-user/jobs.md)
@@ -38,15 +40,17 @@ Technical docs:
 - [Workflow Engine](technical/workflow-engine.md)
 - [Workspaces, Tools, and Outputs](technical/workspaces-tools-outputs.md)
 - [Frontend HTMX](technical/frontend-htmx.md)
-- [Avatar Dashboard Fragments](technical/avatar-dashboard-fragments.md)
-- [Avatar Dashboard Layout Persistence](technical/avatar-dashboard-layout-persistence.md)
-- [Avatar Planner Organizer](technical/avatar-planner-organizer.md)
 - [Security](technical/security.md)
 - [Configuration and Operations](technical/configuration-operations.md)
+- [Schema migration foundation (001–009)](technical/migrations-001-009.md) and [current migration ownership through 013](technical/data-model.md)
 
 API docs:
 
 - [API index](api/00-index.md)
+- [Artifacts](api/artifacts.md)
+- [Skills](api/skills.md)
+- [Runtime Observability](api/runtime-observability.md)
+- [Schedules and Reactions](api/schedules-reactions.md)
 
 ## Current Status
 

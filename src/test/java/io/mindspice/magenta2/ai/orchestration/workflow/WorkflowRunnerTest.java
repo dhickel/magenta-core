@@ -6,12 +6,12 @@ import io.mindspice.magenta2.ai.chat.rendering.ChatMarkdownRenderer;
 import io.mindspice.magenta2.ai.chat.repository.ChatMemoryRepository;
 import io.mindspice.magenta2.ai.orchestration.runtime.OrchestrationTaskContext;
 import io.mindspice.magenta2.ai.orchestration.runtime.OrchestrationTaskContextHolder;
-import io.mindspice.magenta2.ai.orchestration.workspaces.EffectiveWorkspaceResolver;
+import io.mindspice.magenta2.ai.orchestration.workspaces.OutputArtifactRepository;
 import io.mindspice.magenta2.ai.orchestration.workspaces.OutputArtifactService;
+import io.mindspice.magenta2.ai.orchestration.workspaces.OutputArtifactTestSchema;
+import io.mindspice.magenta2.ai.orchestration.workspaces.RootRelativePathService;
 import io.mindspice.magenta2.ai.orchestration.workspaces.RunOutputArtifact;
 import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceDirectoryService;
-import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceRepository;
-import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -30,6 +30,7 @@ import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceDirectoryServiceTestSupport;
 
 class WorkflowRunnerTest {
 
@@ -48,32 +49,26 @@ class WorkflowRunnerTest {
     void setUp() throws Exception {
         ObjectMapper mapper = new ObjectMapper().findAndRegisterModules();
         jdbcTemplate = new JdbcTemplate(new SingleConnectionDataSource("jdbc:sqlite::memory:?foreign_keys=true", true));
+        OutputArtifactTestSchema.initialize(jdbcTemplate);
 
         PlanRepository planRepository = new PlanRepository(jdbcTemplate, mapper);
         ChatMemoryRepository memoryRepository = new ChatMemoryRepository(jdbcTemplate, mapper);
 
         Path dataRoot = tempDir.resolve("data");
         java.nio.file.Files.createDirectories(dataRoot);
-        workspaceDirectoryService = new WorkspaceDirectoryService(
-            new io.mindspice.magenta2.ai.config.user.AiConfig(
-                null, null, null, null, dataRoot, null, null));
+        workspaceDirectoryService = WorkspaceDirectoryServiceTestSupport.directoryService(dataRoot);
 
-        WorkspaceRepository workspaceRepository = new WorkspaceRepository(jdbcTemplate);
         outputArtifactService = new OutputArtifactService(
-            workspaceRepository, workspaceDirectoryService, mapper);
-        EffectiveWorkspaceResolver effectiveWorkspaceResolver = new EffectiveWorkspaceResolver(
-            workspaceDirectoryService,
-            new WorkspaceService(workspaceRepository, new io.mindspice.magenta2.ai.config.user.AiConfig(
-                null, null, null, null, dataRoot, null, null))
-        );
+            new OutputArtifactRepository(jdbcTemplate), workspaceDirectoryService,
+            new RootRelativePathService(workspaceDirectoryService), mapper);
         planService = new PlanService(
             planRepository, memoryRepository, null, new ChatMarkdownRenderer(),
-            workspaceDirectoryService, outputArtifactService, effectiveWorkspaceResolver);
+            workspaceDirectoryService, outputArtifactService);
 
         WorkflowRepository workflowRepository = new WorkflowRepository(jdbcTemplate, mapper);
         inboxService = new InboxService(workflowRepository, mapper);
         workflowRunner = new WorkflowRunner(workflowRepository, planService,
-            inboxService, workspaceDirectoryService, outputArtifactService, effectiveWorkspaceResolver);
+            inboxService, workspaceDirectoryService, outputArtifactService);
         workflowService = new WorkflowService(workflowRepository, planService, workflowRunner);
     }
 
@@ -344,7 +339,7 @@ class WorkflowRunnerTest {
         ));
 
         AtomicInteger counter = new AtomicInteger();
-        workflowRunner.setTaskNodeExecutor((planId, planRunId, inputs, workspacePath) -> {
+        workflowRunner.setTaskNodeExecutor((planId, planRunId, inputs) -> {
             try { Thread.sleep(200); } catch (InterruptedException ignored) { }
             if (planId.equals(source.id())) {
                 return completedPlanRun(planRunId, planId, Map.of(), Map.of("result", "seed"));
@@ -361,7 +356,8 @@ class WorkflowRunnerTest {
         assertThat(finished.status()).isEqualTo(WorkflowRunStatus.COMPLETED);
         assertThat(elapsedMs).isLessThan(900); // source + parallel workers + final
         assertThat(finished.finalOutputs()).containsKeys("a", "b", "c", "d");
-        assertThat(finished.artifactIds()).hasSizeGreaterThanOrEqualTo(4);
+        assertThat(finished.artifactIds()).isEmpty();
+        // Standalone runs have no live TaskRunWriteCapability and cannot publish.
     }
 
     @Test
@@ -389,27 +385,11 @@ class WorkflowRunnerTest {
         WorkflowRun finished = pollForTerminal(run.id());
 
         assertThat(finished.status()).isEqualTo(WorkflowRunStatus.COMPLETED);
-        assertStoredRelative(finished.workspacePath(), "workspace/system/runs/");
-        Path resolvedWorkspace = resolveStored(finished.workspacePath());
-        assertThat(resolvedWorkspace)
-            .startsWith(workspaceDirectoryService.dataRoot().resolve("workspace/system/runs"));
-        assertThat(finished.outputDir()).isNotEqualTo(finished.workspacePath());
-        assertStoredRelative(finished.outputDir(), "workspace/system/runs/");
-        Path resolvedOutput = resolveStored(finished.outputDir());
-        assertThat(resolvedOutput)
-            .isEqualTo(resolvedWorkspace.resolve("outputs"));
-        assertThat(finished.artifactIds()).hasSize(2);
-        List<RunOutputArtifact> artifacts = finished.artifactIds().stream()
-            .map(outputArtifactService::getArtifact)
-            .toList();
-        assertThat(artifacts)
-            .extracting(RunOutputArtifact::filePath)
-            .anySatisfy(path -> assertStoredRelative(path, "workspace/system/runs/"))
-            .anySatisfy(path -> assertStoredRelative(path, "workspace/system/outputs/"));
-        assertThat(Files.exists(resolvedWorkspace)).isTrue();
-        assertThat(Files.isDirectory(resolvedOutput)).isTrue();
-        assertThat(artifacts)
-            .allSatisfy(artifact -> assertThat(Files.isRegularFile(resolveStored(artifact.filePath()))).isTrue());
+        assertThat(finished.workspaceIdentity()).isEqualTo("agent/system");
+        Path resolvedWorkspace = workspaceDirectoryService.dataRoot().resolve("workspace/agent/system");
+        Path resolvedOutput = resolvedWorkspace.resolve("outputs");
+        assertThat(finished.artifactIds()).isEmpty();
+        assertThat(Files.exists(resolvedOutput)).isFalse();
     }
 
     @Test
@@ -433,10 +413,19 @@ class WorkflowRunnerTest {
             List.of(finalNode), List.of(), Map.of(), null, null
         ));
 
-        OrchestrationTaskContextHolder.set(new OrchestrationTaskContext(
-            "agent-1", "Agent 1", "job-1", "project-1", "workspace-effective-1", "JOB_WORKFLOW_ITEM",
-            null, null
-        ).withJobRun("assignment-1", "job-run-1"));
+        OrchestrationTaskContextHolder.set(new OrchestrationTaskContext("agent-1",
+            "Agent 1",
+            "job-1",
+            null,
+            null,
+            "project-1",
+            "agent",
+            "agent-1",
+            "agent/agent-1",
+            "JOB_WORKFLOW_ITEM",
+            null,
+            null,
+            null, null, null, null, null).withJobRun("assignment-1", "job-run-1"));
         try {
             WorkflowRun run = workflowService.startRun(def.id());
             WorkflowRun finished = pollForTerminal(run.id());
@@ -447,17 +436,11 @@ class WorkflowRunnerTest {
             assertThat(finished.jobAssignmentId()).isEqualTo("assignment-1");
             assertThat(finished.jobRunId()).isEqualTo("job-run-1");
             assertThat(finished.projectId()).isEqualTo("project-1");
-            assertThat(finished.workspaceId()).isEqualTo("workspace-effective-1");
+            assertThat(finished.workspaceIdentity()).isEqualTo("agent/agent-1");
             assertThat(finished.runType()).isEqualTo("JOB_WORKFLOW_ITEM");
 
-            RunOutputArtifact artifact = outputArtifactService.getArtifact(finished.artifactIds().getFirst());
-            assertThat(artifact.agentId()).isEqualTo("agent-1");
-            assertThat(artifact.jobId()).isEqualTo("job-1");
-            assertThat(artifact.jobAssignmentId()).isEqualTo("assignment-1");
-            assertThat(artifact.jobRunId()).isEqualTo("job-run-1");
-            assertThat(artifact.projectId()).isEqualTo("project-1");
-            assertThat(artifact.workspaceId()).isEqualTo("workspace-effective-1");
-            assertThat(artifact.runType()).isEqualTo("JOB_WORKFLOW_ITEM");
+            assertThat(finished.artifactIds()).isEmpty();
+            // Attribution alone is not publication authority; no writer capability was supplied.
         } finally {
             OrchestrationTaskContextHolder.clear();
         }
@@ -473,16 +456,24 @@ class WorkflowRunnerTest {
         ));
 
         AtomicReference<OrchestrationTaskContext> contextSeenByTaskNode = new AtomicReference<>();
-        workflowRunner.setTaskNodeExecutor((planId, planRunId, inputs, workspacePath) -> {
+        workflowRunner.setTaskNodeExecutor((planId, planRunId, inputs) -> {
             contextSeenByTaskNode.set(OrchestrationTaskContextHolder.current());
             return completedPlanRun(planRunId, planId, inputs, Map.of("status", "ok"));
         });
 
-        OrchestrationTaskContextHolder.set(new OrchestrationTaskContext(
-            "agent-1", "Agent 1", "job-1", "project-1", "workspace-1", "WORKFLOW_RUN",
+        OrchestrationTaskContextHolder.set(new OrchestrationTaskContext("agent-1",
+            "Agent 1",
+            "job-1",
+            null,
+            null,
+            "project-1",
+            "agent",
+            "agent-1",
+            "agent/agent-1",
+            "WORKFLOW_RUN",
+            null,
             tempDir.resolve("caller-workspace").toString(),
-            tempDir.resolve("caller-outputs").toString()
-        ));
+            null, null, null, null, null));
         try {
             WorkflowRun run = workflowService.startRun(def.id());
             WorkflowRun finished = pollForTerminal(run.id());
@@ -492,13 +483,9 @@ class WorkflowRunnerTest {
             assertThat(seen).isNotNull();
             assertThat(seen.agentId()).isEqualTo("agent-1");
             assertThat(seen.projectId()).isEqualTo("project-1");
-            assertStoredRelative(finished.workspacePath(), "workspace/agent-1/runs/");
-            assertStoredRelative(finished.outputDir(), "workspace/agent-1/runs/");
-            assertThat(seen.hostWorkspacePath()).isEqualTo(resolveStored(finished.workspacePath()).toString());
-            assertThat(seen.hostRunPath()).isEqualTo(resolveStored(finished.workspacePath()).toString());
-            assertThat(seen.hostOutputPath()).isEqualTo(resolveStored(finished.outputDir()).toString());
+            assertThat(finished.workspaceIdentity()).isEqualTo("agent/agent-1");
             assertThat(seen.hostDurableWorkspacePath())
-                .isEqualTo(workspaceDirectoryService.dataRoot().resolve("projects/project-1").toString());
+                .isEqualTo(workspaceDirectoryService.dataRoot().resolve("workspace/agent/agent-1").toString());
         } finally {
             OrchestrationTaskContextHolder.clear();
         }
@@ -513,13 +500,19 @@ class WorkflowRunnerTest {
             List.of(node), List.of(), Map.of(), null, null
         ));
 
-        OrchestrationTaskContextHolder.set(new OrchestrationTaskContext(
-            "agent-1", "Agent 1", null, null, "workspace-1", "WORKFLOW_RUN",
+        OrchestrationTaskContextHolder.set(new OrchestrationTaskContext("agent-1",
+            "Agent 1",
+            null,
+            null,
+            null,
+            null,
+            null,
+            "workspace-1",
+            "workspace-1",
+            "WORKFLOW_RUN",
             "Daily workflow run",
             tempDir.resolve("caller-workspace").toString(),
-            tempDir.resolve("caller-outputs").toString(),
-            null, null, null, null, null, null, null, null
-        ));
+            null, null, null, null, null));
         try {
             WorkflowRun run = workflowService.startRun(def.id());
             WorkflowRun finished = pollForTerminal(run.id());
@@ -554,10 +547,19 @@ class WorkflowRunnerTest {
             List.of(delegation), List.of(), Map.of(), null, null
         ));
 
-        OrchestrationTaskContextHolder.set(new OrchestrationTaskContext(
-            "agent-1", "Agent 1", "job-1", "project-1", "workspace-1", "WORKFLOW_RUN",
-            null, null
-        ));
+        OrchestrationTaskContextHolder.set(new OrchestrationTaskContext("agent-1",
+            "Agent 1",
+            "job-1",
+            null,
+            null,
+            "project-1",
+            "agent",
+            "agent-1",
+            "agent/agent-1",
+            "WORKFLOW_RUN",
+            null,
+            null,
+            null, null, null, null, null));
         try {
             WorkflowRun run = workflowService.startRun(def.id());
             WorkflowRun finished = pollForTerminal(run.id());
@@ -571,11 +573,7 @@ class WorkflowRunnerTest {
                 .get("childRunId")
                 .toString();
             PlanRun childRun = planService.getRun(childRunId);
-            assertStoredRelative(childRun.outputDirectory(), "workspace/agent-1/runs/");
-            assertThat(resolveStored(childRun.outputDirectory()))
-                .startsWith(workspaceDirectoryService.dataRoot()
-                    .resolve("workspace/agent-1/runs"));
-            assertThat(childRun.workspaceId()).isNotBlank();
+            assertThat(childRun.workspaceIdentity()).isNotBlank();
         } finally {
             OrchestrationTaskContextHolder.clear();
         }
@@ -600,16 +598,14 @@ class WorkflowRunnerTest {
             Map.of(), null, null
         ));
 
-        workflowRunner.setTaskNodeExecutor((planId, planRunId, inputs, workspacePath) ->
+        workflowRunner.setTaskNodeExecutor((planId, planRunId, inputs) ->
             completedPlanRun(planRunId, planId, inputs, Map.of("status", "ok")));
 
         WorkflowRun run = workflowService.startRun(def.id());
         WorkflowRun waiting = pollForWaiting(run.id());
-        assertThat(waiting.outputDir()).isNotEqualTo(waiting.workspacePath());
-        assertStoredRelative(waiting.workspacePath(), "workspace/system/runs/");
-        assertStoredRelative(waiting.outputDir(), "workspace/system/runs/");
-        assertThat(Files.isDirectory(resolveStored(waiting.workspacePath()))).isTrue();
-        assertThat(Files.isDirectory(resolveStored(waiting.outputDir()))).isTrue();
+        assertThat(waiting.workspaceIdentity()).isEqualTo("agent/system");
+        assertThat(Files.exists(workspaceDirectoryService.dataRoot()
+            .resolve("workspace/agent/system/outputs"))).isFalse();
         String messageId = String.valueOf(waiting.nodeRuns().stream()
             .filter(n -> n.nodeKey().equals("gate"))
             .findFirst().orElseThrow().outputValues().get("messageId"));
@@ -642,7 +638,7 @@ class WorkflowRunnerTest {
             Map.of(), null, null
         ));
 
-        workflowRunner.setTaskNodeExecutor((planId, planRunId, inputs, workspacePath) ->
+        workflowRunner.setTaskNodeExecutor((planId, planRunId, inputs) ->
             completedPlanRun(planRunId, planId, inputs, Map.of("status", "rejected-path")));
 
         WorkflowRun run = workflowService.startRun(def.id());
@@ -658,80 +654,6 @@ class WorkflowRunnerTest {
         assertThat(finished.status()).isEqualTo(WorkflowRunStatus.COMPLETED);
         assertThat(nodeStatus(finished, "approved")).isEqualTo(WorkflowNodeRunStatus.SKIPPED);
         assertThat(nodeStatus(finished, "rejected")).isEqualTo(WorkflowNodeRunStatus.COMPLETED);
-    }
-
-    @Test
-    void resumeSupportsLegacyAbsoluteCurrentRootWorkflowPaths() throws Exception {
-        PlanDefinition branchTask = task("legacy-current", List.of(), List.of(field("status", PlanFieldType.STRING, true)));
-        WorkflowNode gate = new WorkflowNode("gate", WorkflowNodeType.USER_APPROVAL, null,
-            "gate", null, List.of(), List.of(), Map.of(), false, List.of(), "approve?", null);
-        WorkflowNode approved = taskNode("approved", branchTask.id());
-        WorkflowNode rejected = taskNode("rejected", branchTask.id());
-        WorkflowDefinition def = workflowService.saveDefinitionValidated(new WorkflowDefinition(
-            null, 2, "Legacy Current Resume", "", 2,
-            List.of(gate, approved, rejected),
-            List.of(
-                new WorkflowRoute("c1", "gate", null, "approved", null, WorkflowRouteType.CONTROL, "APPROVED"),
-                new WorkflowRoute("c2", "gate", null, "rejected", null, WorkflowRouteType.CONTROL, "REJECTED")
-            ),
-            Map.of(), null, null
-        ));
-        workflowRunner.setTaskNodeExecutor((planId, planRunId, inputs, workspacePath) -> {
-            assertThat(Path.of(workspacePath).isAbsolute()).isTrue();
-            return completedPlanRun(planRunId, planId, inputs, Map.of("status", "ok"));
-        });
-
-        WorkflowRun waiting = pollForWaiting(workflowService.startRun(def.id()).id());
-        Path workspacePath = resolveStored(waiting.workspacePath()).toRealPath();
-        Path outputDir = resolveStored(waiting.outputDir()).toRealPath();
-        jdbcTemplate.update("update workflow_runs set workspace_path = ?, output_dir = ? where id = ?",
-            workspacePath.toString(), outputDir.toString(), waiting.id());
-        String messageId = String.valueOf(waiting.nodeRuns().stream()
-            .filter(n -> n.nodeKey().equals("gate"))
-            .findFirst().orElseThrow().outputValues().get("messageId"));
-
-        inboxService.respondUserApproval(messageId, true, "yes");
-        WorkflowRun finished = workflowService.resumeRunSynchronously(waiting.id(), null, WorkflowExecutionObserver.NOOP);
-
-        assertThat(finished.status()).isEqualTo(WorkflowRunStatus.COMPLETED);
-        assertThat(outputArtifactService.artifactsForRun(finished.id())).isNotEmpty();
-    }
-
-    @Test
-    void staleOldRootAbsoluteWorkflowOutputPathFailsWithoutMutatingOldRoot() throws Exception {
-        PlanDefinition branchTask = task("stale-output", List.of(), List.of(field("status", PlanFieldType.STRING, true)));
-        WorkflowNode gate = new WorkflowNode("gate", WorkflowNodeType.USER_APPROVAL, null,
-            "gate", null, List.of(), List.of(), Map.of(), false, List.of(), "approve?", null);
-        WorkflowNode approved = taskNode("approved", branchTask.id());
-        WorkflowNode rejected = taskNode("rejected", branchTask.id());
-        WorkflowDefinition def = workflowService.saveDefinitionValidated(new WorkflowDefinition(
-            null, 2, "Stale Resume", "", 2,
-            List.of(gate, approved, rejected),
-            List.of(
-                new WorkflowRoute("c1", "gate", null, "approved", null, WorkflowRouteType.CONTROL, "APPROVED"),
-                new WorkflowRoute("c2", "gate", null, "rejected", null, WorkflowRouteType.CONTROL, "REJECTED")
-            ),
-            Map.of(), null, null
-        ));
-        workflowRunner.setTaskNodeExecutor((planId, planRunId, inputs, workspacePath) ->
-            completedPlanRun(planRunId, planId, inputs, Map.of("status", "ok")));
-        Path oldOutput = Files.createDirectories(tempDir.resolve("old-root/root/agents/system/workspace/outputs/workflows/old/run"));
-
-        WorkflowRun waiting = pollForWaiting(workflowService.startRun(def.id()).id());
-        jdbcTemplate.update("update workflow_runs set output_dir = ? where id = ?",
-            oldOutput.toString(), waiting.id());
-        String messageId = String.valueOf(waiting.nodeRuns().stream()
-            .filter(n -> n.nodeKey().equals("gate"))
-            .findFirst().orElseThrow().outputValues().get("messageId"));
-
-        inboxService.respondUserApproval(messageId, true, "yes");
-
-        assertThatThrownBy(() -> workflowService.resumeRunSynchronously(waiting.id(), null, WorkflowExecutionObserver.NOOP))
-            .isInstanceOf(IllegalArgumentException.class)
-            .hasMessageContaining("stale or outside current data root");
-        try (var stream = Files.list(oldOutput)) {
-            assertThat(stream).isEmpty();
-        }
     }
 
     private WorkflowNode simpleFinalNode(String key) {
@@ -787,18 +709,16 @@ class WorkflowRunnerTest {
             null, List.of(), 0, 0, null, null, null, null
         ));
     }
-
     private PlanRun completedPlanRun(String runId, String planId, Map<String, Object> inputs, Map<String, Object> outputs) {
         return new PlanRun(
             runId,
             planId,
+            null,
             PlanRunStatus.COMPLETED,
             inputs,
             outputs,
             null,
-            null,
-            null,
-            null,
+            null, null, null,
             List.of(),
             List.of(),
             List.of(),

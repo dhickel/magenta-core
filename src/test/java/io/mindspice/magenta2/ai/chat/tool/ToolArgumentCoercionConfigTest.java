@@ -2,40 +2,36 @@ package io.mindspice.magenta2.ai.chat.tool;
 
 import java.util.List;
 
-import com.fasterxml.jackson.core.type.TypeReference;
 import org.junit.jupiter.api.Test;
-import org.springframework.ai.util.json.JsonParser;
+import org.springframework.ai.util.JsonHelper;
+import org.springframework.core.ParameterizedTypeReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
 class ToolArgumentCoercionConfigTest {
 
+    private final JsonHelper json = new JsonHelper();
+
     @Test
     void scalarIsCoercedToSingleElementList() {
-        new ToolArgumentCoercionConfig().enableSingleValueAsArray();
-
-        List<String> result = JsonParser.fromJson("\"None.\"",
-            new TypeReference<List<String>>() {}.getType());
+        List<String> result = json.fromJson("\"None.\"",
+            new ParameterizedTypeReference<>() {});
 
         assertThat(result).containsExactly("None.");
     }
 
     @Test
     void actualArraysPassThrough() {
-        new ToolArgumentCoercionConfig().enableSingleValueAsArray();
-
-        List<String> result = JsonParser.fromJson("[\"a\", \"b\"]",
-            new TypeReference<List<String>>() {}.getType());
+        List<String> result = json.fromJson("[\"a\", \"b\"]",
+            new ParameterizedTypeReference<>() {});
 
         assertThat(result).containsExactly("a", "b");
     }
 
     @Test
     void integerScalarCoercedToSingleElementList() {
-        new ToolArgumentCoercionConfig().enableSingleValueAsArray();
-
-        List<Integer> result = JsonParser.fromJson("42",
-            new TypeReference<List<Integer>>() {}.getType());
+        List<Integer> result = json.fromJson("42",
+            new ParameterizedTypeReference<>() {});
 
         assertThat(result).containsExactly(42);
     }

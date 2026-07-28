@@ -7,7 +7,7 @@ Use `/agents` to manage execution agents, inspect queues and histories, operate 
 The agents page has:
 
 - A sidebar with **Create Agent**, **Reload**, filter, and agent cards.
-- Agent detail tabs: dashboard, profile, queue, inbox, jobs, schedules, reactions, workspace, outputs, exec, history, and submit.
+- Agent detail tabs: dashboard, profile, queue, inbox, jobs, schedules, reactions, workspace (Files), outputs, exec, history, and submit.
 - A collapsible **Chat with Agent** panel.
 
 ## Create And Select An Agent
@@ -44,13 +44,12 @@ Approved tools and shell commands are comma-separated. Avoid broad wildcard acce
 
 ## Queue Tab
 
-The queue tab lists active assignments with type, status, priority, project/effective workspace context, compatibility workspace metadata, progress, lease, job, created time, and actions.
+The queue tab lists active assignments with type, status, priority, project metadata, typed workspace selection, progress, assignment-queue lease state, job, created time, and actions.
 
 Available actions depend on assignment status:
 
 - **Pause** queued or running work.
 - **Resume** waiting or paused work.
-- **Requeue Workspace** for assignments waiting on a workspace lease after the blocking lease has cleared.
 - **Cancel** non-terminal work.
 - **Diagnostics** to inspect runtime details.
 - **Transcript** from diagnostics/history views.
@@ -71,48 +70,52 @@ Schedules can enqueue assignments on a cron expression when schedules are enable
 
 Event reactions can enqueue assignments when matching runtime events occur, when reactions are enabled. Reaction forms use selectors for model override and workspace where available. Filter JSON and input JSON remain manual because they are user-authored JSON objects.
 
-If schedules or reactions are disabled, the tab shows the required feature flag.
+If schedules or reactions are disabled, the tab shows the required feature flag. See [Schedules and Reactions](schedules-and-reactions.md) for revision, simulation, firing/dispatch audit, and enqueue-versus-completion semantics.
 
-## Avatar Assistant Organizer Tools
+## Context Panel
 
-The reserved `Avatar` agent profile can be configured as the personal assistant surface for local organizer state. When the Avatar profile is active and explicitly approves the tool names, Avatar chat can manage:
+The **Context** panel shows the agent's versioned context defaults and materialization summaries. It displays:
 
-- Todos: `avatar_todo_list`, `avatar_todo_upsert`, `avatar_todo_complete`.
-- Daily tasks: `avatar_daily_task_list`, `avatar_daily_task_upsert`, `avatar_daily_task_complete`.
-- Local calendar items: `avatar_calendar_list`, `avatar_calendar_upsert`, `avatar_calendar_delete`.
-- Notes: `avatar_note_append`, `avatar_note_search`.
-- Task assignment: `avatar_submit_task`, `avatar_submit_research_assignment`.
-- Output inspection: `avatar_list_outputs`, `avatar_read_output`.
+- The current context selection: a materialization (project-local context container) or a personal area (`HOME`, `SCRIPTS`, or `APPS`).
+- Materialization state: `PROVISIONING`, `READY`, `FAILED`, or `REVOKED`. `READY` means the local container is safely available, not that content has been acquired. An empty `READY` container is truthfully shown as empty.
+- Immutable binding summaries captured for conversations, assignments, and runs.
 
-These tools return compact JSON records and store organizer data in Avatar persistence. They do not grant shell access, poll email, expose a public email-ingress endpoint, connect to external calendars, or create plugin-runtime behavior.
+Context defaults can be changed with expected-version CAS; changes affect only future captures. Existing bindings retain their captured selection indefinitely.
 
-Email processing is intentionally deferred. Future mail handling should enter through the scripting API, internal messaging, or agents using approved tools to add messages; it should not use an open external Avatar endpoint.
+## System Chat Panel
 
-## Workspace Tab
+The **System Chat** panel provides a restricted operational chat per agent. It:
 
-The workspace tab shows:
+- Uses a fixed server-created profile; its enabled state and model come from runtime settings, while its prompt, tools, and context bound are server-owned.
+- Has bounded non-secret reads of agent status, workspace metadata, and assignment lifecycle facts; it does not expose file contents, paths, or project attribution.
+- Can propose queue operations (`PAUSE`, `RESUME`, `RETRY`, `REPLAY`, `CANCEL`) on assignments.
+- Proposals are non-executing: confirmation passes through the ordinary lifecycle control plane requiring exact matching target, state, and authorization.
+- Cannot write files, invoke processes, approve/activate skills, broaden authority, or execute its own proposal.
 
-- Workspace ID.
-- Owner type and owner ID.
-- Display name.
-- Root relative path.
-- Output directory hint.
-- Metadata.
-- Active leases.
-- Workspace links and access flags.
+System chat is exclusively agent-scoped and server-created; it cannot be selected through the normal `/chat` surface. Proposals display semantic state chips (`PENDING`, `CONFIRMING`, `CONFIRMED`, `DENIED`, `CANCELLED`, `STALE`, `UNAVAILABLE`).
 
-Use this tab to verify where agent work is mounted and whether a lease is active. A lease is a runtime hold on workspace use; it is not a Docker container by itself.
+## Workspace (Files Tab)
 
-## Workspace AGENTS.md Guidance
+The **Files** tab combines the agent's workspace file explorer with conceptual area navigation and an independently loaded **Task Runs** operations panel. The explorer remains bound to `workspace/agent/<agentId>/` and provides:
 
-When Magenta creates a brand-new agent execution workspace root, it can seed one starter `AGENTS.md` file at that workspace root.
+- Conceptual area navigation: `.skills` (skill-owned view), `scripts`, `apps`, `home` (confined storage), `repos` (user-managed read-only storage outside Magenta), `projects` (materialization facts), `tasks` and `outputs` (lifecycle/publication read models).
+- Confined folder navigation within the selected area.
+- File and directory create, rename, move, copy, and delete (where permitted by area policy).
+- Text and Markdown viewing and editing.
+- Image preview and download.
+- Labels, tags, and recent action history.
 
-- The starter file is created once on first workspace-root creation.
-- Existing `AGENTS.md` files are never overwritten, regenerated, or normalized.
-- Starter guidance explains workspace-root expectations, `home/` persistence, run staging under `runs/`, and output staging under `<runId>/outputs`.
-- During model-backed assignment/agent execution with a bound project/workspace root, runtime guidance uses layered `AGENTS.md` context from ancestor to closest path. Closest guidance wins on conflicts, while non-conflicting ancestor guidance remains active. This ancestor retention is Magenta runtime behavior; the external AGENTS.md site only states nearest-file precedence and explicit prompt override.
-- File and shell tools update the active path from the confined path they actually touch, so nested guidance follows the current tool target when work moves between sibling directories.
-- Explicit user prompts and assignment instructions override all `AGENTS.md` guidance.
+All operations stay confined to the agent's workspace root. The reserved `tasks/`, `.skills/`, run-local `outputs/`/`staging/`, and legacy workspace-root `outputs/` structures are read-only through the explorer. `scripts` and `apps` are storage only, not execution authority. `repos` is user-managed storage outside Magenta: files may be listed and read, but Magenta provides no provisioning, mutation, or interpretation controls.
+
+The explorer uses HTMX for standard CRUD operations with OOB list, inspector, and modal refreshes.
+
+The Task Runs panel groups the most recently updated task, workflow, and job runs. Select a run to inspect normalized status/outcome, source-supported timestamps, wall and active elapsed time, attempts, safe current-claim state, retry/replay lineage, model/tool call counts, and run-local artifact states. Published recent artifacts offer an authorized HTMX preview. `Unavailable` means the source fact was not recorded; it does not mean zero, healthy, or successful. `Partial` means the run is active or not fully reconciled. Integrity-failed artifacts are counted but their bytes are not offered for preview or download.
+
+Run metadata loads independently from Files. A filesystem error does not authorize or populate run metadata, and run metadata never changes explorer confinement. Empty, unavailable, missing, and load-error panels are explicit. See [Task Run Monitoring](task-run-monitoring.md).
+
+## Runtime AGENTS.md Guidance
+
+Magenta resolves layered `AGENTS.md` files from the effective workspace descriptor root down to the active confined tool path during execution. Files that exist beneath the descriptor root are ordered root-to-leaf. Closest guidance wins only on conflicts; non-conflicting ancestor guidance remains active. No starter `AGENTS.md` content is generated. Explicit user prompts and assignment instructions override all `AGENTS.md` guidance.
 
 ## Outputs Tab
 
@@ -120,14 +123,11 @@ The outputs tab lists recent artifacts associated with the agent. For filtering,
 
 ## Exec Tab
 
-The exec tab runs a bounded shell command in the agent workspace when the shell execution service is available.
+The exec tab reports that workspace shell execution is unavailable in the current alpha. Host process confinement and process-tree revocation are not proven, so Magenta does not execute workspace shell commands.
 
 Fields:
 
-- **Command**: executable and arguments.
-- **Working Directory**: defaults to `workspace`.
-
-Use exec for small diagnostics. If the service is unavailable or the command is outside the allowlist, the UI returns an error.
+No command is run from this tab. Use the Files and diagnostics surfaces for inspection; a future shell capability requires proven process confinement.
 
 ## History Tab
 
@@ -143,11 +143,11 @@ Use submit to send saved work directly to this agent:
 2. Use the searchable **Plan/Workflow/Job ID** selector to choose the target.
 3. Set priority.
 4. Choose optional model override.
-5. Choose optional project context. When set, the project workspace is the effective durable workspace for the assignment.
-6. Choose optional **Compatibility Workspace** metadata only when you need to preserve an older workspace reference.
+5. Choose optional project context. Project association is metadata and membership context only.
+6. Keep the bound agent workspace default or choose an existing declared user workspace.
 7. Submit.
 
-The submit result shows assignment ID, project, effective workspace kind/id, effective workspace path when available, and compatibility workspace metadata.
+The submit result shows assignment ID, project metadata, and the effective workspace type, key, and canonical identity.
 
 The target selector searches across tasks, workflows, and jobs. Choose a result instead of copying an opaque ID when the selector is visible.
 
@@ -157,7 +157,7 @@ Agent lifecycle controls include:
 
 - Enable.
 - Disable.
-- Archive workspace and disable.
+- Archive and disable.
 - Hard delete after typing the exact confirmation text shown by the UI.
 
 Prefer disabling before destructive deletion. Hard delete is intentionally guarded because it can remove runtime state tied to the agent.
@@ -168,6 +168,8 @@ Prefer disabling before destructive deletion. Hard delete is intentionally guard
 - **No assignments**: the agent has no active queue items.
 - **Shell execution service is unavailable**: exec is not enabled in this runtime.
 - **Error creating agent**: check runtime logs and agent profile persistence.
+- **Run metadata is unavailable**: the runtime summary capability is not wired or could not be read; Files remains a separate filesystem surface.
+- **No task, workflow, or job runs**: no scoped run summaries are recorded for this agent workspace.
 - **Invalid JSON for inputJson/filterJson**: schedule or reaction JSON fields must be objects.
 - **Priority must be a number**: enter a numeric priority in the allowed range.
 

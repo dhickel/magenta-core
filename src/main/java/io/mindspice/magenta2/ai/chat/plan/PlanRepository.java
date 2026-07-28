@@ -217,8 +217,7 @@ public class PlanRepository {
         return jdbcTemplate.query(
             """
                 select id, plan_id, run_display_name, status, input_values_json, output_values_json,
-                       plan_snapshot_json, workspace_id, output_directory,
-                       temp_workspace_path,
+                       plan_snapshot_json, workspace_type, workspace_key, workspace_identity,
                        execution_evidence_json, validation_feedback_json,
                        deliverable_evidence_json, final_message, error_text,
                        created_at, updated_at, started_at, completed_at
@@ -234,8 +233,7 @@ public class PlanRepository {
         return jdbcTemplate.query(
             """
                 select id, plan_id, run_display_name, status, input_values_json, output_values_json,
-                       plan_snapshot_json, workspace_id, output_directory,
-                       temp_workspace_path,
+                       plan_snapshot_json, workspace_type, workspace_key, workspace_identity,
                        execution_evidence_json, validation_feedback_json,
                        deliverable_evidence_json, final_message, error_text,
                        created_at, updated_at, started_at, completed_at
@@ -256,8 +254,7 @@ public class PlanRepository {
             """
                 insert into plan_runs (
                     id, plan_id, run_display_name, status, input_values_json, output_values_json,
-                    plan_snapshot_json, workspace_id, output_directory,
-                    temp_workspace_path,
+                    plan_snapshot_json, workspace_type, workspace_key, workspace_identity,
                     execution_evidence_json, validation_feedback_json,
                     deliverable_evidence_json, final_message, error_text,
                     created_at, updated_at, started_at, completed_at
@@ -269,9 +266,9 @@ public class PlanRepository {
                     input_values_json = excluded.input_values_json,
                     output_values_json = excluded.output_values_json,
                     plan_snapshot_json = excluded.plan_snapshot_json,
-                    workspace_id = excluded.workspace_id,
-                    output_directory = excluded.output_directory,
-                    temp_workspace_path = excluded.temp_workspace_path,
+                    workspace_type = excluded.workspace_type,
+                    workspace_key = excluded.workspace_key,
+                    workspace_identity = excluded.workspace_identity,
                     execution_evidence_json = excluded.execution_evidence_json,
                     validation_feedback_json = excluded.validation_feedback_json,
                     deliverable_evidence_json = excluded.deliverable_evidence_json,
@@ -288,9 +285,9 @@ public class PlanRepository {
             json(run.inputValues()),
             json(run.outputValues()),
             json(run.planSnapshot()),
-            run.workspaceId(),
-            run.outputDirectory(),
-            run.tempWorkspacePath(),
+            run.workspaceType(),
+            run.workspaceKey(),
+            run.workspaceIdentity(),
             json(run.executionEvidence()),
             json(run.validationFeedback()),
             json(run.deliverableEvidence()),
@@ -303,8 +300,7 @@ public class PlanRepository {
         );
         return new PlanRun(
             run.id(), run.planId(), run.runDisplayName(), run.status(), run.inputValues(), run.outputValues(),
-            run.planSnapshot(), run.workspaceId(), run.outputDirectory(),
-            run.tempWorkspacePath(),
+            run.planSnapshot(), run.workspaceType(), run.workspaceKey(), run.workspaceIdentity(),
             run.executionEvidence(), run.validationFeedback(), run.deliverableEvidence(),
             run.finalMessage(), run.errorText(), createdAt, updatedAt,
             run.startedAt(), run.completedAt()
@@ -354,9 +350,9 @@ public class PlanRepository {
             read(rs.getString("input_values_json"), VALUE_MAP, Map.of()),
             read(rs.getString("output_values_json"), VALUE_MAP, Map.of()),
             readRequired(rs.getString("plan_snapshot_json"), PlanDefinition.class),
-            rs.getString("workspace_id"),
-            rs.getString("output_directory"),
-            rs.getString("temp_workspace_path"),
+            getNullable(rs, "workspace_type"),
+            getNullable(rs, "workspace_key"),
+            getNullable(rs, "workspace_identity"),
             read(rs.getString("execution_evidence_json"), STRING_LIST, List.of()),
             read(rs.getString("validation_feedback_json"), STRING_LIST, List.of()),
             read(rs.getString("deliverable_evidence_json"), STRING_LIST, List.of()),
@@ -436,6 +432,14 @@ public class PlanRepository {
         }
     }
 
+    private String getNullable(java.sql.ResultSet rs, String column) throws java.sql.SQLException {
+        try {
+            return rs.getString(column);
+        } catch (java.sql.SQLException ignored) {
+            return null;
+        }
+    }
+
     // ── Schema bootstrapping ──
 
     private void ensureTables() {
@@ -479,9 +483,9 @@ public class PlanRepository {
                 input_values_json text not null,
                 output_values_json text not null,
                 plan_snapshot_json text not null,
-                workspace_id text,
-                output_directory text,
-                temp_workspace_path text,
+                workspace_type text,
+                workspace_key text,
+                workspace_identity text,
                 execution_evidence_json text not null,
                 validation_feedback_json text not null,
                 deliverable_evidence_json text not null,
@@ -494,9 +498,13 @@ public class PlanRepository {
                 foreign key (plan_id) references plan_definitions(id) on delete cascade
             )
             """);
-        addColumnIfMissing("plan_runs", "temp_workspace_path",
-            "alter table plan_runs add column temp_workspace_path text");
         addColumnIfMissing("plan_runs", "run_display_name",
             "alter table plan_runs add column run_display_name text");
+        addColumnIfMissing("plan_runs", "workspace_type",
+            "alter table plan_runs add column workspace_type text");
+        addColumnIfMissing("plan_runs", "workspace_key",
+            "alter table plan_runs add column workspace_key text");
+        addColumnIfMissing("plan_runs", "workspace_identity",
+            "alter table plan_runs add column workspace_identity text");
     }
 }

@@ -12,6 +12,9 @@ import io.mindspice.magenta2.ai.config.user.ModelConfig;
 import io.mindspice.magenta2.ai.orchestration.settings.RuntimeSettingsService;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.model.ChatModel;
+import org.springframework.ai.deepseek.DeepSeekChatModel;
+import org.springframework.ai.deepseek.DeepSeekChatOptions;
+import org.springframework.ai.deepseek.api.DeepSeekApi;
 import org.springframework.ai.model.tool.ToolCallingChatOptions;
 import org.springframework.ai.model.tool.ToolCallingManager;
 import org.springframework.ai.ollama.OllamaChatModel;
@@ -19,7 +22,6 @@ import org.springframework.ai.ollama.api.OllamaApi;
 import org.springframework.ai.ollama.api.OllamaChatOptions;
 import org.springframework.ai.ollama.management.ModelManagementOptions;
 import org.springframework.ai.openai.OpenAiChatModel;
-import org.springframework.ai.openai.api.OpenAiApi;
 import org.springframework.ai.openai.OpenAiChatOptions;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
@@ -105,13 +107,13 @@ public class ChatModelRouter {
             case OPENAI_COMPATIBLE -> {
                 OpenAiChatOptions.Builder builder = OpenAiChatOptions.builder()
                     .model(config.remoteModelName());
-                applyOpenAiReasoningEffort(builder, effectiveThinkLevel(config), false);
+                applyOpenAiReasoningEffort(builder, effectiveThinkLevel(config));
                 yield builder.build();
             }
             case DEEPSEEK -> {
-                OpenAiChatOptions.Builder builder = OpenAiChatOptions.builder()
+                DeepSeekChatOptions.Builder builder = DeepSeekChatOptions.builder()
                     .model(config.remoteModelName());
-                applyOpenAiReasoningEffort(builder, effectiveThinkLevel(config), true);
+                applyDeepSeekReasoningEffort(builder, effectiveThinkLevel(config));
                 yield builder.build();
             }
         };
@@ -133,7 +135,10 @@ public class ChatModelRouter {
             case OLLAMA -> OllamaChatOptions.builder()
                 .model(config.remoteModelName())
                 .build();
-            case OPENAI_COMPATIBLE, DEEPSEEK -> OpenAiChatOptions.builder()
+            case OPENAI_COMPATIBLE -> OpenAiChatOptions.builder()
+                .model(config.remoteModelName())
+                .build();
+            case DEEPSEEK -> DeepSeekChatOptions.builder()
                 .model(config.remoteModelName())
                 .build();
         };
@@ -157,15 +162,21 @@ public class ChatModelRouter {
         }
     }
 
-    private static void applyOpenAiReasoningEffort(OpenAiChatOptions.Builder builder, int level, boolean isDeepSeek) {
+    private static void applyOpenAiReasoningEffort(OpenAiChatOptions.Builder builder, int level) {
         if (level <= 0) return;
         String effort = switch (level) {
-            case 1 -> isDeepSeek ? "high" : "low";
-            case 2 -> isDeepSeek ? "high" : "medium";
+            case 1 -> "low";
+            case 2 -> "medium";
             case 3 -> "high";
-            default -> isDeepSeek ? "max" : "high";
+            default -> "high";
         };
         builder.reasoningEffort(effort);
+    }
+
+    private static void applyDeepSeekReasoningEffort(DeepSeekChatOptions.Builder builder, int level) {
+        if (level <= 0) return;
+        builder.enableThinking()
+            .reasoningEffort(level >= 4 ? "max" : "high");
     }
 
     private ChatModel buildModel(ModelConfig modelConfig) {
@@ -189,7 +200,7 @@ public class ChatModelRouter {
         applyOllamaThink(optionsBuilder, effectiveThinkLevel(modelConfig));
         return OllamaChatModel.builder()
             .ollamaApi(OllamaApi.builder().baseUrl(modelConfig.remoteEndpoint()).build())
-            .defaultOptions(optionsBuilder.build())
+            .options(optionsBuilder.build())
             .toolCallingManager(toolCallingManager)
             .observationRegistry(observationRegistry)
             .modelManagementOptions(ModelManagementOptions.defaults())
@@ -201,43 +212,51 @@ public class ChatModelRouter {
             throw new IllegalStateException(
                 "OpenAI-compatible model must define apiKey: " + modelConfig.remoteModelName());
         }
-        OpenAiChatOptions options = buildOpenAiOptions(modelConfig, false);
+        OpenAiChatOptions options = buildOpenAiOptions(modelConfig);
         return buildOpenAiChatModel(modelConfig, options);
     }
 
-    private OpenAiChatModel buildDeepSeekModel(ModelConfig modelConfig) {
+    private DeepSeekChatModel buildDeepSeekModel(ModelConfig modelConfig) {
         if (!StringUtils.hasText(modelConfig.apiKey())) {
             throw new IllegalStateException(
                 "DeepSeek model must define apiKey: " + modelConfig.remoteModelName());
         }
-        OpenAiChatOptions options = buildOpenAiOptions(modelConfig, true);
-        return buildOpenAiChatModel(modelConfig, options);
-    }
-
-    private OpenAiChatOptions buildOpenAiOptions(ModelConfig modelConfig, boolean isDeepSeek) {
-        OpenAiChatOptions.Builder optionsBuilder = OpenAiChatOptions.builder()
+        DeepSeekChatOptions.Builder optionsBuilder = DeepSeekChatOptions.builder()
             .model(modelConfig.remoteModelName());
-        applyOpenAiReasoningEffort(optionsBuilder, effectiveThinkLevel(modelConfig), isDeepSeek);
-        return optionsBuilder.build();
-    }
-
-    private OpenAiChatModel buildOpenAiChatModel(ModelConfig modelConfig, OpenAiChatOptions options) {
+        applyDeepSeekReasoningEffort(optionsBuilder, effectiveThinkLevel(modelConfig));
+        DeepSeekChatOptions options = optionsBuilder.build();
         HttpClient httpClient = HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(30))
             .build();
         JdkClientHttpRequestFactory requestFactory = new JdkClientHttpRequestFactory(httpClient);
         requestFactory.setReadTimeout(openAiCompatibleReadTimeout);
         RestClient.Builder restClientBuilder = RestClient.builder().requestFactory(requestFactory);
-        OpenAiApi api = OpenAiApi.builder()
+        DeepSeekApi api = DeepSeekApi.builder()
             .baseUrl(modelConfig.remoteEndpoint())
             .apiKey(modelConfig.apiKey())
-            .completionsPath("/v1/chat/completions")
-            .embeddingsPath("/v1/embeddings")
             .restClientBuilder(restClientBuilder)
             .build();
+        return DeepSeekChatModel.builder()
+            .deepSeekApi(api)
+            .options(options)
+            .toolCallingManager(toolCallingManager)
+            .observationRegistry(observationRegistry)
+            .build();
+    }
+
+    private OpenAiChatOptions buildOpenAiOptions(ModelConfig modelConfig) {
+        OpenAiChatOptions.Builder optionsBuilder = OpenAiChatOptions.builder()
+            .baseUrl(modelConfig.remoteEndpoint())
+            .apiKey(modelConfig.apiKey())
+            .timeout(openAiCompatibleReadTimeout)
+            .model(modelConfig.remoteModelName());
+        applyOpenAiReasoningEffort(optionsBuilder, effectiveThinkLevel(modelConfig));
+        return optionsBuilder.build();
+    }
+
+    private OpenAiChatModel buildOpenAiChatModel(ModelConfig modelConfig, OpenAiChatOptions options) {
         return OpenAiChatModel.builder()
-            .openAiApi(api)
-            .defaultOptions(options)
+            .options(options)
             .toolCallingManager(toolCallingManager)
             .observationRegistry(observationRegistry)
             .build();

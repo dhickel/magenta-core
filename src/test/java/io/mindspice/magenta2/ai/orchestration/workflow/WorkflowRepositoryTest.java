@@ -97,7 +97,9 @@ class WorkflowRepositoryTest {
         assertThat(migrated.nodeRuns()).isEmpty();
         assertThat(migrated.updatedAt()).isEqualTo(migrated.createdAt());
         assertThat(columns(jdbcTemplate, "workflow_runs")).contains(
-            "agent_id", "job_id", "job_assignment_id", "job_run_id", "project_id", "workspace_id", "run_type");
+            "agent_id", "job_id", "job_assignment_id", "job_run_id", "project_id",
+            "workspace_type", "workspace_key", "workspace_identity", "run_type");
+        assertThat(columns(jdbcTemplate, "workflow_runs")).doesNotContain("workspace_id");
     }
 
     @Test
@@ -117,14 +119,14 @@ class WorkflowRepositoryTest {
             WorkflowRunStatus.COMPLETED,
             0,
             java.util.List.of(),
-            "/tmp/work",
-            "/tmp/out",
             "agent-1",
             "job-1",
             "assignment-1",
             "job-run-1",
             "project-1",
-            "workspace-1",
+            "agent",
+            "agent-1",
+            null,
             "JOB_WORKFLOW_ITEM",
             definition,
             java.util.Map.of("result", "ok"),
@@ -144,7 +146,9 @@ class WorkflowRepositoryTest {
         assertThat(run.jobAssignmentId()).isEqualTo("assignment-1");
         assertThat(run.jobRunId()).isEqualTo("job-run-1");
         assertThat(run.projectId()).isEqualTo("project-1");
-        assertThat(run.workspaceId()).isEqualTo("workspace-1");
+        assertThat(run.workspaceType()).isEqualTo("agent");
+        assertThat(run.workspaceKey()).isEqualTo("agent-1");
+        assertThat(run.workspaceIdentity()).isEqualTo("agent/agent-1");
         assertThat(run.runType()).isEqualTo("JOB_WORKFLOW_ITEM");
     }
 

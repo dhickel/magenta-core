@@ -5,18 +5,19 @@ import io.mindspice.magenta2.ai.chat.plan.PlanFieldType;
 import io.mindspice.magenta2.ai.chat.plan.PlanRun;
 import io.mindspice.magenta2.ai.chat.plan.PlanRunStatus;
 import io.mindspice.magenta2.ai.chat.plan.PlanService;
+import io.mindspice.magenta2.ai.orchestration.runtime.LifecycleReservationRequest;
 import io.mindspice.magenta2.ai.orchestration.runtime.OrchestrationTaskContext;
 import io.mindspice.magenta2.ai.orchestration.runtime.OrchestrationTaskContextHolder;
-import io.mindspice.magenta2.ai.orchestration.workspaces.EffectiveWorkspace;
-import io.mindspice.magenta2.ai.orchestration.workspaces.EffectiveWorkspaceResolver;
+import io.mindspice.magenta2.ai.orchestration.runtime.TaskRunLifecycleService;
 import io.mindspice.magenta2.ai.orchestration.workspaces.OutputArtifactContext;
+import io.mindspice.magenta2.ai.orchestration.workspaces.TaskRunLocation;
+import io.mindspice.magenta2.ai.orchestration.workspaces.TaskRunWriteCapability;
+import io.mindspice.magenta2.ai.orchestration.workspaces.TaskSourceKind;
 import io.mindspice.magenta2.ai.orchestration.workspaces.OutputArtifactService;
-import io.mindspice.magenta2.ai.orchestration.workspaces.OutputDirectoryService;
-import io.mindspice.magenta2.ai.orchestration.workspaces.OutputPublicationTarget;
-import io.mindspice.magenta2.ai.orchestration.workspaces.RootRelativePathService;
-import io.mindspice.magenta2.ai.orchestration.workspaces.RunOutputArtifact;
-import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspacePathLayout;
+import io.mindspice.magenta2.ai.orchestration.workspaces.PublicationRecord;
+import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceDescriptor;
 import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceDirectoryService;
+import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceKind;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.ObjectProvider;
@@ -55,10 +56,8 @@ public class WorkflowRunner {
     private final InboxService inboxService;
     private final WorkspaceDirectoryService workspaceDirectoryService;
     private final OutputArtifactService outputArtifactService;
-    private final EffectiveWorkspaceResolver effectiveWorkspaceResolver;
-    private final OutputDirectoryService outputDirectoryService;
     private final WorkflowTaskExecutor workflowTaskExecutor;
-    private final RootRelativePathService rootRelativePathService;
+    private final TaskRunLifecycleService taskRunLifecycleService;
     private final ExecutorService executor = Executors.newCachedThreadPool();
 
     private volatile TaskNodeExecutor taskNodeExecutor;
@@ -67,16 +66,7 @@ public class WorkflowRunner {
                           InboxService inboxService,
                           WorkspaceDirectoryService workspaceDirectoryService,
                           OutputArtifactService outputArtifactService) {
-        this(repository, planService, inboxService, workspaceDirectoryService, outputArtifactService, null, null, null, null);
-    }
-
-    public WorkflowRunner(WorkflowRepository repository, PlanService planService,
-                          InboxService inboxService,
-                          WorkspaceDirectoryService workspaceDirectoryService,
-                          OutputArtifactService outputArtifactService,
-                          EffectiveWorkspaceResolver effectiveWorkspaceResolver) {
-        this(repository, planService, inboxService, workspaceDirectoryService, outputArtifactService,
-            effectiveWorkspaceResolver, null, null, null);
+        this(repository, planService, inboxService, workspaceDirectoryService, outputArtifactService, null, null);
     }
 
     @Autowired
@@ -84,26 +74,20 @@ public class WorkflowRunner {
                           InboxService inboxService,
                           WorkspaceDirectoryService workspaceDirectoryService,
                           OutputArtifactService outputArtifactService,
-                          @Autowired(required = false) EffectiveWorkspaceResolver effectiveWorkspaceResolver,
-                          @Autowired(required = false) OutputDirectoryService outputDirectoryService,
                           ObjectProvider<WorkflowTaskExecutor> workflowTaskExecutorProvider,
-                          @Autowired(required = false) RootRelativePathService rootRelativePathService) {
+                          @Autowired(required = false) TaskRunLifecycleService taskRunLifecycleService) {
         this.repository = repository;
         this.planService = planService;
         this.inboxService = inboxService;
         this.workspaceDirectoryService = workspaceDirectoryService;
         this.outputArtifactService = outputArtifactService;
-        this.effectiveWorkspaceResolver = effectiveWorkspaceResolver;
-        this.outputDirectoryService = outputDirectoryService;
         this.workflowTaskExecutor = workflowTaskExecutorProvider == null ? null : workflowTaskExecutorProvider.getIfAvailable();
-        this.rootRelativePathService = rootRelativePathService != null
-            ? rootRelativePathService
-            : new RootRelativePathService(workspaceDirectoryService);
+        this.taskRunLifecycleService = taskRunLifecycleService;
     }
 
     @FunctionalInterface
     public interface TaskNodeExecutor {
-        PlanRun execute(String planId, String planRunId, Map<String, Object> inputs, String workspacePath);
+        PlanRun execute(String planId, String planRunId, Map<String, Object> inputs);
     }
 
     public void setTaskNodeExecutor(TaskNodeExecutor executor) {
@@ -119,13 +103,34 @@ public class WorkflowRunner {
     }
 
     private WorkflowRun createRun(WorkflowDefinition definition, String modelOverride, boolean submitAsync) {
-        String runId = UUID.randomUUID().toString();
-        Instant now = Instant.now();
-
         OrchestrationTaskContext currentContext = OrchestrationTaskContextHolder.current();
-        Path workspacePath = workflowRunPath(runId, currentContext);
-        Path outputPath = workflowRunOutputPath(workspacePath);
+        boolean usesReservedRun = currentContext != null && currentContext.taskRunLocation() != null
+            && currentContext.taskRunLocation().taskIdentity().sourceKind() == TaskSourceKind.WORKFLOW
+            && definition.id().equals(currentContext.taskRunLocation().taskIdentity().stableId());
+        String runId = usesReservedRun
+            ? currentContext.taskRunLocation().taskRunId() : UUID.randomUUID().toString();
+        Instant now = Instant.now();
+        if (usesReservedRun) {
+            WorkflowRun existing = repository.findRun(runId).orElse(null);
+            if (existing != null) return existing;
+        }
+
+
+        WorkspaceDescriptor descriptor = resolveDescriptor(currentContext);
         OutputArtifactContext attribution = outputContext(currentContext);
+
+        if (!usesReservedRun && taskRunLifecycleService != null && descriptor != null) {
+            if (descriptor.kind() == WorkspaceKind.CHAT) {
+                throw new IllegalArgumentException("CHAT workspaces are not task-selectable");
+            }
+            String inputDigest = taskRunLifecycleService.canonicalInputDigest(Map.of(
+                "workflowId", definition.id(), "nodeCount", definition.nodes().size()));
+            taskRunLifecycleService.reserve(LifecycleReservationRequest.reuseNative(
+                    "workflow-submission:" + UUID.randomUUID(), TaskSourceKind.WORKFLOW,
+                    definition.id(), descriptor.kind(), descriptor.key(), runId,
+                    attribution.jobAssignmentId(), inputDigest));
+        }
+
         List<WorkflowNodeRun> nodeRuns = definition.nodes().stream()
             .map(node -> new WorkflowNodeRun(
                 node.key(), node.type(), WorkflowNodeRunStatus.PENDING,
@@ -140,14 +145,14 @@ public class WorkflowRunner {
             WorkflowRunStatus.RUNNING,
             0,
             nodeRuns,
-            storePath(workspacePath),
-            storePath(outputPath),
             attribution.agentId(),
             attribution.jobId(),
             attribution.jobAssignmentId(),
             attribution.jobRunId(),
             attribution.projectId(),
-            attribution.workspaceId(),
+            descriptor.kind().token(),
+            descriptor.key(),
+            descriptor.identity(),
             attribution.runType(),
             definition,
             Map.of(),
@@ -225,9 +230,8 @@ public class WorkflowRunner {
         WorkflowRun resumed = repository.saveRun(new WorkflowRun(
             run.id(), run.workflowId(), run.runDisplayName(), WorkflowRunStatus.RUNNING,
             Math.max(0, index), updatedRuns,
-            run.workspacePath(), run.outputDir(),
-            run.agentId(), run.jobId(), run.jobAssignmentId(), run.jobRunId(),
-            run.projectId(), run.workspaceId(), run.runType(),
+            run.agentId(), run.jobId(), run.jobAssignmentId(), run.jobRunId(), run.projectId(),
+            run.workspaceType(), run.workspaceKey(), run.workspaceIdentity(), run.runType(),
             run.workflowSnapshot(),
             run.finalOutputs(), run.artifactIds(),
             run.finalMessage(), run.errorText(),
@@ -262,9 +266,8 @@ public class WorkflowRunner {
             repository.saveRun(new WorkflowRun(
                 current.id(), current.workflowId(), current.runDisplayName(), WorkflowRunStatus.FAILED,
                 current.currentNodeIndex(), current.nodeRuns(),
-                current.workspacePath(), current.outputDir(),
-                current.agentId(), current.jobId(), current.jobAssignmentId(), current.jobRunId(),
-                current.projectId(), current.workspaceId(), current.runType(),
+                current.agentId(), current.jobId(), current.jobAssignmentId(), current.jobRunId(), current.projectId(),
+                current.workspaceType(), current.workspaceKey(), current.workspaceIdentity(), current.runType(),
                 current.workflowSnapshot(),
                 current.finalOutputs(), current.artifactIds(),
                 current.finalMessage(), e.getMessage(),
@@ -459,11 +462,13 @@ public class WorkflowRunner {
             if (observer != null) {
                 observer.taskConversationStarted(run.id(), node.key(), conversationId);
             }
-            var taskRun = workflowTaskExecutor.execute(node.planId(), inputs, conversationId, modelOverride);
+            var taskRun = executeWorkflowTaskChild(node, inputs, run, conversationId, modelOverride);
             if (!workflowTaskExecutor.succeeded(taskRun.status())) {
                 throw new IllegalStateException("Task node '" + node.key() + "' failed with status " + taskRun.status().name());
             }
-            return taskRun.outputValues();
+            Map<String, Object> outputs = new LinkedHashMap<>(taskRun.outputValues());
+            outputs.put("taskRunId", taskRun.id());
+            return outputs;
         }
 
         if (taskNodeExecutor == null) {
@@ -471,11 +476,63 @@ public class WorkflowRunner {
         }
 
         String planRunId = UUID.randomUUID().toString();
-        PlanRun planRun = taskNodeExecutor.execute(node.planId(), planRunId, inputs, resolveStoredPath(run.workspacePath()).toString());
+        PlanRun planRun = taskNodeExecutor.execute(node.planId(), planRunId, inputs);
         if (planRun.status() == PlanRunStatus.FAILED || planRun.status() == PlanRunStatus.NEEDS_REVIEW) {
             throw new IllegalStateException("Task node '" + node.key() + "' failed with status " + planRun.status().name());
         }
         return planRun.outputValues();
+    }
+
+    private io.mindspice.magenta2.ai.chat.task.TaskRun executeWorkflowTaskChild(
+        WorkflowNode node, Map<String, Object> inputs, WorkflowRun workflowRun,
+        String conversationId, String modelOverride
+    ) {
+        OrchestrationTaskContext parent = OrchestrationTaskContextHolder.current();
+        if (taskRunLifecycleService == null || parent == null || parent.taskRunLocation() == null
+                || parent.writerCapability() == null) {
+            return workflowTaskExecutor.execute(node.planId(), inputs, conversationId, modelOverride);
+        }
+        taskRunLifecycleService.requireCurrentWriter(parent.writerCapability());
+        String childRunId = UUID.randomUUID().toString();
+        String linkKey = workflowRun.id() + ":" + node.key() + ":" + parent.attemptNumber();
+        String digest = taskRunLifecycleService.canonicalInputDigest(Map.of(
+            "workflowRunId", workflowRun.id(), "nodeKey", node.key(), "inputs", inputs));
+        var child = taskRunLifecycleService.reserveChild(parent.taskRunId(), "WORKFLOW_CHILD", linkKey,
+            "workflow-child:" + linkKey, TaskSourceKind.TASK, node.planId(), childRunId, digest);
+        TaskRunLocation location = taskRunLifecycleService.provisionLocation(child.taskRunId());
+        TaskRunWriteCapability capability;
+        try {
+            capability = taskRunLifecycleService.acquireWriterClaim(location, child.attemptNumber(),
+                parent.writerCapability().ownerId());
+        } catch (IllegalStateException stale) {
+            child = taskRunLifecycleService.recoverForAssignment(child.taskRunId(), parent.jobAssignmentId(),
+                "workflow-child-recovery:" + linkKey, digest);
+            capability = taskRunLifecycleService.acquireWriterClaim(location, child.attemptNumber(),
+                parent.writerCapability().ownerId());
+        }
+        final TaskRunWriteCapability childCapability = capability;
+        OrchestrationTaskContext childContext = new OrchestrationTaskContext(
+            parent.agentId(), parent.agentName(), parent.jobId(), parent.jobAssignmentId(), parent.jobRunId(),
+            parent.projectId(), parent.workspaceType(), parent.workspaceKey(), parent.workspaceIdentity(),
+            "WORKFLOW_CHILD", parent.runDisplayName(), location.confinedPath().toString(), null,
+            location, workspaceDirectoryService.resolveRunOutput(location),
+            child.taskRunId() + ":" + child.attemptNumber(), childCapability, parent.workspaceDescriptor(),
+            parent.contextBindingKey());
+        try {
+            var result = runWithContext(childContext,
+                () -> workflowTaskExecutor.execute(node.planId(), inputs, conversationId, modelOverride));
+            if (workflowTaskExecutor.succeeded(result.status())) {
+                taskRunLifecycleService.completeAttempt(childCapability);
+            } else {
+                taskRunLifecycleService.failAttempt(childCapability, "Workflow child task failed: " + result.status());
+            }
+            return result;
+        } catch (RuntimeException failure) {
+            if (taskRunLifecycleService.verifyWriterClaimCurrent(childCapability)) {
+                taskRunLifecycleService.failAttempt(childCapability, failure.getMessage());
+            }
+            throw failure;
+        }
     }
 
     private Map<String, Object> executeFinalOutputNode(WorkflowNode node, Map<String, Object> inputs, WorkflowRun run) {
@@ -580,17 +637,9 @@ public class WorkflowRunner {
 
     private Map<String, Object> executeLogNode(WorkflowNode node, Map<String, Object> inputs, WorkflowRun run) {
         try {
-            Path outputDir = outputPathFor(run);
             for (Map.Entry<String, Object> entry : inputs.entrySet()) {
-                outputArtifactService.materialize(
-                    run.id(),
-                    run.workflowId(),
-                    node.key() + "_" + entry.getKey(),
-                    PlanFieldType.STRING,
-                    entry.getValue(),
-                    outputDir,
-                    outputContext()
-                );
+                publishTypedOutput(run, "log:" + node.key() + ":" + entry.getKey(),
+                    node.key() + "_" + entry.getKey(), PlanFieldType.STRING, entry.getValue());
             }
         } catch (Exception e) {
             throw new IllegalStateException("Failed to materialize log node outputs", e);
@@ -606,7 +655,6 @@ public class WorkflowRunner {
     ) {
         Map<String, Object> finalOutputs = collectFinalOutputs(def, nodeRuns, outputsByNode);
         List<String> artifactIds = materializeFinalOutputs(run, finalOutputs);
-        artifactIds = promoteFinalOutputs(run, artifactIds);
 
         persistState(run, nodeRuns, WorkflowRunStatus.COMPLETED,
             finalOutputs, artifactIds,
@@ -652,50 +700,45 @@ public class WorkflowRunner {
         if (finalOutputs.isEmpty()) {
             return List.of();
         }
-        Path outputDir = outputPathFor(run);
         List<String> artifactIds = new ArrayList<>();
         for (Map.Entry<String, Object> entry : finalOutputs.entrySet()) {
             try {
-                PlanFieldType type = inferType(entry.getValue());
-                RunOutputArtifact artifact = outputArtifactService.materialize(
-                    run.id(),
-                    run.workflowId(),
-                    entry.getKey(),
-                    type,
-                    entry.getValue(),
-                    outputDir,
-                    outputContext()
-                );
-                artifactIds.add(artifact.id());
+                PublicationRecord artifact = publishTypedOutput(run, "final:" + entry.getKey(),
+                    entry.getKey(), inferType(entry.getValue()), entry.getValue());
+                if (artifact != null) artifactIds.add(artifact.artifactId());
             } catch (IOException e) {
-                throw new IllegalStateException("Failed to materialize final output '" + entry.getKey() + "'", e);
+                throw new IllegalStateException("Failed to publish final output '" + entry.getKey() + "'", e);
             }
         }
         return artifactIds;
     }
 
-    private List<String> promoteFinalOutputs(WorkflowRun run, List<String> existingArtifactIds) {
-        Path finalDir = finalOutputPathFor(run);
-        if (finalDir == null) {
-            return existingArtifactIds;
+    private PublicationRecord publishTypedOutput(WorkflowRun run, String operationSuffix,
+                                                  String outputName, PlanFieldType type,
+                                                  Object value) throws IOException {
+        OrchestrationTaskContext context = OrchestrationTaskContextHolder.current();
+        if (context == null || context.runOutputLocation() == null || context.writerCapability() == null) {
+            // Standalone/control-plane execution has no authorized task writer. It may
+            // complete, but must not fall back to arbitrary-path publication.
+            return null;
         }
-        try {
-            List<RunOutputArtifact> promoted = outputArtifactService.promoteDirectoryContents(
-                run.id(),
-                run.workflowId(),
-                outputPathFor(run),
-                finalDir,
-                outputContext()
-            );
-            if (promoted.isEmpty()) {
-                return existingArtifactIds;
-            }
-            List<String> ids = new ArrayList<>(existingArtifactIds);
-            promoted.stream().map(RunOutputArtifact::id).forEach(ids::add);
-            return List.copyOf(ids);
-        } catch (IOException exception) {
-            throw new IllegalStateException("Failed to promote workflow outputs for run " + run.id(), exception);
+        String operationKey = "workflow-output:" + run.id() + ":" + operationSuffix;
+        if (type == PlanFieldType.FILE_PATH) {
+            Path source = Path.of(String.valueOf(value));
+            if (!source.isAbsolute()) source = context.taskRunLocation().confinedPath().resolve(source).normalize();
+            return outputArtifactService.publishTaskRunFile(context.runOutputLocation(),
+                context.writerCapability(), operationKey, outputName, null, source,
+                run.id(), context.attemptNumber());
         }
+        byte[] bytes = switch (type) {
+            case JSON -> toJson(value).getBytes(java.nio.charset.StandardCharsets.UTF_8);
+            case USER_MESSAGE, STRING, NUMBER -> String.valueOf(value).getBytes(java.nio.charset.StandardCharsets.UTF_8);
+            case FILE_PATH -> throw new IllegalStateException("handled above");
+        };
+        String mediaType = type == PlanFieldType.JSON ? "application/json" : "text/plain";
+        return outputArtifactService.publishTaskRunBytes(context.runOutputLocation(),
+            context.writerCapability(), operationKey, outputName, mediaType, bytes,
+            run.id(), context.attemptNumber());
     }
 
     private PlanFieldType inferType(Object value) {
@@ -734,14 +777,14 @@ public class WorkflowRunner {
             status,
             currentNodeIndex(orderedRuns),
             orderedRuns,
-            base.workspacePath(),
-            base.outputDir(),
             base.agentId(),
             base.jobId(),
             base.jobAssignmentId(),
             base.jobRunId(),
             base.projectId(),
-            base.workspaceId(),
+            base.workspaceType(),
+            base.workspaceKey(),
+            base.workspaceIdentity(),
             base.runType(),
             base.workflowSnapshot(),
             finalOutputs,
@@ -756,125 +799,56 @@ public class WorkflowRunner {
         return persisted;
     }
 
-    private Path finalOutputPathFor(WorkflowRun run) {
-        OrchestrationTaskContext context = OrchestrationTaskContextHolder.current();
-        if (outputDirectoryService != null) {
-            String agentId = context != null && StringUtils.hasText(context.agentId())
-                ? context.agentId()
-                : "system";
-            return outputDirectoryService.resolve(OutputPublicationTarget.workflow(
-                run.workflowId(),
-                run.id(),
-                agentId,
-                context == null ? null : context.projectId(),
-                context == null ? run.workspaceId() : context.workspaceId(),
-                context == null ? null : context.selectedWorkAreaId(),
-                context == null ? null : context.outputRouteType(),
-                context == null ? null : context.outputWorkAreaId(),
-                context == null ? null : context.outputDirectRelativePath()
-            )).outputDirectory();
-        }
-        if (effectiveWorkspaceResolver == null) {
-            return null;
-        }
-        String agentId = context != null && StringUtils.hasText(context.agentId())
-            ? context.agentId()
-            : "system";
-        EffectiveWorkspace workspace = effectiveWorkspaceResolver.resolve(
-            agentId,
-            context == null ? null : context.projectId()
-        );
-        return workspace.outputsDir();
-    }
-
-    private Path workflowRunPath(String runId, OrchestrationTaskContext context) {
-        try {
-            String agentId = context != null && StringUtils.hasText(context.agentId())
-                ? context.agentId()
-                : "system";
-            Path agentWorkspace = workspaceDirectoryService.agentWorkspaceRoot(agentId).toRealPath();
-            return Files.createDirectories(agentWorkspace
-                .resolve(WorkspacePathLayout.RUNS)
-                .resolve(runId)).toRealPath();
-        } catch (IOException exception) {
-            throw new IllegalStateException("Failed to allocate workflow run staging for " + runId, exception);
-        }
-    }
-
-    private Path workflowRunOutputPath(Path runPath) {
-        try {
-            return Files.createDirectories(runPath.resolve(WorkspacePathLayout.OUTPUTS)).toRealPath();
-        } catch (IOException exception) {
-            throw new IllegalStateException("Failed to allocate workflow run outputs for " + runPath, exception);
-        }
-    }
-
     private Path outputPathFor(WorkflowRun run) {
-        if (StringUtils.hasText(run.outputDir())) {
-            return resolveStoredPath(run.outputDir());
+        return workspaceDirectoryService.outputs(descriptorForRun(run));
+    }
+
+    private WorkspaceDescriptor resolveDescriptor(OrchestrationTaskContext context) {
+        WorkspaceKind kind;
+        String key;
+        if (context != null && StringUtils.hasText(context.workspaceType())
+            && StringUtils.hasText(context.workspaceKey())) {
+            kind = WorkspaceKind.fromToken(context.workspaceType());
+            key = context.workspaceKey();
+        } else {
+            kind = WorkspaceKind.AGENT;
+            key = context != null && StringUtils.hasText(context.agentId()) ? context.agentId() : "system";
         }
-        return workspaceDirectoryService.workflowTemp(run.id());
+        if (kind == WorkspaceKind.CHAT) {
+            throw new IllegalArgumentException("Chat workspaces cannot execute workflows");
+        }
+        return workspaceDirectoryService.resolveForWrite(kind, key);
+    }
+
+    private WorkspaceDescriptor descriptorForRun(WorkflowRun run) {
+        if (!StringUtils.hasText(run.workspaceType()) || !StringUtils.hasText(run.workspaceKey())) {
+            throw new IllegalStateException("Workflow run has no executable workspace selection: " + run.id());
+        }
+        WorkspaceKind kind = WorkspaceKind.fromToken(run.workspaceType());
+        if (kind == WorkspaceKind.CHAT) {
+            throw new IllegalStateException("Chat workspaces cannot execute workflows");
+        }
+        return workspaceDirectoryService.resolveForWrite(kind, run.workspaceKey());
     }
 
     private OrchestrationTaskContext executionContextFor(WorkflowRun run, OrchestrationTaskContext base) {
-        String runPath = StringUtils.hasText(run.workspacePath()) ? resolveStoredPath(run.workspacePath()).toString() : null;
-        String outputPath = StringUtils.hasText(run.outputDir()) ? resolveStoredPath(run.outputDir()).toString() : null;
-        String durableWorkspacePath = base == null ? null : base.hostDurableWorkspacePath();
-        if (!StringUtils.hasText(durableWorkspacePath)) {
-            durableWorkspacePath = inferDurableWorkspacePath(run);
-        }
-        if (base != null) {
-            return base.withExecutionPaths(durableWorkspacePath, outputPath, runPath, base.hostRootPath());
-        }
-        if (!StringUtils.hasText(runPath) && !StringUtils.hasText(outputPath)) {
-            return null;
-        }
+        WorkspaceDescriptor descriptor = descriptorForRun(run);
+        boolean sameLifecycle = base != null && base.taskRunLocation() != null
+            && run.id().equals(base.taskRunLocation().taskRunId());
         return new OrchestrationTaskContext(
-            null, null, null, null, null, "WORKFLOW_RUN",
-            runPath, outputPath, durableWorkspacePath, runPath
+            run.agentId() != null ? run.agentId() : base == null ? null : base.agentId(),
+            base == null ? null : base.agentName(),
+            run.jobId(), run.jobAssignmentId(), run.jobRunId(), run.projectId(),
+            descriptor.kind().token(), descriptor.key(), descriptor.identity(),
+            StringUtils.hasText(run.runType()) ? run.runType() : "WORKFLOW_RUN",
+            run.runDisplayName(), sameLifecycle ? base.resolvedHostPath() : descriptor.root().toString(), null,
+            sameLifecycle ? base.taskRunLocation() : null,
+            sameLifecycle ? base.runOutputLocation() : null,
+            sameLifecycle ? base.attemptId() : null,
+            sameLifecycle ? base.writerCapability() : null,
+            descriptor,
+            base != null ? base.contextBindingKey() : null
         );
-    }
-
-    private String inferDurableWorkspacePath(WorkflowRun run) {
-        if (StringUtils.hasText(run.projectId()) && effectiveWorkspaceResolver != null) {
-            String agentId = StringUtils.hasText(run.agentId()) ? run.agentId() : "system";
-            return effectiveWorkspaceResolver.resolve(agentId, run.projectId()).root().toString();
-        }
-        if (StringUtils.hasText(run.workspacePath())) {
-            Path runPath = resolveStoredPath(run.workspacePath()).toAbsolutePath().normalize();
-            Path runsDir = runPath.getParent();
-            Path workspaceRoot = runsDir == null ? null : runsDir.getParent();
-            if (runsDir != null
-                && runsDir.getFileName() != null
-                && WorkspacePathLayout.RUNS.equals(runsDir.getFileName().toString())
-                && workspaceRoot != null) {
-                return workspaceRoot.toString();
-            }
-        }
-        if (!StringUtils.hasText(run.outputDir())) {
-            return null;
-        }
-        Path outputPath = resolveStoredPath(run.outputDir()).toAbsolutePath().normalize();
-        Path workflowIdDir = outputPath.getParent();
-        Path workflowsDir = workflowIdDir == null ? null : workflowIdDir.getParent();
-        Path outputsDir = workflowsDir == null ? null : workflowsDir.getParent();
-        Path workspaceRoot = outputsDir == null ? null : outputsDir.getParent();
-        if (workspaceRoot == null
-            || outputsDir.getFileName() == null
-            || workflowsDir.getFileName() == null
-            || !"outputs".equals(outputsDir.getFileName().toString())
-            || !"workflows".equals(workflowsDir.getFileName().toString())) {
-            return null;
-        }
-        return workspaceRoot.toString();
-    }
-
-    private String storePath(Path path) {
-        return rootRelativePathService.store(path);
-    }
-
-    private Path resolveStoredPath(String storedPath) {
-        return rootRelativePathService.resolve(storedPath);
     }
 
     private OutputArtifactContext outputContext() {
@@ -892,7 +866,9 @@ public class WorkflowRunner {
             context.jobAssignmentId(),
             context.jobRunId(),
             context.projectId(),
-            context.workspaceId(),
+            context.workspaceType(),
+            context.workspaceKey(),
+            context.workspaceIdentity(),
             StringUtils.hasText(context.runType()) ? context.runType() : "WORKFLOW_RUN"
         );
     }

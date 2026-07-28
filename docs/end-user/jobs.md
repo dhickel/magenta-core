@@ -24,7 +24,7 @@ The page has:
 
 The project field is selector-backed where available. The owner agent field is currently a plain agent dropdown in the job editor.
 
-Jobs run through an agent and bind to a project and Work Area when those are selected. Jobs do not own separate workspace directories. If a project is selected, job outputs and project-facing task/workflow item outputs promote to the project or selected Work Area destination. Otherwise they use the executing agent workspace destination.
+Jobs run through an agent and bind to a project when one is selected. Jobs do not own separate workspace directories. Each job or child task/workflow run publishes beneath its canonical `tasks/<taskPathKey>/<taskRunId>/outputs/` directory. Project association is metadata and membership context only.
 
 ## Add Ordered Items
 
@@ -69,11 +69,11 @@ Save recurrence from the job editor. Recurrence config does not prove the schedu
 Saved jobs expose two operational actions:
 
 - **Start Run** creates a job assignment using the job owner agent or the first active agent.
-- **Submit to Agent** opens a form where you choose the agent, priority, optional project override, compatibility workspace metadata, and optional model override before submitting.
+- **Submit to Agent** opens a form where you choose the agent, priority, optional project metadata, an existing declared user workspace override, and an optional model override before submitting.
 
-The submit form shows the job's saved project and compatibility workspace metadata. `projectId` chooses the effective project workspace for the assignment. `workspaceId` is compatibility metadata and does not replace project selection.
+The submit form shows the job's saved project. Project association is metadata and membership context only.
 
-During execution, model-facing `outputs/` is the run-local staging area. After successful backend completion, validation, or promotion, job outputs are promoted to the bound Work Area or project output destination. Job definitions do not create or share their own workspace directories.
+Before dispatch, Magenta reserves a stable job run identity. Each plan or workflow work item receives its own linked sibling run, so retry/recovery cannot alias the assignment or parent job. Operator retry/replay creates a new lineage-linked run; resume reuses the current run with a new attempt. Assignment-owned child outputs publish beneath each canonical run-local `outputs/` location with create-only placement and integrity metadata. Scoped attribution and artifact operations are available through `/api/artifacts`.
 
 Recurring jobs also start by creating job assignments. Use the run panel to confirm the assignment id and job run id after a recurrence fires.
 
@@ -81,7 +81,7 @@ Recurring jobs also start by creating job assignments. Use the run panel to conf
 
 The job detail panels show:
 
-- **Runs** with assignment ID, job run ID, status, agent/project context, effective workspace, selected Work Area/output context, output count, created time, and cancel action for non-terminal runs. Legacy rows may still display compatibility workspace/path fields.
+- **Runs** with assignment ID, job run ID, status, agent/project context, workspace type/key, output count, created time, and cancel action for non-terminal runs.
 - **Recent Outputs** from job runs, including provenance context where available.
 - **Run Events** summarizing job run state changes.
 

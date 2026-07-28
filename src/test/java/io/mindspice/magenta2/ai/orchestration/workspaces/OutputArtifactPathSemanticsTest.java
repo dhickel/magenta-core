@@ -7,7 +7,6 @@ import java.util.List;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.mindspice.magenta2.ai.chat.plan.PlanFieldType;
-import io.mindspice.magenta2.ai.config.user.AiConfig;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -15,6 +14,7 @@ import org.springframework.jdbc.datasource.SingleConnectionDataSource;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceDirectoryServiceTestSupport;
 
 class OutputArtifactPathSemanticsTest {
 
@@ -89,17 +89,15 @@ class OutputArtifactPathSemanticsTest {
         JdbcTemplate jdbc = new JdbcTemplate(
             new SingleConnectionDataSource("jdbc:sqlite::memory:?foreign_keys=true", true)
         );
-        WorkspaceRepository repository = new WorkspaceRepository(jdbc);
+        OutputArtifactTestSchema.initialize(jdbc);
+        OutputArtifactRepository repository = new OutputArtifactRepository(jdbc);
         Path dataRoot = Files.createDirectories(tempDir.resolve(name).resolve("data"));
-        WorkspaceDirectoryService directoryService = new WorkspaceDirectoryService(
-            new AiConfig(null, null, null, null, dataRoot, null, null)
-        );
+        WorkspaceDirectoryService directoryService = WorkspaceDirectoryServiceTestSupport.directoryService(dataRoot);
         OutputArtifactService service = new OutputArtifactService(
             repository,
             directoryService,
             new RootRelativePathService(directoryService),
-            new ObjectMapper().findAndRegisterModules(),
-            true
+            new ObjectMapper().findAndRegisterModules()
         );
         return new Fixture(repository, service, directoryService.dataRoot());
     }
@@ -109,6 +107,8 @@ class OutputArtifactPathSemanticsTest {
             id,
             "run-" + id,
             "plan-" + id,
+            null,
+            null,
             null,
             null,
             null,
@@ -133,7 +133,7 @@ class OutputArtifactPathSemanticsTest {
     }
 
     private record Fixture(
-        WorkspaceRepository repository,
+        OutputArtifactRepository repository,
         OutputArtifactService service,
         Path dataRoot
     ) {

@@ -27,8 +27,7 @@ spring:
     driver-class-name: org.sqlite.JDBC
   sql:
     init:
-      mode: always
-      schema-locations: classpath:schema.sql
+      mode: never
   autoconfigure:
     exclude:
       - org.springframework.ai.model.openai.autoconfigure.OpenAiChatAutoConfiguration

@@ -8,19 +8,23 @@ public record OutputArtifactContext(
     String jobAssignmentId,
     String jobRunId,
     String projectId,
-    String workspaceId,
+    String workspaceType,
+    String workspaceKey,
+    String workspaceIdentity,
     String runType
 ) {
-    public static final OutputArtifactContext EMPTY = new OutputArtifactContext(null, null, null, null, null, null, null);
+    public static final OutputArtifactContext EMPTY = new OutputArtifactContext(null, null, null, null, null, null, null, null, null);
 
     public OutputArtifactContext(
         String agentId,
         String jobId,
         String projectId,
-        String workspaceId,
+        String workspaceType,
+        String workspaceKey,
+        String workspaceIdentity,
         String runType
     ) {
-        this(agentId, jobId, null, null, projectId, workspaceId, runType);
+        this(agentId, jobId, null, null, projectId, workspaceType, workspaceKey, workspaceIdentity, runType);
     }
 
     public OutputArtifactContext {
@@ -29,7 +33,9 @@ public record OutputArtifactContext(
         jobAssignmentId = normalize(jobAssignmentId);
         jobRunId = normalize(jobRunId);
         projectId = normalize(projectId);
-        workspaceId = normalize(workspaceId);
+        workspaceType = normalize(workspaceType);
+        workspaceKey = normalize(workspaceKey);
+        workspaceIdentity = normalize(workspaceIdentity);
         runType = normalize(runType);
     }
 
@@ -39,7 +45,9 @@ public record OutputArtifactContext(
             && !StringUtils.hasText(jobAssignmentId)
             && !StringUtils.hasText(jobRunId)
             && !StringUtils.hasText(projectId)
-            && !StringUtils.hasText(workspaceId)
+            && !StringUtils.hasText(workspaceType)
+            && !StringUtils.hasText(workspaceKey)
+            && !StringUtils.hasText(workspaceIdentity)
             && !StringUtils.hasText(runType);
     }
 

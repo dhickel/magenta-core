@@ -20,7 +20,7 @@ public class WorkspaceFileActionLogRepository {
     }
 
     public WorkspaceFileActionRecord record(
-        WorkArea workArea,
+        WorkspaceDescriptor descriptor,
         WorkspaceFileActionType actionType,
         String sourceRelativePath,
         String targetRelativePath,
@@ -28,7 +28,7 @@ public class WorkspaceFileActionLogRepository {
         String payloadJson
     ) {
         return record(
-            workArea,
+            descriptor,
             "system",
             null,
             actionType,
@@ -40,7 +40,7 @@ public class WorkspaceFileActionLogRepository {
     }
 
     public WorkspaceFileActionRecord record(
-        WorkArea workArea,
+        WorkspaceDescriptor descriptor,
         String actorType,
         String actorId,
         WorkspaceFileActionType actionType,
@@ -53,17 +53,15 @@ public class WorkspaceFileActionLogRepository {
         String id = UUID.randomUUID().toString();
         jdbcTemplate.update(
             """
-                insert into workspace_file_actions (
-                    id, workspace_id, owner_type, owner_id, work_area_id, actor_type, actor_id,
-                    action_type, source_relative_path, target_relative_path, result, payload_json, created_at
+                insert into workspace_file_action_log (
+                    id, workspace_identity, actor_type, actor_id,
+                    action_type, source_relative_path, target_relative_path,
+                    result, payload_json, created_at
                 )
-                values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
             id,
-            workArea.workspaceId(),
-            workArea.ownerType().name(),
-            workArea.ownerId(),
-            workArea.id(),
+            descriptor.identity(),
             StringUtils.hasText(actorType) ? actorType.trim() : "system",
             StringUtils.hasText(actorId) ? actorId.trim() : null,
             actionType.name(),
@@ -78,7 +76,7 @@ public class WorkspaceFileActionLogRepository {
 
     public WorkspaceFileActionRecord findById(String id) {
         return jdbcTemplate.query(
-            "select * from workspace_file_actions where id = ?",
+            "select * from workspace_file_action_log where id = ?",
             rs -> {
                 if (!rs.next()) {
                     throw new IllegalArgumentException("workspace file action not found: " + id);
@@ -89,16 +87,16 @@ public class WorkspaceFileActionLogRepository {
         );
     }
 
-    public List<WorkspaceFileActionRecord> recentForWorkspace(String workspaceId, int limit) {
+    public List<WorkspaceFileActionRecord> recentForWorkspace(String workspaceIdentity, int limit) {
         return jdbcTemplate.query(
             """
-                select * from workspace_file_actions
-                where workspace_id = ?
+                select * from workspace_file_action_log
+                where workspace_identity = ?
                 order by created_at desc
                 limit ?
                 """,
             (rs, rowNum) -> toRecord(rs),
-            workspaceId,
+            workspaceIdentity,
             Math.max(1, limit)
         );
     }
@@ -106,10 +104,7 @@ public class WorkspaceFileActionLogRepository {
     private WorkspaceFileActionRecord toRecord(ResultSet rs) throws SQLException {
         return new WorkspaceFileActionRecord(
             rs.getString("id"),
-            rs.getString("workspace_id"),
-            WorkspaceOwnerType.valueOf(rs.getString("owner_type")),
-            rs.getString("owner_id"),
-            rs.getString("work_area_id"),
+            rs.getString("workspace_identity"),
             rs.getString("actor_type"),
             rs.getString("actor_id"),
             WorkspaceFileActionType.valueOf(rs.getString("action_type")),
@@ -123,12 +118,9 @@ public class WorkspaceFileActionLogRepository {
 
     private void ensureSchema() {
         jdbcTemplate.execute("""
-            create table if not exists workspace_file_actions (
+            create table if not exists workspace_file_action_log (
                 id text primary key,
-                workspace_id text not null,
-                owner_type text not null,
-                owner_id text not null,
-                work_area_id text,
+                workspace_identity text not null,
                 actor_type text,
                 actor_id text,
                 action_type text not null,
@@ -136,25 +128,16 @@ public class WorkspaceFileActionLogRepository {
                 target_relative_path text,
                 result text not null,
                 payload_json text not null default '{}',
-                created_at text not null,
-                foreign key(workspace_id) references workspaces(id)
+                created_at text not null
             )
             """);
         jdbcTemplate.execute("""
-            create index if not exists idx_workspace_file_actions_workspace
-                on workspace_file_actions(workspace_id, created_at desc)
+            create index if not exists idx_workspace_file_action_log_identity
+                on workspace_file_action_log(workspace_identity, created_at desc)
             """);
         jdbcTemplate.execute("""
-            create index if not exists idx_workspace_file_actions_owner
-                on workspace_file_actions(owner_type, owner_id, created_at desc)
-            """);
-        jdbcTemplate.execute("""
-            create index if not exists idx_workspace_file_actions_work_area
-                on workspace_file_actions(work_area_id, created_at desc)
-            """);
-        jdbcTemplate.execute("""
-            create index if not exists idx_workspace_file_actions_type
-                on workspace_file_actions(action_type, created_at desc)
+            create index if not exists idx_workspace_file_action_log_type
+                on workspace_file_action_log(action_type, created_at desc)
             """);
     }
 }

@@ -4,8 +4,6 @@ import java.util.List;
 
 import io.mindspice.magenta2.ai.orchestration.agents.AgentProfile;
 import io.mindspice.magenta2.ai.orchestration.agents.AgentProfileService;
-import io.mindspice.magenta2.ai.orchestration.workspaces.Workspace;
-import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceService;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -23,11 +21,9 @@ import jakarta.validation.Valid;
 @RequestMapping("/api/agents")
 public class AgentProfileController {
     private final AgentProfileService agentProfileService;
-    private final WorkspaceService workspaceService;
 
-    public AgentProfileController(AgentProfileService agentProfileService, WorkspaceService workspaceService) {
+    public AgentProfileController(AgentProfileService agentProfileService) {
         this.agentProfileService = agentProfileService;
-        this.workspaceService = workspaceService;
     }
 
     @GetMapping
@@ -71,11 +67,5 @@ public class AgentProfileController {
         } catch (IllegalStateException exception) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, exception.getMessage());
         }
-    }
-
-    @GetMapping("/{agentId}/workspace")
-    public Workspace workspace(@PathVariable String agentId) {
-        AgentProfile profile = get(agentId);
-        return workspaceService.agentWorkspace(profile.id(), profile.name());
     }
 }

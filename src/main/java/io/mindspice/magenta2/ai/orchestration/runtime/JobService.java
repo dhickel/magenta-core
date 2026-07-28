@@ -13,20 +13,15 @@ import java.util.Optional;
 import java.util.UUID;
 
 import io.mindspice.magenta2.ai.chat.plan.PlanService;
+import io.mindspice.magenta2.ai.orchestration.workspaces.TaskSourceKind;
+import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceKind;
 import io.mindspice.magenta2.ai.orchestration.agents.AgentProfile;
 import io.mindspice.magenta2.ai.orchestration.agents.AgentProfileService;
 import io.mindspice.magenta2.ai.orchestration.workflow.WorkflowService;
-import io.mindspice.magenta2.ai.orchestration.workspaces.EffectiveWorkspace;
-import io.mindspice.magenta2.ai.orchestration.workspaces.EffectiveWorkspaceResolver;
 import io.mindspice.magenta2.ai.orchestration.workspaces.OutputArtifactService;
-import io.mindspice.magenta2.ai.orchestration.workspaces.OutputDirectoryService;
-import io.mindspice.magenta2.ai.orchestration.workspaces.OutputPublicationTarget;
-import io.mindspice.magenta2.ai.orchestration.workspaces.ResolvedOutputDirectory;
 import io.mindspice.magenta2.ai.orchestration.workspaces.RootRelativePathService;
 import io.mindspice.magenta2.ai.orchestration.workspaces.RunOutputArtifact;
-import io.mindspice.magenta2.ai.orchestration.workspaces.Workspace;
 import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceDirectoryService;
-import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceService;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.slf4j.Logger;
@@ -49,56 +44,28 @@ public class JobService {
     private final WorkspaceDirectoryService workspaceDirectoryService;
     private final PlanService planService;
     private final WorkflowService workflowService;
-    private final EffectiveWorkspaceResolver effectiveWorkspaceResolver;
     private final OrchestrationRuntimeRepository runtimeRepository;
     private final ObjectProvider<AssignmentService> assignmentServiceProvider;
     private final AgentProfileService agentProfileService;
     private final ProjectService projectService;
-    private final WorkspaceService workspaceService;
     private final OutputArtifactService outputArtifactService;
-    private final OutputDirectoryService outputDirectoryService;
     private final RootRelativePathService rootRelativePathService;
+    private final TaskRunLifecycleService taskRunLifecycleService;
 
     public JobService(JobRepository jobRepository,
                       WorkspaceDirectoryService workspaceDirectoryService,
                       PlanService planService,
                       WorkflowService workflowService) {
-        this(jobRepository, workspaceDirectoryService, planService, workflowService, null, null);
+        this(jobRepository, workspaceDirectoryService, planService, workflowService, null);
     }
 
     public JobService(JobRepository jobRepository,
                       WorkspaceDirectoryService workspaceDirectoryService,
                       PlanService planService,
                       WorkflowService workflowService,
-                      EffectiveWorkspaceResolver effectiveWorkspaceResolver) {
-        this(jobRepository, workspaceDirectoryService, planService, workflowService, effectiveWorkspaceResolver, null);
-    }
-
-    public JobService(JobRepository jobRepository,
-                      WorkspaceDirectoryService workspaceDirectoryService,
-                      PlanService planService,
-                      WorkflowService workflowService,
-                      @Autowired(required = false) EffectiveWorkspaceResolver effectiveWorkspaceResolver,
-                      @Autowired(required = false) OrchestrationRuntimeRepository runtimeRepository) {
-        this(jobRepository, workspaceDirectoryService, planService, workflowService, effectiveWorkspaceResolver,
-            runtimeRepository, null, null, null, null, null, null, null);
-    }
-
-    public JobService(JobRepository jobRepository,
-                      WorkspaceDirectoryService workspaceDirectoryService,
-                      PlanService planService,
-                      WorkflowService workflowService,
-                      EffectiveWorkspaceResolver effectiveWorkspaceResolver,
-                      OrchestrationRuntimeRepository runtimeRepository,
-                      ObjectProvider<AssignmentService> assignmentServiceProvider,
-                      AgentProfileService agentProfileService,
-                      ProjectService projectService,
-                      WorkspaceService workspaceService,
-                      OutputArtifactService outputArtifactService,
-                      RootRelativePathService rootRelativePathService) {
-        this(jobRepository, workspaceDirectoryService, planService, workflowService, effectiveWorkspaceResolver,
-            runtimeRepository, assignmentServiceProvider, agentProfileService, projectService, workspaceService,
-            outputArtifactService, null, rootRelativePathService);
+                      OrchestrationRuntimeRepository runtimeRepository) {
+        this(jobRepository, workspaceDirectoryService, planService, workflowService,
+            runtimeRepository, null, null, null, null, null, null);
     }
 
     @Autowired
@@ -106,30 +73,26 @@ public class JobService {
                       WorkspaceDirectoryService workspaceDirectoryService,
                       PlanService planService,
                       WorkflowService workflowService,
-                      @Autowired(required = false) EffectiveWorkspaceResolver effectiveWorkspaceResolver,
                       @Autowired(required = false) OrchestrationRuntimeRepository runtimeRepository,
                       @Autowired(required = false) ObjectProvider<AssignmentService> assignmentServiceProvider,
                       @Autowired(required = false) AgentProfileService agentProfileService,
                       @Autowired(required = false) ProjectService projectService,
-                      @Autowired(required = false) WorkspaceService workspaceService,
                       @Autowired(required = false) OutputArtifactService outputArtifactService,
-                      @Autowired(required = false) OutputDirectoryService outputDirectoryService,
-                      @Autowired(required = false) RootRelativePathService rootRelativePathService) {
+                      @Autowired(required = false) RootRelativePathService rootRelativePathService,
+                      @Autowired(required = false) TaskRunLifecycleService taskRunLifecycleService) {
         this.jobRepository = jobRepository;
         this.workspaceDirectoryService = workspaceDirectoryService;
         this.planService = planService;
         this.workflowService = workflowService;
-        this.effectiveWorkspaceResolver = effectiveWorkspaceResolver;
         this.runtimeRepository = runtimeRepository;
         this.assignmentServiceProvider = assignmentServiceProvider;
         this.agentProfileService = agentProfileService;
         this.projectService = projectService;
-        this.workspaceService = workspaceService;
         this.outputArtifactService = outputArtifactService;
-        this.outputDirectoryService = outputDirectoryService;
         this.rootRelativePathService = rootRelativePathService != null
             ? rootRelativePathService
             : workspaceDirectoryService == null ? null : new RootRelativePathService(workspaceDirectoryService);
+        this.taskRunLifecycleService = taskRunLifecycleService;
     }
 
     // ════════════════════════════════════════════════════════════════
@@ -178,8 +141,9 @@ public class JobService {
             id,
             normalize(def.ownerAgentId()),
             normalize(def.projectId()),
-            normalize(def.workspaceId()),
-            false,
+            normalize(def.workspaceType()),
+            normalize(def.workspaceKey()),
+            null,
             StringUtils.hasText(def.status()) ? def.status().trim() : "DRAFT",
             def.title(), def.summary(),
             orderedItems(items),
@@ -235,10 +199,9 @@ public class JobService {
     public void updateDefinitionStatus(String jobId, String status) {
         JobDefinition def = getDefinition(jobId);
         saveDefinition(new JobDefinition(
-            def.id(), def.ownerAgentId(), def.projectId(), def.workspaceId(),
-            def.persistentWorkspaceEnabled(), status, def.title(), def.summary(), def.items(),
-            def.promptProfile(), def.model(), def.settingsOverrideJson(),
-            def.createdAt(), def.updatedAt()
+            def.id(), def.ownerAgentId(), def.projectId(), def.workspaceType(), def.workspaceKey(),
+            def.workspaceIdentity(), status, def.title(), def.summary(), def.items(), def.promptProfile(),
+            def.model(), def.settingsOverrideJson(), def.createdAt(), def.updatedAt()
         ));
     }
 
@@ -262,19 +225,6 @@ public class JobService {
     }
 
     public JobRun startRun(String jobId, String agentId, String projectId, String jobAssignmentId) {
-        return startRun(jobId, agentId, projectId, jobAssignmentId, null, null, null, null);
-    }
-
-    public JobRun startRun(
-        String jobId,
-        String agentId,
-        String projectId,
-        String jobAssignmentId,
-        String selectedWorkAreaId,
-        String outputRouteType,
-        String outputWorkAreaId,
-        String outputDirectRelativePath
-    ) {
         if (!StringUtils.hasText(jobAssignmentId)) {
             throw new IllegalStateException("Job runs require an assignment context");
         }
@@ -287,61 +237,48 @@ public class JobService {
             }
             return existingRun;
         }
-        Instant now = Instant.now();
-        String runId = UUID.randomUUID().toString();
-        String effectiveAgentId = firstText(agentId, def.ownerAgentId(), "system");
-        String effectiveProjectId = firstText(projectId, def.projectId());
+        OrchestrationTaskContext context = OrchestrationTaskContextHolder.current();
+        String workspaceType = context == null ? def.workspaceType() : context.workspaceType();
+        String workspaceKey = context == null ? def.workspaceKey() : context.workspaceKey();
+        if (!StringUtils.hasText(workspaceType) && StringUtils.hasText(agentId)) {
+            workspaceType = "agent";
+            workspaceKey = agentId.trim();
+        }
+        if ((StringUtils.hasText(workspaceType)) != (StringUtils.hasText(workspaceKey))) {
+            throw new IllegalStateException("Job run has an incomplete workspace selection");
+        }
+        String workspaceIdentity = StringUtils.hasText(workspaceType)
+            ? workspaceType + "/" + workspaceKey : null;
 
-        String workspacePath = null;
-        String outputDir = null;
-        String effectiveWorkspaceId = null;
-        try {
-            EffectiveWorkspace effectiveWorkspace = effectiveWorkspace(effectiveAgentId, effectiveProjectId);
-            effectiveWorkspaceId = effectiveWorkspace.workspaceId();
-            Path outPath;
-            if (outputDirectoryService != null) {
-                ResolvedOutputDirectory resolved = outputDirectoryService.resolve(OutputPublicationTarget.job(
-                    def.id(),
-                    assignmentKey,
-                    runId,
-                    effectiveAgentId,
-                    effectiveProjectId,
-                    null,
-                    selectedWorkAreaId,
-                    outputRouteType,
-                    outputWorkAreaId,
-                    outputDirectRelativePath
-                ));
-                effectiveWorkspaceId = resolved.workspaceId();
-                outPath = resolved.outputDirectory();
-            } else {
-                outPath = effectiveWorkspace.outputsDir();
+        boolean usesReservedRun = context != null && context.taskRunLocation() != null
+            && context.taskRunLocation().taskIdentity().sourceKind() == TaskSourceKind.JOB
+            && jobId.equals(context.taskRunLocation().taskIdentity().stableId());
+        String runId = usesReservedRun
+            ? context.taskRunLocation().taskRunId() : UUID.randomUUID().toString();
+        if (usesReservedRun) {
+            JobRun existing = jobRepository.findRun(runId).orElse(null);
+            if (existing != null) return existing;
+        } else if (taskRunLifecycleService != null && StringUtils.hasText(workspaceType)) {
+            WorkspaceKind kind = WorkspaceKind.fromToken(workspaceType);
+            if (kind == WorkspaceKind.CHAT) {
+                throw new IllegalArgumentException("CHAT workspaces are not task-selectable");
             }
-            outputDir = storePath(outPath.toRealPath());
-            log.info("Allocated job output={} agent={} project={} assignment={} for job run={}",
-                outputDir, effectiveAgentId, effectiveProjectId, assignmentKey, runId);
-        } catch (Exception e) {
-            log.error("Failed to allocate output/workspace for job run={}: {}", runId, e.getMessage());
+            String inputDigest = taskRunLifecycleService.canonicalInputDigest(Map.of(
+                "jobId", jobId, "assignmentId", assignmentKey));
+            taskRunLifecycleService.reserve(LifecycleReservationRequest.reuseNative(
+                    "job-submission:" + UUID.randomUUID(), TaskSourceKind.JOB, jobId, kind,
+                    workspaceKey, runId, assignmentKey, inputDigest));
         }
 
-        // Initialize work item runs
-        List<JobWorkItemRun> itemRuns = new ArrayList<>();
-        for (JobWorkItem item : def.items()) {
-            itemRuns.add(new JobWorkItemRun(
-                item.key(),
-                item.type().name(),
-                item.planId(),
-                item.workflowId(),
-                "QUEUED",
-                null, // runId — assigned when executed
-                Map.of(), Map.of(), null, null, null
-            ));
-        }
-
+        Instant now = Instant.now();
+        List<JobWorkItemRun> itemRuns = def.items().stream()
+            .map(item -> new JobWorkItemRun(item.key(), item.type().name(), item.planId(), item.workflowId(),
+                "QUEUED", null, Map.of(), Map.of(), null, null, null))
+            .toList();
         return jobRepository.saveRun(new JobRun(
-            runId, jobId, assignmentKey, effectiveWorkspaceId, JobRunStatus.QUEUED,
-            itemRuns, workspacePath, outputDir,
-            null, null, now, now, null, null
+            runId, jobId, assignmentKey,
+            workspaceType, workspaceKey, workspaceIdentity, JobRunStatus.QUEUED,
+            itemRuns, null, null, now, now, null, null
         ));
     }
 
@@ -354,8 +291,8 @@ public class JobService {
             throw new IllegalStateException("Job run must be QUEUED to start: " + runId);
         }
         return jobRepository.saveRun(new JobRun(
-            run.id(), run.jobId(), run.jobAssignmentId(), run.workspaceId(), JobRunStatus.RUNNING,
-            run.workItemRuns(), run.workspacePath(), run.outputDir(),
+            run.id(), run.jobId(), run.jobAssignmentId(), run.workspaceType(), run.workspaceKey(),
+            run.workspaceIdentity(), JobRunStatus.RUNNING, run.workItemRuns(),
             run.finalMessage(), run.errorText(),
             run.createdAt(), Instant.now(), Instant.now(), run.completedAt()
         ));
@@ -399,8 +336,8 @@ public class JobService {
         }
 
         return jobRepository.saveRun(new JobRun(
-            run.id(), run.jobId(), run.jobAssignmentId(), run.workspaceId(), newStatus,
-            updated, run.workspacePath(), run.outputDir(),
+            run.id(), run.jobId(), run.jobAssignmentId(), run.workspaceType(), run.workspaceKey(),
+            run.workspaceIdentity(), newStatus, updated,
             newStatus.isTerminal() ? "Job run " + newStatus.name().toLowerCase() : run.finalMessage(),
             run.errorText(),
             run.createdAt(), Instant.now(),
@@ -412,9 +349,8 @@ public class JobService {
     public JobRun failRun(String runId, String errorText) {
         JobRun run = getRun(runId);
         return jobRepository.saveRun(new JobRun(
-            run.id(), run.jobId(), run.jobAssignmentId(), run.workspaceId(), JobRunStatus.FAILED,
-            run.workItemRuns(), run.workspacePath(), run.outputDir(),
-            run.finalMessage(), errorText,
+            run.id(), run.jobId(), run.jobAssignmentId(), run.workspaceType(), run.workspaceKey(),
+            run.workspaceIdentity(), JobRunStatus.FAILED, run.workItemRuns(), run.finalMessage(), errorText,
             run.createdAt(), Instant.now(),
             run.startedAt(), Instant.now()
         ));
@@ -426,8 +362,8 @@ public class JobService {
             return run;
         }
         return jobRepository.saveRun(new JobRun(
-            run.id(), run.jobId(), run.jobAssignmentId(), run.workspaceId(), JobRunStatus.COMPLETED,
-            run.workItemRuns(), run.workspacePath(), run.outputDir(),
+            run.id(), run.jobId(), run.jobAssignmentId(), run.workspaceType(), run.workspaceKey(),
+            run.workspaceIdentity(), JobRunStatus.COMPLETED, run.workItemRuns(),
             StringUtils.hasText(finalMessage) ? finalMessage : "Job run completed",
             run.errorText(),
             run.createdAt(), Instant.now(),
@@ -458,9 +394,8 @@ public class JobService {
             return run;
         }
         return jobRepository.saveRun(new JobRun(
-            run.id(), run.jobId(), run.jobAssignmentId(), run.workspaceId(), JobRunStatus.CANCELLED,
-            run.workItemRuns(), run.workspacePath(), run.outputDir(),
-            "Cancelled", run.errorText(),
+            run.id(), run.jobId(), run.jobAssignmentId(), run.workspaceType(), run.workspaceKey(),
+            run.workspaceIdentity(), JobRunStatus.CANCELLED, run.workItemRuns(), "Cancelled", run.errorText(),
             run.createdAt(), Instant.now(),
             run.startedAt(), Instant.now()
         ));
@@ -551,10 +486,15 @@ public class JobService {
             job.projectId()
         );
         Project project = project(projectId);
-        String effectiveWorkspaceId = firstText(
-            assignment == null ? null : assignment.effectiveWorkspaceId(),
-            run == null ? null : run.workspaceId()
-        );
+        String workspaceType = firstText(
+            assignment == null ? null : assignment.workspaceType(),
+            run == null ? null : run.workspaceType(), job.workspaceType(),
+            StringUtils.hasText(agentId) ? "agent" : null);
+        String workspaceKey = firstText(
+            assignment == null ? null : assignment.workspaceKey(),
+            run == null ? null : run.workspaceKey(), job.workspaceKey(), agentId);
+        String workspaceIdentity = StringUtils.hasText(workspaceType) && StringUtils.hasText(workspaceKey)
+            ? workspaceType + "/" + workspaceKey : null;
         OutputStats outputStats = outputStats(run);
         return new JobExecutionSummary(
             job.id(),
@@ -570,18 +510,11 @@ public class JobService {
             agent == null || agent.status() == null ? null : agent.status().name(),
             projectId,
             project == null ? null : project.name(),
-            firstText(assignment == null ? null : assignment.workspaceId(), job.workspaceId()),
-            effectiveWorkspaceId,
-            firstText(assignment == null ? null : assignment.effectiveWorkspaceKind(),
-                StringUtils.hasText(projectId) ? "PROJECT" : StringUtils.hasText(effectiveWorkspaceId) ? "AGENT" : null),
-            effectiveWorkspaceDisplayPath(effectiveWorkspaceId),
-            false,
-            null,
-            run == null ? null : run.workspacePath(),
-            StringUtils.hasText(run == null ? null : run.workspacePath()),
+            workspaceType,
+            workspaceKey,
+            workspaceIdentity,
             run == null ? null : run.id(),
             run == null ? null : run.status(),
-            run == null ? null : run.outputDir(),
             childRunIds(run),
             outputStats.count(),
             outputStats.latestAt(),
@@ -609,18 +542,6 @@ public class JobService {
         }
         try {
             return projectService.getProject(projectId);
-        } catch (RuntimeException ignored) {
-            return null;
-        }
-    }
-
-    private String effectiveWorkspaceDisplayPath(String workspaceId) {
-        if (!StringUtils.hasText(workspaceId) || workspaceService == null) {
-            return null;
-        }
-        try {
-            Workspace workspace = workspaceService.get(workspaceId);
-            return workspace.rootRelativePath();
         } catch (RuntimeException ignored) {
             return null;
         }
@@ -660,10 +581,6 @@ public class JobService {
             }
         }
         return new OutputStats(count, latest);
-    }
-
-    private String storePath(Path path) {
-        return rootRelativePathService == null ? path.toString() : rootRelativePathService.store(path);
     }
 
     // ════════════════════════════════════════════════════════════════
@@ -735,7 +652,8 @@ public class JobService {
                     0,
                     job.model(),
                     job.projectId(),
-                    job.workspaceId(),
+                    null,
+                    null,
                     Map.of("jobId", job.id(), "recurrenceId", rec.id())
                 ));
                 assignments.add(assignment);
@@ -761,7 +679,7 @@ public class JobService {
     private JobDefinition withItems(JobDefinition definition, List<JobWorkItem> items) {
         return new JobDefinition(
             definition.id(), definition.ownerAgentId(), definition.projectId(),
-            definition.workspaceId(), definition.persistentWorkspaceEnabled(),
+            definition.workspaceType(), definition.workspaceKey(), definition.workspaceIdentity(),
             definition.status(), definition.title(),
             definition.summary(), items, definition.promptProfile(), definition.model(),
             definition.settingsOverrideJson(), definition.createdAt(), definition.updatedAt()
@@ -830,8 +748,8 @@ public class JobService {
     private boolean jobExecutionAffectingChanged(JobDefinition existing, JobDefinition incoming, List<JobWorkItem> incomingItems) {
         return !same(existing.ownerAgentId(), incoming.ownerAgentId())
             || !same(existing.projectId(), incoming.projectId())
-            || !same(existing.workspaceId(), incoming.workspaceId())
-            || Boolean.TRUE.equals(existing.persistentWorkspaceEnabled()) != Boolean.TRUE.equals(incoming.persistentWorkspaceEnabled())
+            || !same(existing.workspaceType(), incoming.workspaceType())
+            || !same(existing.workspaceKey(), incoming.workspaceKey())
             || !same(existing.promptProfile(), incoming.promptProfile())
             || !same(existing.model(), incoming.model())
             || !same(existing.settingsOverrideJson(), incoming.settingsOverrideJson())
@@ -852,29 +770,6 @@ public class JobService {
 
     private String normalize(String value) {
         return StringUtils.hasText(value) ? value.trim() : null;
-    }
-
-    private EffectiveWorkspace effectiveWorkspace(String agentId, String projectId) {
-        if (effectiveWorkspaceResolver != null) {
-            return effectiveWorkspaceResolver.resolve(agentId, projectId);
-        }
-        Path root = StringUtils.hasText(projectId)
-            ? workspaceDirectoryService.projectWorkspaceRoot(projectId)
-            : workspaceDirectoryService.agentWorkspaceRoot(agentId);
-        return new EffectiveWorkspace(
-            StringUtils.hasText(projectId)
-                ? io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceOwnerType.PROJECT
-                : io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceOwnerType.AGENT,
-            StringUtils.hasText(projectId) ? projectId : agentId,
-            agentId,
-            projectId,
-            null,
-            root,
-            workspaceDirectoryService.workDir(root),
-            workspaceDirectoryService.outputsDir(root),
-            workspaceDirectoryService.runsDir(root),
-            null
-        );
     }
 
     private Instant nextFireTime(JobRecurrence recurrence) {

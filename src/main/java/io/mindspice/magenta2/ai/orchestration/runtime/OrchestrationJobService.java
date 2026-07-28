@@ -5,7 +5,6 @@ import java.util.Map;
 import java.util.UUID;
 
 import io.mindspice.magenta2.ai.orchestration.agents.AgentProfileService;
-import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceService;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
@@ -13,16 +12,13 @@ import org.springframework.util.StringUtils;
 public class OrchestrationJobService {
     private final OrchestrationRuntimeRepository repository;
     private final AgentProfileService agentProfileService;
-    private final WorkspaceService workspaceService;
 
     public OrchestrationJobService(
         OrchestrationRuntimeRepository repository,
-        AgentProfileService agentProfileService,
-        WorkspaceService workspaceService
+        AgentProfileService agentProfileService
     ) {
         this.repository = repository;
         this.agentProfileService = agentProfileService;
-        this.workspaceService = workspaceService;
     }
 
     public List<OrchestrationJob> jobs(String agentId) {
@@ -43,19 +39,18 @@ public class OrchestrationJobService {
         }
         agentProfileService.get(job.ownerAgentId());
         String id = StringUtils.hasText(job.id()) ? job.id() : UUID.randomUUID().toString();
-        String workspaceId = job.workspaceId();
-        if (StringUtils.hasText(workspaceId)) {
-            workspaceService.get(workspaceId);
-        } else {
-            workspaceId = null;
+        String workspaceType = normalize(job.workspaceType());
+        String workspaceKey = normalize(job.workspaceKey());
+        if ((workspaceType == null) != (workspaceKey == null)) {
+            throw new IllegalArgumentException("workspaceType and workspaceKey must be supplied together");
+        }
+        if (workspaceType == null) {
+            workspaceType = "agent";
+            workspaceKey = job.ownerAgentId();
         }
         return repository.saveJob(new OrchestrationJob(
-            id,
-            job.ownerAgentId(),
-            job.title().trim(),
-            normalize(job.summary()),
-            normalize(job.defaultModel()),
-            workspaceId,
+            id, job.ownerAgentId(), job.title().trim(), normalize(job.summary()), normalize(job.defaultModel()),
+            workspaceType, workspaceKey, null,
             job.status() == null ? OrchestrationStatus.QUEUED : job.status(),
             job.createdAt(),
             job.updatedAt()

@@ -16,23 +16,28 @@ import io.mindspice.magenta2.ai.chat.plan.PlanService;
 import io.mindspice.magenta2.ai.chat.repository.AuditRepository;
 import io.mindspice.magenta2.ai.orchestration.agents.AgentProfile;
 import io.mindspice.magenta2.ai.orchestration.agents.AgentProfileService;
+import io.mindspice.magenta2.ai.orchestration.context.AgentContextService;
 import io.mindspice.magenta2.ai.orchestration.settings.RuntimeSettingsService;
 import io.mindspice.magenta2.ai.orchestration.workflow.WorkflowRun;
 import io.mindspice.magenta2.ai.orchestration.workflow.WorkflowService;
-import io.mindspice.magenta2.ai.orchestration.workspaces.EffectiveWorkspace;
-import io.mindspice.magenta2.ai.orchestration.workspaces.EffectiveWorkspaceResolver;
-import io.mindspice.magenta2.ai.orchestration.workspaces.WorkAreaService;
-import io.mindspice.magenta2.ai.orchestration.workspaces.Workspace;
-import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceLeaseService;
-import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceOwnerType;
-import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceService;
+import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceDescriptor;
+import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceDirectoryService;
+import io.mindspice.magenta2.ai.orchestration.workspaces.TaskSourceKind;
+import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceKind;
+import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceResolutionException;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
 @Service
 public class AssignmentService {
+    private static final org.slf4j.Logger logger = org.slf4j.LoggerFactory.getLogger(AssignmentService.class);
+    // SQLite permits one writer. Serialize local submissions before they take
+    // transaction locks; the durable operation row remains the cross-process arbiter.
+    private static final Object SUBMISSION_MUTEX = new Object();
+
     private final OrchestrationRuntimeRepository repository;
     private final AgentProfileService agentProfileService;
     private final RuntimeSettingsService runtimeSettingsService;
@@ -40,10 +45,9 @@ public class AssignmentService {
     private final AuditRepository auditRepository;
     private final PlanService planService;
     private final WorkflowService workflowService;
-    private final EffectiveWorkspaceResolver effectiveWorkspaceResolver;
-    private final WorkspaceService workspaceService;
-    private final WorkspaceLeaseService workspaceLeaseService;
-    private final WorkAreaService workAreaService;
+    private final WorkspaceDirectoryService workspaceDirectoryService;
+    private final TaskRunLifecycleService taskRunLifecycleService;
+    private final AgentContextService agentContextService;
     private volatile Consumer<String> localInterruptHandler = ignored -> { };
 
     public AssignmentService(
@@ -52,20 +56,7 @@ public class AssignmentService {
         RuntimeSettingsService runtimeSettingsService,
         JobService jobService
     ) {
-        this(repository, agentProfileService, runtimeSettingsService, jobService, null, null, null);
-    }
-
-    public AssignmentService(
-        OrchestrationRuntimeRepository repository,
-        AgentProfileService agentProfileService,
-        RuntimeSettingsService runtimeSettingsService,
-        JobService jobService,
-        @Autowired(required = false) AuditRepository auditRepository,
-        @Autowired(required = false) PlanService planService,
-        @Autowired(required = false) WorkflowService workflowService
-    ) {
-        this(repository, agentProfileService, runtimeSettingsService, jobService, auditRepository, planService,
-            workflowService, null, null, null, null);
+        this(repository, agentProfileService, runtimeSettingsService, jobService, null, null, null, null, null, null);
     }
 
     public AssignmentService(
@@ -76,12 +67,10 @@ public class AssignmentService {
         AuditRepository auditRepository,
         PlanService planService,
         WorkflowService workflowService,
-        EffectiveWorkspaceResolver effectiveWorkspaceResolver,
-        WorkspaceService workspaceService,
-        WorkspaceLeaseService workspaceLeaseService
+        WorkspaceDirectoryService workspaceDirectoryService
     ) {
-        this(repository, agentProfileService, runtimeSettingsService, jobService, auditRepository, planService,
-            workflowService, effectiveWorkspaceResolver, workspaceService, workspaceLeaseService, null);
+        this(repository, agentProfileService, runtimeSettingsService, jobService, auditRepository,
+            planService, workflowService, workspaceDirectoryService, null, null);
     }
 
     @Autowired
@@ -93,10 +82,9 @@ public class AssignmentService {
         @Autowired(required = false) AuditRepository auditRepository,
         @Autowired(required = false) PlanService planService,
         @Autowired(required = false) WorkflowService workflowService,
-        @Autowired(required = false) EffectiveWorkspaceResolver effectiveWorkspaceResolver,
-        @Autowired(required = false) WorkspaceService workspaceService,
-        @Autowired(required = false) WorkspaceLeaseService workspaceLeaseService,
-        @Autowired(required = false) WorkAreaService workAreaService
+        @Autowired(required = false) WorkspaceDirectoryService workspaceDirectoryService,
+        @Autowired(required = false) TaskRunLifecycleService taskRunLifecycleService,
+        @Autowired(required = false) AgentContextService agentContextService
     ) {
         this.repository = repository;
         this.agentProfileService = agentProfileService;
@@ -105,14 +93,16 @@ public class AssignmentService {
         this.auditRepository = auditRepository;
         this.planService = planService;
         this.workflowService = workflowService;
-        this.effectiveWorkspaceResolver = effectiveWorkspaceResolver;
-        this.workspaceService = workspaceService;
-        this.workspaceLeaseService = workspaceLeaseService;
-        this.workAreaService = workAreaService;
+        this.workspaceDirectoryService = workspaceDirectoryService;
+        this.taskRunLifecycleService = taskRunLifecycleService;
+        this.agentContextService = agentContextService;
     }
 
+    @Transactional
     public WorkAssignment create(AssignmentRequest request) {
-        return create(UUID.randomUUID().toString(), request);
+        synchronized (SUBMISSION_MUTEX) {
+            return create(UUID.randomUUID().toString(), request);
+        }
     }
 
     WorkAssignment create(String assignmentId, AssignmentRequest request) {
@@ -131,13 +121,11 @@ public class AssignmentService {
         }
         Map<String, Object> input = inputWithProjectContext(request);
         String projectId = normalize(firstText(request.projectId(), text(input.get("projectId"))));
-        validateWorkspaceCompatibility(projectId, request.workspaceId());
-        EffectiveWorkspace effectiveWorkspace = resolveEffectiveWorkspace(request.agentId(), projectId);
-        WorkspaceOwnerType effectiveOwnerType = StringUtils.hasText(projectId)
-            ? WorkspaceOwnerType.PROJECT
-            : WorkspaceOwnerType.AGENT;
-        String effectiveOwnerId = StringUtils.hasText(projectId) ? projectId : request.agentId();
-        WorkAreaRouting workAreaRouting = resolveWorkAreaRouting(request, effectiveOwnerType, effectiveOwnerId);
+
+        // Resolve workspace selection: type/key both absent or both present
+        ResolvedSelection selection = resolveWorkspaceSelection(
+            request.agentId(), request.workspaceType(), request.workspaceKey());
+
         AssignmentTemplateParser.validate(new AssignmentRequest(
             request.agentId(),
             request.jobId(),
@@ -147,47 +135,245 @@ public class AssignmentService {
             request.priority(),
             request.modelOverride(),
             projectId,
-            request.workspaceId(),
-            workAreaRouting.selectedWorkAreaId(),
-            workAreaRouting.outputRouteType(),
-            workAreaRouting.outputWorkAreaId(),
-            workAreaRouting.outputDirectRelativePath(),
+            selection.workspaceType(),
+            selection.workspaceKey(),
             input
         ));
-        return repository.saveAssignment(new WorkAssignment(
-            assignmentId,
-            request.agentId(),
-            normalize(request.jobId()),
-            normalize(request.jobItemId()),
-            request.assignmentType(),
-            normalize(request.runDisplayName()),
-            request.priority() == null ? 0 : request.priority(),
-            OrchestrationStatus.QUEUED,
-            normalize(request.modelOverride()),
-            normalize(request.workspaceId()),
-            projectId,
-            effectiveWorkspace == null ? null : effectiveWorkspace.workspaceId(),
-            effectiveWorkspace == null ? null : effectiveWorkspace.ownerType().name(),
-            workAreaRouting.selectedWorkAreaId(),
-            workAreaRouting.outputRouteType(),
-            workAreaRouting.outputWorkAreaId(),
-            workAreaRouting.outputDirectRelativePath(),
-            0,
-            Map.of(),
-            input,
-            Map.of(),
-            Map.of(),
-            null,
-            null,
-            null,
-            null,
-            null,
-            null,
-            null,
-            null,
-            null
+        String operationKey = StringUtils.hasText(request.operationKey())
+            ? request.operationKey().trim() : "submission:" + UUID.randomUUID();
+        String intentDigest = submissionIntentDigest(request, projectId, selection, input);
+        requireContextService();
+        var operation = agentContextService.beginAssignmentSubmission(operationKey, intentDigest);
+        if (operation.status() == io.mindspice.magenta2.ai.orchestration.context.AgentContextRepository.ContextOperationStatus.CONFLICT) {
+            throw new TaskRunLifecycleService.OperationConflictException(
+                "Assignment operation key was reused with contradictory submission intent");
+        }
+        if (operation.status() == io.mindspice.magenta2.ai.orchestration.context.AgentContextRepository.ContextOperationStatus.REPLAYED) {
+            return replayAssignmentSubmission(operation, request, projectId, selection, input);
+        }
+
+        String bindingKey = "assignment:" + assignmentId;
+        // The capture and owner-link are mandatory. This transaction rolls back the
+        // operation reservation if either one cannot be persisted.
+        agentContextService.captureDefaultOrPersonalHome(request.agentId(), bindingKey,
+            "assignment-capture:" + operationKey);
+        agentContextService.linkOwner("ASSIGNMENT", assignmentId, bindingKey,
+            "assignment-owner-link:" + operationKey);
+
+        WorkAssignment assignment = repository.saveAssignment(new WorkAssignment(
+            assignmentId, request.agentId(), normalize(request.jobId()), normalize(request.jobItemId()),
+            request.assignmentType(), normalize(request.runDisplayName()), request.priority() == null ? 0 : request.priority(),
+            OrchestrationStatus.QUEUED, normalize(request.modelOverride()), selection.workspaceType(),
+            selection.workspaceKey(), selection.workspaceIdentity(), projectId, 0, Map.of(), input, Map.of(), Map.of(),
+            null, null, null, null, null, null, null, null, null
         ));
+        WorkAssignment reserved = reserveLifecycleAtSubmission(assignment, operationKey, bindingKey);
+        String taskRunId = text(reserved.checkpoint().get("taskRunId"));
+        agentContextService.completeAssignmentSubmission(operationKey, intentDigest,
+            bindingKey, reserved.id(), taskRunId);
+        return reserved;
     }
+
+    private void requireContextService() {
+        if (agentContextService == null) {
+            throw new IllegalStateException("Immutable context binding service is unavailable");
+        }
+    }
+
+    private WorkAssignment replayAssignmentSubmission(
+            io.mindspice.magenta2.ai.orchestration.context.AgentContextRepository.AssignmentSubmissionOperation operation,
+            AssignmentRequest request, String projectId, ResolvedSelection selection, Map<String, Object> input) {
+        if (!StringUtils.hasText(operation.assignmentId()) || !StringUtils.hasText(operation.bindingKey())) {
+            throw new IllegalStateException("Recorded assignment operation has no stable result");
+        }
+        WorkAssignment existing = get(operation.assignmentId());
+        if (!existing.agentId().equals(request.agentId()) || existing.assignmentType() != request.assignmentType()
+                || !java.util.Objects.equals(existing.jobId(), normalize(request.jobId()))
+                || !java.util.Objects.equals(existing.jobItemId(), normalize(request.jobItemId()))
+                || !java.util.Objects.equals(existing.projectId(), projectId)
+                || !java.util.Objects.equals(existing.workspaceType(), selection.workspaceType())
+                || !java.util.Objects.equals(existing.workspaceKey(), selection.workspaceKey())
+                || !java.util.Objects.equals(existing.input(), input)) {
+            throw new TaskRunLifecycleService.OperationConflictException(
+                "Assignment operation key was reused with contradictory submission intent");
+        }
+        requireOwnerBinding("ASSIGNMENT", existing.id(), operation.bindingKey());
+        var binding = agentContextService.getBinding(operation.bindingKey());
+        if (binding.outcome() != io.mindspice.magenta2.ai.orchestration.context.AgentContextService.ContextOutcome.AVAILABLE
+                || binding.value() == null || !existing.agentId().equals(binding.value().agentId())) {
+            throw new IllegalStateException("Recorded assignment binding is unavailable or incompatible");
+        }
+        if (StringUtils.hasText(operation.taskRunId())) {
+            requireOwnerBinding("TASK_RUN", operation.taskRunId(), operation.bindingKey());
+            if (!operation.taskRunId().equals(text(existing.checkpoint().get("taskRunId")))) {
+                throw new IllegalStateException("Recorded assignment lifecycle result is incompatible");
+            }
+        }
+        return existing;
+    }
+
+    private String bindingKeyForAssignment(WorkAssignment assignment) {
+        var link = agentContextService.getOwnerLink("ASSIGNMENT", assignment.id());
+        if (link.outcome() != io.mindspice.magenta2.ai.orchestration.context.AgentContextService.ContextOutcome.AVAILABLE
+                || link.value() == null) {
+            throw new IllegalStateException("Assignment has no durable immutable binding owner link");
+        }
+        return link.value().bindingKey();
+    }
+
+    private void requireOwnerBinding(String ownerType, String ownerId, String bindingKey) {
+        var link = agentContextService.getOwnerLink(ownerType, ownerId);
+        if (link.outcome() != io.mindspice.magenta2.ai.orchestration.context.AgentContextService.ContextOutcome.AVAILABLE
+                || link.value() == null || !bindingKey.equals(link.value().bindingKey())) {
+            throw new IllegalStateException("Missing or incompatible immutable binding owner link for " + ownerType);
+        }
+    }
+
+    /** Link a task-run reservation to the exact binding of its owning assignment. */
+    private void linkTaskRunBinding(String taskRunId, String assignmentId, String bindingKey) {
+        requireOwnerBinding("ASSIGNMENT", assignmentId, bindingKey);
+        agentContextService.linkOwner("TASK_RUN", taskRunId, bindingKey,
+            "task-run-owner-link:" + taskRunId);
+        requireOwnerBinding("TASK_RUN", taskRunId, bindingKey);
+    }
+
+    private WorkAssignment reserveLifecycleAtSubmission(WorkAssignment assignment, String operationKey, String bindingKey) {
+        if (!isTaskRunAssignment(assignment.assignmentType())) {
+            Map<String, Object> checkpoint = Map.of("contextBindingKey", bindingKey);
+            return repository.saveAssignment(copy(assignment, assignment.status(), assignment.currentItemIndex(), checkpoint,
+                assignment.output(), assignment.evidence(), assignment.errorText(), assignment.leaseOwner(),
+                assignment.leaseExpiresAt(), assignment.completedAt()));
+        }
+        if (taskRunLifecycleService == null) {
+            throw new IllegalStateException("Task-run lifecycle service is unavailable");
+        }
+        TaskSourceKind sourceKind = sourceKind(assignment.assignmentType());
+        String sourceId = sourceId(assignment);
+        String nativeRunId = UUID.randomUUID().toString();
+        var binding = agentContextService.getBinding(bindingKey).value();
+        if (binding == null) throw new IllegalStateException("Assignment binding disappeared before lifecycle reservation");
+        String inputDigest = taskRunLifecycleService.canonicalInputDigest(Map.of(
+            "assignmentType", assignment.assignmentType().name(), "sourceId", sourceId,
+            "workspaceType", assignment.workspaceType(), "workspaceKey", assignment.workspaceKey(),
+            "input", assignment.input(), "bindingKey", binding.bindingKey(),
+            "bindingSelection", binding.selectionKind().name(),
+            "bindingMaterializationKey", binding.materializationKey() == null ? "" : binding.materializationKey().serialized(),
+            "bindingMaterializationGeneration", binding.materializationGeneration() == null ? 0 : binding.materializationGeneration(),
+            "bindingPersonalSelection", binding.personalSelection() == null ? "" : binding.personalSelection().name()
+        ));
+        LifecycleResult lifecycle = taskRunLifecycleService.reserve(
+            LifecycleReservationRequest.reuseNative(operationKey, sourceKind, sourceId,
+                WorkspaceKind.fromToken(assignment.workspaceType()), assignment.workspaceKey(),
+                nativeRunId, assignment.id(), inputDigest));
+        String owningAssignmentId = taskRunLifecycleService.findAssignmentId(lifecycle.taskRunId());
+        if (!assignment.id().equals(owningAssignmentId)) {
+            throw new IllegalStateException("Lifecycle reservation belongs to another assignment");
+        }
+        linkTaskRunBinding(lifecycle.taskRunId(), assignment.id(), bindingKey);
+        Map<String, Object> checkpoint = new LinkedHashMap<>();
+        checkpoint.put("taskRunId", lifecycle.taskRunId());
+        checkpoint.put("nativeRunId", lifecycle.nativeRunId());
+        checkpoint.put("lifecycleOperationKey", lifecycle.operationKey());
+        checkpoint.put("lifecycleInputDigest", inputDigest);
+        checkpoint.put("attemptNumber", lifecycle.attemptNumber());
+        checkpoint.put("contextBindingKey", bindingKey); // compatibility only; runner verifies owner links.
+        return repository.saveAssignment(copy(assignment, assignment.status(), assignment.currentItemIndex(),
+            checkpoint, assignment.output(), assignment.evidence(), assignment.errorText(),
+            assignment.leaseOwner(), assignment.leaseExpiresAt(), assignment.completedAt()));
+    }
+
+    private String submissionIntentDigest(AssignmentRequest request, String projectId,
+                                          ResolvedSelection selection, Map<String, Object> input) {
+        String canonicalInput = taskRunLifecycleService == null ? String.valueOf(input)
+            : taskRunLifecycleService.canonicalInputDigest(input);
+        return TaskRunLifecycleService.sha256Hex(String.join("\\u001f", List.of(
+            request.agentId(), request.assignmentType().name(), String.valueOf(normalize(request.jobId())),
+            String.valueOf(normalize(request.jobItemId())), String.valueOf(projectId), selection.workspaceType(),
+            selection.workspaceKey(), canonicalInput)));
+    }
+
+    private boolean isTaskRunAssignment(AssignmentType type) {
+        return type == AssignmentType.TASK_RUN || type == AssignmentType.WORKFLOW_RUN || type == AssignmentType.JOB_RUN;
+    }
+
+    private TaskSourceKind sourceKind(AssignmentType type) {
+        return switch (type) {
+            case TASK_RUN -> TaskSourceKind.TASK;
+            case WORKFLOW_RUN -> TaskSourceKind.WORKFLOW;
+            case JOB_RUN -> TaskSourceKind.JOB;
+            default -> throw new IllegalArgumentException("Assignment has no task-run lifecycle: " + type);
+        };
+    }
+
+    private String sourceId(WorkAssignment assignment) {
+        return switch (assignment.assignmentType()) {
+            case TASK_RUN -> requireSourceId(assignment.input(), "taskId", "planId");
+            case WORKFLOW_RUN -> requireSourceId(assignment.input(), "workflowId");
+            case JOB_RUN -> StringUtils.hasText(assignment.jobId())
+                ? assignment.jobId() : requireSourceId(assignment.input(), "jobId");
+            default -> throw new IllegalArgumentException("Assignment has no native source");
+        };
+    }
+
+    private String requireSourceId(Map<String, Object> input, String... keys) {
+        for (String key : keys) {
+            String value = text(input.get(key));
+            if (StringUtils.hasText(value)) return value.trim();
+        }
+        throw new IllegalArgumentException("Executable assignment is missing its native source id");
+    }
+
+    // ── Centralized workspace selection ──
+
+    private ResolvedSelection resolveWorkspaceSelection(
+        String agentId, String workspaceType, String workspaceKey
+    ) {
+        boolean hasType = StringUtils.hasText(workspaceType);
+        boolean hasKey = StringUtils.hasText(workspaceKey);
+
+        // Both absent → default to agent
+        if (!hasType && !hasKey) {
+            return new ResolvedSelection(
+                WorkspaceKind.AGENT.token(), agentId, WorkspaceKind.AGENT.token() + "/" + agentId);
+        }
+        // One field only → reject
+        if (hasType != hasKey) {
+            throw new IllegalArgumentException(
+                "workspaceType and workspaceKey must both be present or both absent");
+        }
+        WorkspaceKind kind;
+        try {
+            kind = WorkspaceKind.fromToken(workspaceType);
+        } catch (IllegalArgumentException e) {
+            throw new IllegalArgumentException("Invalid workspaceType: " + workspaceType);
+        }
+        return switch (kind) {
+            case AGENT -> {
+                if (!agentId.equals(workspaceKey)) {
+                    throw new IllegalArgumentException(
+                        "Agent workspace key must match bound agent: " + agentId);
+                }
+                yield new ResolvedSelection(kind.token(), workspaceKey, kind.token() + "/" + workspaceKey);
+            }
+            case USER -> {
+                if (workspaceDirectoryService == null) {
+                    throw new IllegalStateException("Workspace directory service is unavailable");
+                }
+                try {
+                    WorkspaceDescriptor descriptor = workspaceDirectoryService.resolveForRead(
+                        WorkspaceKind.USER, workspaceKey);
+                    yield new ResolvedSelection(kind.token(), workspaceKey, descriptor.identity());
+                } catch (WorkspaceResolutionException e) {
+                    throw new IllegalArgumentException("User workspace not found: " + workspaceKey);
+                }
+            }
+            case CHAT -> throw new IllegalArgumentException("Chat workspace selection is not supported");
+        };
+    }
+
+    private record ResolvedSelection(String workspaceType, String workspaceKey, String workspaceIdentity) {}
+
+    // ── CRUD ──
 
     public WorkAssignment get(String assignmentId) {
         return repository.findAssignment(assignmentId)
@@ -243,6 +429,8 @@ public class AssignmentService {
         repository.purgeTerminalAssignmentHistory(Instant.now().minus(Duration.ofDays(settings.assignmentHistoryAutoPurgeDays())));
     }
 
+    // ── Lifecycle ──
+
     WorkAssignment cancel(String assignmentId) {
         return cancel(get(assignmentId));
     }
@@ -295,7 +483,128 @@ public class AssignmentService {
             && current.status() != OrchestrationStatus.WAITING) {
             throw new IllegalStateException("Assignment is not resumable: " + current.id());
         }
+        if (taskRunLifecycleService != null && isTaskRunAssignment(current.assignmentType())) {
+            String taskRunId = text(current.checkpoint().get("taskRunId"));
+            if (!StringUtils.hasText(taskRunId)) {
+                throw new IllegalStateException("Legacy assignment has no resumable lifecycle identity: " + current.id());
+            }
+            requireContextService();
+            String bindingKey = bindingKeyForAssignment(current);
+            requireOwnerBinding("TASK_RUN", taskRunId, bindingKey);
+            if (!current.id().equals(taskRunLifecycleService.findAssignmentId(taskRunId))) {
+                throw new IllegalStateException("Task run is not owned by assignment: " + current.id());
+            }
+            int currentAttempt = integer(current.checkpoint().get("attemptNumber"),
+                taskRunLifecycleService.currentAttemptNumber(taskRunId));
+            String operationKey = "assignment-resume:" + current.id() + ":" + currentAttempt;
+            String inputDigest = taskRunLifecycleService.canonicalInputDigest(Map.of(
+                "assignmentId", current.id(), "taskRunId", taskRunId, "fromAttempt", currentAttempt));
+            LifecycleResult resumed = taskRunLifecycleService.resume(
+                new LifecycleResumeRequest(operationKey, taskRunId, inputDigest));
+            Map<String, Object> checkpoint = new LinkedHashMap<>(current.checkpoint());
+            checkpoint.put("lifecycleOperationKey", resumed.operationKey());
+            checkpoint.put("lifecycleInputDigest", inputDigest);
+            checkpoint.put("attemptNumber", resumed.attemptNumber());
+            current = copy(current, current.status(), current.currentItemIndex(), checkpoint,
+                current.output(), current.evidence(), current.errorText(), current.leaseOwner(),
+                current.leaseExpiresAt(), current.completedAt());
+        }
         return saveStatus(current, OrchestrationStatus.QUEUED);
+    }
+
+    public WorkAssignment retry(String agentId, String assignmentId, String operationKey) {
+        return createLineage(requireAgentAssignment(agentId, assignmentId),
+            RunLineageMode.RETRY_OF, operationKey);
+    }
+
+    public WorkAssignment replay(String agentId, String assignmentId, String operationKey) {
+        return createLineage(requireAgentAssignment(agentId, assignmentId),
+            RunLineageMode.REPLAY_OF, operationKey);
+    }
+
+    @Transactional
+    WorkAssignment createLineage(WorkAssignment source, RunLineageMode mode, String requestedOperationKey) {
+        if (!isTaskRunAssignment(source.assignmentType())) {
+            throw new IllegalArgumentException("Assignment has no task-run lineage: " + source.id());
+        }
+        String parentTaskRunId = text(source.checkpoint().get("taskRunId"));
+        if (!StringUtils.hasText(parentTaskRunId)) {
+            throw new IllegalStateException("Legacy assignment has no lineage identity: " + source.id());
+        }
+        if (!source.status().isTerminal() && source.status() != OrchestrationStatus.INTERRUPTED) {
+            throw new IllegalStateException("Only terminal or interrupted assignments can be retried or replayed");
+        }
+        String newAssignmentId = UUID.randomUUID().toString();
+        WorkAssignment child = repository.saveAssignment(new WorkAssignment(
+            newAssignmentId, source.agentId(), source.jobId(), source.jobItemId(), source.assignmentType(),
+            source.runDisplayName(), source.priority(), OrchestrationStatus.QUEUED, source.modelOverride(),
+            source.workspaceType(), source.workspaceKey(), source.workspaceIdentity(), source.projectId(),
+            0, Map.of(), source.input(), Map.of(), Map.of(), null, null, null, 0L,
+            null, null, null, null, null, null));
+
+        // Copy immutable source facts through durable owner links only.
+        String newBindingKey = "assignment:" + newAssignmentId;
+        captureLineageBinding(source, newAssignmentId, newBindingKey);
+
+        String key = StringUtils.hasText(requestedOperationKey)
+            ? requestedOperationKey.trim() : mode.name().toLowerCase() + ":" + UUID.randomUUID();
+        String digest = taskRunLifecycleService.canonicalInputDigest(Map.of(
+            "mode", mode.name(), "parentTaskRunId", parentTaskRunId,
+            "workspaceIdentity", source.workspaceIdentity(), "input", source.input()));
+        String nativeRunId = UUID.randomUUID().toString();
+        LifecycleLineageRequest request = new LifecycleLineageRequest(key, parentTaskRunId, mode,
+            nativeRunId, nativeRunId, newAssignmentId, digest);
+        LifecycleResult lifecycle = mode == RunLineageMode.RETRY_OF
+            ? taskRunLifecycleService.retry(request) : taskRunLifecycleService.replay(request);
+        String owningAssignmentId = taskRunLifecycleService.findAssignmentId(lifecycle.taskRunId());
+        if (!newAssignmentId.equals(owningAssignmentId)) {
+            repository.deleteAssignment(source.agentId(), newAssignmentId);
+            return get(owningAssignmentId);
+        }
+        Map<String, Object> checkpoint = new LinkedHashMap<>();
+        checkpoint.put("taskRunId", lifecycle.taskRunId());
+        checkpoint.put("nativeRunId", lifecycle.nativeRunId());
+        checkpoint.put("lifecycleOperationKey", lifecycle.operationKey());
+        checkpoint.put("lifecycleInputDigest", digest);
+        checkpoint.put("attemptNumber", lifecycle.attemptNumber());
+        checkpoint.put("lineageParentTaskRunId", parentTaskRunId);
+        checkpoint.put("lineageMode", mode.name());
+        checkpoint.put("contextBindingKey", newBindingKey);
+        linkTaskRunBinding(lifecycle.taskRunId(), newAssignmentId, newBindingKey);
+        return repository.saveAssignment(copy(child, child.status(), 0, checkpoint, Map.of(), Map.of(),
+            null, null, null, null));
+    }
+
+    /**
+     * Copies the source assignment's immutable binding facts into a new binding
+     * for a lineage child, then creates the owner link.
+     */
+    private void captureLineageBinding(WorkAssignment source, String newAssignmentId, String newBindingKey) {
+        requireContextService();
+        var sourceLink = agentContextService.getOwnerLink("ASSIGNMENT", source.id());
+        if (sourceLink.outcome() != io.mindspice.magenta2.ai.orchestration.context.AgentContextService.ContextOutcome.AVAILABLE
+                || sourceLink.value() == null) {
+            throw new IllegalStateException("Legacy assignment has no unambiguous immutable binding: " + source.id());
+        }
+        String sourceBindingKey = sourceLink.value().bindingKey();
+        var bindingLookup = agentContextService.getBinding(sourceBindingKey);
+        if (bindingLookup.outcome() != io.mindspice.magenta2.ai.orchestration.context.AgentContextService.ContextOutcome.AVAILABLE
+                || bindingLookup.value() == null) {
+            throw new IllegalStateException("Source assignment binding is unavailable: " + source.id());
+        }
+        var sourceBinding = bindingLookup.value();
+        if (sourceBinding.selectionKind()
+                == io.mindspice.magenta2.ai.orchestration.context.AgentContextRepository.SelectionKind.MATERIALIZATION) {
+            agentContextService.captureMaterialization(sourceBinding.agentId(), newBindingKey,
+                sourceBinding.materializationKey(), sourceBinding.materializationGeneration(),
+                "lineage-capture:" + newAssignmentId);
+        } else {
+            agentContextService.capturePersonal(sourceBinding.agentId(), newBindingKey,
+                sourceBinding.personalSelection(), "lineage-capture:" + newAssignmentId);
+        }
+        agentContextService.linkOwner("ASSIGNMENT", newAssignmentId, newBindingKey,
+            "lineage-owner-link:" + newAssignmentId);
+        requireOwnerBinding("ASSIGNMENT", newAssignmentId, newBindingKey);
     }
 
     WorkAssignment forceInterrupt(String assignmentId, String reason) {
@@ -314,7 +623,12 @@ public class AssignmentService {
             throw new IllegalStateException("Assignment is not force-interruptible: " + current.id());
         }
         String operatorReason = StringUtils.hasText(reason) ? reason.trim() : "operator requested force interrupt";
-        boolean updated = repository.forceInterruptAssignment(current.id(), "Force interrupted: " + operatorReason);
+        boolean updated = repository.forceInterruptAssignmentFenced(current.id(), current.leaseOwner(),
+            current.leaseFence(), "Force interrupted: " + operatorReason);
+        if (updated && taskRunLifecycleService != null) {
+            taskRunLifecycleService.interruptCurrentWriterForAssignment(current.id(),
+                "Force interrupted: " + operatorReason);
+        }
         localInterruptHandler.accept(current.id());
         return updated ? get(current.id()) : get(current.id());
     }
@@ -322,6 +636,8 @@ public class AssignmentService {
     public void registerLocalInterruptHandler(Consumer<String> handler) {
         this.localInterruptHandler = handler == null ? ignored -> { } : handler;
     }
+
+    // ── Diagnostics ──
 
     public AssignmentDiagnostics diagnostics(String assignmentId) {
         WorkAssignment assignment = get(assignmentId);
@@ -390,43 +706,22 @@ public class AssignmentService {
         return runtimeSettingsService.resolveModel(key, null);
     }
 
-    WorkAssignment save(WorkAssignment assignment) {
+    // Private: all external mutation must go through fenced paths or
+    // public lifecycle methods that validate state transitions.
+    private WorkAssignment save(WorkAssignment assignment) {
         return repository.saveAssignment(assignment);
     }
 
     WorkAssignment saveIfLeaseOwner(WorkAssignment assignment, String leaseOwner) {
         return repository.saveAssignmentIfLeaseOwner(assignment, leaseOwner)
-            .orElseGet(() -> repository.findAssignment(assignment.id()).orElse(assignment));
+            .orElseThrow(() -> new StaleAssignmentLeaseException(
+                "Assignment lease is stale: " + assignment.id()));
     }
 
-    public WorkAssignment repairEffectiveWorkspaceContext(WorkAssignment assignment) {
-        if (assignment == null) {
-            return null;
+    public static final class StaleAssignmentLeaseException extends RuntimeException {
+        public StaleAssignmentLeaseException(String message) {
+            super(message);
         }
-        String projectId = normalize(firstText(assignment.projectId(), text(assignment.input().get("projectId"))));
-        if (StringUtils.hasText(projectId)) {
-            validateWorkspaceCompatibility(projectId, assignment.workspaceId());
-        }
-        if (StringUtils.hasText(assignment.effectiveWorkspaceId())
-            && StringUtils.hasText(assignment.effectiveWorkspaceKind())
-            && safeEquals(projectId, assignment.projectId())) {
-            return assignment;
-        }
-        EffectiveWorkspace effectiveWorkspace = resolveEffectiveWorkspace(assignment.agentId(), projectId);
-        if (effectiveWorkspace == null) {
-            return assignment;
-        }
-        return repository.saveAssignment(new WorkAssignment(
-            assignment.id(), assignment.agentId(), assignment.jobId(), assignment.jobItemId(),
-            assignment.assignmentType(), assignment.runDisplayName(), assignment.priority(), assignment.status(), assignment.modelOverride(),
-            assignment.workspaceId(), projectId, effectiveWorkspace.workspaceId(), effectiveWorkspace.ownerType().name(),
-            assignment.selectedWorkAreaId(), assignment.outputRouteType(), assignment.outputWorkAreaId(),
-            assignment.outputDirectRelativePath(),
-            assignment.currentItemIndex(), assignment.checkpoint(), assignment.input(), assignment.output(), assignment.evidence(),
-            assignment.errorText(), assignment.leaseOwner(), assignment.leaseExpiresAt(), assignment.createdAt(),
-            assignment.updatedAt(), assignment.startedAt(), assignment.completedAt(), assignment.lastProgressAt(),
-            assignment.lastHeartbeatAt()
-        ));
     }
 
     public AssignmentSummary summary(String assignmentId) {
@@ -441,8 +736,8 @@ public class AssignmentService {
         return repository.findActiveAssignmentsForProject(projectId).stream().map(this::summary).toList();
     }
 
-    public List<AssignmentSummary> activeSummariesForEffectiveWorkspace(String workspaceId) {
-        return repository.findActiveAssignmentsForEffectiveWorkspace(workspaceId).stream().map(this::summary).toList();
+    public List<AssignmentSummary> activeSummariesForWorkspaceIdentity(String workspaceIdentity) {
+        return repository.findActiveAssignmentsForWorkspaceIdentity(workspaceIdentity).stream().map(this::summary).toList();
     }
 
     public boolean hasActiveAssignmentsForProject(String projectId) {
@@ -453,55 +748,8 @@ public class AssignmentService {
         return repository.countActiveAssignmentsForJob(jobId) > 0;
     }
 
-    public boolean hasActiveAssignmentsForEffectiveWorkspace(String workspaceId) {
-        return repository.countActiveAssignmentsForEffectiveWorkspace(workspaceId) > 0;
-    }
-
-    public WorkAssignment requeueWorkspaceBlockedAssignment(String assignmentId) {
-        WorkAssignment assignment = get(assignmentId);
-        if (assignment.status() != OrchestrationStatus.WAITING || !assignment.checkpoint().containsKey("workspaceBlocker")) {
-            throw new IllegalStateException("Assignment is not waiting on a workspace lease: " + assignmentId);
-        }
-        String workspaceId = firstText(
-            assignment.effectiveWorkspaceId(),
-            text(assignment.checkpoint().get("projectWorkspaceId")),
-            text(assignment.checkpoint().get("effectiveWorkspaceId"))
-        );
-        if (!StringUtils.hasText(workspaceId)) {
-            throw new IllegalStateException("Workspace-blocked assignment has no effective workspace id: " + assignmentId);
-        }
-        if (workspaceLeaseService == null) {
-            throw new IllegalStateException("Workspace lease service is unavailable");
-        }
-        if (workspaceLeaseService.activeWritableLease(workspaceId).isPresent()) {
-            throw new IllegalStateException("Workspace still has an active writable lease: " + workspaceId);
-        }
-        Map<String, Object> checkpoint = new LinkedHashMap<>(assignment.checkpoint());
-        Object blocker = checkpoint.remove("workspaceBlocker");
-        if (blocker != null) {
-            checkpoint.put("lastWorkspaceBlocker", blocker);
-        }
-        return repository.saveAssignment(copy(
-            assignment, OrchestrationStatus.QUEUED, assignment.currentItemIndex(), checkpoint,
-            assignment.output(), assignment.evidence(), null, null, null, assignment.completedAt()
-        ));
-    }
-
-    public int requeueWorkspaceBlockedAssignments(int limit) {
-        int boundedLimit = limit <= 0 ? 50 : Math.min(limit, 200);
-        int requeued = 0;
-        for (WorkAssignment assignment : repository.findWaitingAssignments(boundedLimit)) {
-            if (!assignment.checkpoint().containsKey("workspaceBlocker")) {
-                continue;
-            }
-            try {
-                requeueWorkspaceBlockedAssignment(assignment.id());
-                requeued++;
-            } catch (IllegalStateException ignored) {
-                // Still blocked or not enough context; leave it WAITING for a later operator pass.
-            }
-        }
-        return requeued;
+    public boolean hasActiveAssignmentsForWorkspaceIdentity(String workspaceIdentity) {
+        return repository.countActiveAssignmentsForWorkspaceIdentity(workspaceIdentity) > 0;
     }
 
     WorkAssignment saveStatus(WorkAssignment assignment, OrchestrationStatus status) {
@@ -534,14 +782,14 @@ public class AssignmentService {
     ) {
         return new WorkAssignment(
             assignment.id(), assignment.agentId(), assignment.jobId(), assignment.jobItemId(),
-            assignment.assignmentType(), assignment.runDisplayName(), assignment.priority(), status, assignment.modelOverride(), assignment.workspaceId(),
-            assignment.projectId(), assignment.effectiveWorkspaceId(), assignment.effectiveWorkspaceKind(),
-            assignment.selectedWorkAreaId(), assignment.outputRouteType(), assignment.outputWorkAreaId(),
-            assignment.outputDirectRelativePath(),
+            assignment.assignmentType(), assignment.runDisplayName(), assignment.priority(), status,
+            assignment.modelOverride(), assignment.workspaceType(), assignment.workspaceKey(),
+            assignment.workspaceIdentity(), assignment.projectId(),
             currentItemIndex, checkpoint == null ? Map.of() : checkpoint, assignment.input(),
             output == null ? Map.of() : output, evidence == null ? Map.of() : evidence, errorText,
-            leaseOwner, leaseExpiresAt, assignment.createdAt(), assignment.updatedAt(), assignment.startedAt(), completedAt,
-            assignment.lastProgressAt(), assignment.lastHeartbeatAt()
+            leaseOwner, leaseExpiresAt, assignment.leaseFence(),
+            assignment.createdAt(), assignment.updatedAt(), assignment.startedAt(),
+            completedAt, assignment.lastProgressAt(), assignment.lastHeartbeatAt()
         );
     }
 
@@ -565,9 +813,7 @@ public class AssignmentService {
     }
 
     private void addTaskRun(List<LinkedRunStatus> runs, String runId) {
-        if (!StringUtils.hasText(runId)) {
-            return;
-        }
+        if (!StringUtils.hasText(runId)) return;
         try {
             PlanRun planRun = planService == null ? null : planService.getRun(runId);
             if (planRun != null) {
@@ -579,9 +825,7 @@ public class AssignmentService {
     }
 
     private void addWorkflowRun(List<LinkedRunStatus> runs, String runId) {
-        if (!StringUtils.hasText(runId)) {
-            return;
-        }
+        if (!StringUtils.hasText(runId)) return;
         try {
             WorkflowRun run = workflowService == null ? null : workflowService.getRun(runId);
             if (run != null) {
@@ -593,9 +837,7 @@ public class AssignmentService {
     }
 
     private void addJobRun(List<LinkedRunStatus> runs, String runId) {
-        if (!StringUtils.hasText(runId)) {
-            return;
-        }
+        if (!StringUtils.hasText(runId)) return;
         try {
             JobRun run = jobService == null ? null : jobService.getRun(runId);
             if (run != null) {
@@ -621,11 +863,9 @@ public class AssignmentService {
             assignment.priority(),
             assignment.status(),
             assignment.projectId(),
-            assignment.workspaceId(),
-            assignment.effectiveWorkspaceId(),
-            assignment.effectiveWorkspaceKind(),
-            effectiveWorkspaceDisplayPath(assignment.effectiveWorkspaceId()),
-            text(assignment.checkpoint().get("workspaceBlocker")),
+            assignment.workspaceType(),
+            assignment.workspaceKey(),
+            assignment.workspaceIdentity(),
             text(assignment.checkpoint().get("jobRunId")),
             text(assignment.checkpoint().get("workflowRunId")),
             firstText(text(assignment.checkpoint().get("taskRunId")), text(assignment.checkpoint().get("planRunId"))),
@@ -634,18 +874,6 @@ public class AssignmentService {
             assignment.startedAt(),
             assignment.completedAt()
         );
-    }
-
-    private String effectiveWorkspaceDisplayPath(String workspaceId) {
-        if (!StringUtils.hasText(workspaceId) || workspaceService == null) {
-            return null;
-        }
-        try {
-            Workspace workspace = workspaceService.get(workspaceId);
-            return workspace.rootRelativePath();
-        } catch (RuntimeException ignored) {
-            return null;
-        }
     }
 
     public boolean deletable(OrchestrationStatus status) {
@@ -678,9 +906,7 @@ public class AssignmentService {
 
     @SuppressWarnings("unchecked")
     private void collectConversationIds(LinkedHashSet<String> ids, Object value) {
-        if (value == null) {
-            return;
-        }
+        if (value == null) return;
         if (value instanceof Map<?, ?> map) {
             for (Map.Entry<?, ?> entry : map.entrySet()) {
                 String key = entry.getKey() == null ? "" : entry.getKey().toString();
@@ -708,16 +934,12 @@ public class AssignmentService {
 
     private void addConversationId(LinkedHashSet<String> ids, Object value) {
         String text = text(value);
-        if (StringUtils.hasText(text)) {
-            ids.add(text);
-        }
+        if (StringUtils.hasText(text)) ids.add(text);
     }
 
     private String firstText(String... values) {
         for (String value : values) {
-            if (StringUtils.hasText(value)) {
-                return value;
-            }
+            if (StringUtils.hasText(value)) return value;
         }
         return null;
     }
@@ -726,15 +948,18 @@ public class AssignmentService {
         return value == null ? null : value.toString();
     }
 
+    private int integer(Object value, int fallback) {
+        if (value == null) return fallback;
+        return value instanceof Number number ? number.intValue() : Integer.parseInt(value.toString());
+    }
+
     private Duration age(Instant now, Instant instant) {
         return instant == null ? null : Duration.between(instant, now);
     }
 
     private Instant firstInstant(Instant... values) {
         for (Instant value : values) {
-            if (value != null) {
-                return value;
-            }
+            if (value != null) return value;
         }
         return null;
     }
@@ -753,112 +978,16 @@ public class AssignmentService {
         return StringUtils.hasText(value) ? value.trim() : null;
     }
 
-    private boolean safeEquals(String left, String right) {
-        return java.util.Objects.equals(normalize(left), normalize(right));
-    }
-
-    private EffectiveWorkspace resolveEffectiveWorkspace(String agentId, String projectId) {
-        if (effectiveWorkspaceResolver == null) {
-            return null;
-        }
-        return effectiveWorkspaceResolver.resolve(agentId, projectId);
-    }
-
-    private WorkAreaRouting resolveWorkAreaRouting(
-        AssignmentRequest request,
-        WorkspaceOwnerType ownerType,
-        String ownerId
-    ) {
-        String selectedWorkAreaId = normalize(request.selectedWorkAreaId());
-        String routeType = normalizeOutputRouteType(request.outputRouteType());
-        String outputWorkAreaId = normalize(request.outputWorkAreaId());
-        String outputDirectRelativePath = normalize(request.outputDirectRelativePath());
-
-        if (workAreaService == null) {
-            return new WorkAreaRouting(selectedWorkAreaId, routeType, outputWorkAreaId, outputDirectRelativePath);
-        }
-
-        if (!StringUtils.hasText(selectedWorkAreaId)) {
-            selectedWorkAreaId = workAreaService.ensureHome(ownerType, ownerId, null).id();
-        } else {
-            workAreaService.requireActiveOwned(selectedWorkAreaId, ownerType, ownerId, "selected Work Area");
-        }
-
-        if (AssignmentRequest.OUTPUT_ROUTE_WORK_AREA.equals(routeType)) {
-            if (!StringUtils.hasText(outputWorkAreaId)) {
-                throw new IllegalArgumentException("outputWorkAreaId is required when outputRouteType is WORK_AREA");
-            }
-            workAreaService.requireActiveOwned(outputWorkAreaId, ownerType, ownerId, "output Work Area");
-            outputDirectRelativePath = null;
-        } else if (AssignmentRequest.OUTPUT_ROUTE_DIRECT_DIRECTORY.equals(routeType)) {
-            if (!StringUtils.hasText(outputDirectRelativePath)) {
-                throw new IllegalArgumentException(
-                    "outputDirectRelativePath is required when outputRouteType is DIRECT_DIRECTORY");
-            }
-            outputDirectRelativePath = workAreaService.requireExistingOwnerDirectory(
-                ownerType, ownerId, outputDirectRelativePath, "direct output directory");
-            outputWorkAreaId = null;
-        } else {
-            outputWorkAreaId = null;
-            outputDirectRelativePath = null;
-        }
-        return new WorkAreaRouting(selectedWorkAreaId, routeType, outputWorkAreaId, outputDirectRelativePath);
-    }
-
-    private String normalizeOutputRouteType(String routeType) {
-        String normalized = normalize(routeType);
-        if (!StringUtils.hasText(normalized)) {
-            return AssignmentRequest.OUTPUT_ROUTE_DEFAULT;
-        }
-        String upper = normalized.toUpperCase(java.util.Locale.ROOT);
-        if (AssignmentRequest.OUTPUT_ROUTE_DEFAULT.equals(upper)
-            || AssignmentRequest.OUTPUT_ROUTE_WORK_AREA.equals(upper)
-            || AssignmentRequest.OUTPUT_ROUTE_DIRECT_DIRECTORY.equals(upper)) {
-            return upper;
-        }
-        throw new IllegalArgumentException("Unsupported outputRouteType: " + routeType);
-    }
-
-    private record WorkAreaRouting(
-        String selectedWorkAreaId,
-        String outputRouteType,
-        String outputWorkAreaId,
-        String outputDirectRelativePath
-    ) {
-    }
-
-    private void validateWorkspaceCompatibility(String projectId, String workspaceId) {
-        if (!StringUtils.hasText(projectId) || !StringUtils.hasText(workspaceId) || workspaceService == null) {
-            return;
-        }
-        try {
-            Workspace workspace = workspaceService.get(workspaceId.trim());
-            if (workspace.ownerType() == WorkspaceOwnerType.PROJECT
-                && !projectId.trim().equals(workspace.ownerId())) {
-                throw new IllegalArgumentException(
-                    "workspaceId belongs to project " + workspace.ownerId()
-                    + " but projectId is " + projectId.trim()
-                    + "; projectId is the only project-scoping field"
-                );
-            }
-        } catch (IllegalStateException ignored) {
-            // Unknown compatibility workspace ids remain metadata and do not select project execution.
-        }
-    }
-
     private Map<String, Object> inputWithProjectContext(AssignmentRequest request) {
         Map<String, Object> input = request.input() == null ? Map.of() : request.input();
         String projectId = firstText(request.projectId(), text(input.get("projectId")));
-        if (!StringUtils.hasText(projectId)) {
-            return input;
-        }
+        if (!StringUtils.hasText(projectId)) return input;
         Map<String, Object> merged = new LinkedHashMap<>(input);
         merged.put("projectId", projectId.trim());
         return merged;
     }
 
-    public record LinkedRunStatus(String type, String id, String parentId, String status, String errorText) {
-    }
+    public record LinkedRunStatus(String type, String id, String parentId, String status, String errorText) {}
 
     public record AssignmentSummary(
         String id,
@@ -869,11 +998,9 @@ public class AssignmentService {
         int priority,
         OrchestrationStatus status,
         String projectId,
-        String workspaceId,
-        String effectiveWorkspaceId,
-        String effectiveWorkspaceKind,
-        String effectiveWorkspaceDisplayPath,
-        String workspaceBlocker,
+        String workspaceType,
+        String workspaceKey,
+        String workspaceIdentity,
         String jobRunId,
         String workflowRunId,
         String taskRunId,
@@ -881,8 +1008,7 @@ public class AssignmentService {
         Instant updatedAt,
         Instant startedAt,
         Instant completedAt
-    ) {
-    }
+    ) {}
 
     public record AssignmentDiagnostics(
         WorkAssignment assignment,
@@ -895,13 +1021,11 @@ public class AssignmentService {
         List<AuditRepository.AuditEvent> auditEvents,
         String conversationId,
         String buildCommit
-    ) {
-    }
+    ) {}
 
     public record AssignmentTranscript(
         WorkAssignment assignment,
         List<String> conversationIds,
         List<AuditRepository.AuditEvent> auditEvents
-    ) {
-    }
+    ) {}
 }

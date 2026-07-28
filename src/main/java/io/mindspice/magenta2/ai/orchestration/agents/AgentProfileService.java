@@ -10,9 +10,6 @@ import io.mindspice.magenta2.ai.orchestration.runtime.JobRepository;
 import io.mindspice.magenta2.ai.orchestration.runtime.OrchestrationRuntimeRepository;
 import io.mindspice.magenta2.ai.orchestration.runtime.ProjectRepository;
 import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceDirectoryService;
-import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceOwnerType;
-import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceRepository;
-import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceService;
 import io.mindspice.magenta2.core.util.PlainPathSegmentValidator;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.ObjectProvider;
@@ -29,40 +26,17 @@ public class AgentProfileService {
     private final AgentProfileRepository repository;
     private final AiConfig aiConfig;
     private final ObjectProvider<ChatToolRegistry> chatToolRegistry;
-    private final ObjectProvider<WorkspaceService> workspaceService;
     private final ObjectProvider<WorkspaceDirectoryService> workspaceDirectoryService;
-    private final ObjectProvider<WorkspaceRepository> workspaceRepository;
     private final ObjectProvider<OrchestrationRuntimeRepository> orchestrationRuntimeRepository;
     private final ObjectProvider<JobRepository> jobRepository;
     private final ObjectProvider<ProjectRepository> projectRepository;
-
-    // Compatibility constructor for tests that instantiate the service directly.
-    public AgentProfileService(
-        AgentProfileRepository repository,
-        AiConfig aiConfig,
-        ObjectProvider<ChatToolRegistry> chatToolRegistry
-    ) {
-        this(
-            repository,
-            aiConfig,
-            chatToolRegistry,
-            null,
-            null,
-            null,
-            null,
-            null,
-            null
-        );
-    }
 
     @Autowired
     public AgentProfileService(
         AgentProfileRepository repository,
         AiConfig aiConfig,
         @Autowired(required = false) ObjectProvider<ChatToolRegistry> chatToolRegistry,
-        @Autowired(required = false) ObjectProvider<WorkspaceService> workspaceService,
         @Autowired(required = false) ObjectProvider<WorkspaceDirectoryService> workspaceDirectoryService,
-        @Autowired(required = false) ObjectProvider<WorkspaceRepository> workspaceRepository,
         @Autowired(required = false) ObjectProvider<OrchestrationRuntimeRepository> orchestrationRuntimeRepository,
         @Autowired(required = false) ObjectProvider<JobRepository> jobRepository,
         @Autowired(required = false) ObjectProvider<ProjectRepository> projectRepository
@@ -70,9 +44,7 @@ public class AgentProfileService {
         this.repository = repository;
         this.aiConfig = aiConfig;
         this.chatToolRegistry = chatToolRegistry;
-        this.workspaceService = workspaceService;
         this.workspaceDirectoryService = workspaceDirectoryService;
-        this.workspaceRepository = workspaceRepository;
         this.orchestrationRuntimeRepository = orchestrationRuntimeRepository;
         this.jobRepository = jobRepository;
         this.projectRepository = projectRepository;
@@ -109,7 +81,6 @@ public class AgentProfileService {
             null,
             null
         ));
-        ensureAgentDurableStorage(created.id(), created.name());
         return created;
     }
 
@@ -128,7 +99,6 @@ public class AgentProfileService {
             current.createdAt(),
             current.updatedAt()
         ));
-        ensureAgentDurableStorage(updated.id(), updated.name());
         return updated;
     }
 
@@ -147,7 +117,6 @@ public class AgentProfileService {
             profile.createdAt(),
             profile.updatedAt()
         ));
-        ensureAgentDurableStorage(enabled.id(), enabled.name());
         return enabled;
     }
 
@@ -171,12 +140,7 @@ public class AgentProfileService {
 
     public AgentProfile archiveAndDisable(String id) {
         requireAgentId(id);
-        AgentProfile disabled = disable(id);
-        WorkspaceService ws = workspaceService();
-        if (ws != null) {
-            ws.archiveAgentWorkspaceData(id);
-        }
-        return disabled;
+        return disable(id);
     }
 
     public void hardDelete(String id, String confirmationText) {
@@ -189,23 +153,17 @@ public class AgentProfileService {
         if (runtimeRepository != null) {
             runtimeRepository.purgeAgentOwnedReferences(id);
         }
-        JobRepository jobRepository = jobRepository();
-        if (jobRepository != null) {
-            jobRepository.purgeDefinitionsOwnedByAgent(id);
+        JobRepository jr = jobRepository();
+        if (jr != null) {
+            jr.purgeDefinitionsOwnedByAgent(id);
         }
-        ProjectRepository projectRepository = projectRepository();
-        if (projectRepository != null) {
-            projectRepository.purgeAgentReferences(id);
+        ProjectRepository pr = projectRepository();
+        if (pr != null) {
+            pr.purgeAgentReferences(id);
         }
-        WorkspaceRepository wsRepository = workspaceRepository();
-        if (wsRepository != null) {
-            wsRepository.findByOwner(WorkspaceOwnerType.AGENT, id)
-                .ifPresent(workspace -> wsRepository.releaseLeasesByWorkspaceId(workspace.id()));
-            wsRepository.deleteByOwner(WorkspaceOwnerType.AGENT, id);
-        }
-        WorkspaceService ws = workspaceService();
-        if (ws != null) {
-            ws.deleteAgentWorkspaceData(id);
+        WorkspaceDirectoryService directories = workspaceDirectoryService();
+        if (directories != null) {
+            directories.deleteAgentRoot(id);
         }
         repository.delete(id);
     }
@@ -286,29 +244,8 @@ public class AgentProfileService {
         }
     }
 
-    private void ensureAgentDurableStorage(String agentId, String agentName) {
-        WorkspaceService ws = workspaceService();
-        if (ws != null) {
-            ws.agentWorkspace(agentId, agentName);
-        }
-        WorkspaceDirectoryService dir = workspaceDirectoryService();
-        if (dir != null) {
-            dir.agentWorkspaceRoot(agentId);
-            dir.agentWorkspace(agentId);
-            dir.agentWorkspaceOutputs(agentId);
-        }
-    }
-
-    private WorkspaceService workspaceService() {
-        return workspaceService == null ? null : workspaceService.getIfAvailable();
-    }
-
     private WorkspaceDirectoryService workspaceDirectoryService() {
         return workspaceDirectoryService == null ? null : workspaceDirectoryService.getIfAvailable();
-    }
-
-    private WorkspaceRepository workspaceRepository() {
-        return workspaceRepository == null ? null : workspaceRepository.getIfAvailable();
     }
 
     private OrchestrationRuntimeRepository orchestrationRuntimeRepository() {

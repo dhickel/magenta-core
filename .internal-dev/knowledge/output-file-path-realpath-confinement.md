@@ -11,14 +11,15 @@ Output file_path realpath confinement
 # Key Takeaways
 
 - `file_path` output materialization must check the source path's real target, not only the lexical path string.
-- Resolve candidate source paths with `toRealPath()` and compare against `WorkspaceDirectoryService.dataRoot().toRealPath()` before copying or saving artifact metadata.
+- Source files must resolve to real files confined beneath the effective workspace descriptor root. Validate with `toRealPath()` and compare against the descriptor root before copy.
 - Use `LinkOption.NOFOLLOW_LINKS` when checking source and destination existence so broken symlinks can produce clear failures and existing destination symlinks do not hide collisions.
-- Bare filename and relative output values should keep resolving against the run output directory; the resolved source must still pass real data-root confinement.
-- When the source is already the destination path, validate its real target first. This prevents an escaped symlink in the output directory from being registered as a legitimate artifact.
+- Destination paths are collision-safe normalized relative names beneath the effective workspace's lazy `outputs/` directory. Reject absolute, dot-only, traversing, escaping, or symlinked destinations.
+- Current direct publication targets workspace-local `outputs/` as legacy/non-task behavior. New task artifacts will target the trusted canonical `tasks/<taskPathKey>/<taskRunId>/outputs/` child after lifecycle fencing and reserved-tree policy activate it. Never invent a generic `runs/<runId>` path or derive a destination from an arbitrary `Path`.
+- When the source is already the destination path, validate its real target first. This prevents an escaped symlink from being registered as a legitimate artifact.
 
 # Engine Relevance
 
-This pattern protects host filesystem output materialization without changing the user-visible `file_path` contract for normal run output files.
+This pattern protects current host filesystem output materialization. Phase 04 must preserve realpath and destination-link checks when it cuts task artifacts over to trusted run-local output locations.
 
 # Open Questions
 

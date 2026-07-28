@@ -5,14 +5,16 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.mindspice.magenta2.ai.config.user.AiConfig;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
+import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -21,6 +23,7 @@ import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
+import org.springframework.web.servlet.mvc.method.annotation.RequestMappingHandlerMapping;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.containsString;
@@ -60,6 +63,9 @@ class PublicApiRouteBindingTest {
     @Autowired
     private AiConfig aiConfig;
 
+    @Autowired
+    private RequestMappingHandlerMapping requestMappingHandlerMapping;
+
     @DynamicPropertySource
     static void sqliteProperties(DynamicPropertyRegistry registry) {
         registry.add("magenta.root.path", () -> MAGENTA_ROOT.toString());
@@ -72,6 +78,43 @@ class PublicApiRouteBindingTest {
         assertThat(aiConfig.dataRoot()).isEqualTo(DATA_ROOT.normalize());
         assertThat(DATA_ROOT).isDirectory();
         assertThat(DB_PATH).isRegularFile();
+    }
+
+    @Test
+    void avatarRoutesAreUnmappedWithoutRedirectOrFallbackContent() throws Exception {
+        for (String route : new String[] {"/avatar", "/avatar/chat", "/avatar/widgets/example"}) {
+            mockMvc.perform(get(route))
+                .andExpect(status().isNotFound())
+                .andExpect(header().doesNotExist("Location"));
+        }
+    }
+
+    @Test
+    void typedWorkspaceRoutesAreMappedAndObsoleteFamiliesAreAbsent() {
+        Set<String> patterns = requestMappingHandlerMapping.getHandlerMethods().keySet().stream()
+            .flatMap(info -> info.getPatternValues().stream())
+            .collect(Collectors.toSet());
+
+        assertThat(patterns).contains(
+            "/api/workspace/user",
+            "/api/workspace/{type}/{id}/files",
+            "/api/workspace/{type}/{id}/files/inspect",
+            "/api/workspace/{type}/{id}/files/preview",
+            "/api/workspace/{type}/{id}/files/view",
+            "/api/workspace/{type}/{id}/files/download",
+            "/api/workspace/{type}/{id}/files/text",
+            "/api/workspace/{type}/{id}/directories",
+            "/api/workspace/{type}/{id}/files/markdown",
+            "/api/workspace/{type}/{id}/files/rename",
+            "/api/workspace/{type}/{id}/files/move",
+            "/api/workspace/{type}/{id}/files/copy",
+            "/api/workspace/{type}/{id}/files/delete/preflight",
+            "/api/workspace/{type}/{id}/files/delete",
+            "/api/workspace/{type}/{id}/files/labels",
+            "/api/workspace/{type}/{id}/tags",
+            "/api/workspace/{type}/{id}/files/actions/recent"
+        );
+        assertThat(patterns).noneMatch(path -> path.startsWith("/api/work-areas") || path.startsWith("/api/workspaces"));
     }
 
     @Test
@@ -89,7 +132,8 @@ class PublicApiRouteBindingTest {
                 """,
             conversationId
         );
-        Path chatFile = Files.createDirectories(DATA_ROOT.resolve("chats/" + conversationId + "/files"))
+        // Phase 02: chat files are now under workspace/chat/{conversationId}
+        Path chatFile = Files.createDirectories(DATA_ROOT.resolve("workspace/chat/" + conversationId))
             .resolve("route.txt");
         Files.writeString(chatFile, "route file");
 
@@ -136,7 +180,8 @@ class PublicApiRouteBindingTest {
                 .content(json(Map.of(
                     "agentId", agentId,
                     "projectId", projectId,
-                    "workspaceId", "legacy-workspace-1"
+                    "workspaceType", "agent",
+                    "workspaceKey", agentId
                 ))))
             .andExpect(request().asyncStarted())
             .andReturn();
@@ -151,7 +196,7 @@ class PublicApiRouteBindingTest {
 
         Map<String, Object> assignmentRow = jdbcTemplate.queryForMap(
             """
-                select workspace_id, input_json
+                select workspace_type, workspace_key, workspace_identity, input_json
                 from work_assignments
                 where assignment_type = 'TASK_RUN'
                   and input_json like ?
@@ -160,7 +205,10 @@ class PublicApiRouteBindingTest {
                 """,
             "%" + planId + "%"
         );
-        assertThat(assignmentRow).containsEntry("workspace_id", "legacy-workspace-1");
+        assertThat(assignmentRow)
+            .containsEntry("workspace_type", "agent")
+            .containsEntry("workspace_key", agentId)
+            .containsEntry("workspace_identity", "agent/" + agentId);
         assertThat((String) assignmentRow.get("input_json")).contains(projectId);
     }
 
@@ -256,12 +304,17 @@ class PublicApiRouteBindingTest {
             .andExpect(content().string(containsString(agentId)))
             .andExpect(content().string(containsString("ACTIVE")));
 
-        mockMvc.perform(get("/api/agents/" + agentId + "/workspace"))
+        mockMvc.perform(get("/api/workspace/agent/" + agentId + "/files")
+                .param("path", "."))
             .andExpect(status().isOk())
-            .andExpect(jsonPath("$.ownerType").value("AGENT"))
-            .andExpect(jsonPath("$.ownerId").value(agentId));
+            .andExpect(jsonPath("$.path").exists());
 
-        mockMvc.perform(get("/api/outputs"))
+        mockMvc.perform(get("/api/workspace/user"))
+            .andExpect(status().isOk());
+
+        mockMvc.perform(get("/api/artifacts")
+                .param("workspaceKind", "agent")
+                .param("workspaceKey", agentId))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$").isArray());
 

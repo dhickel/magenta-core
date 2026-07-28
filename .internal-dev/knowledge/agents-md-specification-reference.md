@@ -122,9 +122,7 @@ The root `AGENTS.md` is comprehensive and follows the spec's recommendations —
 
 ### 2.2 Current Loading Pattern
 
-**Magenta itself doesn't programmatically load or parse AGENTS.md files.** The existing AGENTS.md files are consumed by the AI coding tools used to develop Magenta (Claude, Cursor, etc.), not by Magenta's own agent runtime. The files serve as static documentation for external coding agents.
-
-However, Magenta has a **CLAUDE.md → AGENTS.md delegation pattern** where `CLAUDE.md` files in sub-packages contain `@AGENTS.md`, which tells Claude to read the closest AGENTS.md. This is a tool-specific convention, not a general AGENTS.md loading mechanism.
+Magenta programmatically resolves AGENTS.md files from the effective workspace descriptor root to the active confined tool path during execution through `AgentsMdResolver`. Resolution is confined; no starter content is generated. The existing AGENTS.md files in the Magenta repository are also consumed by external AI coding tools (Claude, Cursor, etc.) as static development documentation. Magenta has a **CLAUDE.md → AGENTS.md delegation pattern** where `CLAUDE.md` files in sub-packages contain `@AGENTS.md`, which tells Claude to read the closest AGENTS.md.
 
 ### 2.3 Relevant Magenta Architecture for AGENTS.md Loading
 
@@ -552,9 +550,9 @@ The AGENTS.md specification is intentionally minimal. There are no "MUST" requir
 
 ### 7.1 What We SHOULD Do
 
-- [ ] Read AGENTS.md from the project root directory (the workspace path)
-- [ ] Read nested AGENTS.md files from subdirectories (for monorepo support)
-- [ ] Follow the "closest wins" precedence rule
+- [ ] Read AGENTS.md from the workspace descriptor root when files exist
+- [ ] Read nested AGENTS.md files along the active confined tool path
+- [ ] Follow Magenta's ancestor-retention policy: closest wins only on conflict
 - [ ] Inject AGENTS.md content into the agent's context (system prompt)
 - [ ] Not require any specific format, headings, or sections
 - [ ] Allow AGENTS.md to be updated between sessions (re-read on new sessions)
@@ -564,18 +562,18 @@ The AGENTS.md specification is intentionally minimal. There are no "MUST" requir
 ### 7.2 What We COULD Do (Ecosystem Alignment)
 
 - [ ] Support `AGENT.md` as a fallback filename (backward compatibility with older projects)
-- [ ] Create a symlink `AGENT.md → AGENTS.md` automatically if only the old name exists
 - [ ] Display which AGENTS.md files are active in the chat UI
 - [ ] Allow the agent to update AGENTS.md when conventions change
 - [ ] Magenta-specific: retain ancestor AGENTS.md layers from bound root to active runtime target, with sibling layers dropped when the target path moves
 
 ### 7.3 What We Should NOT Do
 
+- [ ] Generate starter `AGENTS.md` files — Magenta never creates AGENTS.md content
 - [ ] Require any specific frontmatter or metadata format
 - [ ] Fail if AGENTS.md is missing — it's optional
 - [ ] Override explicit user instructions with AGENTS.md content
 - [ ] Parse or validate AGENTS.md content structure
-- [ ] Cache AGENTS.md content across application restarts (always re-read on session start)
+- [ ] Resolve AGENTS.md outside the bound workspace descriptor root
 
 ---
 

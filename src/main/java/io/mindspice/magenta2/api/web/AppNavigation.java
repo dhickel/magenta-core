@@ -5,7 +5,7 @@ import io.mindspice.simplypages.components.navigation.SideNav;
 import io.mindspice.simplypages.core.Component;
 
 final class AppNavigation {
-    static final String OPERATIONAL_CSS = "/css/orchestration.css?v=14";
+    static final String OPERATIONAL_CSS = "/css/orchestration.css?v=15";
 
     private AppNavigation() {
     }

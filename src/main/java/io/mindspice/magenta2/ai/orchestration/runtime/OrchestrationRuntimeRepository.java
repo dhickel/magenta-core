@@ -35,20 +35,24 @@ public class OrchestrationRuntimeRepository {
         jdbcTemplate.update(
             """
                 insert into orchestration_jobs (
-                    id, owner_agent_id, title, summary, default_model, workspace_id, status, created_at, updated_at
+                    id, owner_agent_id, title, summary, default_model,
+                    workspace_type, workspace_key, workspace_identity, status, created_at, updated_at
                 )
-                values (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 on conflict(id) do update set
                     owner_agent_id = excluded.owner_agent_id,
                     title = excluded.title,
                     summary = excluded.summary,
                     default_model = excluded.default_model,
-                    workspace_id = excluded.workspace_id,
+                    workspace_type = excluded.workspace_type,
+                    workspace_key = excluded.workspace_key,
+                    workspace_identity = excluded.workspace_identity,
                     status = excluded.status,
                     updated_at = excluded.updated_at
                 """,
-            job.id(), job.ownerAgentId(), job.title(), job.summary(), job.defaultModel(), job.workspaceId(),
-            job.status().name(), createdAt.toString(), updatedAt.toString()
+            job.id(), job.ownerAgentId(), job.title(), job.summary(), job.defaultModel(),
+            job.workspaceType(), job.workspaceKey(), job.workspaceIdentity(), job.status().name(),
+            createdAt.toString(), updatedAt.toString()
         );
         return findJob(job.id()).orElseThrow();
     }
@@ -121,7 +125,7 @@ public class OrchestrationRuntimeRepository {
         );
     }
 
-    public WorkAssignment saveAssignment(WorkAssignment assignment) {
+    WorkAssignment saveAssignment(WorkAssignment assignment) {
         Instant now = Instant.now();
         Instant createdAt = assignment.createdAt() == null ? now : assignment.createdAt();
         Instant updatedAt = now;
@@ -134,13 +138,13 @@ public class OrchestrationRuntimeRepository {
             """
                 insert into work_assignments (
                     id, agent_id, job_id, job_item_id, assignment_type, priority, status, model_override,
-                    run_display_name, workspace_id, project_id, effective_workspace_id, effective_workspace_kind,
-                    selected_work_area_id, output_route_type, output_work_area_id, output_direct_relative_path,
+                    run_display_name, workspace_type, workspace_key, workspace_identity, project_id,
                     current_item_index, checkpoint_json, input_json, output_json, evidence_json,
-                    error_text, lease_owner, lease_expires_at, last_progress_at, last_heartbeat_at,
+                    error_text, lease_owner, lease_expires_at, lease_fence,
+                    last_progress_at, last_heartbeat_at,
                     created_at, updated_at, started_at, completed_at
                 )
-                values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 on conflict(id) do update set
                     agent_id = excluded.agent_id,
                     job_id = excluded.job_id,
@@ -150,14 +154,10 @@ public class OrchestrationRuntimeRepository {
                     status = excluded.status,
                     model_override = excluded.model_override,
                     run_display_name = excluded.run_display_name,
-                    workspace_id = excluded.workspace_id,
+                    workspace_type = excluded.workspace_type,
+                    workspace_key = excluded.workspace_key,
+                    workspace_identity = excluded.workspace_identity,
                     project_id = excluded.project_id,
-                    effective_workspace_id = excluded.effective_workspace_id,
-                    effective_workspace_kind = excluded.effective_workspace_kind,
-                    selected_work_area_id = excluded.selected_work_area_id,
-                    output_route_type = excluded.output_route_type,
-                    output_work_area_id = excluded.output_work_area_id,
-                    output_direct_relative_path = excluded.output_direct_relative_path,
                     current_item_index = excluded.current_item_index,
                     checkpoint_json = excluded.checkpoint_json,
                     input_json = excluded.input_json,
@@ -174,30 +174,25 @@ public class OrchestrationRuntimeRepository {
                 """,
             assignment.id(), assignment.agentId(), assignment.jobId(), assignment.jobItemId(),
             assignment.assignmentType().name(), assignment.priority(), assignment.status().name(),
-            assignment.modelOverride(), assignment.runDisplayName(), assignment.workspaceId(), assignment.projectId(),
-            assignment.effectiveWorkspaceId(), assignment.effectiveWorkspaceKind(),
-            assignment.selectedWorkAreaId(), assignment.outputRouteType(), assignment.outputWorkAreaId(),
-            assignment.outputDirectRelativePath(), assignment.currentItemIndex(),
+            assignment.modelOverride(), assignment.runDisplayName(),
+            assignment.workspaceType(), assignment.workspaceKey(), assignment.workspaceIdentity(),
+            assignment.projectId(), assignment.currentItemIndex(),
             jsonOrNull(assignment.checkpoint()), jsonOrNull(assignment.input()), jsonOrNull(assignment.output()),
             jsonOrNull(assignment.evidence()), assignment.errorText(), assignment.leaseOwner(),
-            instant(assignment.leaseExpiresAt()), instant(lastProgressAt), instant(lastHeartbeatAt),
+            instant(assignment.leaseExpiresAt()), assignment.leaseFence(),
+            instant(lastProgressAt), instant(lastHeartbeatAt),
             createdAt.toString(), updatedAt.toString(),
             instant(assignment.startedAt()), instant(assignment.completedAt())
         );
         return findAssignment(assignment.id()).orElseThrow();
     }
 
-    public Optional<WorkAssignment> saveAssignmentIfLeaseOwner(WorkAssignment assignment, String leaseOwner) {
+    Optional<WorkAssignment> saveAssignmentIfLeaseOwner(WorkAssignment assignment, String leaseOwner) {
         if (!StringUtils.hasText(assignment.id()) || !StringUtils.hasText(leaseOwner)) {
             return Optional.empty();
         }
         Optional<WorkAssignment> current = findAssignment(assignment.id());
-        if (current.isEmpty()
-            || (current.get().status() != OrchestrationStatus.RUNNING
-                && current.get().status() != OrchestrationStatus.CANCEL_REQUESTED)
-            || !leaseOwner.equals(current.get().leaseOwner())) {
-            return Optional.empty();
-        }
+        if (current.isEmpty()) return Optional.empty();
         Instant now = Instant.now();
         Instant lastProgressAt = progressTimestamp(current.get(), assignment, now, current.get().createdAt());
         Instant lastHeartbeatAt = assignment.lastHeartbeatAt() != null
@@ -214,10 +209,10 @@ public class OrchestrationRuntimeRepository {
                     status = ?,
                     model_override = ?,
                     run_display_name = ?,
-                    workspace_id = ?,
+                    workspace_type = ?,
+                    workspace_key = ?,
+                    workspace_identity = ?,
                     project_id = ?,
-                    effective_workspace_id = ?,
-                    effective_workspace_kind = ?,
                     current_item_index = ?,
                     checkpoint_json = ?,
                     input_json = ?,
@@ -231,17 +226,17 @@ public class OrchestrationRuntimeRepository {
                     updated_at = ?,
                     started_at = ?,
                     completed_at = ?
-                where id = ? and status in (?, ?) and lease_owner = ?
+                where id = ? and status in (?, ?) and lease_owner = ? and lease_fence = ?
                 """,
             assignment.agentId(), assignment.jobId(), assignment.jobItemId(), assignment.assignmentType().name(),
             assignment.priority(), assignment.status().name(), assignment.modelOverride(), assignment.runDisplayName(),
-            assignment.workspaceId(), assignment.projectId(), assignment.effectiveWorkspaceId(), assignment.effectiveWorkspaceKind(),
-            assignment.currentItemIndex(), jsonOrNull(assignment.checkpoint()), jsonOrNull(assignment.input()),
-            jsonOrNull(assignment.output()), jsonOrNull(assignment.evidence()), assignment.errorText(),
-            assignment.leaseOwner(), instant(assignment.leaseExpiresAt()), instant(lastProgressAt),
-            instant(lastHeartbeatAt), now.toString(), instant(assignment.startedAt()),
+            assignment.workspaceType(), assignment.workspaceKey(), assignment.workspaceIdentity(),
+            assignment.projectId(), assignment.currentItemIndex(), jsonOrNull(assignment.checkpoint()),
+            jsonOrNull(assignment.input()), jsonOrNull(assignment.output()), jsonOrNull(assignment.evidence()),
+            assignment.errorText(), assignment.leaseOwner(), instant(assignment.leaseExpiresAt()),
+            instant(lastProgressAt), instant(lastHeartbeatAt), now.toString(), instant(assignment.startedAt()),
             instant(assignment.completedAt()), assignment.id(), OrchestrationStatus.RUNNING.name(),
-            OrchestrationStatus.CANCEL_REQUESTED.name(), leaseOwner
+            OrchestrationStatus.CANCEL_REQUESTED.name(), leaseOwner, assignment.leaseFence()
         );
         return updated == 1 ? findAssignment(assignment.id()) : Optional.empty();
     }
@@ -441,16 +436,16 @@ public class OrchestrationRuntimeRepository {
         );
     }
 
-    public List<WorkAssignment> findActiveAssignmentsForEffectiveWorkspace(String workspaceId) {
+    public List<WorkAssignment> findActiveAssignmentsForWorkspaceIdentity(String workspaceIdentity) {
         return jdbcTemplate.query(
             """
                 select * from work_assignments
-                where effective_workspace_id = ?
+                where workspace_identity = ?
                   and status not in (?, ?, ?, ?)
                 order by priority desc, created_at asc
                 """,
             (rs, rowNum) -> toAssignment(rs),
-            workspaceId,
+            workspaceIdentity,
             OrchestrationStatus.CANCELLED.name(),
             OrchestrationStatus.FAILED.name(),
             OrchestrationStatus.COMPLETED.name(),
@@ -470,8 +465,8 @@ public class OrchestrationRuntimeRepository {
         return findActiveAssignmentsForProjectAndAgent(projectId, agentId).size();
     }
 
-    public long countActiveAssignmentsForEffectiveWorkspace(String workspaceId) {
-        return findActiveAssignmentsForEffectiveWorkspace(workspaceId).size();
+    public long countActiveAssignmentsForWorkspaceIdentity(String workspaceIdentity) {
+        return findActiveAssignmentsForWorkspaceIdentity(workspaceIdentity).size();
     }
 
     public List<WorkAssignment> findQueuedAssignments(int limit) {
@@ -542,7 +537,7 @@ public class OrchestrationRuntimeRepository {
     }
 
     @Transactional
-    public Optional<WorkAssignment> acquireLease(String assignmentId, String leaseOwner, Instant leaseExpiresAt) {
+    Optional<WorkAssignment> acquireLease(String assignmentId, String leaseOwner, Instant leaseExpiresAt) {
         Instant now = Instant.now();
         int updated = jdbcTemplate.update(
             """
@@ -562,7 +557,7 @@ public class OrchestrationRuntimeRepository {
         return updated == 0 ? Optional.empty() : findAssignment(assignmentId);
     }
 
-    public int markStaleRunningLeases(Instant now) {
+    int markStaleRunningLeases(Instant now) {
         return jdbcTemplate.update(
             """
                 update work_assignments
@@ -574,7 +569,7 @@ public class OrchestrationRuntimeRepository {
         );
     }
 
-    public int markStaleCancelRequestedLeases(Instant now) {
+    int markStaleCancelRequestedLeases(Instant now) {
         return jdbcTemplate.update(
             """
                 update work_assignments
@@ -588,7 +583,7 @@ public class OrchestrationRuntimeRepository {
         );
     }
 
-    public Optional<WorkAssignment> requestCancel(String assignmentId) {
+    Optional<WorkAssignment> requestCancel(String assignmentId) {
         Instant now = Instant.now();
         int updated = jdbcTemplate.update(
             """
@@ -657,7 +652,7 @@ public class OrchestrationRuntimeRepository {
         );
     }
 
-    public boolean revertToQueued(String assignmentId, String leaseOwner) {
+    boolean revertToQueued(String assignmentId, String leaseOwner) {
         int updated = jdbcTemplate.update(
             """
                 update work_assignments
@@ -670,7 +665,7 @@ public class OrchestrationRuntimeRepository {
         return updated == 1;
     }
 
-    public int extendRunningLease(String assignmentId, String leaseOwner, Instant leaseExpiresAt) {
+    int extendRunningLease(String assignmentId, String leaseOwner, Instant leaseExpiresAt) {
         Instant now = Instant.now();
         return jdbcTemplate.update(
             """
@@ -683,19 +678,32 @@ public class OrchestrationRuntimeRepository {
         );
     }
 
-    public boolean forceInterruptAssignment(String assignmentId, String reason) {
+    public boolean forceInterruptAssignmentFenced(String assignmentId, String expectedOwner,
+                                                   long expectedFence, String reason) {
+        if (!StringUtils.hasText(expectedOwner) || expectedFence < 1) return false;
         Instant now = Instant.now();
         int updated = jdbcTemplate.update(
             """
                 update work_assignments
                 set status = ?, lease_owner = null, lease_expires_at = null,
                     error_text = ?, last_progress_at = ?, updated_at = ?
-                where id = ? and status in (?, ?)
+                where id = ? and lease_owner = ? and lease_fence = ? and status in (?, ?)
                 """,
             OrchestrationStatus.INTERRUPTED.name(), reason, now.toString(), now.toString(),
-            assignmentId, OrchestrationStatus.RUNNING.name(), OrchestrationStatus.CANCEL_REQUESTED.name()
+            assignmentId, expectedOwner, expectedFence,
+            OrchestrationStatus.RUNNING.name(), OrchestrationStatus.CANCEL_REQUESTED.name()
         );
         return updated == 1;
+    }
+
+    public boolean isAssignmentLeaseCurrent(String assignmentId, String owner, long fence) {
+        Integer count = jdbcTemplate.queryForObject("""
+                select count(*) from work_assignments
+                where id = ? and lease_owner = ? and lease_fence = ?
+                  and status in (?, ?)
+                """, Integer.class, assignmentId, owner, fence,
+                OrchestrationStatus.RUNNING.name(), OrchestrationStatus.CANCEL_REQUESTED.name());
+        return count != null && count == 1;
     }
 
     public InboxMessage saveInboxMessage(InboxMessage message) {
@@ -950,7 +958,7 @@ public class OrchestrationRuntimeRepository {
     private OrchestrationJob toJob(ResultSet rs) throws SQLException {
         return new OrchestrationJob(
             rs.getString("id"), rs.getString("owner_agent_id"), rs.getString("title"), rs.getString("summary"),
-            rs.getString("default_model"), rs.getString("workspace_id"),
+            rs.getString("default_model"), selectionType(rs), selectionKey(rs), selectionIdentity(rs),
             OrchestrationStatus.valueOf(rs.getString("status")), instantValue(rs.getString("created_at")),
             instantValue(rs.getString("updated_at"))
         );
@@ -971,16 +979,31 @@ public class OrchestrationRuntimeRepository {
             rs.getString("id"), rs.getString("agent_id"), rs.getString("job_id"), rs.getString("job_item_id"),
             AssignmentType.valueOf(rs.getString("assignment_type")), rs.getString("run_display_name"), rs.getInt("priority"),
             OrchestrationStatus.valueOf(rs.getString("status")), rs.getString("model_override"),
-            rs.getString("workspace_id"), rs.getString("project_id"), rs.getString("effective_workspace_id"),
-            rs.getString("effective_workspace_kind"), rs.getString("selected_work_area_id"),
-            rs.getString("output_route_type"), rs.getString("output_work_area_id"),
-            rs.getString("output_direct_relative_path"), rs.getInt("current_item_index"), map(rs.getString("checkpoint_json")),
+            getNullable(rs, "workspace_type"), getNullable(rs, "workspace_key"), getNullable(rs, "workspace_identity"),
+            rs.getString("project_id"), rs.getInt("current_item_index"), map(rs.getString("checkpoint_json")),
             map(rs.getString("input_json")), map(rs.getString("output_json")), map(rs.getString("evidence_json")),
             rs.getString("error_text"), rs.getString("lease_owner"), instantValue(rs.getString("lease_expires_at")),
+            readLeaseFence(rs),
             instantValue(rs.getString("created_at")), instantValue(rs.getString("updated_at")),
             instantValue(rs.getString("started_at")), instantValue(rs.getString("completed_at")),
             instantValue(rs.getString("last_progress_at")), instantValue(rs.getString("last_heartbeat_at"))
         );
+    }
+
+    private long readLeaseFence(ResultSet rs) {
+        try {
+            return rs.getInt("lease_fence");
+        } catch (SQLException e) {
+            return 0L;
+        }
+    }
+
+    private String getNullable(ResultSet rs, String column) throws SQLException {
+        try {
+            return rs.getString(column);
+        } catch (SQLException ignored) {
+            return null;
+        }
     }
 
     private InboxMessage toInboxMessage(ResultSet rs) throws SQLException {
@@ -1051,31 +1074,55 @@ public class OrchestrationRuntimeRepository {
         return StringUtils.hasText(value) ? Instant.parse(value) : null;
     }
 
-    private void backfillAssignmentProjectContext() {
+    private String selectionType(ResultSet rs) throws SQLException {
+        String type = getNullable(rs, "workspace_type");
+        String key = getNullable(rs, "workspace_key");
+        if (StringUtils.hasText(type) && StringUtils.hasText(key)) return type;
+        return StringUtils.hasText(getNullable(rs, "owner_agent_id")) ? "agent" : null;
+    }
+
+    private String selectionKey(ResultSet rs) throws SQLException {
+        String type = getNullable(rs, "workspace_type");
+        String key = getNullable(rs, "workspace_key");
+        if (StringUtils.hasText(type) && StringUtils.hasText(key)) return key;
+        return getNullable(rs, "owner_agent_id");
+    }
+
+    private String selectionIdentity(ResultSet rs) throws SQLException {
+        String type = selectionType(rs);
+        String key = selectionKey(rs);
+        return StringUtils.hasText(type) && StringUtils.hasText(key) ? type + "/" + key : null;
+    }
+
+    private void addTextColumnIfMissing(List<String> columns, String table, String column) {
+        if (!columns.contains(column)) {
+            jdbcTemplate.execute("alter table " + table + " add column " + column + " text");
+        }
+    }
+
+    private void backfillAssignmentWorkspaceIdentity() {
         List<Map<String, Object>> rows = jdbcTemplate.queryForList(
             """
-                select id, input_json
+                select id, workspace_type, workspace_key, agent_id
                 from work_assignments
-                where project_id is null and input_json is not null
+                where workspace_identity is null
                 """
         );
         for (Map<String, Object> row : rows) {
-            String inputJson = row.get("input_json") == null ? null : row.get("input_json").toString();
-            if (!StringUtils.hasText(inputJson)) {
-                continue;
+            String type = row.get("workspace_type") == null ? null : row.get("workspace_type").toString();
+            String key = row.get("workspace_key") == null ? null : row.get("workspace_key").toString();
+            String agentId = row.get("agent_id") == null ? null : row.get("agent_id").toString();
+            String identity = null;
+            if (StringUtils.hasText(type) && StringUtils.hasText(key)) {
+                identity = type.trim() + "/" + key.trim();
+            } else if (StringUtils.hasText(agentId)) {
+                identity = "agent/" + agentId.trim();
             }
-            try {
-                Map<String, Object> input = objectMapper.readValue(inputJson, MAP_TYPE);
-                Object projectValue = input.get("projectId");
-                if (projectValue != null && StringUtils.hasText(projectValue.toString())) {
-                    jdbcTemplate.update(
-                        "update work_assignments set project_id = ? where id = ? and project_id is null",
-                        projectValue.toString().trim(),
-                        row.get("id")
-                    );
-                }
-            } catch (JsonProcessingException ignored) {
-                // Leave malformed legacy input untouched; row loading will surface parse failures where needed.
+            if (identity != null) {
+                jdbcTemplate.update(
+                    "update work_assignments set workspace_identity = ? where id = ? and workspace_identity is null",
+                    identity, row.get("id")
+                );
             }
         }
     }
@@ -1088,12 +1135,19 @@ public class OrchestrationRuntimeRepository {
                 title text not null,
                 summary text,
                 default_model text,
-                workspace_id text,
+                workspace_type text,
+                workspace_key text,
+                workspace_identity text,
                 status text not null,
                 created_at text not null,
                 updated_at text not null
             )
             """);
+        List<String> jobColumns = jdbcTemplate.queryForList(
+            "select name from pragma_table_info('orchestration_jobs')", String.class);
+        addTextColumnIfMissing(jobColumns, "orchestration_jobs", "workspace_type");
+        addTextColumnIfMissing(jobColumns, "orchestration_jobs", "workspace_key");
+        addTextColumnIfMissing(jobColumns, "orchestration_jobs", "workspace_identity");
         jdbcTemplate.execute("""
             create table if not exists orchestration_job_items (
                 id text primary key,
@@ -1133,14 +1187,10 @@ public class OrchestrationRuntimeRepository {
                 status text not null,
                 model_override text,
                 run_display_name text,
-                workspace_id text,
+                workspace_type text,
+                workspace_key text,
+                workspace_identity text,
                 project_id text,
-                effective_workspace_id text,
-                effective_workspace_kind text,
-                selected_work_area_id text,
-                output_route_type text,
-                output_work_area_id text,
-                output_direct_relative_path text,
                 current_item_index integer not null,
                 checkpoint_json text,
                 input_json text,
@@ -1169,31 +1219,27 @@ public class OrchestrationRuntimeRepository {
             jdbcTemplate.execute("alter table work_assignments add column last_heartbeat_at text");
             jdbcTemplate.execute("update work_assignments set last_heartbeat_at = updated_at where status = 'RUNNING'");
         }
+        if (!assignmentColumns.contains("workspace_type")) {
+            jdbcTemplate.execute("alter table work_assignments add column workspace_type text");
+        }
+        if (!assignmentColumns.contains("workspace_key")) {
+            jdbcTemplate.execute("alter table work_assignments add column workspace_key text");
+        }
+        if (!assignmentColumns.contains("workspace_identity")) {
+            jdbcTemplate.execute("alter table work_assignments add column workspace_identity text");
+        }
         if (!assignmentColumns.contains("project_id")) {
             jdbcTemplate.execute("alter table work_assignments add column project_id text");
         }
         if (!assignmentColumns.contains("run_display_name")) {
             jdbcTemplate.execute("alter table work_assignments add column run_display_name text");
         }
-        if (!assignmentColumns.contains("effective_workspace_id")) {
-            jdbcTemplate.execute("alter table work_assignments add column effective_workspace_id text");
+        // Compatibility for repository-only tests and pre-runner embeddings. Normal
+        // application startup receives this column from ordered migration 002.
+        if (!assignmentColumns.contains("lease_fence")) {
+            jdbcTemplate.execute("alter table work_assignments add column lease_fence integer not null default 0");
         }
-        if (!assignmentColumns.contains("effective_workspace_kind")) {
-            jdbcTemplate.execute("alter table work_assignments add column effective_workspace_kind text");
-        }
-        if (!assignmentColumns.contains("selected_work_area_id")) {
-            jdbcTemplate.execute("alter table work_assignments add column selected_work_area_id text");
-        }
-        if (!assignmentColumns.contains("output_route_type")) {
-            jdbcTemplate.execute("alter table work_assignments add column output_route_type text");
-        }
-        if (!assignmentColumns.contains("output_work_area_id")) {
-            jdbcTemplate.execute("alter table work_assignments add column output_work_area_id text");
-        }
-        if (!assignmentColumns.contains("output_direct_relative_path")) {
-            jdbcTemplate.execute("alter table work_assignments add column output_direct_relative_path text");
-        }
-        backfillAssignmentProjectContext();
+        backfillAssignmentWorkspaceIdentity();
         jdbcTemplate.execute("""
             create index if not exists idx_work_assignments_queue
                 on work_assignments(status, priority, created_at)
@@ -1203,8 +1249,8 @@ public class OrchestrationRuntimeRepository {
                 on work_assignments(project_id, status, created_at)
             """);
         jdbcTemplate.execute("""
-            create index if not exists idx_work_assignments_effective_workspace_active
-                on work_assignments(effective_workspace_id, status, created_at)
+            create index if not exists idx_work_assignments_workspace_identity_active
+                on work_assignments(workspace_identity, status, created_at)
             """);
         jdbcTemplate.execute("""
             create table if not exists assignment_conversation_links (
@@ -1315,5 +1361,218 @@ public class OrchestrationRuntimeRepository {
             tableName
         );
         return count != null && count > 0;
+    }
+
+    // ── Phase 02: Fenced lease operations ──
+
+    /**
+     * Acquire a lease with monotonic fence increment. Returns the updated
+     * assignment with the new fence value, or empty if acquisition fails.
+     */
+    @Transactional
+    public Optional<WorkAssignment> acquireLeaseFenced(String assignmentId, String leaseOwner,
+                                                        Instant leaseExpiresAt) {
+        Instant now = Instant.now();
+        int updated = jdbcTemplate.update(
+            """
+                update work_assignments
+                set status = ?, lease_owner = ?, lease_expires_at = ?,
+                    lease_fence = lease_fence + 1,
+                    started_at = coalesce(started_at, ?),
+                    last_progress_at = coalesce(last_progress_at, ?),
+                    last_heartbeat_at = ?,
+                    updated_at = ?
+                where id = ? and status in (?, ?)
+                  and (lease_expires_at is null or lease_expires_at <= ?)
+                """,
+            OrchestrationStatus.RUNNING.name(), leaseOwner, leaseExpiresAt.toString(),
+            now.toString(), now.toString(), now.toString(), now.toString(),
+            assignmentId, OrchestrationStatus.QUEUED.name(), OrchestrationStatus.INTERRUPTED.name(),
+            now.toString()
+        );
+        if (updated == 0) return Optional.empty();
+        WorkAssignment leased = findAssignment(assignmentId).orElse(null);
+        if (leased != null) {
+            recordFenceGeneration(assignmentId, leased.leaseFence(), leaseOwner, now);
+        }
+        return Optional.ofNullable(leased);
+    }
+
+    /**
+     * Heartbeat with fence check. Only succeeds if the expected owner and fence match.
+     */
+    public int extendRunningLeaseFenced(String assignmentId, String leaseOwner,
+                                         long expectedFence, Instant leaseExpiresAt) {
+        Instant now = Instant.now();
+        return jdbcTemplate.update(
+            """
+                update work_assignments
+                set lease_expires_at = ?, last_heartbeat_at = ?, updated_at = ?
+                where id = ? and status = ? and lease_owner = ? and lease_fence = ?
+                """,
+            leaseExpiresAt.toString(), now.toString(), now.toString(),
+            assignmentId, OrchestrationStatus.RUNNING.name(), leaseOwner, expectedFence
+        );
+    }
+
+    /**
+     * Checkpoint with fence check. Stores progress and updates lease.
+     */
+    public Optional<WorkAssignment> checkpointAssignmentFenced(
+            String assignmentId, String leaseOwner, long expectedFence,
+            OrchestrationStatus status, int currentItemIndex,
+            Map<String, Object> checkpoint, Map<String, Object> output,
+            Map<String, Object> evidence, String errorText, Instant completedAt) {
+        Instant now = Instant.now();
+        int updated = jdbcTemplate.update(
+            """
+                update work_assignments
+                set status = ?, current_item_index = ?,
+                    checkpoint_json = ?, output_json = ?, evidence_json = ?,
+                    error_text = coalesce(?, error_text),
+                    last_progress_at = ?,
+                    lease_expires_at = case when ? is not null then ? else lease_expires_at end,
+                    updated_at = ?,
+                    completed_at = coalesce(?, completed_at)
+                where id = ? and lease_owner = ? and lease_fence = ?
+                """,
+            status.name(), currentItemIndex,
+            jsonOrNull(checkpoint), jsonOrNull(output), jsonOrNull(evidence),
+            errorText,
+            now.toString(),
+            now.toString(), now.toString(),
+            now.toString(),
+            instant(completedAt),
+            assignmentId, leaseOwner, expectedFence
+        );
+        return updated == 1 ? findAssignment(assignmentId) : Optional.empty();
+    }
+
+    /**
+     * Cancel with fence check. Only succeeds if running/cancel-requested
+     * with matching owner and fence.
+     */
+    public Optional<WorkAssignment> cancelAssignmentFenced(String assignmentId,
+                                                            String leaseOwner,
+                                                            long expectedFence) {
+        Instant now = Instant.now();
+        int updated = jdbcTemplate.update(
+            """
+                update work_assignments
+                set status = ?, lease_owner = null, lease_expires_at = null,
+                    completed_at = ?, last_progress_at = ?, updated_at = ?
+                where id = ? and lease_owner = ? and lease_fence = ?
+                  and status in (?, ?)
+                """,
+            OrchestrationStatus.CANCELLED.name(),
+            now.toString(), now.toString(), now.toString(),
+            assignmentId, leaseOwner, expectedFence,
+            OrchestrationStatus.RUNNING.name(), OrchestrationStatus.CANCEL_REQUESTED.name()
+        );
+        return updated == 1 ? findAssignment(assignmentId) : Optional.empty();
+    }
+
+    /**
+     * Complete with fence check.
+     */
+    public Optional<WorkAssignment> completeAssignmentFenced(String assignmentId,
+                                                              String leaseOwner,
+                                                              long expectedFence) {
+        Instant now = Instant.now();
+        int updated = jdbcTemplate.update(
+            """
+                update work_assignments
+                set status = ?, lease_owner = null, lease_expires_at = null,
+                    completed_at = ?, last_progress_at = ?, updated_at = ?
+                where id = ? and lease_owner = ? and lease_fence = ? and status = ?
+                """,
+            OrchestrationStatus.COMPLETED.name(),
+            now.toString(), now.toString(), now.toString(),
+            assignmentId, leaseOwner, expectedFence,
+            OrchestrationStatus.RUNNING.name()
+        );
+        return updated == 1 ? findAssignment(assignmentId) : Optional.empty();
+    }
+
+    /**
+     * Release lease with fence check, returning to QUEUED.
+     */
+    public boolean releaseAssignmentFenced(String assignmentId, String leaseOwner,
+                                            long expectedFence) {
+        Instant now = Instant.now();
+        int updated = jdbcTemplate.update(
+            """
+                update work_assignments
+                set status = ?, lease_owner = null, lease_expires_at = null, updated_at = ?
+                where id = ? and status = ? and lease_owner = ? and lease_fence = ?
+                """,
+            OrchestrationStatus.QUEUED.name(), now.toString(),
+            assignmentId, OrchestrationStatus.RUNNING.name(), leaseOwner, expectedFence
+        );
+        return updated == 1;
+    }
+
+    /**
+     * Takeover stale lease by incrementing fence. Only succeeds when the
+     * current lease has expired.
+     */
+    public Optional<WorkAssignment> takeoverStaleLeaseFenced(String assignmentId,
+                                                               String newOwner,
+                                                               Instant now) {
+        int updated = jdbcTemplate.update(
+            """
+                update work_assignments
+                set status = ?, lease_owner = ?, lease_expires_at = null,
+                    lease_fence = lease_fence + 1,
+                    last_progress_at = ?, updated_at = ?
+                where id = ? and status = ?
+                  and (lease_expires_at is null or lease_expires_at <= ?)
+                """,
+            OrchestrationStatus.INTERRUPTED.name(), newOwner,
+            now.toString(), now.toString(),
+            assignmentId, OrchestrationStatus.RUNNING.name(), now.toString()
+        );
+        if (updated != 1) return Optional.empty();
+        WorkAssignment assignment = findAssignment(assignmentId).orElse(null);
+        if (assignment != null) {
+            recordFenceGeneration(assignmentId, assignment.leaseFence(), newOwner, now);
+        }
+        return Optional.ofNullable(assignment);
+    }
+
+    /**
+     * Check if a lease fence is current.
+     */
+    public boolean isLeaseFenceCurrent(String assignmentId, String leaseOwner, long fence) {
+        Integer count = jdbcTemplate.queryForObject(
+            "select count(*) from work_assignments"
+                + " where id = ? and lease_owner = ? and lease_fence = ? and status = ?",
+            Integer.class,
+            assignmentId, leaseOwner, fence, OrchestrationStatus.RUNNING.name()
+        );
+        return count != null && count == 1;
+    }
+
+    private void recordFenceGeneration(String assignmentId, long generation,
+                                        String ownerId, Instant claimedAt) {
+        jdbcTemplate.update(
+            "insert or ignore into assignment_fence_generations"
+                + " (assignment_id, generation, owner_id, claimed_at)"
+                + " values (?, ?, ?, ?)",
+            assignmentId, generation, ownerId, claimedAt.toString()
+        );
+    }
+
+    /**
+     * Find the latest task run ID linked to an assignment.
+     */
+    public Optional<String> findTaskRunIdForAssignment(String assignmentId) {
+        if (!tableExists("task_run_native_links")) return Optional.empty();
+        return jdbcTemplate.query(
+            "select task_run_id from task_run_native_links"
+                + " where assignment_id = ? order by created_at desc limit 1",
+            rs -> rs.next() ? Optional.of(rs.getString(1)) : Optional.empty(),
+            assignmentId
+        );
     }
 }

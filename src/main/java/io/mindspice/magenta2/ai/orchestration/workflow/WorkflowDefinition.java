@@ -36,27 +36,6 @@ public record WorkflowDefinition(
         uiLayout = uiLayout == null ? Map.of() : Map.copyOf(uiLayout);
     }
 
-    /**
-     * Compatibility constructor used by older callers.
-     */
-    @Deprecated
-    public WorkflowDefinition(String id, String title, String summary,
-                              List<WorkflowNode> nodes, List<WorkflowRoute> routes,
-                              Instant createdAt, Instant updatedAt) {
-        this(id, CURRENT_SCHEMA_VERSION, title, summary, DEFAULT_MAX_CONCURRENCY,
-            nodes, routes, Map.of(), createdAt, updatedAt);
-    }
-
-    /**
-     * Compatibility constructor for old callers that did not include routes.
-     */
-    @Deprecated
-    public WorkflowDefinition(String id, String title, String summary,
-                              List<WorkflowNode> nodes, Instant createdAt, Instant updatedAt) {
-        this(id, CURRENT_SCHEMA_VERSION, title, summary, DEFAULT_MAX_CONCURRENCY,
-            nodes, List.of(), Map.of(), createdAt, updatedAt);
-    }
-
     public WorkflowNode nodeByKey(String key) {
         return nodes.stream()
             .filter(n -> n.key().equals(key))

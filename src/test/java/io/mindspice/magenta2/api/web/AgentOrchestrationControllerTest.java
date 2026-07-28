@@ -52,7 +52,7 @@ class AgentOrchestrationControllerTest {
     ) {
         return new AgentOrchestrationController(
             inboxService, assignmentService, scheduleService, reactionService,
-            agentProfileService, chatService, new AgentChatPromptService()
+            null, agentProfileService, chatService, new AgentChatPromptService()
         );
     }
 
@@ -160,7 +160,7 @@ class AgentOrchestrationControllerTest {
         );
 
         assertThatThrownBy(() -> controller.assign("agent-1", new AgentOrchestrationController.AgentAssignmentCreateRequest(
-            null, null, null, 0, null, null, null, java.util.Map.of()
+            null, null, null, 0, null, null, java.util.Map.of()
         ))).isInstanceOfSatisfying(ResponseStatusException.class, exception -> {
             assertThat(exception.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
         });
@@ -175,7 +175,7 @@ class AgentOrchestrationControllerTest {
         );
 
         WorkAssignment result = controller.assign("agent-1", new AgentOrchestrationController.AgentAssignmentCreateRequest(
-            null, null, AssignmentType.TASK_RUN, 0, null, null, null, java.util.Map.of()
+            null, null, AssignmentType.TASK_RUN, 0, null, null, java.util.Map.of()
         ));
 
         assertThat(result).isNotNull();
@@ -192,7 +192,7 @@ class AgentOrchestrationControllerTest {
         );
 
         controller.assign("agent-from-path", new AgentOrchestrationController.AgentAssignmentCreateRequest(
-            null, null, AssignmentType.REPORT, 0, null, null, null, java.util.Map.of()
+            null, null, AssignmentType.REPORT, 0, null, null, java.util.Map.of()
         ));
 
         assertThat(assignmentService.receivedAgentId).isEqualTo("agent-from-path");
@@ -326,7 +326,7 @@ class AgentOrchestrationControllerTest {
         private String requestedId;
 
         StubAgentProfileService() {
-            super(null, null, null);
+            super(null, null, null, null, null, null, null);
         }
 
         @Override
@@ -422,7 +422,7 @@ class AgentOrchestrationControllerTest {
                 throw new IllegalArgumentException("assignmentType is required");
             }
             return new WorkAssignment("assign-1", request.agentId(), null, null, request.assignmentType(),
-                0, OrchestrationStatus.QUEUED, null, null, 0,
+                0, OrchestrationStatus.QUEUED, null, null, null, null, 0,
                 java.util.Map.of(), java.util.Map.of(), java.util.Map.of(), java.util.Map.of(),
                 null, null, null, null, null, null, null);
         }
@@ -467,7 +467,7 @@ class AgentOrchestrationControllerTest {
 
         private WorkAssignment assignment(String assignmentId, String agentId, OrchestrationStatus status) {
             return new WorkAssignment(assignmentId, agentId, null, null, AssignmentType.REPORT,
-                0, status, null, null, 0,
+                0, status, null, null, null, null, 0,
                 java.util.Map.of(), java.util.Map.of(), java.util.Map.of(), java.util.Map.of(),
                 null, null, null, null, null, null, null);
         }
@@ -493,7 +493,7 @@ class AgentOrchestrationControllerTest {
         public WorkAssignment create(AssignmentRequest request) {
             receivedAgentId = request.agentId();
             return new WorkAssignment("assign-1", request.agentId(), null, null, request.assignmentType(),
-                0, OrchestrationStatus.QUEUED, null, null, 0,
+                0, OrchestrationStatus.QUEUED, null, null, null, null, 0,
                 java.util.Map.of(), java.util.Map.of(), java.util.Map.of(), java.util.Map.of(),
                 null, null, null, null, null, null, null);
         }
@@ -761,9 +761,10 @@ class AgentOrchestrationControllerTest {
 
     private static class StubScheduleService extends ScheduleService {
         private final Map<String, List<AgentSchedule>> byAgent = new java.util.HashMap<>();
+        private static final com.fasterxml.jackson.databind.ObjectMapper MAPPER = new com.fasterxml.jackson.databind.ObjectMapper();
 
         StubScheduleService() {
-            super(null, null, null, null, true);
+            super(null, MAPPER, null, null, java.time.Clock.systemUTC(), true);
         }
 
         @Override
@@ -817,9 +818,10 @@ class AgentOrchestrationControllerTest {
 
     private static class StubReactionService extends EventReactionService {
         private final Map<String, List<AgentEventReaction>> byAgent = new java.util.HashMap<>();
+        private static final com.fasterxml.jackson.databind.ObjectMapper MAPPER = new com.fasterxml.jackson.databind.ObjectMapper();
 
         StubReactionService() {
-            super(null, null);
+            super(null, MAPPER, null, java.time.Clock.systemUTC(), true);
         }
 
         @Override

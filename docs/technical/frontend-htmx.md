@@ -21,7 +21,7 @@ Source anchors:
 - `/api/fragments/chat/sessions`
 - `/api/fragments/chat/planning`
 
-`OrchestrationController` owns the operational UI routes and HTMX fragments for dashboard, plans, workflows, jobs, projects, inbox, outputs, agents, and settings.
+`OrchestrationController` owns the operational UI routes and HTMX fragments for dashboard, plans, workflows, jobs, projects, inbox, outputs, agents, settings, and the thin agent-scoped run adapter. `RunOperationsFragments` renders reusable bounded run groups/detail; `WorkspaceExplorerFragments` only mounts its independent host beside Files.
 
 JSON API controllers provide the route families consumed by both HTMX fragments and JavaScript islands.
 
@@ -37,12 +37,13 @@ Use HTMX for:
 - Validation fragments.
 - Submit-to-agent forms.
 - Project membership add/remove controls.
-- Assignment workspace-blocked requeue actions.
+- Run-group refresh and on-demand run expansion.
+- Artifact search/detail/preview/lineage/retention, skill trust/snapshot controls, and schedule/reaction audit fragments.
 - Delete/confirm actions.
 
 HTMX routes should return server-rendered HTML fragments and preserve consistent status/markup behavior for failed requests so operational panels show actionable errors instead of silent failures.
 
-For modal hosts, keep one stable target element in the page and return modal content for `innerHTML` swaps, or return the full target with `outerHTML`. Do not return a second element with the same id inside an `innerHTML` target. The Avatar Work Area explorer uses `#avatar-workarea-modal` as a stable host and returns modal content without duplicating that id.
+For modal hosts, keep one stable target element in the page and return modal content for `innerHTML` swaps, or return the full target with `outerHTML`. Do not return a second element with the same id inside an `innerHTML` target. The workspace explorer uses `#workspace-file-modal` as its stable host and returns modal content without duplicating that id.
 
 ## JavaScript Islands
 
@@ -73,7 +74,7 @@ When adding or changing UI:
 - Use shared render structures and slot keys when the same structure renders request-specific data.
 - Keep controllers thin; rendering helpers/components should assemble view state, while services own domain behavior.
 - Follow existing orchestration page patterns before introducing new markup style.
-- For dense operational explorers, use details/list tables, stable row actions, a separate inspector, and HTMX fragments before reaching for decorative card grids.
+- For dense operational explorers, use details/list tables, stable row actions, a separate inspector, and HTMX fragments before reaching for decorative card grids. The Files surface uses independent `#agent-run-groups` and `#agent-run-detail` hosts: filesystem swaps cannot replace run metadata, and run responses cannot replace list/inspector/modal hosts. Run refresh is an OOB host swap; expansion, lineage navigation, and authorized artifact preview remain scoped HTMX requests.
 
 If SimplyPages lacks a reasonable primitive, inspect `/home/hickelpickle/Code/Java/cannasite/java-html-framework/docs` and `/home/hickelpickle/Code/Java/cannasite/java-html-framework/demo`. If the library truly has a bug or missing primitive, document or fix the library rather than adding brittle page-level workarounds.
 
@@ -82,7 +83,7 @@ If SimplyPages lacks a reasonable primitive, inspect `/home/hickelpickle/Code/Ja
 CSS is split by surface:
 
 - `magenta.css` for shared shell/chat styling.
-- `orchestration.css` for operational UI styling.
+- `orchestration.css` for operational UI styling, including compact blue-gray Files/run panels, small radii, semantic run chips, bounded tables, and desktop-to-mobile stacking.
 
 Static JavaScript is loaded as browser assets from `src/main/resources/static/js`. Keep modules narrowly scoped and avoid hidden global behavior except where an existing island already establishes a small shared helper.
 
@@ -98,4 +99,4 @@ For UI changes, validate against a running app with focused Playwright checks on
 
 For project/job/output/assignment UX changes, Playwright validation should inspect the changed `/projects`, `/jobs`, `/outputs`, plan submit, workflow submit, and agent submit/history surfaces with screenshots. Use isolated runtime data when possible, capture console/network diagnostics, and treat blocked browser validation as an explicit blocker unless the user approves a fallback.
 
-During UI review, explicitly check that JavaScript use is justified, standard CRUD remains HTMX-first, labels distinguish `projectId` from compatibility `workspaceId`, and provenance fields fit without hiding primary actions.
+During UI review, explicitly check that JavaScript use is justified, standard CRUD remains HTMX-first, labels distinguish `workspaceType`/`workspaceKey` from `projectId`, and provenance fields fit without hiding primary actions.

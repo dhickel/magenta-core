@@ -1,0 +1,327 @@
+{
+  "version": 2,
+  "runId": "exec-agent-workspace-establishment",
+  "state": "interrupted",
+  "revision": 1,
+  "source": {
+    "projectRoot": "/home/dhickel/Code/Java/Magenta",
+    "sourcePlanPath": ".internal-dev/plans/20260727-195154-home-dhickel-code-java-magenta-internal-dev-ha",
+    "sourcePlanningRunId": "20260727-195154-home-dhickel-code-java-magenta-internal-dev-ha",
+    "aggregateDigest": "4d3295ab423012a482a20fdfcfb254a919115ae8ec186695a4ee3e8ee0b373f3",
+    "files": [
+      {
+        "path": "concepts.md",
+        "sha256": "d3fc1d057b1e4c340d0880e7794a89924da0792a6273385cc0a77ca1a2b6a13c",
+        "bytes": 15438
+      },
+      {
+        "path": "orchestration.md",
+        "sha256": "a787ed7eac042764988180034dcbc11915e8d802ef9a310df742ffa29dfccb46",
+        "bytes": 9766
+      },
+      {
+        "path": "phase-01-agent-workspace-policy.md",
+        "sha256": "71566137f923f33d0929bbae00e17dadc9ecccc339a23daa259cbdb9b69a9228",
+        "bytes": 11266
+      },
+      {
+        "path": "phase-02-materialization-context-persistence.md",
+        "sha256": "469e408fc44413a8890637ba00e1613e2b7bbaca00e872e45900d01c2fe40fe3",
+        "bytes": 15837
+      },
+      {
+        "path": "phase-03-immutable-binding-lifecycle.md",
+        "sha256": "2d6647ee40ab942ba288811a3a602aee26c82c454e652c79bc9dd11d6a9bafe4",
+        "bytes": 12181
+      },
+      {
+        "path": "phase-04-repository-control-qualification.md",
+        "sha256": "afdfc0fd1cfc6704abf8a5aaff9c78144b57e79901c344456b079263313b8715",
+        "bytes": 9449
+      },
+      {
+        "path": "phase-05-managed-git-local.md",
+        "sha256": "f6a0e86be89695cd7f757380faeea0b881c99ee6a6c883b6c93d7241eda8dcbd",
+        "bytes": 15368
+      },
+      {
+        "path": "phase-06-secure-remote-provider.md",
+        "sha256": "e321e7ec4ae773a0d1e7b00be45abb6f3825ca5da55a2987e77f4d4205e5cde0",
+        "bytes": 17130
+      },
+      {
+        "path": "phase-07-prompt-skills-context.md",
+        "sha256": "5b16c89120a84f5ea2559e61d043de09020593cb97d05504449bcb086b98020b",
+        "bytes": 13362
+      },
+      {
+        "path": "phase-08-restricted-system-chat.md",
+        "sha256": "a38946e12d925a727596d99c878107ac75e19f6bc52d8030134417597b0c691c",
+        "bytes": 13911
+      },
+      {
+        "path": "phase-09-api-agent-console.md",
+        "sha256": "e789948f795b7bad598c667a0c196f80dfffb3dd201baa8e6ae83005d6790f0d",
+        "bytes": 15709
+      },
+      {
+        "path": "phase-10-documentation-integration.md",
+        "sha256": "d448b2e019ada04cdb86876368a6080239721a12faeb86c008056bc43d019cb2",
+        "bytes": 12817
+      }
+    ]
+  },
+  "frozen": {
+    "scopeSize": "large",
+    "phases": [
+      "phase-01-agent-workspace-policy.md",
+      "phase-02-materialization-context-persistence.md",
+      "phase-03-immutable-binding-lifecycle.md",
+      "phase-04-repository-control-qualification.md",
+      "phase-05-managed-git-local.md",
+      "phase-06-secure-remote-provider.md",
+      "phase-07-prompt-skills-context.md",
+      "phase-08-restricted-system-chat.md",
+      "phase-09-api-agent-console.md",
+      "phase-10-documentation-integration.md"
+    ],
+    "dependencies": {
+      "phase-01-agent-workspace-policy.md": [],
+      "phase-02-materialization-context-persistence.md": [
+        "phase-01-agent-workspace-policy.md"
+      ],
+      "phase-03-immutable-binding-lifecycle.md": [
+        "phase-02-materialization-context-persistence.md"
+      ],
+      "phase-04-repository-control-qualification.md": [
+        "phase-02-materialization-context-persistence.md"
+      ],
+      "phase-05-managed-git-local.md": [
+        "phase-03-immutable-binding-lifecycle.md",
+        "phase-04-repository-control-qualification.md"
+      ],
+      "phase-06-secure-remote-provider.md": [
+        "phase-05-managed-git-local.md"
+      ],
+      "phase-07-prompt-skills-context.md": [
+        "phase-03-immutable-binding-lifecycle.md",
+        "phase-05-managed-git-local.md"
+      ],
+      "phase-08-restricted-system-chat.md": [
+        "phase-03-immutable-binding-lifecycle.md",
+        "phase-07-prompt-skills-context.md"
+      ],
+      "phase-09-api-agent-console.md": [
+        "phase-06-secure-remote-provider.md",
+        "phase-07-prompt-skills-context.md",
+        "phase-08-restricted-system-chat.md"
+      ],
+      "phase-10-documentation-integration.md": [
+        "phase-09-api-agent-console.md"
+      ]
+    },
+    "waves": {
+      "phase-01-agent-workspace-policy.md": 1,
+      "phase-02-materialization-context-persistence.md": 2,
+      "phase-03-immutable-binding-lifecycle.md": 3,
+      "phase-04-repository-control-qualification.md": 3,
+      "phase-05-managed-git-local.md": 4,
+      "phase-06-secure-remote-provider.md": 5,
+      "phase-07-prompt-skills-context.md": 5,
+      "phase-08-restricted-system-chat.md": 6,
+      "phase-09-api-agent-console.md": 7,
+      "phase-10-documentation-integration.md": 8
+    },
+    "goals": {
+      "phase-01-agent-workspace-policy.md": "enforce the closed AGENT root and ordinary writer policy",
+      "phase-02-materialization-context-persistence.md": "persist generation-safe materializations, defaults, and immutable binding snapshots",
+      "phase-03-immutable-binding-lifecycle.md": "capture and carry immutable context through conversations, assignments, runs, and lineage",
+      "phase-04-repository-control-qualification.md": "prove or fail closed the only permitted in-process Git storage boundary",
+      "phase-05-managed-git-local.md": "implement claimed, bounded local Git and reconciliation",
+      "phase-06-secure-remote-provider.md": "add policy-pinned GitHub or GHE remote, PR, and fail-closed merge behavior",
+      "phase-07-prompt-skills-context.md": "inject trusted binding policy and generation-bound untrusted guidance and skills",
+      "phase-08-restricted-system-chat.md": "provide fixed-profile read-only system chat and audited queue proposals",
+      "phase-09-api-agent-console.md": "expose thin versioned APIs and independent HTMX agent-console hosts",
+      "phase-10-documentation-integration.md": "reconcile contracts and run final cross-domain validation"
+    },
+    "targets": {
+      "phase-01-agent-workspace-policy.md": [
+        "src/main/java/io/mindspice/magenta2/ai/orchestration/workspaces/AgentWorkspaceArea.java",
+        "src/main/java/io/mindspice/magenta2/ai/orchestration/workspaces/WorkspacePathLayout.java",
+        "src/main/java/io/mindspice/magenta2/ai/orchestration/workspaces/WorkspaceDirectoryService.java",
+        "src/main/java/io/mindspice/magenta2/ai/orchestration/workspaces/ReservedWorkspacePathPolicy.java",
+        "src/main/java/io/mindspice/magenta2/ai/orchestration/workspaces/ConfinedPathMutationService.java",
+        "src/main/java/io/mindspice/magenta2/ai/orchestration/workspaces/WorkspaceExplorerService.java",
+        "src/main/java/io/mindspice/magenta2/ai/chat/tool/file/AgentFileToolService.java"
+      ],
+      "phase-02-materialization-context-persistence.md": [
+        "src/main/resources/db/migrations/010-agent-materialization-context.sql",
+        "src/main/resources/schema.sql",
+        "src/main/java/io/mindspice/magenta2/core/persistence/SchemaMigrationRunner.java",
+        "src/main/java/io/mindspice/magenta2/ai/orchestration/context/AgentContextService.java",
+        "src/main/java/io/mindspice/magenta2/ai/orchestration/context/AgentContextRepository.java",
+        "src/main/java/io/mindspice/magenta2/ai/orchestration/context/AgentMaterializationService.java",
+        "src/main/java/io/mindspice/magenta2/ai/orchestration/context/AgentMaterializationRepository.java",
+        "src/main/java/io/mindspice/magenta2/ai/orchestration/workspaces/MaterializationLocation.java"
+      ],
+      "phase-03-immutable-binding-lifecycle.md": [
+        "src/main/java/io/mindspice/magenta2/ai/chat/model/ChatRequest.java",
+        "src/main/java/io/mindspice/magenta2/ai/chat/service/RequestResolver.java",
+        "src/main/java/io/mindspice/magenta2/ai/chat/service/ChatService.java",
+        "src/main/java/io/mindspice/magenta2/ai/orchestration/runtime/AssignmentService.java",
+        "src/main/java/io/mindspice/magenta2/ai/orchestration/runtime/TaskRunLifecycleService.java",
+        "src/main/java/io/mindspice/magenta2/ai/orchestration/runtime/OrchestrationRunnerService.java",
+        "src/main/java/io/mindspice/magenta2/ai/orchestration/workflow/WorkflowRunner.java",
+        "src/main/java/io/mindspice/magenta2/ai/chat/plan/PlanService.java",
+        "src/main/java/io/mindspice/magenta2/ai/orchestration/runtime/JobService.java"
+      ],
+      "phase-04-repository-control-qualification.md": [
+        "pom.xml",
+        "src/main/resources/db/migrations/011-repository-control-storage.sql",
+        "src/main/resources/schema.sql",
+        "src/main/java/io/mindspice/magenta2/core/persistence/SchemaMigrationRunner.java",
+        "src/main/java/io/mindspice/magenta2/ai/orchestration/workspaces/WorkspacePathLayout.java",
+        "src/main/java/io/mindspice/magenta2/ai/orchestration/git/control/RepositoryControlStorageService.java",
+        "src/main/java/io/mindspice/magenta2/ai/orchestration/git/control/RepositoryControlCapabilityService.java",
+        "src/main/java/io/mindspice/magenta2/ai/orchestration/git/control/JGitRepositoryControlAdapter.java",
+        "src/main/java/io/mindspice/magenta2/ai/orchestration/git/control/BrokeredCheckoutService.java"
+      ],
+      "phase-05-managed-git-local.md": [
+        "src/main/resources/db/migrations/012-managed-git-local.sql",
+        "src/main/resources/schema.sql",
+        "src/main/java/io/mindspice/magenta2/core/persistence/SchemaMigrationRunner.java",
+        "src/main/java/io/mindspice/magenta2/ai/orchestration/git/ManagedGitService.java",
+        "src/main/java/io/mindspice/magenta2/ai/orchestration/git/ManagedGitRepository.java",
+        "src/main/java/io/mindspice/magenta2/ai/orchestration/git/ManagedWorktreeService.java",
+        "src/main/java/io/mindspice/magenta2/ai/orchestration/git/RepositoryMutationClaimService.java",
+        "src/main/java/io/mindspice/magenta2/ai/orchestration/git/RepositoryReconciliationService.java"
+      ],
+      "phase-06-secure-remote-provider.md": [
+        "src/main/resources/db/migrations/013-git-provider-operations.sql",
+        "src/main/resources/schema.sql",
+        "src/main/java/io/mindspice/magenta2/core/persistence/SchemaMigrationRunner.java",
+        "src/main/java/io/mindspice/magenta2/ai/config/user/GitProviderConfig.java",
+        "src/main/java/io/mindspice/magenta2/ai/orchestration/git/provider/PinnedHttpsTransport.java",
+        "src/main/java/io/mindspice/magenta2/ai/orchestration/git/provider/JGitSmartHttpTransport.java",
+        "src/main/java/io/mindspice/magenta2/ai/orchestration/git/provider/GitHubProviderClient.java",
+        "src/main/java/io/mindspice/magenta2/ai/orchestration/git/provider/ManagedGitRemoteService.java",
+        "src/main/java/io/mindspice/magenta2/ai/orchestration/git/provider/PullRequestService.java",
+        "src/main/java/io/mindspice/magenta2/ai/orchestration/git/provider/MergeAuthorizationService.java"
+      ],
+      "phase-07-prompt-skills-context.md": [
+        "src/main/java/io/mindspice/magenta2/ai/chat/service/turn/TrustedContextPolicyAssembler.java",
+        "src/main/java/io/mindspice/magenta2/ai/chat/service/turn/PromptContextAssembler.java",
+        "src/main/java/io/mindspice/magenta2/ai/orchestration/workspaces/AgentsMdResolver.java",
+        "src/main/java/io/mindspice/magenta2/ai/orchestration/workspaces/WorkspaceMdResolver.java",
+        "src/main/java/io/mindspice/magenta2/ai/skills/MaterializationSkillAuthority.java",
+        "src/main/java/io/mindspice/magenta2/ai/skills/SkillResolutionContext.java",
+        "src/main/java/io/mindspice/magenta2/ai/skills/SkillScopeDiscoveryService.java",
+        "src/main/java/io/mindspice/magenta2/ai/skills/SkillTrustService.java"
+      ],
+      "phase-08-restricted-system-chat.md": [
+        "src/main/resources/db/migrations/014-system-chat-proposals.sql",
+        "src/main/resources/schema.sql",
+        "src/main/java/io/mindspice/magenta2/core/persistence/SchemaMigrationRunner.java",
+        "src/main/java/io/mindspice/magenta2/ai/chat/service/ChatInvocationProfile.java",
+        "src/main/java/io/mindspice/magenta2/ai/chat/service/ChatService.java",
+        "src/main/java/io/mindspice/magenta2/ai/chat/system/SystemChatService.java",
+        "src/main/java/io/mindspice/magenta2/ai/chat/system/SystemChatToolRegistry.java",
+        "src/main/java/io/mindspice/magenta2/ai/chat/system/SystemChatActionProposalService.java",
+        "src/main/java/io/mindspice/magenta2/ai/orchestration/settings/RuntimeSettingsService.java"
+      ],
+      "phase-09-api-agent-console.md": [
+        "src/main/java/io/mindspice/magenta2/api/web/AgentContextController.java",
+        "src/main/java/io/mindspice/magenta2/api/web/AgentGitController.java",
+        "src/main/java/io/mindspice/magenta2/api/web/SystemChatController.java",
+        "src/main/java/io/mindspice/magenta2/api/web/AgentContextFragments.java",
+        "src/main/java/io/mindspice/magenta2/api/web/AgentGitFragments.java",
+        "src/main/java/io/mindspice/magenta2/api/web/SystemChatFragments.java",
+        "src/main/java/io/mindspice/magenta2/api/web/WorkspaceExplorerFragments.java",
+        "src/main/java/io/mindspice/magenta2/api/web/OrchestrationController.java",
+        "src/main/resources/static/css/orchestration.css",
+        "src/main/resources/static/js/orchestration/system-chat.js"
+      ],
+      "phase-10-documentation-integration.md": [
+        ".internal-dev/specifications/architecture.md",
+        ".internal-dev/specifications/service-graph.md",
+        ".internal-dev/specifications/services.md",
+        ".internal-dev/specifications/api.md",
+        ".internal-dev/specifications/web.md",
+        ".internal-dev/specifications/simplypages.md",
+        ".internal-dev/specifications/decisions.md",
+        ".internal-dev/specifications/deferred-features.md",
+        "docs/technical/architecture.md",
+        "docs/technical/data-model.md",
+        "docs/technical/security.md",
+        "docs/technical/workspaces-tools-outputs.md",
+        "docs/api/agent-workspaces-context-git.md",
+        "docs/end-user/agents.md",
+        "docs/end-user/projects-and-workspaces.md",
+        "docs/end-user/chat.md",
+        ".internal-dev/changelogs/2026-07-27-agent-workspace-establishment.md"
+      ]
+    },
+    "implementationModel": {
+      "provider": "deepseek",
+      "model": "deepseek-v4-pro",
+      "thinking": "max"
+    },
+    "validationModel": {
+      "provider": "openai-codex",
+      "model": "gpt-5.6-terra",
+      "thinking": "high"
+    }
+  },
+  "phases": [
+    {
+      "phase": "phase-01-agent-workspace-policy.md",
+      "validations": []
+    },
+    {
+      "phase": "phase-02-materialization-context-persistence.md",
+      "validations": []
+    },
+    {
+      "phase": "phase-03-immutable-binding-lifecycle.md",
+      "validations": []
+    },
+    {
+      "phase": "phase-04-repository-control-qualification.md",
+      "validations": []
+    },
+    {
+      "phase": "phase-05-managed-git-local.md",
+      "validations": []
+    },
+    {
+      "phase": "phase-06-secure-remote-provider.md",
+      "validations": []
+    },
+    {
+      "phase": "phase-07-prompt-skills-context.md",
+      "validations": []
+    },
+    {
+      "phase": "phase-08-restricted-system-chat.md",
+      "validations": []
+    },
+    {
+      "phase": "phase-09-api-agent-console.md",
+      "validations": []
+    },
+    {
+      "phase": "phase-10-documentation-integration.md",
+      "validations": []
+    }
+  ],
+  "integrationValidations": [],
+  "createdAt": "2026-07-27T21:16:27.033Z",
+  "updatedAt": "2026-07-27T21:39:29.390Z",
+  "interrupted": {
+    "reason": "Extension session shutdown.",
+    "timestamp": "2026-07-27T21:39:29.390Z",
+    "changedFileObservations": [],
+    "outsideDeclaredTargets": []
+  },
+  "terminalAt": "2026-07-27T21:39:29.390Z"
+}

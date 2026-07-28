@@ -14,17 +14,27 @@ public record AssignmentRequest(
     Integer priority,
     String modelOverride,
     String projectId,
-    String workspaceId,
-    String selectedWorkAreaId,
-    String outputRouteType,
-    String outputWorkAreaId,
-    String outputDirectRelativePath,
-    Map<String, Object> input
+    String workspaceType,
+    String workspaceKey,
+    Map<String, Object> input,
+    String operationKey
 ) {
-    public static final String OUTPUT_ROUTE_DEFAULT = "DEFAULT";
-    public static final String OUTPUT_ROUTE_WORK_AREA = "WORK_AREA";
-    public static final String OUTPUT_ROUTE_DIRECT_DIRECTORY = "DIRECT_DIRECTORY";
-
+    public AssignmentRequest(
+        String agentId,
+        String jobId,
+        String jobItemId,
+        AssignmentType assignmentType,
+        String runDisplayName,
+        Integer priority,
+        String modelOverride,
+        String projectId,
+        String workspaceType,
+        String workspaceKey,
+        Map<String, Object> input
+    ) {
+        this(agentId, jobId, jobItemId, assignmentType, runDisplayName, priority, modelOverride,
+            projectId, workspaceType, workspaceKey, input, null);
+    }
     public AssignmentRequest(
         String agentId,
         String jobId,
@@ -33,11 +43,9 @@ public record AssignmentRequest(
         Integer priority,
         String modelOverride,
         String projectId,
-        String workspaceId,
         Map<String, Object> input
     ) {
-        this(agentId, jobId, jobItemId, assignmentType, null, priority, modelOverride, projectId, workspaceId,
-            null, null, null, null, input);
+        this(agentId, jobId, jobItemId, assignmentType, null, priority, modelOverride, projectId, null, null, input, null);
     }
 
     public AssignmentRequest(
@@ -47,11 +55,9 @@ public record AssignmentRequest(
         AssignmentType assignmentType,
         Integer priority,
         String modelOverride,
-        String workspaceId,
         Map<String, Object> input
     ) {
-        this(agentId, jobId, jobItemId, assignmentType, null, priority, modelOverride, null, workspaceId,
-            null, null, null, null, input);
+        this(agentId, jobId, jobItemId, assignmentType, null, priority, modelOverride, null, null, null, input, null);
     }
 
     public AssignmentRequest(
@@ -62,14 +68,11 @@ public record AssignmentRequest(
         Integer priority,
         String modelOverride,
         String projectId,
-        String workspaceId,
-        String selectedWorkAreaId,
-        String outputRouteType,
-        String outputWorkAreaId,
-        String outputDirectRelativePath,
+        String workspaceType,
+        String workspaceKey,
         Map<String, Object> input
     ) {
-        this(agentId, jobId, jobItemId, assignmentType, null, priority, modelOverride, projectId, workspaceId,
-            selectedWorkAreaId, outputRouteType, outputWorkAreaId, outputDirectRelativePath, input);
+        this(agentId, jobId, jobItemId, assignmentType, null, priority, modelOverride, projectId,
+            workspaceType, workspaceKey, input, null);
     }
 }

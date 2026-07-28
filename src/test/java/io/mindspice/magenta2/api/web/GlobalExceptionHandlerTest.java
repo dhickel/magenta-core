@@ -77,7 +77,11 @@ class GlobalExceptionHandlerTest {
     @Test
     void httpMessageNotReadableReturns400WithMessage() {
         HttpMessageNotReadableException exception =
-            new HttpMessageNotReadableException("Required request body is missing", new RuntimeException("malformed JSON"));
+            new HttpMessageNotReadableException(
+                "Required request body is missing",
+                new RuntimeException("malformed JSON"),
+                new org.springframework.mock.http.MockHttpInputMessage(new byte[0])
+            );
 
         @SuppressWarnings("unchecked")
         ResponseEntity<Map<String, Object>> response =

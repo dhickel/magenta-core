@@ -2,17 +2,19 @@
 
 These guides explain how to operate Magenta through the current alpha browser UI.
 
-Magenta has three main browser surfaces:
+Magenta has two main browser surfaces:
 
 - `/chat` for conversations and anonymous ad hoc planning.
-- `/avatar` for the personal assistant shell, Work Areas, outputs, and dashboard widgets.
-- `/dashboard` and the operational pages for agents, plans, workflows, jobs, projects, inboxes, outputs, and runtime settings.
+- `/dashboard` and the operational pages for agents, plans, workflows, jobs, projects, workspaces, outputs, inboxes, settings, and skills.
 
 ## Start Here
 
 - New user setup: [Quickstart](quickstart.md)
+- First workspace-backed run: [Getting Started with Workspaces, Tasks, and Outputs](getting-started-workspaces-tasks-outputs.md)
+- Runtime history, outputs, and lineage: [Task Run Monitoring](task-run-monitoring.md)
+- Timed and event-driven automation: [Schedules and Reactions](schedules-and-reactions.md)
 - Conversational work and planning: [Chat](chat.md)
-- Personal assistant shell: [Avatar Dashboard](avatar-dashboard.md)
+- Manage the application workspace tree: [Projects and Workspaces](projects-and-workspaces.md)
 - Operator overview: [Dashboard](dashboard.md)
 - Build executable work: [Plans and Tasks](plans-and-tasks.md)
 - Chain work together: [Workflows](workflows.md)
@@ -21,6 +23,7 @@ Magenta has three main browser surfaces:
 - Manage reusable agent capabilities: [Agent Skills](agent-skills.md)
 - Organize workspace-backed work: [Projects and Workspaces](projects-and-workspaces.md)
 - Handle messages, artifacts, and defaults: [Inbox, Outputs, and Settings](inbox-outputs-settings.md)
+- View, assign, approve, revoke, and activate reusable capabilities: [Agent Skills](agent-skills.md)
 
 ## Common Workflows
 
@@ -46,7 +49,7 @@ Operate a running agent:
 
 1. Open `/agents`.
 2. Select an agent.
-3. Use the dashboard, queue, inbox, workspace, outputs, exec, history, and submit tabs.
+3. Use the dashboard, queue, inbox, Files plus Task Runs, outputs/artifacts, and history tabs.
 4. Pause, resume, cancel, force-interrupt, or inspect diagnostics from the queue and history tabs.
 
 ## Selector Behavior

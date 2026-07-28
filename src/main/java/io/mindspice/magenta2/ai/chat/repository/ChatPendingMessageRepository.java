@@ -260,7 +260,14 @@ public class ChatPendingMessageRepository {
     }
 
     private ChatSessionSurface surface(String value) {
-        return value == null || value.isBlank() ? null : ChatSessionSurface.valueOf(value);
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+        try {
+            return ChatSessionSurface.valueOf(value);
+        } catch (IllegalArgumentException ignored) {
+            return null;
+        }
     }
 
     private String now() {

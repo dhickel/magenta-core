@@ -19,11 +19,6 @@ import io.mindspice.magenta2.ai.orchestration.runtime.Project;
 import io.mindspice.magenta2.ai.orchestration.runtime.ProjectService;
 import io.mindspice.magenta2.ai.orchestration.workflow.WorkflowDefinition;
 import io.mindspice.magenta2.ai.orchestration.workflow.WorkflowService;
-import io.mindspice.magenta2.ai.orchestration.workspaces.WorkArea;
-import io.mindspice.magenta2.ai.orchestration.workspaces.WorkAreaService;
-import io.mindspice.magenta2.ai.orchestration.workspaces.Workspace;
-import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceOwnerType;
-import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceService;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
@@ -37,8 +32,6 @@ public class EntityLookupService {
     private final WorkflowService workflowService;
     private final JobService jobService;
     private final ProjectService projectService;
-    private final WorkspaceService workspaceService;
-    private final WorkAreaService workAreaService;
     private final ChatService chatService;
 
     public EntityLookupService(
@@ -47,8 +40,6 @@ public class EntityLookupService {
         WorkflowService workflowService,
         JobService jobService,
         ProjectService projectService,
-        WorkspaceService workspaceService,
-        WorkAreaService workAreaService,
         ChatService chatService
     ) {
         this.agentProfileService = agentProfileService;
@@ -56,8 +47,6 @@ public class EntityLookupService {
         this.workflowService = workflowService;
         this.jobService = jobService;
         this.projectService = projectService;
-        this.workspaceService = workspaceService;
-        this.workAreaService = workAreaService;
         this.chatService = chatService;
     }
 
@@ -68,8 +57,6 @@ public class EntityLookupService {
             case WORKFLOW -> workflows();
             case JOB -> jobs(query.context());
             case PROJECT -> projects();
-            case WORKSPACE -> workspaces(query);
-            case WORK_AREA -> workAreas(query);
             case MODEL -> models();
             case RUN -> runs(query.context());
             case TARGET -> targets();
@@ -108,8 +95,6 @@ public class EntityLookupService {
                 case WORKFLOW -> option(workflowService.getDefinition(id));
                 case JOB -> option(jobService.getDefinition(id));
                 case PROJECT -> option(projectService.getProject(id));
-                case WORKSPACE -> option(workspaceService.get(id));
-                case WORK_AREA -> workAreaService == null ? null : option(workAreaService.get(id));
                 case MODEL -> chatService.availableModels().stream()
                     .filter(model -> model.equals(id))
                     .findFirst()
@@ -161,29 +146,6 @@ public class EntityLookupService {
 
     private List<EntityOption> projects() {
         return projectService.listProjects().stream()
-            .map(this::option)
-            .toList();
-    }
-
-    private List<EntityOption> workspaces(SelectorQuery query) {
-        return workspaceService.list(null, null, Math.max(query.limit(), DEFAULT_LIMIT)).stream()
-            .map(this::option)
-            .toList();
-    }
-
-    private List<EntityOption> workAreas(SelectorQuery query) {
-        if (workAreaService == null) {
-            return List.of();
-        }
-        String ownerType = query.context().get("ownerType");
-        String ownerId = query.context().get("ownerId");
-        if (StringUtils.hasText(ownerType) && StringUtils.hasText(ownerId)) {
-            WorkspaceOwnerType type = WorkspaceOwnerType.valueOf(ownerType.trim().toUpperCase(Locale.ROOT));
-            return workAreaService.list(type, ownerId.trim(), query.includeUnavailable()).stream()
-                .map(this::option)
-                .toList();
-        }
-        return workAreaService.listActive(Math.max(query.limit(), DEFAULT_LIMIT)).stream()
             .map(this::option)
             .toList();
     }
@@ -301,19 +263,6 @@ public class EntityLookupService {
     private EntityOption option(Project project) {
         return new EntityOption("project", project.id(), first(project.name(), project.id()),
             first(project.description(), "Shared workspace context"), "project", true);
-    }
-
-    private EntityOption option(Workspace workspace) {
-        return new EntityOption("workspace", workspace.id(), first(workspace.displayName(), workspace.id()),
-            first(workspace.rootRelativePath(), workspace.ownerType() + ":" + workspace.ownerId()),
-            workspace.ownerType() == null ? "workspace" : workspace.ownerType().name(), true);
-    }
-
-    private EntityOption option(WorkArea workArea) {
-        return new EntityOption("work-area", workArea.id(), first(workArea.displayName(), workArea.id()),
-            workArea.ownerType() + " " + workArea.ownerId() + " / " + workArea.areaRelativePath(),
-            workArea.home() ? "HOME" : workArea.active() ? "ACTIVE" : "INACTIVE",
-            workArea.active());
     }
 
     private EntityOption option(JobRun run) {

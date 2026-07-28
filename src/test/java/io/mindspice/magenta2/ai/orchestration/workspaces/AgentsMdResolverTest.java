@@ -116,64 +116,56 @@ class AgentsMdResolverTest {
     }
 
     @Test
-    void resolvesProjectBoundRootWithSelectedWorkAreaAsNestedContext() throws Exception {
-        Path projectRoot = Files.createDirectories(tempDir.resolve("projects/project-1"));
-        Path selectedWorkArea = Files.createDirectories(projectRoot.resolve("workareas/area-1"));
-        writeAgents(projectRoot, "project-root");
-        writeAgents(selectedWorkArea, "work-area");
-        OrchestrationTaskContext context = new OrchestrationTaskContext(
-            "agent-1",
+    void resolvesDescriptorBoundRootWithNestedContext() throws Exception {
+        Path agentRoot = Files.createDirectories(tempDir.resolve("workspace/agent/agent-1"));
+        Path nestedDir = Files.createDirectories(agentRoot.resolve("nested"));
+        writeAgents(agentRoot, "agent-root");
+        writeAgents(nestedDir, "nested-layer");
+        OrchestrationTaskContext context = new OrchestrationTaskContext("agent-1",
             "Agent One",
             null,
-            "project-1",
+            null,
+            null,
+            null,
             null,
             "TASK_RUN",
-            selectedWorkArea.toString(),
-            selectedWorkArea.resolve("outputs").toString(),
-            selectedWorkArea.toString(),
-            selectedWorkArea.resolve("runs/run-1").toString(),
+            agentRoot.toString(),
+            agentRoot.resolve("outputs").toString(),
             null,
-            projectRoot.toString(),
-            "area-1",
-            null,
-            null,
-            null
-        );
+            agentRoot.toString(),
+            null, null, null, null, null,
+            new WorkspaceDescriptor(WorkspaceKind.AGENT, "agent-1", agentRoot), null);
 
-        Optional<AgentsMdResolution> result = new AgentsMdResolver().resolveForContext(context, "workspace/notes.txt");
+        Optional<AgentsMdResolution> result = new AgentsMdResolver().resolveForContext(context, "nested/file.txt");
 
         assertThat(result).isPresent();
-        assertThat(result.orElseThrow().boundRoot()).isEqualTo(projectRoot.toRealPath());
+        assertThat(result.orElseThrow().boundRoot()).isEqualTo(agentRoot.toRealPath());
         assertThat(result.orElseThrow().layers()).extracting(AgentsMdLayer::relativeDirectory)
-            .containsExactly("", "workareas/area-1");
+            .containsExactly("", "nested");
     }
 
     @Test
-    void resolvesAgentEffectiveWorkspaceWhenNoOwnerRootIsProvided() throws Exception {
-        Path workspaceRoot = Files.createDirectories(tempDir.resolve("workspace/agent-1"));
+    void resolvesDescriptorBoundWorkspaceWithoutUsingLegacyHostRoot() throws Exception {
+        Path workspaceRoot = Files.createDirectories(tempDir.resolve("workspace/agent/agent-1"));
         Path nested = Files.createDirectories(workspaceRoot.resolve("docs"));
         writeAgents(workspaceRoot, "workspace-root");
         writeAgents(nested, "docs-layer");
-        OrchestrationTaskContext context = new OrchestrationTaskContext(
-            "agent-1",
+        OrchestrationTaskContext context = new OrchestrationTaskContext("agent-1",
             "Agent One",
+            null,
+            null,
             null,
             null,
             null,
             "TASK_RUN",
             workspaceRoot.toString(),
             workspaceRoot.resolve("runs/run-1/outputs").toString(),
+            null,
             workspaceRoot.toString(),
-            workspaceRoot.resolve("runs/run-1").toString(),
-            null,
-            null,
-            null,
-            null,
-            null,
-            null
-        );
+            null, null, null, null, null,
+            new WorkspaceDescriptor(WorkspaceKind.AGENT, "agent-1", workspaceRoot), null);
 
-        Optional<AgentsMdResolution> result = new AgentsMdResolver().resolveForContext(context, "workspace/docs/file.txt");
+        Optional<AgentsMdResolution> result = new AgentsMdResolver().resolveForContext(context, "docs/file.txt");
 
         assertThat(result).isPresent();
         assertThat(result.orElseThrow().boundRoot()).isEqualTo(workspaceRoot.toRealPath());

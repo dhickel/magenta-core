@@ -1,117 +1,134 @@
 package io.mindspice.magenta2.ai.orchestration.workspaces;
 
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
+import java.util.Locale;
+import java.util.Objects;
+import java.util.regex.Pattern;
 
 import io.mindspice.magenta2.core.util.PlainPathSegmentValidator;
 
+/** Sole structural grammar authority for Magenta workspace paths. */
 public final class WorkspacePathLayout {
     public static final String WORKSPACE = "workspace";
-    public static final String AGENTS = "agents";
-    public static final String PROJECTS = "projects";
-    public static final String CHATS = "chats";
-    public static final String HOME = "home";
-    public static final String WORKAREAS = "workareas";
-    public static final String WORK = "work";
     public static final String OUTPUTS = "outputs";
-    public static final String RUNS = "runs";
-    public static final String ROOT_ALIAS = "root";
-    public static final String RUN_ALIAS = "run";
-    public static final String FILES = "files";
+    public static final String TASKS = "tasks";
+    public static final String SKILLS = ".skills";
+    public static final String STAGING = "staging";
+    public static final String HOME = "home";
+    public static final String SCRIPTS = "scripts";
+    public static final String APPS = "apps";
+    public static final String REPOS = "repos";
+    public static final String PROJECTS = "projects";
 
-    public static final String LEGACY_RUNTIME = "runtime";
-    public static final String LEGACY_TASK_RUNS = "task-runs";
-    public static final String LEGACY_WORKFLOW_RUNS = "workflow-runs";
-    public static final String LEGACY_JOBS = "jobs";
-    public static final String LEGACY_SCRATCH = "scratch";
+    private static final int MAX_COMPONENT_BYTES = 255;
+    private static final Pattern TASK_PATH_KEY = Pattern.compile(
+        "v1-(task|workflow|job)-[0-9a-f]{64}");
 
     private WorkspacePathLayout() {
     }
 
-    public static Path agentWorkspaceRoot(String agentWorkspaceId) {
-        return Path.of(WORKSPACE, segment(agentWorkspaceId, "agentWorkspaceId"));
+    public static Path agentRoot(String agentId) {
+        return Path.of(WORKSPACE, WorkspaceKind.AGENT.token(), segment(agentId, "agentId"));
     }
 
-    public static Path agentHome(String agentWorkspaceId) {
-        return agentWorkspaceRoot(agentWorkspaceId).resolve(HOME);
+    public static Path chatRoot(String conversationId) {
+        return Path.of(WORKSPACE, WorkspaceKind.CHAT.token(), segment(conversationId, "conversationId"));
     }
 
-    public static Path workArea(String agentWorkspaceId, String workAreaId) {
-        return agentWorkspaceRoot(agentWorkspaceId)
-            .resolve(WORKAREAS)
-            .resolve(segment(workAreaId, "workAreaId"));
+    public static Path userRoot(String name) {
+        return Path.of(WORKSPACE, WorkspaceKind.USER.token(), segment(name, "userName"));
     }
 
-    public static Path workAreaRelative(String workAreaId) {
-        return Path.of(WORKAREAS, segment(workAreaId, "workAreaId"));
+    // ── AGENT canonical personal area factories ──
+
+    public static Path agentHomeDir(String agentId) {
+        return agentRoot(agentId).resolve(HOME);
     }
 
-    public static Path runRoot(String agentWorkspaceId, String runId) {
-        return agentWorkspaceRoot(agentWorkspaceId)
-            .resolve(RUNS)
-            .resolve(segment(runId, "runId"));
+    public static Path agentScriptsDir(String agentId) {
+        return agentRoot(agentId).resolve(SCRIPTS);
     }
 
-    public static Path runOutputs(String agentWorkspaceId, String runId) {
-        return runRoot(agentWorkspaceId, runId).resolve(OUTPUTS);
+    public static Path agentAppsDir(String agentId) {
+        return agentRoot(agentId).resolve(APPS);
     }
 
-    public static Path agentFinalOutputs(String agentWorkspaceId) {
-        return agentWorkspaceRoot(agentWorkspaceId).resolve(OUTPUTS);
+    public static Path agentReposDir(String agentId) {
+        return agentRoot(agentId).resolve(REPOS);
     }
 
-    public static Path agentWork(String agentWorkspaceId) {
-        return agentWorkspaceRoot(agentWorkspaceId).resolve(WORK);
+    public static Path agentProjectsDir(String agentId) {
+        return agentRoot(agentId).resolve(PROJECTS);
     }
 
-    public static Path agentProjectLinks(String agentWorkspaceId) {
-        return agentWorkspaceRoot(agentWorkspaceId).resolve(PROJECTS);
+    /** Workspace-relative path to an agent's materialization directory. */
+    public static Path agentMaterializationDir(String agentId, String keySerialized) {
+        return agentProjectsDir(agentId).resolve(validateComponent(keySerialized, "materializationKey"));
     }
 
-    public static Path chatFiles(String conversationId) {
-        return Path.of(CHATS, segment(conversationId, "conversationId"), FILES);
+    /** Workspace-relative reserved task root. */
+    public static Path tasksRoot() {
+        return Path.of(TASKS);
     }
 
-    public static Path projectRoot(String projectId) {
-        return Path.of(PROJECTS, segment(projectId, "projectId"));
+    /** Workspace-relative reserved skill root. */
+    public static Path skillsRoot() {
+        return Path.of(SKILLS);
     }
 
-    public static Path agentMetadataRoot(String agentId) {
-        return Path.of(AGENTS, segment(agentId, "agentId"));
+    public static Path tasksDir(TaskPathKey taskPathKey) {
+        Objects.requireNonNull(taskPathKey, "taskPathKey");
+        validateComponent(taskPathKey.serialized(), "taskPathKey");
+        return Path.of(TASKS, taskPathKey.serialized());
     }
 
-    public static Path legacyAgentHome(String agentId) {
-        return agentMetadataRoot(agentId).resolve(HOME);
+    public static Path taskRunDir(TaskPathKey taskPathKey, String taskRunId) {
+        return tasksDir(taskPathKey).resolve(validateComponent(taskRunId, "taskRunId"));
     }
 
-    public static Path legacyAgentOutputs(String agentId) {
-        return agentMetadataRoot(agentId).resolve(OUTPUTS);
+    public static Path taskRunOutputsDir(TaskPathKey taskPathKey, String taskRunId) {
+        return taskRunDir(taskPathKey, taskRunId).resolve(OUTPUTS);
     }
 
-    public static Path legacyAgentWorkspaceRoot(String agentId) {
-        return agentMetadataRoot(agentId).resolve(WORKSPACE);
+    public static Path taskRunStagingDir(TaskPathKey taskPathKey, String taskRunId) {
+        return taskRunDir(taskPathKey, taskRunId).resolve(STAGING);
     }
 
-    public static Path legacyTaskRun(String runId) {
-        return Path.of(LEGACY_RUNTIME, LEGACY_TASK_RUNS, segment(runId, "runId"));
+    static String validateRunId(String taskRunId) {
+        return validateComponent(taskRunId, "taskRunId");
     }
 
-    public static Path legacyWorkflowRun(String runId) {
-        return Path.of(LEGACY_RUNTIME, LEGACY_WORKFLOW_RUNS, segment(runId, "runId"));
-    }
-
-    public static Path legacyJobWorkspace(String jobId) {
-        return Path.of(LEGACY_JOBS, segment(jobId, "jobId"), WORKSPACE);
-    }
-
-    public static Path legacyJobOutputRoot(String jobId) {
-        return Path.of(LEGACY_JOBS, segment(jobId, "jobId"), OUTPUTS);
-    }
-
-    public static String relativeString(Path relativePath) {
-        return relativePath.toString().replace('\\', '/');
+    static String validateTaskPathKeySegment(String value) {
+        String component = validateComponent(value, "taskPathKey");
+        if (!TASK_PATH_KEY.matcher(component).matches()) {
+            throw new IllegalArgumentException("taskPathKey is not canonical");
+        }
+        return component;
     }
 
     private static String segment(String value, String label) {
-        return PlainPathSegmentValidator.requirePlainSegment(value, label);
+        String segment = PlainPathSegmentValidator.requirePlainSegment(value, label);
+        requireComponentByteLength(segment, label);
+        return segment;
+    }
+
+    private static String validateComponent(String value, String label) {
+        String component = PlainPathSegmentValidator.requirePlainSegment(value, label);
+        String lower = component.toLowerCase(Locale.ROOT);
+        if (OUTPUTS.equals(lower) || TASKS.equals(lower) || SKILLS.equals(lower)
+                || STAGING.equals(lower) || WORKSPACE.equals(lower)
+                || HOME.equals(lower) || SCRIPTS.equals(lower) || APPS.equals(lower)
+                || REPOS.equals(lower) || PROJECTS.equals(lower)) {
+            throw new IllegalArgumentException(label + " must not use reserved name: " + value);
+        }
+        requireComponentByteLength(component, label);
+        return component;
+    }
+
+    private static void requireComponentByteLength(String value, String label) {
+        if (value.getBytes(StandardCharsets.UTF_8).length > MAX_COMPONENT_BYTES) {
+            throw new IllegalArgumentException(label + " exceeds " + MAX_COMPONENT_BYTES + " UTF-8 bytes");
+        }
     }
 }

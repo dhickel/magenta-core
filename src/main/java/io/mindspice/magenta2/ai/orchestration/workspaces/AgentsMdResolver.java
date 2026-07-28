@@ -1,6 +1,9 @@
 package io.mindspice.magenta2.ai.orchestration.workspaces;
 
 import java.io.IOException;
+import java.nio.charset.CharacterCodingException;
+import java.nio.charset.CodingErrorAction;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
@@ -15,12 +18,20 @@ import org.springframework.util.StringUtils;
 /**
  * Resolves AGENTS.md layers confined to a bound root and active path.
  *
- * <p>Magenta keeps all ancestor layers from the bound root to the active path
- * and uses closest-wins only for conflicts.
+ * <p>Walks ancestors from the bound root to the confined target directory,
+ * collecting user-authored AGENTS.md files in root-to-leaf order.
+ * No starter file is generated and no alias escapes the root.
+ *
+ * <p>Every candidate layer is validated: links, non-regular files, escape,
+ * invalid UTF-8, and unsafe active-path ancestry are terminal. Per-layer
+ * and aggregate byte limits apply with path-free truncation markers.
  */
 @Service
 public class AgentsMdResolver {
     private static final String AGENTS_FILE = "AGENTS.md";
+    private static final int MAX_LAYER_BYTES = 16384;   // 16 KB per layer
+    private static final int MAX_AGGREGATE_BYTES = 65536; // 64 KB total
+    private static final int MAX_PROMPT_CHARS = 8192;    // per-layer prompt truncation
 
     public AgentsMdResolution resolve(Path boundRoot, Path activePath) throws IOException {
         Path realBoundRoot = requireExistingDirectory(boundRoot, "bound root");
@@ -42,84 +53,120 @@ public class AgentsMdResolver {
         if (context == null) {
             return Optional.empty();
         }
-        String boundRootText = boundRootText(context);
-        if (!StringUtils.hasText(boundRootText)) {
+        WorkspaceDescriptor descriptor = context.workspaceDescriptor();
+        if (descriptor == null) {
             return Optional.empty();
         }
-        Path boundRoot = requireExistingDirectory(Path.of(boundRootText), "bound root");
-        Path resolvedActivePath = resolveContextActivePath(context, activePath);
-        return Optional.of(resolve(boundRoot, resolvedActivePath));
+        return Optional.of(resolveForDescriptor(descriptor, activePath));
     }
 
-    private Path resolveContextActivePath(
-        OrchestrationTaskContext context,
-        String activePath
+    /**
+     * Resolve using a descriptor as the bound root. The active path is
+     * resolved relative to the descriptor root.
+     */
+    public AgentsMdResolution resolveForDescriptor(
+        WorkspaceDescriptor descriptor,
+        String relativePath
     ) throws IOException {
-        Path workspaceRoot = requireExistingDirectory(Path.of(requiredText(contextWorkspacePath(context),
-            "active durable workspace path")), "active durable workspace");
-        String requested = StringUtils.hasText(activePath) ? activePath.trim() : WorkspacePathLayout.WORKSPACE;
-        String normalized = normalizeRequest(requested);
-        if (isAliasRoot(normalized, WorkspacePathLayout.WORKSPACE)) {
-            return workspaceRoot;
+        if (descriptor == null) {
+            throw new IllegalArgumentException("descriptor is required");
         }
-        if (normalized.startsWith(WorkspacePathLayout.WORKSPACE + "/")) {
-            return resolveScoped(workspaceRoot, normalized.substring((WorkspacePathLayout.WORKSPACE + "/").length()),
-                "active durable workspace");
+        Path boundRoot = requireExistingDirectory(descriptor.root(), "descriptor root");
+        String requested = StringUtils.hasText(relativePath) ? relativePath.trim() : ".";
+        if (requested.startsWith("/")) {
+            throw new IllegalArgumentException("Absolute paths are not allowed for AGENTS.md resolution");
         }
-        if (WorkspacePathLayout.ROOT_ALIAS.equals(normalized) || normalized.startsWith(WorkspacePathLayout.ROOT_ALIAS + "/")) {
-            Path ownerRoot = requireExistingDirectory(
-                Path.of(requiredText(contextRootPath(context), "active owner root path")),
-                "active owner root");
-            String remainder = WorkspacePathLayout.ROOT_ALIAS.equals(normalized)
-                ? ""
-                : normalized.substring((WorkspacePathLayout.ROOT_ALIAS + "/").length());
-            return resolveScoped(ownerRoot, remainder, "active owner root");
-        }
-        if (WorkspacePathLayout.OUTPUTS.equals(normalized) || normalized.startsWith(WorkspacePathLayout.OUTPUTS + "/")) {
-            Path outputRoot = requireExistingDirectory(Path.of(requiredText(context.hostOutputPath(),
-                "active output path")), "active output");
-            String remainder = WorkspacePathLayout.OUTPUTS.equals(normalized)
-                ? ""
-                : normalized.substring((WorkspacePathLayout.OUTPUTS + "/").length());
-            return resolveScoped(outputRoot, remainder, "active output");
-        }
-        if (WorkspacePathLayout.RUN_ALIAS.equals(normalized) || normalized.startsWith(WorkspacePathLayout.RUN_ALIAS + "/")) {
-            Path runRoot = requireExistingDirectory(Path.of(requiredText(contextRunPath(context),
-                "active run path")), "active run");
-            String remainder = WorkspacePathLayout.RUN_ALIAS.equals(normalized)
-                ? ""
-                : normalized.substring((WorkspacePathLayout.RUN_ALIAS + "/").length());
-            return resolveScoped(runRoot, remainder, "active run");
-        }
-        if (normalized.startsWith(WorkspacePathLayout.PROJECTS + "/")) {
-            String requiredProjectPrefix = WorkspacePathLayout.PROJECTS + "/" + requiredText(context.projectId(), "projectId");
-            if (!normalized.equals(requiredProjectPrefix) && !normalized.startsWith(requiredProjectPrefix + "/")) {
-                throw new IllegalArgumentException("Project path is not bound to this execution context: " + activePath);
-            }
-            Path ownerRoot = requireExistingDirectory(
-                Path.of(requiredText(contextRootPath(context), "active owner root path")),
-                "active owner root");
-            return resolveScoped(ownerRoot, normalized, "active owner root");
-        }
-        return resolveScoped(workspaceRoot, normalized, "active durable workspace");
+        Path active = ".".equals(requested) ? boundRoot : boundRoot.resolve(requested).normalize();
+        return resolve(boundRoot, active);
     }
 
     private List<AgentsMdLayer> collectLayers(Path realBoundRoot, Path lookupDirectory) throws IOException {
         List<Path> candidateDirectories = directoriesFromRoot(realBoundRoot, lookupDirectory);
         List<AgentsMdLayer> layers = new ArrayList<>();
+        int aggregateBytes = 0;
         int rank = 0;
         for (Path directory : candidateDirectories) {
             Path agentsPath = directory.resolve(AGENTS_FILE);
-            if (!Files.isRegularFile(agentsPath, LinkOption.NOFOLLOW_LINKS)) {
+            if (!Files.exists(agentsPath, LinkOption.NOFOLLOW_LINKS)) {
                 continue;
             }
-            Path realAgentsPath = agentsPath.toRealPath();
-            if (!realAgentsPath.startsWith(realBoundRoot)) {
-                throw new IllegalArgumentException("AGENTS.md escapes bound root: " + agentsPath);
+
+            // Reject links and non-regular files
+            if (Files.isSymbolicLink(agentsPath)) {
+                throw new AgentsMdIntegrityException(
+                        "AGENTS.md is a symbolic link and is not allowed");
             }
+            if (!Files.isRegularFile(agentsPath, LinkOption.NOFOLLOW_LINKS)) {
+                throw new AgentsMdIntegrityException(
+                        "AGENTS.md is not a regular file");
+            }
+
+            // Confinement check via real path
+            Path realAgentsPath;
+            try {
+                realAgentsPath = agentsPath.toRealPath();
+            } catch (IOException e) {
+                throw new AgentsMdIntegrityException(
+                        "Failed to resolve AGENTS.md real path", e);
+            }
+            if (!realAgentsPath.startsWith(realBoundRoot)) {
+                throw new AgentsMdIntegrityException(
+                        "AGENTS.md escapes bound root");
+            }
+
+            // Read bounded bytes
+            long fileSize;
+            try {
+                fileSize = Files.size(realAgentsPath);
+            } catch (IOException e) {
+                throw new AgentsMdIntegrityException(
+                        "Failed to read AGENTS.md size", e);
+            }
+            if (fileSize > MAX_LAYER_BYTES) {
+                throw new AgentsMdIntegrityException(
+                        "AGENTS.md exceeds per-layer limit of " + MAX_LAYER_BYTES + " bytes");
+            }
+
+            byte[] bytes;
+            try {
+                bytes = Files.readAllBytes(realAgentsPath);
+            } catch (IOException e) {
+                throw new AgentsMdIntegrityException(
+                        "Failed to read AGENTS.md", e);
+            }
+
+            // Validate UTF-8
+            String content;
+            try {
+                content = StandardCharsets.UTF_8.newDecoder()
+                        .onMalformedInput(CodingErrorAction.REPORT)
+                        .onUnmappableCharacter(CodingErrorAction.REPORT)
+                        .decode(java.nio.ByteBuffer.wrap(bytes))
+                        .toString();
+            } catch (CharacterCodingException e) {
+                throw new AgentsMdIntegrityException(
+                        "AGENTS.md is not valid UTF-8");
+            }
+
+            // Check aggregate limit
+            aggregateBytes += bytes.length;
+            if (aggregateBytes > MAX_AGGREGATE_BYTES) {
+                throw new AgentsMdIntegrityException(
+                        "AGENTS.md layers exceed aggregate limit of "
+                                + MAX_AGGREGATE_BYTES + " bytes");
+            }
+
+            // Truncate for prompt injection with path-free marker
+            String promptContent = content;
+            boolean truncated = false;
+            if (promptContent.length() > MAX_PROMPT_CHARS) {
+                promptContent = promptContent.substring(0, MAX_PROMPT_CHARS);
+                truncated = true;
+            }
+
             String relativeDirectory = normalizeRelative(realBoundRoot.relativize(directory));
-            String content = Files.readString(realAgentsPath);
-            layers.add(new AgentsMdLayer(realAgentsPath, relativeDirectory, content, rank));
+            layers.add(new AgentsMdLayer(realAgentsPath, relativeDirectory,
+                    promptContent, rank, truncated));
             rank++;
         }
         return List.copyOf(layers);
@@ -180,12 +227,6 @@ public class AgentsMdResolver {
         return normalized;
     }
 
-    private Path resolveScoped(Path scopeRoot, String relativePath, String label) throws IOException {
-        rejectUnsafeRelativePath(relativePath, label);
-        Path resolved = scopeRoot.resolve(relativePath).normalize();
-        return resolveConfinedPath(scopeRoot, resolved, label);
-    }
-
     private Path requireExistingDirectory(Path path, String label) throws IOException {
         if (path == null) {
             throw new IllegalArgumentException(label + " is required");
@@ -208,68 +249,27 @@ public class AgentsMdResolver {
         return current;
     }
 
-    private String contextWorkspacePath(OrchestrationTaskContext context) {
-        return StringUtils.hasText(context.hostDurableWorkspacePath())
-            ? context.hostDurableWorkspacePath()
-            : context.hostWorkspacePath();
-    }
-
-    private String contextRunPath(OrchestrationTaskContext context) {
-        return StringUtils.hasText(context.hostRunPath())
-            ? context.hostRunPath()
-            : context.hostWorkspacePath();
-    }
-
-    private String contextRootPath(OrchestrationTaskContext context) {
-        return StringUtils.hasText(context.hostRootPath())
-            ? context.hostRootPath()
-            : contextWorkspacePath(context);
-    }
-
-    private String boundRootText(OrchestrationTaskContext context) {
-        if (StringUtils.hasText(context.hostRootPath())) {
-            return context.hostRootPath();
-        }
-        if (StringUtils.hasText(context.hostDurableWorkspacePath())) {
-            return context.hostDurableWorkspacePath();
-        }
-        return context.hostWorkspacePath();
-    }
-
-    private String normalizeRequest(String requested) {
-        String normalized = requested.replace('\\', '/').trim();
-        if (normalized.startsWith("/")) {
-            throw new IllegalArgumentException("Absolute paths are not allowed for AGENTS.md resolution: " + requested);
-        }
-        if (normalized.contains("//")) {
-            throw new IllegalArgumentException("AGENTS.md active path is invalid: " + requested);
-        }
-        return normalized;
-    }
-
-    private boolean isAliasRoot(String normalized, String alias) {
-        return normalized.isEmpty() || ".".equals(normalized) || alias.equals(normalized);
-    }
-
-    private void rejectUnsafeRelativePath(String relativePath, String label) {
-        String normalized = relativePath == null ? "" : relativePath.replace('\\', '/');
-        if (normalized.equals("..")
-            || normalized.startsWith("../")
-            || normalized.endsWith("/..")
-            || normalized.contains("/../")) {
-            throw new IllegalArgumentException(label + " path escapes its scope");
-        }
-    }
-
-    private String requiredText(String value, String label) {
-        if (!StringUtils.hasText(value)) {
-            throw new IllegalArgumentException(label + " is required");
-        }
-        return value;
-    }
-
     private String normalizeRelative(Path relativePath) {
         String normalized = relativePath.toString().replace('\\', '/');
         return ".".equals(normalized) ? "" : normalized;
+    }
+
+    // ── Integrity exception ──
+
+    /**
+     * Terminal exception for AGENTS.md integrity or I/O failures.
+     *
+     * <p>Only an absent optional file resolves to empty. Any discovered-file
+     * link, non-regular file, escape, invalid UTF-8, size-limit, or I/O
+     * failure is terminal.
+     */
+    public static final class AgentsMdIntegrityException extends RuntimeException {
+        public AgentsMdIntegrityException(String message) {
+            super(message);
+        }
+
+        public AgentsMdIntegrityException(String message, Throwable cause) {
+            super(message, cause);
+        }
     }
 }

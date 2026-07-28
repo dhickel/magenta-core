@@ -14,14 +14,13 @@ These docs explain Magenta internals for contributors. Code remains the source o
 - [Workflow Engine](workflow-engine.md)
 - [Workspaces, Tools, and Outputs](workspaces-tools-outputs.md)
 - [Frontend HTMX](frontend-htmx.md)
-- [Avatar Dashboard Fragments](avatar-dashboard-fragments.md)
-- [Avatar Dashboard Layout Persistence](avatar-dashboard-layout-persistence.md)
-- [Avatar Planner Organizer](avatar-planner-organizer.md)
 - [Security](security.md)
 - [Configuration and Operations](configuration-operations.md)
+- [Schema migration foundation (001–009)](migrations-001-009.md); current contiguous migration ownership through 013 is summarized in [Data Model](data-model.md).
 
 ## Owner Notes
 
 - Architecture, API, service, schema, persistence, frontend, security, and configuration changes must update the relevant page.
 - Keep this index current when pages are added, renamed, or removed.
 - Keep route and payload summaries aligned with [`../api/00-index.md`](../api/00-index.md).
+- Ordered migration resources are contiguous through 013. The historical migration guide documents the immutable schedule/reaction version 008 and no-schema warm-bookkeeping marker at version 009; Data Model records versions 010-013.

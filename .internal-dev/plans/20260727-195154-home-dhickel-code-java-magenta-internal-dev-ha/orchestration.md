@@ -1,0 +1,34 @@
+# Orchestration
+
+## Scope Size
+**Size**: large
+
+## Phase Ledger
+- phase-01-agent-workspace-policy.md | depends: none | targets: src/main/java/io/mindspice/magenta2/ai/orchestration/workspaces/AgentWorkspaceArea.java, src/main/java/io/mindspice/magenta2/ai/orchestration/workspaces/WorkspacePathLayout.java, src/main/java/io/mindspice/magenta2/ai/orchestration/workspaces/WorkspaceDirectoryService.java, src/main/java/io/mindspice/magenta2/ai/orchestration/workspaces/ReservedWorkspacePathPolicy.java, src/main/java/io/mindspice/magenta2/ai/orchestration/workspaces/ConfinedPathMutationService.java, src/main/java/io/mindspice/magenta2/ai/orchestration/workspaces/WorkspaceExplorerService.java, src/main/java/io/mindspice/magenta2/ai/chat/tool/file/AgentFileToolService.java | goal: enforce the closed AGENT root and ordinary writer policy
+- phase-02-materialization-context-persistence.md | depends: phase-01-agent-workspace-policy.md | targets: src/main/resources/db/migrations/010-agent-materialization-context.sql, src/main/resources/schema.sql, src/main/java/io/mindspice/magenta2/core/persistence/SchemaMigrationRunner.java, src/main/java/io/mindspice/magenta2/ai/orchestration/context/AgentContextService.java, src/main/java/io/mindspice/magenta2/ai/orchestration/context/AgentContextRepository.java, src/main/java/io/mindspice/magenta2/ai/orchestration/context/AgentMaterializationService.java, src/main/java/io/mindspice/magenta2/ai/orchestration/context/AgentMaterializationRepository.java, src/main/java/io/mindspice/magenta2/ai/orchestration/workspaces/WorkspaceDirectoryService.java, src/main/java/io/mindspice/magenta2/ai/orchestration/workspaces/MaterializationLocation.java | goal: persist generation-safe materializations, defaults, and immutable binding snapshots
+- phase-03-immutable-binding-lifecycle.md | depends: phase-02-materialization-context-persistence.md | targets: src/main/java/io/mindspice/magenta2/ai/chat/model/ChatRequest.java, src/main/java/io/mindspice/magenta2/ai/chat/service/RequestResolver.java, src/main/java/io/mindspice/magenta2/ai/chat/service/ChatService.java, src/main/java/io/mindspice/magenta2/ai/orchestration/runtime/AssignmentService.java, src/main/java/io/mindspice/magenta2/ai/orchestration/runtime/TaskRunLifecycleService.java, src/main/java/io/mindspice/magenta2/ai/orchestration/runtime/OrchestrationRunnerService.java, src/main/java/io/mindspice/magenta2/ai/orchestration/workflow/WorkflowRunner.java, src/main/java/io/mindspice/magenta2/ai/chat/plan/PlanService.java, src/main/java/io/mindspice/magenta2/ai/orchestration/runtime/JobService.java | goal: capture and carry immutable context through conversations, assignments, runs, and lineage
+- phase-04-prompt-skills-context.md | depends: phase-03-immutable-binding-lifecycle.md | targets: src/main/java/io/mindspice/magenta2/ai/chat/service/turn/TrustedContextPolicyAssembler.java, src/main/java/io/mindspice/magenta2/ai/chat/service/turn/PromptContextAssembler.java, src/main/java/io/mindspice/magenta2/ai/orchestration/workspaces/AgentsMdResolver.java, src/main/java/io/mindspice/magenta2/ai/orchestration/workspaces/WorkspaceMdResolver.java, src/main/java/io/mindspice/magenta2/ai/skills/MaterializationSkillAuthority.java, src/main/java/io/mindspice/magenta2/ai/skills/SkillResolutionContext.java, src/main/java/io/mindspice/magenta2/ai/skills/SkillScopeDiscoveryService.java, src/main/java/io/mindspice/magenta2/ai/skills/SkillTrustService.java | goal: inject trusted binding policy and generation-bound untrusted guidance and skills
+- phase-05-restricted-system-chat.md | depends: phase-03-immutable-binding-lifecycle.md, phase-04-prompt-skills-context.md | targets: src/main/resources/db/migrations/012-system-chat-proposals.sql, src/main/resources/schema.sql, src/main/java/io/mindspice/magenta2/core/persistence/SchemaMigrationRunner.java, src/main/java/io/mindspice/magenta2/ai/chat/service/ChatInvocationProfile.java, src/main/java/io/mindspice/magenta2/ai/chat/service/ChatService.java, src/main/java/io/mindspice/magenta2/ai/chat/system/SystemChatService.java, src/main/java/io/mindspice/magenta2/ai/chat/system/SystemChatToolRegistry.java, src/main/java/io/mindspice/magenta2/ai/chat/system/SystemChatActionProposalService.java, src/main/java/io/mindspice/magenta2/ai/orchestration/settings/RuntimeSettingsService.java | goal: provide fixed-profile read-only system chat and audited queue proposals
+- phase-06-api-agent-console.md | depends: phase-04-prompt-skills-context.md, phase-05-restricted-system-chat.md | targets: src/main/java/io/mindspice/magenta2/api/web/AgentContextController.java, src/main/java/io/mindspice/magenta2/api/web/SystemChatController.java, src/main/java/io/mindspice/magenta2/api/web/AgentContextFragments.java, src/main/java/io/mindspice/magenta2/api/web/SystemChatFragments.java, src/main/java/io/mindspice/magenta2/api/web/WorkspaceExplorerFragments.java, src/main/java/io/mindspice/magenta2/api/web/OrchestrationController.java, src/main/resources/static/css/orchestration.css, src/main/resources/static/js/orchestration/htmx-errors.js, src/main/resources/static/js/orchestration/system-chat.js | goal: expose thin versioned APIs and independent HTMX agent-console hosts
+- phase-07-documentation-integration.md | depends: phase-06-api-agent-console.md | targets: .internal-dev/specifications/architecture.md, .internal-dev/specifications/service-graph.md, .internal-dev/specifications/services.md, .internal-dev/specifications/api.md, .internal-dev/specifications/web.md, .internal-dev/specifications/simplypages.md, .internal-dev/specifications/decisions.md, .internal-dev/specifications/deferred-features.md, docs/technical/architecture.md, docs/technical/data-model.md, docs/technical/security.md, docs/technical/workspaces-tools-outputs.md, docs/end-user/agents.md, docs/end-user/projects-and-workspaces.md, docs/end-user/chat.md, .internal-dev/changelogs/2026-07-27-agent-workspace-establishment.md | goal: reconcile contracts and run final cross-domain validation
+
+## Execution Waves
+- wave-01: phase-01-agent-workspace-policy.md
+- wave-02: phase-02-materialization-context-persistence.md
+- wave-03: phase-03-immutable-binding-lifecycle.md
+- wave-04: phase-04-prompt-skills-context.md
+- wave-05: phase-05-restricted-system-chat.md
+- wave-06: phase-06-api-agent-console.md
+- wave-07: phase-07-documentation-integration.md
+
+## Model Assignments
+- Implementation: deepseek/deepseek-v4-pro:max
+- Validation: openai-codex/gpt-5.6-terra:high
+- Implementers: exactly one implementation agent per phase
+
+## Validation Gate
+- Gate: post-phase validator review-and-repair must PASS before a phase is complete.
+- Dependencies: no dependent phase starts before every dependency has PASS.
+
+## Final Integration
+- Integration: after all phases PASS, run final integration validation with openai-codex/gpt-5.6-terra:high.

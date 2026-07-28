@@ -21,12 +21,12 @@ public class WorkspaceFileMetadataService {
         return repository.ensureLabel(labelSlug, displayName, false);
     }
 
-    public WorkspaceFileLabelAssignment addLabel(WorkArea workArea, String rootRelativePath, String labelSlug) {
-        WorkspaceFileLabelAssignment assignment = repository.addLabel(workArea, rootRelativePath, rootRelativePath, labelSlug);
+    public WorkspaceFileLabelAssignment addLabel(WorkspaceDescriptor descriptor, String fileRelativePath, String labelSlug) {
+        WorkspaceFileLabelAssignment assignment = repository.addLabel(descriptor.identity(), fileRelativePath, labelSlug);
         actionLogRepository.record(
-            workArea,
+            descriptor,
             WorkspaceFileActionType.TAG_ADD,
-            rootRelativePath,
+            fileRelativePath,
             null,
             "SUCCEEDED",
             "{\"label\":\"" + assignment.label().slug() + "\"}"
@@ -34,12 +34,12 @@ public class WorkspaceFileMetadataService {
         return assignment;
     }
 
-    public int removeLabel(WorkArea workArea, String rootRelativePath, String labelSlug) {
-        int removed = repository.removeLabel(workArea, rootRelativePath, labelSlug);
+    public int removeLabel(WorkspaceDescriptor descriptor, String fileRelativePath, String labelSlug) {
+        int removed = repository.removeLabel(descriptor.identity(), fileRelativePath, labelSlug);
         actionLogRepository.record(
-            workArea,
+            descriptor,
             WorkspaceFileActionType.TAG_REMOVE,
-            rootRelativePath,
+            fileRelativePath,
             null,
             "SUCCEEDED",
             "{\"label\":\"" + labelSlug + "\",\"removed\":" + removed + "}"
@@ -47,19 +47,19 @@ public class WorkspaceFileMetadataService {
         return removed;
     }
 
-    public List<WorkspaceFileLabelAssignment> labelsForPath(String workspaceId, String rootRelativePath) {
-        return repository.labelsForPath(workspaceId, rootRelativePath);
+    public List<WorkspaceFileLabelAssignment> labelsForPath(WorkspaceDescriptor descriptor, String fileRelativePath) {
+        return repository.labelsForPath(descriptor.identity(), fileRelativePath);
     }
 
-    public void onMove(WorkArea workArea, String sourceRootRelativePath, String targetRootRelativePath) {
-        repository.moveSubtree(workArea, sourceRootRelativePath, targetRootRelativePath);
+    public void onMove(WorkspaceDescriptor descriptor, String sourceRelativePath, String targetRelativePath) {
+        repository.moveSubtree(descriptor.identity(), sourceRelativePath, targetRelativePath);
     }
 
-    public void onCopy(WorkArea workArea, String sourceRootRelativePath, String targetRootRelativePath) {
-        repository.copySubtree(workArea, sourceRootRelativePath, targetRootRelativePath);
+    public void onCopy(WorkspaceDescriptor descriptor, String sourceRelativePath, String targetRelativePath) {
+        repository.copySubtree(descriptor.identity(), sourceRelativePath, targetRelativePath);
     }
 
-    public void onDelete(WorkArea workArea, String sourceRootRelativePath) {
-        repository.deleteSubtree(workArea.workspaceId(), sourceRootRelativePath);
+    public void onDelete(WorkspaceDescriptor descriptor, String sourceRelativePath) {
+        repository.deleteSubtree(descriptor.identity(), sourceRelativePath);
     }
 }

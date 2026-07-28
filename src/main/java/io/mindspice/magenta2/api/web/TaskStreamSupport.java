@@ -57,7 +57,8 @@ public final class TaskStreamSupport {
             return new OrchestrationRunContext(null, null, null, null, null);
         }
         return new OrchestrationRunContext(
-            request.agentId(), request.jobId(), request.projectId(), request.workspaceId(),
+            request.agentId(), request.jobId(), request.projectId(),
+            request.workspaceType(), request.workspaceKey(),
             request.modelOverride(), request.priority()
         );
     }

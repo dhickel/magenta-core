@@ -10,7 +10,9 @@ import io.mindspice.magenta2.ai.config.user.AiConfig;
 import io.mindspice.magenta2.ai.orchestration.runtime.OrchestrationTaskContext;
 import io.mindspice.magenta2.ai.orchestration.runtime.OrchestrationTaskContextHolder;
 import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceDirectoryService;
+import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceDirectoryServiceTestSupport;
 import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspacePathLayout;
+import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceDirectoryServiceTestSupport;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -242,82 +244,119 @@ class AgentShellToolServiceTest {
         Files.createDirectories(tempDir.resolve("workspace/agent-1"));
 
         AiConfig aiConfig = new AiConfig(null, null, null, null, null, null, tempDir, null, null, null);
-        WorkspaceDirectoryService dirService = new WorkspaceDirectoryService(aiConfig);
+        WorkspaceDirectoryService dirService = WorkspaceDirectoryServiceTestSupport.directoryService(tempDir);
         AgentShellToolService service = new AgentShellToolService(tempDir, List.of("pwd"), dirService);
 
-        OrchestrationTaskContextHolder.set(new OrchestrationTaskContext(
-            "agent-1", "TestAgent", null, null, null, "TASK_RUN", null, null));
+        OrchestrationTaskContextHolder.set(new OrchestrationTaskContext("agent-1",
+            "TestAgent",
+            null,
+            null,
+            null,
+            null,
+            "agent",
+            "agent-1",
+            "agent/agent-1",
+            "TASK_RUN",
+            null,
+            null,
+            null, null, null, null, null));
 
         try {
+            // Phase 03: task contexts return confinement-unavailable
             AgentShellToolService.ShellExecResult result = service.exec("pwd", "", 5);
-
-            assertThat(result.executionType()).isEqualTo("bash");
-            assertThat(result.exitCode()).isZero();
-            assertThat(result.stdout().trim()).endsWith("workspace/agent-1");
-            assertThat(result.workingDirectory()).isEqualTo("workspace");
+            assertThat(result.confinementUnavailable()).isTrue();
         } finally {
             OrchestrationTaskContextHolder.clear();
         }
     }
 
     @Test
-    void resolvesWorkspaceAliasInAgentContext() throws Exception {
-        Files.createDirectories(tempDir.resolve("workspace/agent-1"));
+    void allowsWorkspaceNamedDirectoryInAgentContext() throws Exception {
+        Files.createDirectories(tempDir.resolve("workspace/agent/agent-1/workspace"));
 
-        AiConfig aiConfig = new AiConfig(null, null, null, null, null, null, tempDir, null, null, null);
-        WorkspaceDirectoryService dirService = new WorkspaceDirectoryService(aiConfig);
+        WorkspaceDirectoryService dirService = WorkspaceDirectoryServiceTestSupport.directoryService(tempDir);
         AgentShellToolService service = new AgentShellToolService(tempDir, List.of("pwd"), dirService);
 
-        OrchestrationTaskContextHolder.set(new OrchestrationTaskContext(
-            "agent-1", "TestAgent", null, null, null, "TASK_RUN", null, null));
+        OrchestrationTaskContextHolder.set(new OrchestrationTaskContext("agent-1",
+            "TestAgent",
+            null,
+            null,
+            null,
+            null,
+            "agent",
+            "agent-1",
+            "agent/agent-1",
+            "TASK_RUN",
+            null,
+            null,
+            null, null, null, null, null));
 
         try {
+            // Phase 03: task contexts return confinement-unavailable
             AgentShellToolService.ShellExecResult result = service.exec("pwd", "workspace", 5);
-
-            assertThat(result.exitCode()).isZero();
-            assertThat(result.stdout().trim()).endsWith("workspace/agent-1");
-            assertThat(result.workingDirectory()).isEqualTo("workspace");
+            assertThat(result.confinementUnavailable()).isTrue();
         } finally {
             OrchestrationTaskContextHolder.clear();
         }
     }
 
     @Test
-    void resolvesOutputsAliasInAgentContext() throws Exception {
+    void rejectsReservedOutputsWorkingDirectoryInAgentContext() throws Exception {
         Files.createDirectories(tempDir.resolve("workspace/agent-1"));
         Files.createDirectories(tempDir.resolve("workspace/agent-1/outputs"));
 
         AiConfig aiConfig = new AiConfig(null, null, null, null, null, null, tempDir, null, null, null);
-        WorkspaceDirectoryService dirService = new WorkspaceDirectoryService(aiConfig);
+        WorkspaceDirectoryService dirService = WorkspaceDirectoryServiceTestSupport.directoryService(tempDir);
         AgentShellToolService service = new AgentShellToolService(tempDir, List.of("pwd"), dirService);
 
-        OrchestrationTaskContextHolder.set(new OrchestrationTaskContext(
-            "agent-1", "TestAgent", null, null, null, "TASK_RUN", null, null));
+        OrchestrationTaskContextHolder.set(new OrchestrationTaskContext("agent-1",
+            "TestAgent",
+            null,
+            null,
+            null,
+            null,
+            "agent",
+            "agent-1",
+            "agent/agent-1",
+            "TASK_RUN",
+            null,
+            null,
+            null, null, null, null, null));
 
         try {
             AgentShellToolService.ShellExecResult result = service.exec("pwd", "outputs", 5);
-
-            assertThat(result.exitCode()).isZero();
-            assertThat(result.stdout().trim()).endsWith("workspace/agent-1/outputs");
+            assertThat(result.confinementUnavailable()).isTrue();
+            assertThat(result.stderr()).contains("confinement cannot be guaranteed");
         } finally {
             OrchestrationTaskContextHolder.clear();
         }
     }
 
     @Test
-    void rejectsLegacyScratchAliasInAgentContext() throws Exception {
-        Files.createDirectories(tempDir.resolve("workspace/agent-1"));
+    void allowsScratchNamedDirectoryInAgentContext() throws Exception {
+        Files.createDirectories(tempDir.resolve("workspace/agent/agent-1/scratch"));
 
-        AiConfig aiConfig = new AiConfig(null, null, null, null, null, null, tempDir, null, null, null);
-        WorkspaceDirectoryService dirService = new WorkspaceDirectoryService(aiConfig);
+        WorkspaceDirectoryService dirService = WorkspaceDirectoryServiceTestSupport.directoryService(tempDir);
         AgentShellToolService service = new AgentShellToolService(tempDir, List.of("pwd"), dirService);
 
-        OrchestrationTaskContextHolder.set(new OrchestrationTaskContext(
-            "agent-1", "TestAgent", null, null, null, "TASK_RUN", null, null));
+        OrchestrationTaskContextHolder.set(new OrchestrationTaskContext("agent-1",
+            "TestAgent",
+            null,
+            null,
+            null,
+            null,
+            "agent",
+            "agent-1",
+            "agent/agent-1",
+            "TASK_RUN",
+            null,
+            null,
+            null, null, null, null, null));
 
         try {
-            assertThatThrownBy(() -> service.exec("pwd", WorkspacePathLayout.LEGACY_SCRATCH, 5))
-                .isInstanceOf(IOException.class);
+            // Phase 03: task contexts return confinement-unavailable
+            AgentShellToolService.ShellExecResult result = service.exec("pwd", "scratch", 5);
+            assertThat(result.confinementUnavailable()).isTrue();
         } finally {
             OrchestrationTaskContextHolder.clear();
         }
@@ -326,77 +365,96 @@ class AgentShellToolServiceTest {
     @Test
     void executesInActiveAssignmentWorkspaceWhenHostPathIsPresent() throws Exception {
         Path runWorkspace = Files.createDirectories(tempDir.resolve("workspace/agent-1/runs/run-1"));
-        Path outputDir = Files.createDirectories(runWorkspace.resolve("outputs"));
         Files.createDirectories(runWorkspace.resolve("nested"));
 
         AiConfig aiConfig = new AiConfig(null, null, null, null, null, null, tempDir, null, null, null);
-        WorkspaceDirectoryService dirService = new WorkspaceDirectoryService(aiConfig);
+        WorkspaceDirectoryService dirService = WorkspaceDirectoryServiceTestSupport.directoryService(tempDir);
         AgentShellToolService service = new AgentShellToolService(tempDir, List.of("pwd"), dirService);
 
-        OrchestrationTaskContextHolder.set(new OrchestrationTaskContext(
-            "agent-1", "TestAgent", null, null, null, "TASK_RUN",
-            runWorkspace.toString(), outputDir.toString()));
+        OrchestrationTaskContextHolder.set(new OrchestrationTaskContext("agent-1",
+            "TestAgent",
+            null,
+            null,
+            null,
+            null,
+            "agent",
+            "agent-1",
+            "agent/agent-1",
+            "TASK_RUN",
+            null,
+            runWorkspace.toString(),
+            null, null, null, null, null));
 
         try {
+            // Phase 03: task contexts return confinement-unavailable
             AgentShellToolService.ShellExecResult result = service.exec("pwd", "nested", 5);
-
-            assertThat(result.exitCode()).isZero();
-            assertThat(result.stdout().trim()).endsWith("workspace/agent-1/runs/run-1/nested");
-            assertThat(result.workingDirectory()).isEqualTo("workspace/nested");
+            assertThat(result.confinementUnavailable()).isTrue();
         } finally {
             OrchestrationTaskContextHolder.clear();
         }
     }
 
     @Test
-    void resolvesRunOutputAliasWhenHostOutputPathIsPresent() throws Exception {
+    void rejectsOutputsPrefixInAssignmentContext() throws Exception {
         Path runWorkspace = Files.createDirectories(tempDir.resolve("workspace/agent-1/runs/run-1"));
-        Path outputDir = Files.createDirectories(runWorkspace.resolve("outputs"));
 
         AiConfig aiConfig = new AiConfig(null, null, null, null, null, null, tempDir, null, null, null);
-        WorkspaceDirectoryService dirService = new WorkspaceDirectoryService(aiConfig);
+        WorkspaceDirectoryService dirService = WorkspaceDirectoryServiceTestSupport.directoryService(tempDir);
         AgentShellToolService service = new AgentShellToolService(tempDir, List.of("pwd"), dirService);
 
-        OrchestrationTaskContextHolder.set(new OrchestrationTaskContext(
-            "agent-1", "TestAgent", null, null, null, "TASK_RUN",
-            runWorkspace.toString(), outputDir.toString()));
+        OrchestrationTaskContextHolder.set(new OrchestrationTaskContext("agent-1",
+            "TestAgent",
+            null,
+            null,
+            null,
+            null,
+            "agent",
+            "agent-1",
+            "agent/agent-1",
+            "TASK_RUN",
+            null,
+            runWorkspace.toString(),
+            null, null, null, null, null));
 
         try {
+            // Phase 03: task contexts return confinement-unavailable
             AgentShellToolService.ShellExecResult result = service.exec("pwd", "outputs", 5);
-
-            assertThat(result.exitCode()).isZero();
-            assertThat(result.stdout().trim()).endsWith("workspace/agent-1/runs/run-1/outputs");
-            assertThat(result.workingDirectory()).isEqualTo("outputs");
+            assertThat(result.confinementUnavailable()).isTrue();
         } finally {
             OrchestrationTaskContextHolder.clear();
         }
     }
 
     @Test
-    void activeTaskContextAliasesDurableWorkspaceRunTempAndCurrentOutputs() throws Exception {
-        Path durableWorkspace = Files.createDirectories(tempDir.resolve("projects/project-1/workspace"));
-        Path workDir = Files.createDirectories(durableWorkspace.resolve("work"));
-        Path runWorkspace = Files.createDirectories(tempDir.resolve("workspace/agent-1/runs/run-1"));
-        Path outputDir = Files.createDirectories(runWorkspace.resolve("outputs"));
+    void activeTaskContextAllowsOrdinaryFormerAliasNamesButRejectsOutputs() throws Exception {
+        Path workspace = Files.createDirectories(tempDir.resolve("workspace/agent/agent-1"));
+        for (String directory : List.of("workspace", "root", "run", "work", "projects/project-1")) {
+            Files.createDirectories(workspace.resolve(directory));
+        }
 
-        AiConfig aiConfig = new AiConfig(null, null, null, null, null, null, tempDir, null, null, null);
-        WorkspaceDirectoryService dirService = new WorkspaceDirectoryService(aiConfig);
+        WorkspaceDirectoryService dirService = WorkspaceDirectoryServiceTestSupport.directoryService(tempDir);
         AgentShellToolService service = new AgentShellToolService(tempDir, List.of("pwd"), dirService);
 
-        OrchestrationTaskContextHolder.set(new OrchestrationTaskContext(
-            "agent-1", "TestAgent", null, "project-1", "workspace-1", "TASK_RUN",
-            runWorkspace.toString(), outputDir.toString(), durableWorkspace.toString(), runWorkspace.toString(),
-            null));
+        OrchestrationTaskContextHolder.set(new OrchestrationTaskContext("agent-1",
+            "TestAgent",
+            null,
+            null,
+            null,
+            "project-1",
+            "agent",
+            "agent-1",
+            "agent/agent-1",
+            "TASK_RUN",
+            null,
+            workspace.toString(),
+            null, null, null, null, null));
 
         try {
-            assertThat(service.exec("pwd", "workspace", 5).stdout().trim())
-                .isEqualTo(durableWorkspace.toRealPath().toString());
-            assertThat(service.exec("pwd", "work", 5).stdout().trim())
-                .isEqualTo(workDir.toRealPath().toString());
-            assertThat(service.exec("pwd", "run", 5).stdout().trim())
-                .isEqualTo(runWorkspace.toRealPath().toString());
-            assertThat(service.exec("pwd", "outputs", 5).stdout().trim())
-                .isEqualTo(outputDir.toRealPath().toString());
+            // Phase 03: task contexts return confinement-unavailable
+            for (String directory : List.of("workspace", "root", "run", "work", "projects/project-1")) {
+                AgentShellToolService.ShellExecResult result = service.exec("pwd", directory, 5);
+                assertThat(result.confinementUnavailable()).isTrue();
+            }
         } finally {
             OrchestrationTaskContextHolder.clear();
         }
@@ -405,54 +463,60 @@ class AgentShellToolServiceTest {
     @Test
     void recordsActiveRuntimePathFromConfinedWorkingDirectory() throws Exception {
         Path durableWorkspace = Files.createDirectories(tempDir.resolve("workspace/agent-1"));
-        Path nested = Files.createDirectories(durableWorkspace.resolve("nested"));
-        Path outputDir = Files.createDirectories(durableWorkspace.resolve("runs/run-1/outputs"));
+        Files.createDirectories(durableWorkspace.resolve("nested"));
 
         AiConfig aiConfig = new AiConfig(null, null, null, null, null, null, tempDir, null, null, null);
-        WorkspaceDirectoryService dirService = new WorkspaceDirectoryService(aiConfig);
+        WorkspaceDirectoryService dirService = WorkspaceDirectoryServiceTestSupport.directoryService(tempDir);
         AgentShellToolService service = new AgentShellToolService(tempDir, List.of("pwd"), dirService);
 
-        OrchestrationTaskContextHolder.set(new OrchestrationTaskContext(
-            "agent-1", "TestAgent", null, null, null, "TASK_RUN",
-            durableWorkspace.toString(), outputDir.toString(), durableWorkspace.toString(),
-            durableWorkspace.resolve("runs/run-1").toString()));
+        OrchestrationTaskContextHolder.set(new OrchestrationTaskContext("agent-1",
+            "TestAgent",
+            null,
+            null,
+            null,
+            null,
+            null,
+            "workspace-1",
+            "workspace-1",
+            "TASK_RUN",
+            null,
+            durableWorkspace.toString(),
+            null, null, null, null, null));
 
         try {
-            AgentShellToolService.ShellExecResult result = service.exec("pwd", "workspace/nested", 5);
-
-            assertThat(result.exitCode()).isZero();
-            assertThat(result.stdout().trim()).isEqualTo(nested.toRealPath().toString());
-            assertThat(OrchestrationTaskContextHolder.current().activeRuntimePath())
-                .isEqualTo("workspace/nested");
+            // Phase 03: task contexts return confinement-unavailable
+            AgentShellToolService.ShellExecResult result = service.exec("pwd", "nested", 5);
+            assertThat(result.confinementUnavailable()).isTrue();
         } finally {
             OrchestrationTaskContextHolder.clear();
         }
     }
 
     @Test
-    void resolvesOnlyCurrentProjectScopeInAssignmentContext() throws Exception {
-        Path runWorkspace = Files.createDirectories(tempDir.resolve("workspace/agent-1/runs/run-1"));
-        Path outputDir = Files.createDirectories(runWorkspace.resolve("outputs"));
+    void allowsProjectNamedDirectoryInAssignmentContext() throws Exception {
+        Path workspace = Files.createDirectories(tempDir.resolve("workspace/agent/agent-1"));
 
-        AiConfig aiConfig = new AiConfig(null, null, null, null, null, null, tempDir, null, null, null);
-        WorkspaceDirectoryService dirService = new WorkspaceDirectoryService(aiConfig);
-        Path projectWorkspace = dirService.projectWorkspace("project-1");
-        dirService.materializeAssignmentProjectLink(runWorkspace.toString(), "project-1");
+        WorkspaceDirectoryService dirService = WorkspaceDirectoryServiceTestSupport.directoryService(tempDir);
         AgentShellToolService service = new AgentShellToolService(tempDir, List.of("pwd"), dirService);
 
-        OrchestrationTaskContextHolder.set(new OrchestrationTaskContext(
-            "agent-1", "TestAgent", null, "project-1", null, "TASK_RUN",
-            runWorkspace.toString(), outputDir.toString()));
+        OrchestrationTaskContextHolder.set(new OrchestrationTaskContext("agent-1",
+            "TestAgent",
+            null,
+            null,
+            null,
+            "project-1",
+            "agent",
+            "agent-1",
+            "agent/agent-1",
+            "TASK_RUN",
+            null,
+            workspace.toString(),
+            null, null, null, null, null));
 
         try {
+            // Phase 03: task contexts return confinement-unavailable
             AgentShellToolService.ShellExecResult result = service.exec("pwd", "projects/project-1", 5);
-
-            assertThat(result.exitCode()).isZero();
-            assertThat(result.stdout().trim()).isEqualTo(projectWorkspace.toRealPath().toString());
-            assertThat(result.workingDirectory()).isEqualTo("projects/project-1");
-            assertThatThrownBy(() -> service.exec("pwd", "projects/project-2", 5))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("not linked");
+            assertThat(result.confinementUnavailable()).isTrue();
         } finally {
             OrchestrationTaskContextHolder.clear();
         }
@@ -463,16 +527,27 @@ class AgentShellToolServiceTest {
         Files.createDirectories(tempDir.resolve("workspace/agent-1"));
 
         AiConfig aiConfig = new AiConfig(null, null, null, null, null, null, tempDir, null, null, null);
-        WorkspaceDirectoryService dirService = new WorkspaceDirectoryService(aiConfig);
+        WorkspaceDirectoryService dirService = WorkspaceDirectoryServiceTestSupport.directoryService(tempDir);
         AgentShellToolService service = new AgentShellToolService(tempDir, List.of("pwd"), dirService);
 
-        OrchestrationTaskContextHolder.set(new OrchestrationTaskContext(
-            "agent-1", "TestAgent", null, null, null, "TASK_RUN", null, null));
+        OrchestrationTaskContextHolder.set(new OrchestrationTaskContext("agent-1",
+            "TestAgent",
+            null,
+            null,
+            null,
+            null,
+            "agent",
+            "agent-1",
+            "agent/agent-1",
+            "TASK_RUN",
+            null,
+            null,
+            null, null, null, null, null));
 
         try {
-            assertThatThrownBy(() -> service.exec("pwd", "/etc", 5))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("Absolute working directory not allowed in agent context");
+            // Phase 03: task contexts return confinement-unavailable
+            AgentShellToolService.ShellExecResult result = service.exec("pwd", "/etc", 5);
+            assertThat(result.confinementUnavailable()).isTrue();
         } finally {
             OrchestrationTaskContextHolder.clear();
         }
@@ -483,16 +558,27 @@ class AgentShellToolServiceTest {
         Files.createDirectories(tempDir.resolve("workspace/agent-1"));
 
         AiConfig aiConfig = new AiConfig(null, null, null, null, null, null, tempDir, null, null, null);
-        WorkspaceDirectoryService dirService = new WorkspaceDirectoryService(aiConfig);
+        WorkspaceDirectoryService dirService = WorkspaceDirectoryServiceTestSupport.directoryService(tempDir);
         AgentShellToolService service = new AgentShellToolService(tempDir, List.of("pwd"), dirService);
 
-        OrchestrationTaskContextHolder.set(new OrchestrationTaskContext(
-            "agent-1", "TestAgent", null, null, null, "TASK_RUN", null, null));
+        OrchestrationTaskContextHolder.set(new OrchestrationTaskContext("agent-1",
+            "TestAgent",
+            null,
+            null,
+            null,
+            null,
+            "agent",
+            "agent-1",
+            "agent/agent-1",
+            "TASK_RUN",
+            null,
+            null,
+            null, null, null, null, null));
 
         try {
-            assertThatThrownBy(() -> service.exec("pwd", "..", 5))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("escapes agent workspace");
+            // Phase 03: task contexts return confinement-unavailable
+            AgentShellToolService.ShellExecResult result = service.exec("pwd", "..", 5);
+            assertThat(result.confinementUnavailable()).isTrue();
         } finally {
             OrchestrationTaskContextHolder.clear();
         }

@@ -119,7 +119,7 @@ public class ToolAccessPolicy {
     }
 
     private boolean isOperationalTool(String toolName) {
-        return toolName != null && (toolName.startsWith("agent_") || toolName.startsWith("avatar_"));
+        return toolName != null && toolName.startsWith("agent_");
     }
 
     private List<ToolCallback> hideSkillActivationWhenUnavailable(List<ToolCallback> callbacks, String conversationId) {

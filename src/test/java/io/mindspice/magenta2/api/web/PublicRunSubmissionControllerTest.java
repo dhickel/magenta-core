@@ -32,9 +32,10 @@ import io.mindspice.magenta2.ai.orchestration.workflow.InboxService;
 import io.mindspice.magenta2.ai.orchestration.workflow.WorkflowDefinition;
 import io.mindspice.magenta2.ai.orchestration.workflow.WorkflowService;
 import io.mindspice.magenta2.ai.orchestration.workflow.WorkflowValidator;
+import io.mindspice.magenta2.ai.orchestration.workspaces.OutputArtifactRepository;
 import io.mindspice.magenta2.ai.orchestration.workspaces.OutputArtifactService;
+import io.mindspice.magenta2.ai.orchestration.workspaces.RootRelativePathService;
 import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceDirectoryService;
-import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceRepository;
 import org.junit.jupiter.api.Test;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.SingleConnectionDataSource;
@@ -43,6 +44,7 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceDirectoryServiceTestSupport;
 
 class PublicRunSubmissionControllerTest {
 
@@ -62,7 +64,8 @@ class PublicRunSubmissionControllerTest {
             null,
             null,
             "project-1",
-            "workspace-1",
+            "agent",
+            "agent-1",
             "model-a",
             null
         ));
@@ -71,7 +74,8 @@ class PublicRunSubmissionControllerTest {
         assertThat(assignmentService.lastRequest.agentId()).isEqualTo("agent-1");
         assertThat(assignmentService.lastRequest.priority()).isEqualTo(9);
         assertThat(assignmentService.lastRequest.projectId()).isEqualTo("project-1");
-        assertThat(assignmentService.lastRequest.workspaceId()).isEqualTo("workspace-1");
+        assertThat(assignmentService.lastRequest.workspaceType()).isEqualTo("agent");
+        assertThat(assignmentService.lastRequest.workspaceKey()).isEqualTo("agent-1");
         assertThat(assignmentService.lastRequest.modelOverride()).isEqualTo("model-a");
         assertThat(assignmentService.lastRequest.input()).containsEntry("taskId", "plan-1");
         assertThat(assignmentService.lastRequest.input()).containsEntry("conversationId", "conversation-1");
@@ -93,7 +97,6 @@ class PublicRunSubmissionControllerTest {
             null,
             null,
             null,
-            "workspace-1",
             "model-a",
             null
         ));
@@ -116,7 +119,6 @@ class PublicRunSubmissionControllerTest {
         SseEmitter emitter = controller.streamRun("plan-1", new PlanController.PlanRunRequest(
             Map.of("prompt", "ship it"),
             "conversation-1",
-            null,
             null,
             null,
             null,
@@ -148,7 +150,6 @@ class PublicRunSubmissionControllerTest {
             "job-1",
             "project-1",
             null,
-            null,
             null
         ));
 
@@ -179,7 +180,6 @@ class PublicRunSubmissionControllerTest {
             null,
             "project-1",
             null,
-            null,
             null
         ));
         CapturedSse captured = initializeEmitter(emitter);
@@ -203,9 +203,6 @@ class PublicRunSubmissionControllerTest {
             null,
             null,
             "project-1",
-            "workspace-1",
-            null,
-            null,
             null,
             null,
             "Daily workflow run",
@@ -218,7 +215,6 @@ class PublicRunSubmissionControllerTest {
         assertThat(assignmentService.lastRequest.runDisplayName()).isEqualTo("Daily workflow run");
         assertThat(assignmentService.lastRequest.agentId()).isEqualTo("agent-1");
         assertThat(assignmentService.lastRequest.projectId()).isEqualTo("project-1");
-        assertThat(assignmentService.lastRequest.workspaceId()).isEqualTo("workspace-1");
         assertThat(assignmentService.lastRequest.input()).containsEntry("workflowId", "workflow-1");
     }
 
@@ -236,7 +232,6 @@ class PublicRunSubmissionControllerTest {
             null,
             null,
             "project-1",
-            "workspace-1",
             null,
             null
         )))
@@ -283,7 +278,6 @@ class PublicRunSubmissionControllerTest {
             "agent-1",
             null,
             null,
-            null,
             null
         ));
 
@@ -301,9 +295,6 @@ class PublicRunSubmissionControllerTest {
         );
 
         assertThatThrownBy(() -> controller.startRun("workflow-1", new WorkflowController.WorkflowRunRequest(
-            null,
-            null,
-            null,
             null,
             null,
             null,
@@ -404,7 +395,9 @@ class PublicRunSubmissionControllerTest {
         @Override
         public WorkflowDefinition getDefinition(String id) {
             if ("workflow-1".equals(id)) {
-                return new WorkflowDefinition(id, "Workflow", null, List.of(), Instant.now(), Instant.now());
+                return new WorkflowDefinition(id, WorkflowDefinition.CURRENT_SCHEMA_VERSION,
+                    "Workflow", null, WorkflowDefinition.DEFAULT_MAX_CONCURRENCY,
+                    List.of(), List.of(), Map.of(), Instant.now(), Instant.now());
             }
             throw new IllegalArgumentException("Workflow not found: " + id);
         }
@@ -418,7 +411,9 @@ class PublicRunSubmissionControllerTest {
     private static class EmptyWorkflowService extends StubWorkflowService {
         @Override
         public WorkflowDefinition getDefinition(String id) {
-            return new WorkflowDefinition(id, "Workflow", null, List.of(), Instant.now(), Instant.now());
+            return new WorkflowDefinition(id, WorkflowDefinition.CURRENT_SCHEMA_VERSION,
+                "Workflow", null, WorkflowDefinition.DEFAULT_MAX_CONCURRENCY,
+                List.of(), List.of(), Map.of(), Instant.now(), Instant.now());
         }
 
         @Override
@@ -444,8 +439,9 @@ class PublicRunSubmissionControllerTest {
                     id,
                     "agent-1",
                     null,
-                    "workspace-1",
-                    false,
+                    "agent",
+                    "agent-1",
+                    null,
                     "DRAFT",
                     "Job",
                     null,
@@ -473,17 +469,16 @@ class PublicRunSubmissionControllerTest {
         }
 
         private StubOutputArtifactService(OutputArtifactDeps deps) {
-            super(deps.repository(), deps.directoryService(), deps.objectMapper());
+            super(deps.repository(), deps.directoryService(),
+                new RootRelativePathService(deps.directoryService()), deps.objectMapper());
         }
     }
 
     private static OutputArtifactDeps outputArtifactDeps() {
         try {
             Path dataRoot = Files.createTempDirectory("public-run-output");
-            WorkspaceDirectoryService directories = new WorkspaceDirectoryService(new AiConfig(
-                null, null, null, null, null, 10, dataRoot, null, Map.of(), Map.of()
-            ));
-            WorkspaceRepository repository = new WorkspaceRepository(new JdbcTemplate(
+            WorkspaceDirectoryService directories = WorkspaceDirectoryServiceTestSupport.directoryService(dataRoot);
+            OutputArtifactRepository repository = new OutputArtifactRepository(new JdbcTemplate(
                 new SingleConnectionDataSource("jdbc:sqlite::memory:?foreign_keys=true", true)
             ));
             return new OutputArtifactDeps(repository, directories, new ObjectMapper());
@@ -493,7 +488,7 @@ class PublicRunSubmissionControllerTest {
     }
 
     private record OutputArtifactDeps(
-        WorkspaceRepository repository,
+        OutputArtifactRepository repository,
         WorkspaceDirectoryService directoryService,
         ObjectMapper objectMapper
     ) {
@@ -501,7 +496,7 @@ class PublicRunSubmissionControllerTest {
 
     private static class StubAgentProfileService extends AgentProfileService {
         StubAgentProfileService() {
-            super(null, null, null);
+            super(null, null, null, null, null, null, null);
         }
 
         @Override
@@ -580,14 +575,10 @@ class PublicRunSubmissionControllerTest {
                 request.priority() == null ? 0 : request.priority(),
                 OrchestrationStatus.QUEUED,
                 request.modelOverride(),
-                request.workspaceId(),
+                request.workspaceType(),
+                request.workspaceKey(),
+                null,
                 request.projectId(),
-                null,
-                null,
-                request.selectedWorkAreaId(),
-                request.outputRouteType(),
-                request.outputWorkAreaId(),
-                request.outputDirectRelativePath(),
                 0,
                 Map.<String, Object>of(),
                 request.input() == null ? Map.of() : request.input(),

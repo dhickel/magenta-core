@@ -27,7 +27,9 @@ Session metadata includes:
 5. Streams model output and tool activity.
 6. Persists assistant messages, audit events, context usage, and any plan/task state changes.
 
-Streaming events are represented by `ChatStreamEvent` and sent over `/api/chat/stream`. Expected event names are `start`, `chunk`, `tool`, `system`, `interrupt`, `context`, `done`, and `error`.
+Streaming events are represented by `ChatStreamEvent` and sent over `/api/chat/stream` and `/api/chat/{conversationId}/plan/execute/stream`. Expected event names are `start`, `chunk`, `tool`, `system`, `interrupt`, `context`, `outputs_changed`, `done`, and `error`.
+
+`outputs_changed` is a side-channel invalidation signal carrying only `conversationId`. It is emitted mid-stream after a recognized file-mutating tool (`file_write`, `file_append`, `file_replace`, or `file_delete`) returns a completed, attributable result. The browser client uses this to refresh the Outputs panel while the model continues working, without waiting for stream completion. This is additive and ignored by consumers that do not recognize it. The existing terminal refresh on `done` and error recovery remains intact as a fallback.
 
 ## Anonymous Chat Planning
 
@@ -128,7 +130,7 @@ Plan runs and task runs preserve execution history:
 - `PlanRun` stores input values, output values, definition snapshot, workspace/output paths, evidence, validation feedback, deliverable evidence, final/error messages, status, and timestamps.
 - `TaskRun` stores task-specific run state and is used by task execution paths.
 
-Runs snapshot their definitions so edits after execution do not rewrite historical meaning. During execution, agent-facing `outputs/` resolves to run-local staging at `runs/<runId>/outputs/` under the effective agent workspace. Agents write declared and transient deliverables there; after run completion, backend validation/promotion copies declared final outputs to the effective final destination and indexes the promoted artifacts in `run_output_artifacts`.
+Runs snapshot their definitions so edits after execution do not rewrite historical meaning. During execution, task outputs publish with create-only placement beneath `tasks/<taskPathKey>/<taskRunId>/outputs/`; staging is a lazy sibling owned by publication. No legacy `runs/<runId>` hierarchy is created. Canonical task publication and integrity state live in `output_publications`; `run_output_artifacts` is compatibility metadata for legacy/non-task rows.
 
 ## Submit-To-Agent Semantics
 
@@ -140,7 +142,7 @@ Public plan/task run routes now submit durable assignments:
 
 The controller resolves an active agent when no `agentId` is supplied, defaults priority to `9`, builds `AssignmentRequest`, and calls `AssignmentService.create` with `AssignmentType.TASK_RUN`. The SSE stream returns `submitted` or `failed` and then completes.
 
-Submission payloads can carry explicit `projectId`, compatibility `workspaceId`, `selectedWorkAreaId`, `outputRouteType`, `outputWorkAreaId`, and `outputDirectRelativePath`. `projectId` controls effective durable workspace selection; `workspaceId` is retained for compatibility metadata. Anonymous plan-chat execution does not expose Work Area controls.
+Submission payloads carry `projectId` for attribution metadata and `workspaceType`/`workspaceKey` together for workspace selection. Omission defaults to the bound agent. `projectId` is metadata only and does not select or create a filesystem root. Anonymous plan-chat execution does not expose workspace selection controls.
 
 Actual execution is handled later by orchestration runner services. This keeps HTTP request handling short and makes queued work observable/cancellable.
 
@@ -149,7 +151,7 @@ Actual execution is handled later by orchestration runner services. This keeps H
 Model choices come from both file-backed AI config and runtime settings:
 
 - File config in `ai.config.user` defines model endpoints and legacy agent defaults.
-- `RuntimeSettingsService` provides default model, planning model, summary/compaction model, system chat settings, and tool defaults.
+- `RuntimeSettingsService` provides default model, planning model, summary/compaction model, system-chat enabled/model settings, and tool defaults. The system-chat prompt, callback allowlist, and context bound remain server-owned.
 - `ChatModelRouter` resolves concrete model clients for chat turns.
 
 Tools are controlled by `ChatToolRegistry` and per-agent approved tools. Shell execution also consults agent shell command allowlists and the explicit unsafe wildcard override from file config.

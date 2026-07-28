@@ -71,7 +71,6 @@ public class FrontendController {
                 .withChild(pageHeader("Magenta Portal", "Chat, plan, delegate, and monitor operational assistant work."))
                 .withChild(new Row()
                     .addColumn(homeCard("Chat", "Continue an assistant conversation with session management.", "/chat"))
-                    .addColumn(homeCard("Avatar", "Open the personal dashboard for chat, organizer widgets, and recent work.", "/avatar"))
                     .addColumn(homeCard("Dashboard", "Full-screen orchestration dashboard for plans, workflows, jobs, and agents.", "/dashboard")))
                 .withChild(new Row()
                     .addColumn(homeCard("Plans & Tasks", "Build and run unified plan/task definitions.", "/plans"))

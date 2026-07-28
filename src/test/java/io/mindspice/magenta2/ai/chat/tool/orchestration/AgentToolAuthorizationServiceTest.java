@@ -34,7 +34,7 @@ class AgentToolAuthorizationServiceTest {
     private final AssignmentService assignmentService = mock(AssignmentService.class);
     private final JobService jobService = mock(JobService.class);
     private final AgentToolAuthorizationService authorization = new AgentToolAuthorizationService(
-        agentProfileService, projectService, assignmentService, jobService, "avatar");
+        agentProfileService, projectService, assignmentService, jobService);
 
     @AfterEach
     void clearContext() {
@@ -59,22 +59,11 @@ class AgentToolAuthorizationServiceTest {
     }
 
     @Test
-    void avatarSupervisorRequiresExactIdentityAndExplicitToolApproval() {
-        OrchestrationTaskContextHolder.set(context("avatar"));
-        when(agentProfileService.get("avatar")).thenReturn(profile("avatar", List.of("*"), AgentProfileStatus.ACTIVE));
-
-        assertThatThrownBy(() -> authorization.requireAvatarSupervisor("avatar_system_overview"))
-            .isInstanceOf(IllegalStateException.class)
-            .hasMessageContaining("explicit profile approval");
-
-        when(agentProfileService.get("avatar")).thenReturn(profile("avatar", List.of("avatar_system_overview"), AgentProfileStatus.ACTIVE));
-        assertThat(authorization.requireAvatarSupervisor("avatar_system_overview").id()).isEqualTo("avatar");
-
+    void rejectsUnknownSurface() {
         OrchestrationTaskContextHolder.set(context("agent-1"));
-        when(agentProfileService.get("agent-1")).thenReturn(profile("agent-1", List.of("avatar_system_overview"), AgentProfileStatus.ACTIVE));
-        assertThatThrownBy(() -> authorization.requireAvatarSupervisor("avatar_system_overview"))
-            .isInstanceOf(IllegalStateException.class)
-            .hasMessageContaining("requires agent id");
+        when(agentProfileService.get("agent-1")).thenReturn(profile("agent-1", List.of("*"), AgentProfileStatus.ACTIVE));
+
+        assertThat(authorization.requireCurrentAgent().id()).isEqualTo("agent-1");
     }
 
     @Test
@@ -99,9 +88,9 @@ class AgentToolAuthorizationServiceTest {
             .isInstanceOf(IllegalArgumentException.class)
             .hasMessageContaining("current agent");
 
-        JobDefinition ownerJob = new JobDefinition("job-owner", "agent-1", null, null, false, "ACTIVE",
+        JobDefinition ownerJob = new JobDefinition("job-owner", "agent-1", null, "agent", "agent-1", null, "ACTIVE",
             "Owned", null, List.of(), null, null, null, Instant.now(), Instant.now());
-        JobDefinition projectJob = new JobDefinition("job-project", "agent-9", "project-1", null, false, "ACTIVE",
+        JobDefinition projectJob = new JobDefinition("job-project", "agent-9", "project-1", "agent", "agent-9", null, "ACTIVE",
             "Project", null, List.of(), null, null, null, Instant.now(), Instant.now());
         when(jobService.getDefinition("job-owner")).thenReturn(ownerJob);
         when(jobService.getDefinition("job-project")).thenReturn(projectJob);
@@ -116,7 +105,19 @@ class AgentToolAuthorizationServiceTest {
     }
 
     private OrchestrationTaskContext context(String agentId) {
-        return new OrchestrationTaskContext(agentId, "Agent", null, null, null, "TASK_RUN", "/tmp/run", "/tmp/out");
+        return new OrchestrationTaskContext(agentId,
+            "Agent",
+            null,
+            null,
+            null,
+            null,
+            "agent",
+            agentId,
+            "agent/" + agentId,
+            "TASK_RUN",
+            null,
+            "/tmp/run",
+            null, null, null, null, null);
     }
 
     private AgentProfile profile(String id, List<String> approvedTools, AgentProfileStatus status) {

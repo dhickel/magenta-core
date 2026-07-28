@@ -15,6 +15,7 @@ import org.springframework.util.StringUtils;
 @Service
 public class EntitySelectorComponents {
     static final String CONTEXT_PARAM_PREFIX = "selectorContext.";
+    private static final String WORKSPACE_SELECTION_CONTEXT = "workspaceSelectionContext";
 
     public Component selector(EntitySelectorConfig config, EntityOption current) {
         String rootId = rootId(config.kind(), config.name());
@@ -57,18 +58,6 @@ public class EntitySelectorComponents {
             .withClass("entity-selector-label")
             .withChild(new TextNode(label))
             .withChild(input));
-        if (config.kind() == EntityKind.WORK_AREA) {
-            root.withChild(new HtmlTag("button")
-                .withAttribute("type", "button")
-                .withClass("btn btn-primary entity-selector-browse")
-                .withAttribute("hx-get", optionsUrl(config))
-                .withAttribute("hx-trigger", "click")
-                .withAttribute("hx-target", "#" + resultsId)
-                .withAttribute("hx-include", "closest .entity-selector")
-                .withAttribute("hx-swap", "innerHTML")
-                .withAttribute("aria-controls", resultsId)
-                .withInnerText("Browse Work Areas"));
-        }
         root.withChild(status(config, current));
         root.withChild(new HtmlTag("div")
             .withId(resultsId)
@@ -92,7 +81,7 @@ public class EntitySelectorComponents {
     ) {
         HtmlTag list = new HtmlTag("div").withClass("entity-selector-options");
         if (options.isEmpty()) {
-            String message = kind == EntityKind.WORK_AREA ? "No Work Areas found" : "No matches";
+            String message = "No matches";
             return list.withChild(new HtmlTag("div")
                 .withClass("entity-selector-empty")
                 .withInnerText(message));
@@ -110,6 +99,10 @@ public class EntitySelectorComponents {
                 if (StringUtils.hasText(entry.getValue())) {
                     url += "&" + enc(contextParamName(entry.getKey())) + "=" + enc(entry.getValue());
                 }
+            }
+            String workspaceContext = contextParams.get(WORKSPACE_SELECTION_CONTEXT);
+            if (kind == EntityKind.AGENT && StringUtils.hasText(workspaceContext)) {
+                url = url.replace("/selectors/agent/selected", "/selectors/workspace/agent-selected");
             }
             HtmlTag row = new HtmlTag("button")
                 .withAttribute("type", "button")

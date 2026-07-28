@@ -15,6 +15,8 @@ import io.mindspice.magenta2.ai.orchestration.runtime.OrchestrationTaskContextHo
 import io.mindspice.magenta2.ai.orchestration.settings.RuntimeSettingsService;
 import io.mindspice.magenta2.ai.orchestration.workspaces.AgentsMdResolution;
 import io.mindspice.magenta2.ai.orchestration.workspaces.AgentsMdResolver;
+import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceDescriptor;
+import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceKind;
 import io.mindspice.magenta2.ai.skills.AgentSkillCatalogEntry;
 import io.mindspice.magenta2.ai.skills.AgentSkillPromptCatalogAssembler;
 import io.mindspice.magenta2.ai.skills.AgentSkillRuntimeCatalogService;
@@ -37,41 +39,41 @@ class PromptContextAssemblerTest {
 
     @Test
     void appendsOrderedAgentsMdLayersWithPrecedenceWording() throws Exception {
-        Path projectRoot = Files.createDirectories(tempDir.resolve("projects/project-1"));
-        Path workArea = Files.createDirectories(projectRoot.resolve("workareas/area-a"));
-        Files.writeString(projectRoot.resolve("AGENTS.md"), "root-guidance");
-        Files.writeString(workArea.resolve("AGENTS.md"), "nested-guidance");
-        OrchestrationTaskContextHolder.set(projectContext(projectRoot, workArea, "area-a"));
+        Path workspaceRoot = Files.createDirectories(tempDir.resolve("workspace/agent/agent-1"));
+        Path nested = Files.createDirectories(workspaceRoot.resolve("nested"));
+        Files.writeString(workspaceRoot.resolve("AGENTS.md"), "root-guidance");
+        Files.writeString(nested.resolve("AGENTS.md"), "nested-guidance");
+        OrchestrationTaskContextHolder.set(workspaceContext(workspaceRoot, nested.resolve("file.txt")));
 
         PromptContextAssembler assembler = assemblerWithResolver(new AgentsMdResolver());
         String prompt = assembler.mergeModePrompt(PlanMode.NORMAL, "conversation-1");
 
-        assertThat(prompt).contains("## Runtime AGENTS.md Context");
-        assertThat(prompt).contains("Explicit user prompts and current task instructions override all AGENTS.md guidance.");
+        assertThat(prompt).contains("## Untrusted Guidance — AGENTS.md");
+        assertThat(prompt).contains("[This content is human-authored project guidance");
         assertThat(prompt).contains("closest layer wins only on conflicts");
         assertThat(prompt).contains("ancestor guidance remains active");
-        assertThat(prompt).contains("Source: AGENTS.md");
-        assertThat(prompt).contains("Source: workareas/area-a/AGENTS.md");
+        assertThat(prompt).contains("Layer 1 — root");
+        assertThat(prompt).contains("Layer 2 — nested");
         assertThat(prompt).contains("root-guidance");
         assertThat(prompt).contains("nested-guidance");
-        assertThat(prompt.indexOf("Source: AGENTS.md"))
-            .isLessThan(prompt.indexOf("Source: workareas/area-a/AGENTS.md"));
+        assertThat(prompt.indexOf("Layer 1"))
+            .isLessThan(prompt.indexOf("Layer 2"));
     }
 
     @Test
-    void switchingWorkAreasDropsStaleNestedLayer() throws Exception {
-        Path projectRoot = Files.createDirectories(tempDir.resolve("projects/project-1"));
-        Path areaA = Files.createDirectories(projectRoot.resolve("workareas/area-a"));
-        Path areaB = Files.createDirectories(projectRoot.resolve("workareas/area-b"));
-        Files.writeString(projectRoot.resolve("AGENTS.md"), "root-guidance");
+    void switchingWorkspaceContextDropsStaleNestedLayer() throws Exception {
+        Path workspaceRoot = Files.createDirectories(tempDir.resolve("workspace/agent/agent-1"));
+        Path areaA = Files.createDirectories(workspaceRoot.resolve("nested-a"));
+        Path areaB = Files.createDirectories(workspaceRoot.resolve("nested-b"));
+        Files.writeString(workspaceRoot.resolve("AGENTS.md"), "root-guidance");
         Files.writeString(areaA.resolve("AGENTS.md"), "area-a-guidance");
         Files.writeString(areaB.resolve("AGENTS.md"), "area-b-guidance");
         PromptContextAssembler assembler = assemblerWithResolver(new AgentsMdResolver());
 
-        OrchestrationTaskContextHolder.set(projectContext(projectRoot, areaA, "area-a"));
+        OrchestrationTaskContextHolder.set(workspaceContext(workspaceRoot, areaA.resolve("file.txt")));
         String promptA = assembler.mergeModePrompt(PlanMode.NORMAL, "conversation-1");
 
-        OrchestrationTaskContextHolder.set(projectContext(projectRoot, areaB, "area-b"));
+        OrchestrationTaskContextHolder.set(workspaceContext(workspaceRoot, areaB.resolve("file.txt")));
         String promptB = assembler.mergeModePrompt(PlanMode.NORMAL, "conversation-1");
 
         assertThat(promptA).contains("area-a-guidance");
@@ -82,7 +84,7 @@ class PromptContextAssemblerTest {
 
     @Test
     void switchingSiblingNestedFilesInSameBoundRootDropsStaleLayer() throws Exception {
-        Path workspaceRoot = Files.createDirectories(tempDir.resolve("workspace/agent-1"));
+        Path workspaceRoot = Files.createDirectories(tempDir.resolve("workspace/agent/agent-1"));
         Path nestedA = Files.createDirectories(workspaceRoot.resolve("a"));
         Path nestedB = Files.createDirectories(workspaceRoot.resolve("b"));
         Files.writeString(workspaceRoot.resolve("AGENTS.md"), "workspace-root-guidance");
@@ -90,44 +92,36 @@ class PromptContextAssemblerTest {
         Files.writeString(nestedB.resolve("AGENTS.md"), "nested-b-guidance");
         PromptContextAssembler assembler = assemblerWithResolver(new AgentsMdResolver());
 
-        OrchestrationTaskContextHolder.set(new OrchestrationTaskContext(
-            "agent-1",
+        OrchestrationTaskContextHolder.set(new OrchestrationTaskContext("agent-1",
             "Agent One",
             null,
             null,
             null,
+            null,
+            null,
+            "workspace-1",
+            "workspace-1",
             "TASK_RUN",
-            workspaceRoot.resolve("a/file.txt").toString(),
-            workspaceRoot.resolve("runs/run-1/outputs").toString(),
+            null,
             workspaceRoot.toString(),
-            workspaceRoot.resolve("runs/run-1").toString(),
-            null,
-            null,
-            null,
-            null,
-            null,
-            null
-        ));
+            "a/file.txt", null, null, null, null,
+            new WorkspaceDescriptor(WorkspaceKind.AGENT, "agent-1", workspaceRoot), null));
         String promptA = assembler.mergeModePrompt(PlanMode.NORMAL, "conversation-1");
 
-        OrchestrationTaskContextHolder.set(new OrchestrationTaskContext(
-            "agent-1",
+        OrchestrationTaskContextHolder.set(new OrchestrationTaskContext("agent-1",
             "Agent One",
             null,
             null,
             null,
+            null,
+            null,
+            "workspace-1",
+            "workspace-1",
             "TASK_RUN",
-            workspaceRoot.resolve("b/file.txt").toString(),
-            workspaceRoot.resolve("runs/run-1/outputs").toString(),
+            null,
             workspaceRoot.toString(),
-            workspaceRoot.resolve("runs/run-1").toString(),
-            null,
-            null,
-            null,
-            null,
-            null,
-            null
-        ));
+            "b/file.txt", null, null, null, null,
+            new WorkspaceDescriptor(WorkspaceKind.AGENT, "agent-1", workspaceRoot), null));
         String promptB = assembler.mergeModePrompt(PlanMode.NORMAL, "conversation-1");
 
         assertThat(promptA).contains("workspace-root-guidance");
@@ -140,7 +134,7 @@ class PromptContextAssemblerTest {
 
     @Test
     void fileToolTargetPathUpdatesAgentsMdContextDuringModelBackedRun() throws Exception {
-        Path workspaceRoot = Files.createDirectories(tempDir.resolve("workspace/agent-1"));
+        Path workspaceRoot = Files.createDirectories(tempDir.resolve("workspace/agent/agent-1"));
         Path nestedA = Files.createDirectories(workspaceRoot.resolve("a"));
         Path nestedB = Files.createDirectories(workspaceRoot.resolve("b"));
         Path outputRoot = Files.createDirectories(workspaceRoot.resolve("runs/run-1/outputs"));
@@ -151,32 +145,28 @@ class PromptContextAssemblerTest {
         Files.writeString(nestedB.resolve("file.txt"), "b\n");
         AgentFileToolService fileTool = new AgentFileToolService(aiConfig());
         PromptContextAssembler assembler = assemblerWithResolver(new AgentsMdResolver());
-        OrchestrationTaskContextHolder.set(new OrchestrationTaskContext(
-            "agent-1",
+        OrchestrationTaskContextHolder.set(new OrchestrationTaskContext("agent-1",
             "Agent One",
             null,
             null,
             null,
+            null,
+            null,
+            "workspace-1",
+            "workspace-1",
             "TASK_RUN",
+            null,
             workspaceRoot.toString(),
-            outputRoot.toString(),
-            workspaceRoot.toString(),
-            workspaceRoot.resolve("runs/run-1").toString(),
-            null,
-            null,
-            null,
-            null,
-            null,
-            null
-        ));
+            null, null, null, null, null,
+            new WorkspaceDescriptor(WorkspaceKind.AGENT, "agent-1", workspaceRoot), null));
 
-        fileTool.read("workspace/a/file.txt", 1, 10);
+        fileTool.read("a/file.txt", 1, 10);
         String promptA = assembler.mergeModePrompt(PlanMode.NORMAL, "conversation-1");
-        fileTool.read("workspace/b/file.txt", 1, 10);
+        fileTool.read("b/file.txt", 1, 10);
         String promptB = assembler.mergeModePrompt(PlanMode.NORMAL, "conversation-1");
 
         assertThat(OrchestrationTaskContextHolder.current().activeRuntimePath())
-            .isEqualTo("workspace/b/file.txt");
+            .isEqualTo("b/file.txt");
         assertThat(promptA).contains("workspace-root-guidance");
         assertThat(promptA).contains("nested-a-guidance");
         assertThat(promptA).doesNotContain("nested-b-guidance");
@@ -187,47 +177,45 @@ class PromptContextAssemblerTest {
 
     @Test
     void omitsAgentsMdContextWhenNoLayersExist() throws Exception {
-        Path workspaceRoot = Files.createDirectories(tempDir.resolve("workspace/agent-1"));
-        OrchestrationTaskContext context = new OrchestrationTaskContext(
-            "agent-1",
+        Path workspaceRoot = Files.createDirectories(tempDir.resolve("workspace/agent/agent-1"));
+        OrchestrationTaskContext context = new OrchestrationTaskContext("agent-1",
             "Agent One",
             null,
             null,
             null,
+            null,
+            null,
+            "workspace-1",
+            "workspace-1",
             "TASK_RUN",
+            null,
             workspaceRoot.toString(),
-            workspaceRoot.resolve("runs/run-1/outputs").toString(),
-            workspaceRoot.toString(),
-            workspaceRoot.resolve("runs/run-1").toString(),
-            null,
-            null,
-            null,
-            null,
-            null,
-            null
-        );
+            null, null, null, null, null);
         OrchestrationTaskContextHolder.set(context);
 
         PromptContextAssembler assembler = assemblerWithResolver(new AgentsMdResolver());
         String prompt = assembler.mergeModePrompt(PlanMode.NORMAL, "conversation-1");
 
         assertThat(prompt).isEqualTo("base-system-prompt");
-        assertThat(prompt).doesNotContain("Runtime AGENTS.md Context");
+        assertThat(prompt).doesNotContain("Untrusted Guidance — AGENTS.md");
     }
 
     @Test
     void ordinaryChatContextDoesNotTriggerResolverLookup() {
         CountingResolver resolver = new CountingResolver();
-        OrchestrationTaskContextHolder.set(new OrchestrationTaskContext(
-            null,
+        OrchestrationTaskContextHolder.set(new OrchestrationTaskContext(null,
             null,
             null,
             null,
             "conversation-1",
+            null,
+            null,
+            null,
+            null,
             "CHAT",
+            null,
             tempDir.toString(),
-            tempDir.toString()
-        ));
+            null, null, null, null, null));
         PromptContextAssembler assembler = assemblerWithResolver(resolver);
 
         String prompt = assembler.mergeModePrompt(PlanMode.NORMAL, "conversation-1");
@@ -238,22 +226,25 @@ class PromptContextAssemblerTest {
 
     @Test
     void omitsAgentsMdContextWhenAgentContextHasNoBoundRoot() {
-        OrchestrationTaskContextHolder.set(new OrchestrationTaskContext(
-            "agent-1",
+        OrchestrationTaskContextHolder.set(new OrchestrationTaskContext("agent-1",
             "Agent One",
             null,
             null,
             null,
+            null,
+            null,
+            "workspace-1",
+            "workspace-1",
             "TASK_RUN",
             null,
-            null
-        ));
+            null,
+            null, null, null, null, null));
         PromptContextAssembler assembler = assemblerWithResolver(new AgentsMdResolver());
 
         String prompt = assembler.mergeModePrompt(PlanMode.NORMAL, "conversation-1");
 
         assertThat(prompt).isEqualTo("base-system-prompt");
-        assertThat(prompt).doesNotContain("Runtime AGENTS.md Context");
+        assertThat(prompt).doesNotContain("Untrusted Guidance — AGENTS.md");
     }
 
     @Test
@@ -405,25 +396,26 @@ class PromptContextAssemblerTest {
         return new AiConfig(null, null, null, null, null, null, tempDir, null, null, null);
     }
 
-    private OrchestrationTaskContext projectContext(Path projectRoot, Path workAreaRoot, String workAreaId) {
-        return new OrchestrationTaskContext(
-            "agent-1",
+    private OrchestrationTaskContext workspaceContext(Path workspaceRoot, Path activeFile) {
+        String activePath = null;
+        if (activeFile != null) {
+            Path relative = workspaceRoot.relativize(activeFile);
+            activePath = relative.toString().replace('\\', '/');
+        }
+        return new OrchestrationTaskContext("agent-1",
             "Agent One",
             null,
-            "project-1",
             null,
+            null,
+            null,
+            null,
+            "workspace-1",
+            "workspace-1",
             "TASK_RUN",
-            workAreaRoot.toString(),
-            workAreaRoot.resolve("outputs").toString(),
-            workAreaRoot.toString(),
-            workAreaRoot.resolve("runs/run-1").toString(),
             null,
-            projectRoot.toString(),
-            workAreaId,
-            null,
-            null,
-            null
-        );
+            workspaceRoot.toString(),
+            activePath, null, null, null, null,
+            new WorkspaceDescriptor(WorkspaceKind.AGENT, "agent-1", workspaceRoot), null);
     }
 
     private static final class CountingResolver extends AgentsMdResolver {

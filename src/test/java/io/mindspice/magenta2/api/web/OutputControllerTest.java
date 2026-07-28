@@ -2,29 +2,29 @@ package io.mindspice.magenta2.api.web;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.time.Instant;
-import java.util.List;
 import java.util.Map;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import io.mindspice.magenta2.ai.chat.plan.PlanFieldType;
-import io.mindspice.magenta2.ai.config.user.AiConfig;
-import io.mindspice.magenta2.ai.orchestration.runtime.JobDefinition;
-import io.mindspice.magenta2.ai.orchestration.runtime.JobRepository;
-import io.mindspice.magenta2.ai.orchestration.runtime.JobRun;
-import io.mindspice.magenta2.ai.orchestration.runtime.JobService;
-import io.mindspice.magenta2.ai.orchestration.workspaces.OutputArtifactContext;
+import io.mindspice.magenta2.ai.orchestration.workspaces.ArtifactAccessContext;
+import io.mindspice.magenta2.ai.orchestration.workspaces.ArtifactPreviewService;
+import io.mindspice.magenta2.ai.orchestration.workspaces.ArtifactSearchService;
+import io.mindspice.magenta2.ai.orchestration.workspaces.ConfinedPathMutationService;
+import io.mindspice.magenta2.ai.orchestration.workspaces.OutputArtifactRepository;
 import io.mindspice.magenta2.ai.orchestration.workspaces.OutputArtifactService;
-import io.mindspice.magenta2.ai.orchestration.workspaces.RunOutputArtifact;
+import io.mindspice.magenta2.ai.orchestration.workspaces.OutputArtifactTestSchema;
+import io.mindspice.magenta2.ai.orchestration.workspaces.PublicationRecord;
+import io.mindspice.magenta2.ai.orchestration.workspaces.RootRelativePathService;
+import io.mindspice.magenta2.ai.orchestration.workspaces.TaskRunRetentionService;
 import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceDirectoryService;
-import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceRepository;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.SingleConnectionDataSource;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceDirectoryServiceTestSupport;
 
 class OutputControllerTest {
 
@@ -32,191 +32,120 @@ class OutputControllerTest {
     Path tempDir;
 
     @Test
-    void querySupportsDirectAttributionFilters() throws Exception {
+    void detailReturnsNotFoundForMissingArtifact() throws Exception {
         Services services = services();
-        OutputController controller = new OutputController(services.outputArtifactService(), services.jobService());
-        Path outputDir = Files.createDirectories(services.dataRoot().resolve("outputs-direct"));
-        RunOutputArtifact artifact = services.outputArtifactService().materialize(
-            "run-1",
-            "plan-1",
-            "summary",
-            PlanFieldType.STRING,
-            "done",
-            outputDir,
-            new OutputArtifactContext(
-                "agent-1", "job-1", "assignment-1", "job-run-1",
-                "project-1", "workspace-1", "JOB_WORKFLOW_ITEM")
-        );
-        assertThat(artifact.filePath()).isEqualTo("outputs-direct/summary.txt");
-        assertThat(Path.of(artifact.filePath()).isAbsolute()).isFalse();
+        OutputController controller = new OutputController(
+                services.outputArtifactService(), services.artifactRepository(),
+                services.searchService(), services.previewService(),
+                services.retentionService());
 
-        assertThat(controller.query(null, null, "assignment-1", null, null, null, null, null, null, null, 20))
-            .extracting(RunOutputArtifact::id)
-            .containsExactly(artifact.id());
-        assertThat(controller.query(null, null, null, "job-run-1", null, null, null, null, null, null, 20))
-            .extracting(RunOutputArtifact::id)
-            .containsExactly(artifact.id());
-        assertThat(controller.query(null, null, null, null, null, "workspace-1", null, null, null, null, 20))
-            .extracting(RunOutputArtifact::id)
-            .containsExactly(artifact.id());
-        assertThat(controller.query(null, null, null, null, null, null, null, "plan-1", null, null, 20))
-            .extracting(RunOutputArtifact::id)
-            .containsExactly(artifact.id());
-        assertThat(controller.query(null, null, null, null, null, null, null, null, "JOB_WORKFLOW_ITEM", null, 20))
-            .extracting(RunOutputArtifact::id)
-            .containsExactly(artifact.id());
+        ResponseEntity<?> response = controller.detail("nonexistent", "agent", "agent-1");
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
+    }
 
-        ResponseEntity<?> response = controller.content(artifact.id());
+    @Test
+    void detailReturnsArtifactWhenAuthorized() throws Exception {
+        Services services = services();
+        OutputController controller = new OutputController(
+                services.outputArtifactService(), services.artifactRepository(),
+                services.searchService(), services.previewService(),
+                services.retentionService());
+
+        // Publish a chat artifact
+        PublicationRecord record = services.outputArtifactService().publishChatBytes(
+                "conv-1", "op-1", "test.md", "text/markdown",
+                "# Hello".getBytes());
+
+        ResponseEntity<?> response = controller.detail(
+                record.artifactId(), "chat", "conv-1");
         assertThat(response.getStatusCode().is2xxSuccessful()).isTrue();
-        assertThat(response.getBody()).isInstanceOf(Map.class);
-        @SuppressWarnings("unchecked")
-        Map<String, Object> body = (Map<String, Object>) response.getBody();
-        assertThat(body)
-            .containsEntry("jobAssignmentId", "assignment-1")
-            .containsEntry("jobRunId", "job-run-1")
-            .containsEntry("workspaceId", "workspace-1")
-            .containsEntry("runType", "JOB_WORKFLOW_ITEM")
-            .containsEntry("content", "done");
     }
 
     @Test
-    void downloadReadsRelativeArtifactRows() throws Exception {
+    void detailRejectsWrongWorkspace() throws Exception {
         Services services = services();
-        OutputController controller = new OutputController(services.outputArtifactService(), services.jobService());
-        Path outputDir = Files.createDirectories(services.dataRoot().resolve("outputs-download"));
-        RunOutputArtifact artifact = services.outputArtifactService().materialize(
-            "run-download",
-            "plan-download",
-            "download",
-            PlanFieldType.STRING,
-            "download content",
-            outputDir,
-            OutputArtifactContext.EMPTY
-        );
+        OutputController controller = new OutputController(
+                services.outputArtifactService(), services.artifactRepository(),
+                services.searchService(), services.previewService(),
+                services.retentionService());
 
-        ResponseEntity<?> response = controller.download(artifact.id());
+        PublicationRecord record = services.outputArtifactService().publishChatBytes(
+                "conv-1", "op-2", "test.md", "text/markdown",
+                "# Hello".getBytes());
 
+        // Wrong workspace
+        ResponseEntity<?> response = controller.detail(
+                record.artifactId(), "agent", "wrong-agent");
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
+    }
+
+    @Test
+    void searchRequiresQuery() throws Exception {
+        Services services = services();
+        OutputController controller = new OutputController(
+                services.outputArtifactService(), services.artifactRepository(),
+                services.searchService(), services.previewService(),
+                services.retentionService());
+
+        ResponseEntity<?> response = controller.search(
+                "", "agent", "agent-1", null, 0, 25);
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+    }
+
+    @Test
+    void listByWorkspaceReturnsAuthorizedArtifacts() throws Exception {
+        Services services = services();
+        OutputController controller = new OutputController(
+                services.outputArtifactService(), services.artifactRepository(),
+                services.searchService(), services.previewService(),
+                services.retentionService());
+
+        PublicationRecord record = services.outputArtifactService().publishChatBytes(
+                "conv-1", "op-3", "list-test.md", "text/markdown",
+                "# Test".getBytes());
+
+        ResponseEntity<?> response = controller.listByWorkspace(
+                "chat", "conv-1", null, 0, 50);
         assertThat(response.getStatusCode().is2xxSuccessful()).isTrue();
-        assertThat(response.getHeaders().getContentLength()).isEqualTo("download content".length());
-        assertThat(response.getHeaders().getContentDisposition().getFilename()).isEqualTo("download.txt");
-    }
-
-    @Test
-    void downloadReadsLegacyAbsoluteCurrentRootRows() throws Exception {
-        Services services = services();
-        OutputController controller = new OutputController(services.outputArtifactService(), services.jobService());
-        Path legacyFile = Files.writeString(
-            Files.createDirectories(services.dataRoot().resolve("legacy")).resolve("current.txt"),
-            "legacy download"
-        );
-        RunOutputArtifact artifact = services.workspaceRepository().saveArtifact(new RunOutputArtifact(
-            "legacy-download",
-            "run-legacy-download",
-            "plan-legacy-download",
-            null,
-            null,
-            null,
-            null,
-            null,
-            null,
-            null,
-            "legacy",
-            "text",
-            "current.txt",
-            legacyFile.toString(),
-            null,
-            Instant.now()
-        ));
-
-        ResponseEntity<?> response = controller.download(artifact.id());
-
-        assertThat(response.getStatusCode().is2xxSuccessful()).isTrue();
-        assertThat(response.getHeaders().getContentLength()).isEqualTo("legacy download".length());
-        assertThat(response.getHeaders().getContentDisposition().getFilename()).isEqualTo("current.txt");
-    }
-
-    @Test
-    void downloadRejectsStaleAbsoluteOldRootRowsWithoutCreatingOldRootDirectories() throws Exception {
-        Services services = services();
-        OutputController controller = new OutputController(services.outputArtifactService(), services.jobService());
-        Path oldRoot = tempDir.resolve("old-root/root");
-        RunOutputArtifact artifact = services.workspaceRepository().saveArtifact(new RunOutputArtifact(
-            "stale-download",
-            "run-stale-download",
-            "plan-stale-download",
-            null,
-            null,
-            null,
-            null,
-            null,
-            null,
-            null,
-            "stale",
-            "text",
-            "old.txt",
-            oldRoot.resolve("outputs/old.txt").toAbsolutePath().toString(),
-            null,
-            Instant.now()
-        ));
-
-        ResponseEntity<?> response = controller.download(artifact.id());
-
-        assertThat(response.getStatusCode().value()).isEqualTo(403);
-        assertThat(response.getBody()).isInstanceOf(Map.class);
-        @SuppressWarnings("unchecked")
-        Map<String, Object> body = (Map<String, Object>) response.getBody();
-        assertThat(body.get("error").toString()).contains("stale or outside current data root");
-        assertThat(Files.notExists(oldRoot)).isTrue();
-    }
-
-    @Test
-    void jobFallbackDoesNotMaskMissingDirectAssignmentAttribution() throws Exception {
-        Services services = services();
-        OutputController controller = new OutputController(services.outputArtifactService(), services.jobService());
-        JobDefinition job = services.jobService().saveDefinition(new JobDefinition(
-            null, "agent-1", null, null, false, "ACTIVE", "Legacy Job", "", List.of(),
-            null, null, null, null, null
-        ));
-        JobRun run = services.jobService().startRun(job.id(), "agent-1", null, "assignment-1");
-        RunOutputArtifact legacyArtifact = services.outputArtifactService().materialize(
-            run.id(),
-            job.id(),
-            "legacy",
-            PlanFieldType.STRING,
-            "legacy output",
-            services.dataRoot().resolve(run.outputDir()),
-            OutputArtifactContext.EMPTY
-        );
-
-        assertThat(controller.query(null, job.id(), null, null, null, null, null, null, null, null, 20))
-            .extracting(RunOutputArtifact::id)
-            .containsExactly(legacyArtifact.id());
-        assertThat(controller.query(null, null, "assignment-1", null, null, null, null, null, null, null, 20))
-            .isEmpty();
     }
 
     private Services services() throws Exception {
         ObjectMapper mapper = new ObjectMapper().findAndRegisterModules();
         JdbcTemplate jdbcTemplate = new JdbcTemplate(
-            new SingleConnectionDataSource("jdbc:sqlite::memory:?foreign_keys=true", true)
-        );
+                new SingleConnectionDataSource("jdbc:sqlite::memory:?foreign_keys=true", true));
+        OutputArtifactTestSchema.initialize(jdbcTemplate);
         Path dataRoot = Files.createDirectories(tempDir.resolve("data"));
-        WorkspaceDirectoryService directoryService = new WorkspaceDirectoryService(
-            new AiConfig(null, null, null, null, dataRoot, null, null)
-        );
-        WorkspaceRepository workspaceRepository = new WorkspaceRepository(jdbcTemplate);
+        WorkspaceDirectoryService directoryService = WorkspaceDirectoryServiceTestSupport.directoryService(dataRoot);
+        OutputArtifactRepository artifactRepository = new OutputArtifactRepository(jdbcTemplate);
+        RootRelativePathService rootRelativePathService = new RootRelativePathService(directoryService);
+        ConfinedPathMutationService mutations = new ConfinedPathMutationService();
         OutputArtifactService outputArtifactService = new OutputArtifactService(
-            workspaceRepository, directoryService, mapper);
-        JobService jobService = new JobService(
-            new JobRepository(jdbcTemplate, mapper), directoryService, null, null);
-        return new Services(jobService, outputArtifactService, workspaceRepository, dataRoot);
+                artifactRepository, directoryService, rootRelativePathService, mutations, mapper);
+
+        // Create chat root so chat publication works
+        directoryService.resolveForWrite(
+                io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceKind.CHAT, "conv-1");
+        directoryService.outputs(directoryService.resolveForRead(
+                io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceKind.CHAT, "conv-1"));
+
+        ArtifactSearchService searchService = new ArtifactSearchService(
+                jdbcTemplate, artifactRepository, rootRelativePathService,
+                directoryService, mutations);
+        ArtifactPreviewService previewService = new ArtifactPreviewService(
+                artifactRepository, rootRelativePathService);
+        TaskRunRetentionService retentionService = new TaskRunRetentionService(
+                jdbcTemplate, artifactRepository, rootRelativePathService,
+                directoryService, mutations);
+
+        return new Services(outputArtifactService, artifactRepository,
+                searchService, previewService, retentionService);
     }
 
     private record Services(
-        JobService jobService,
-        OutputArtifactService outputArtifactService,
-        WorkspaceRepository workspaceRepository,
-        Path dataRoot
-    ) {
+            OutputArtifactService outputArtifactService,
+            OutputArtifactRepository artifactRepository,
+            ArtifactSearchService searchService,
+            ArtifactPreviewService previewService,
+            TaskRunRetentionService retentionService) {
     }
 }

@@ -76,16 +76,17 @@ public class JobRepository {
         jdbcTemplate.update(
             """
                 insert into job_definitions (
-                    id, owner_agent_id, project_id, workspace_id, persistent_workspace_enabled, status,
+                    id, owner_agent_id, project_id, workspace_type, workspace_key, workspace_identity, status,
                     title, summary, items_json, prompt_profile,
                     model, settings_override_json, created_at, updated_at
                 )
-                values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 on conflict(id) do update set
                     owner_agent_id = excluded.owner_agent_id,
                     project_id = excluded.project_id,
-                    workspace_id = excluded.workspace_id,
-                    persistent_workspace_enabled = excluded.persistent_workspace_enabled,
+                    workspace_type = excluded.workspace_type,
+                    workspace_key = excluded.workspace_key,
+                    workspace_identity = excluded.workspace_identity,
                     status = excluded.status,
                     title = excluded.title,
                     summary = excluded.summary,
@@ -95,12 +96,9 @@ public class JobRepository {
                     settings_override_json = excluded.settings_override_json,
                     updated_at = excluded.updated_at
                 """,
-            def.id(), def.ownerAgentId(), def.projectId(), def.workspaceId(),
-            Boolean.TRUE.equals(def.persistentWorkspaceEnabled()) ? 1 : 0,
-            def.status(), def.title(), def.summary(),
-            json(def.items()), def.promptProfile(),
-            def.model(), def.settingsOverrideJson(),
-            createdAt.toString(), updatedAt.toString()
+            def.id(), def.ownerAgentId(), def.projectId(), def.workspaceType(), def.workspaceKey(), def.workspaceIdentity(),
+            def.status(), def.title(), def.summary(), json(def.items()), def.promptProfile(),
+            def.model(), def.settingsOverrideJson(), createdAt.toString(), updatedAt.toString()
         );
         return findDefinition(def.id()).orElseThrow();
     }
@@ -199,29 +197,27 @@ public class JobRepository {
         jdbcTemplate.update(
             """
                 insert into job_runs (
-                    id, job_id, job_assignment_id, workspace_id, status, work_item_runs_json,
-                    workspace_path, output_dir, final_message, error_text,
+                    id, job_id, job_assignment_id, workspace_type, workspace_key, workspace_identity,
+                    status, work_item_runs_json, final_message, error_text,
                     created_at, updated_at, started_at, completed_at
                 )
                 values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 on conflict(id) do update set
                     job_assignment_id = excluded.job_assignment_id,
-                    workspace_id = excluded.workspace_id,
+                    workspace_type = excluded.workspace_type,
+                    workspace_key = excluded.workspace_key,
+                    workspace_identity = excluded.workspace_identity,
                     status = excluded.status,
                     work_item_runs_json = excluded.work_item_runs_json,
-                    workspace_path = excluded.workspace_path,
-                    output_dir = excluded.output_dir,
                     final_message = excluded.final_message,
                     error_text = excluded.error_text,
                     updated_at = excluded.updated_at,
                     started_at = excluded.started_at,
                     completed_at = excluded.completed_at
                 """,
-            run.id(), run.jobId(), run.jobAssignmentId(), run.workspaceId(), run.status().name(),
-            json(run.workItemRuns()),
-            run.workspacePath(), run.outputDir(),
-            run.finalMessage(), run.errorText(),
-            createdAt.toString(), updatedAt.toString(),
+            run.id(), run.jobId(), run.jobAssignmentId(), run.workspaceType(), run.workspaceKey(),
+            run.workspaceIdentity(), run.status().name(), json(run.workItemRuns()),
+            run.finalMessage(), run.errorText(), createdAt.toString(), updatedAt.toString(),
             instant(run.startedAt()), instant(run.completedAt())
         );
         return findRun(run.id()).orElseThrow();
@@ -285,8 +281,9 @@ public class JobRepository {
             rs.getString("id"),
             getNullable(rs, "owner_agent_id"),
             getNullable(rs, "project_id"),
-            getNullable(rs, "workspace_id"),
-            getBoolean(rs, "persistent_workspace_enabled"),
+            selectionType(rs, "owner_agent_id"),
+            selectionKey(rs, "owner_agent_id"),
+            selectionIdentity(rs, "owner_agent_id"),
             getNullable(rs, "status"),
             rs.getString("title"),
             rs.getString("summary"),
@@ -304,11 +301,11 @@ public class JobRepository {
             rs.getString("id"),
             rs.getString("job_id"),
             getNullable(rs, "job_assignment_id"),
-            getNullable(rs, "workspace_id"),
+            selectionType(rs, null),
+            selectionKey(rs, null),
+            selectionIdentity(rs, null),
             JobRunStatus.valueOf(rs.getString("status")),
             read(rs.getString("work_item_runs_json"), ITEM_RUN_LIST, List.of()),
-            rs.getString("workspace_path"),
-            rs.getString("output_dir"),
             rs.getString("final_message"),
             rs.getString("error_text"),
             Instant.parse(rs.getString("created_at")),
@@ -366,12 +363,24 @@ public class JobRepository {
         }
     }
 
-    private boolean getBoolean(ResultSet rs, String column) throws SQLException {
-        try {
-            return rs.getInt(column) != 0;
-        } catch (SQLException ignored) {
-            return false;
-        }
+    private String selectionType(ResultSet rs, String agentColumn) throws SQLException {
+        String type = getNullable(rs, "workspace_type");
+        String key = getNullable(rs, "workspace_key");
+        if (StringUtils.hasText(type) && StringUtils.hasText(key)) return type;
+        return StringUtils.hasText(agentColumn) && StringUtils.hasText(getNullable(rs, agentColumn)) ? "agent" : null;
+    }
+
+    private String selectionKey(ResultSet rs, String agentColumn) throws SQLException {
+        String type = getNullable(rs, "workspace_type");
+        String key = getNullable(rs, "workspace_key");
+        if (StringUtils.hasText(type) && StringUtils.hasText(key)) return key;
+        return StringUtils.hasText(agentColumn) ? getNullable(rs, agentColumn) : null;
+    }
+
+    private String selectionIdentity(ResultSet rs, String agentColumn) throws SQLException {
+        String type = selectionType(rs, agentColumn);
+        String key = selectionKey(rs, agentColumn);
+        return StringUtils.hasText(type) && StringUtils.hasText(key) ? type + "/" + key : null;
     }
 
     // ── Schema bootstrapping ──
@@ -382,8 +391,9 @@ public class JobRepository {
                 id text primary key,
                 owner_agent_id text,
                 project_id text,
-                workspace_id text,
-                persistent_workspace_enabled integer not null default 0,
+                workspace_type text,
+                workspace_key text,
+                workspace_identity text,
                 status text,
                 title text not null,
                 summary text,
@@ -405,12 +415,9 @@ public class JobRepository {
         if (!definitionColumns.contains("project_id")) {
             jdbcTemplate.execute("alter table job_definitions add column project_id text");
         }
-        if (!definitionColumns.contains("workspace_id")) {
-            jdbcTemplate.execute("alter table job_definitions add column workspace_id text");
-        }
-        if (!definitionColumns.contains("persistent_workspace_enabled")) {
-            jdbcTemplate.execute("alter table job_definitions add column persistent_workspace_enabled integer not null default 0");
-        }
+        addColumnIfMissing(definitionColumns, "job_definitions", "workspace_type");
+        addColumnIfMissing(definitionColumns, "job_definitions", "workspace_key");
+        addColumnIfMissing(definitionColumns, "job_definitions", "workspace_identity");
         if (!definitionColumns.contains("status")) {
             jdbcTemplate.execute("alter table job_definitions add column status text");
         }
@@ -419,11 +426,11 @@ public class JobRepository {
                 id text primary key,
                 job_id text not null,
                 job_assignment_id text,
-                workspace_id text,
+                workspace_type text,
+                workspace_key text,
+                workspace_identity text,
                 status text not null,
                 work_item_runs_json text not null,
-                workspace_path text,
-                output_dir text,
                 final_message text,
                 error_text text,
                 created_at text not null,
@@ -440,9 +447,9 @@ public class JobRepository {
         if (!runColumns.contains("job_assignment_id")) {
             jdbcTemplate.execute("alter table job_runs add column job_assignment_id text");
         }
-        if (!runColumns.contains("workspace_id")) {
-            jdbcTemplate.execute("alter table job_runs add column workspace_id text");
-        }
+        addColumnIfMissing(runColumns, "job_runs", "workspace_type");
+        addColumnIfMissing(runColumns, "job_runs", "workspace_key");
+        addColumnIfMissing(runColumns, "job_runs", "workspace_identity");
         jdbcTemplate.execute("""
             create table if not exists job_recurrences (
                 id text primary key,
@@ -456,5 +463,11 @@ public class JobRepository {
                 foreign key (job_id) references job_definitions(id) on delete cascade
             )
             """);
+    }
+
+    private void addColumnIfMissing(List<String> columns, String table, String column) {
+        if (!columns.contains(column)) {
+            jdbcTemplate.execute("alter table " + table + " add column " + column + " text");
+        }
     }
 }

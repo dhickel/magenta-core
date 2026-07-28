@@ -19,7 +19,7 @@ This package owns chat-scoped tool execution support.
 - Keep file tool names and arguments plain, predictable, and friendly to smaller local models.
 - Prefer `file_append` for accumulating notes, outlines, reports, or logs; use `file_write` only when writing the complete desired file content.
 - Keep file path confinement centralized and reject traversal or symlink escapes before file IO.
-- During orchestration execution, preserve current alias semantics from workspace layout helpers: `workspace/` is the selected Work Area when present, otherwise the effective durable workspace; `root/` is the owner workspace root; `outputs/` is the current run-local `runs/<runId>/outputs/` staging directory; `run/` is current run staging. Final output destinations are backend promotion targets, not tool write aliases. Legacy scratch/job aliases are compatibility only when still accepted.
+- During orchestration execution, resolve ordinary file and shell paths directly beneath the effective `WorkspaceDescriptor` root. Former alias names such as `workspace`, `root`, `run`, `work`, and `projects` have no special meaning and may be ordinary child names. `outputs/` and descendants are reserved for output publication: file tools may inspect them but may not mutate them, and shell execution may not use them as a working directory.
 - File and shell tools that resolve a confined runtime target also record the active runtime path on `OrchestrationTaskContextHolder` so subsequent model-backed prompt/context assembly can refresh `AGENTS.md` layers for the real target path.
 - Keep shell command execution structured; do not accept raw shell command strings.
 - Keep web tool names and outputs compact, citation-friendly, and explicit about failures/truncation.

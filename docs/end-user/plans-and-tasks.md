@@ -75,15 +75,17 @@ Finalize changes the plan status from draft to approved. It does not execute the
 
 ## Submit To Agent
 
+Each submission reserves a distinct run before the agent starts. Transport retries can reuse the submission operation key, but two intentional submissions with identical inputs remain separate runs. Resume keeps the same run and opens a new attempt; operator retry/replay creates a linked sibling run.
+
 1. Open an existing plan.
 2. Select **Submit to Agent**.
 3. Choose an agent.
-4. Optionally choose a project, model override, and compatibility workspace.
+4. Optionally choose project metadata, a model override, and an existing declared user workspace override.
 5. Set priority.
 6. Fill runtime inputs generated from the plan's input definitions.
 7. Submit.
 
-The project field controls where durable files and outputs belong. If a project is selected, the run uses the project workspace. If no project is selected, it uses the executing agent workspace. The workspace field remains for compatibility and uses a searchable selector where available. The agent field in the plan submit panel may still be a plain dropdown.
+The workspace selector controls which workspace receives output files. By default the bound agent's workspace is used. Declared user workspaces are available as overrides. Project association is metadata only. The agent field in the plan submit panel may still be a plain dropdown.
 
 After submit, Magenta creates an assignment. Open the linked agent page and use the queue, diagnostics, transcript, history, workspace, and outputs tabs to follow execution.
 
@@ -96,7 +98,7 @@ Plan submissions create agent assignments and may create task run records. The p
 - `/outputs` for artifacts.
 - `/jobs` when the plan runs as part of a job.
 
-During execution, model-facing `outputs/` is the run-local staging area. After backend completion, validation, or promotion, task output artifacts are promoted to the selected agent, project, or Work Area output destination. Ordinary chat files remain separate from these output artifacts.
+During execution, task outputs publish beneath the canonical run-local `tasks/<taskPathKey>/<taskRunId>/outputs/` location with create-only placement and integrity metadata. Ordinary chat files remain separate. Scoped artifact metadata, safe preview/download, lineage, and retention are available through `/api/artifacts`. See [Task Run Monitoring](task-run-monitoring.md).
 
 ## Anonymous Chat Plan Execution
 

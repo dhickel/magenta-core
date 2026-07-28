@@ -29,8 +29,6 @@ class AgentOperationalToolConfigurationTest {
 
         assertThat(names).containsExactlyInAnyOrder(
             "agent_workspace_status",
-            "agent_workspace_links",
-            "agent_project_release_workspace",
             "agent_queue_list",
             "agent_assignment_get",
             "agent_assignment_cancel",
@@ -57,27 +55,9 @@ class AgentOperationalToolConfigurationTest {
             "agent_project_list",
             "agent_project_get",
             "agent_project_members",
-            "agent_project_workspace_status",
             "agent_project_events",
             "agent_output_list",
-            "agent_output_read",
-            "avatar_system_overview",
-            "avatar_agent_list",
-            "avatar_agent_status",
-            "avatar_assignment_list",
-            "avatar_assignment_cancel",
-            "avatar_assignment_pause",
-            "avatar_assignment_resume",
-            "avatar_assignment_requeue_workspace_blocked",
-            "avatar_project_list",
-            "avatar_project_members",
-            "avatar_project_release_workspace",
-            "avatar_job_list",
-            "avatar_job_run_list",
-            "avatar_job_run_cancel",
-            "avatar_schedule_list",
-            "avatar_output_list",
-            "avatar_output_read"
+            "agent_output_read"
         );
         assertThat(provider.getToolCallbacks()[0].getToolDefinition().description()).isNotBlank();
     }
@@ -88,11 +68,14 @@ class AgentOperationalToolConfigurationTest {
         ToolCallbackProvider provider = new AgentOperationalToolConfiguration().agentOperationalToolCallbackProvider(tools);
         ChatToolRegistry registry = new ChatToolRegistry(List.of(), List.of(provider));
 
-        assertThat(registry.resolveApprovedTools(List.of("agent_queue_list", "avatar_system_overview")))
+        assertThat(registry.resolveApprovedTools(List.of("agent_queue_list", "agent_inbox_list")))
             .extracting(callback -> callback.getToolDefinition().name())
-            .containsExactly("agent_queue_list", "avatar_system_overview");
+            .containsExactly("agent_queue_list", "agent_inbox_list");
         assertThatThrownBy(() -> registry.resolveApprovedTools(List.of("agent_missing")))
             .isInstanceOf(IllegalArgumentException.class)
             .hasMessageContaining("agent_missing");
+        assertThatThrownBy(() -> registry.resolveApprovedTools(List.of("avatar_system_overview")))
+            .isInstanceOf(IllegalArgumentException.class)
+            .hasMessageContaining("avatar_system_overview");
     }
 }

@@ -9,6 +9,7 @@ import java.util.Map;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import static org.mockito.Mockito.mock;
 import org.junit.jupiter.api.io.TempDir;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.SingleConnectionDataSource;
@@ -28,7 +29,7 @@ class ProjectServiceTest {
     void setUp() throws IOException {
         Files.createDirectories(tempDir.resolve("projects"));
         projectRepository = repository();
-        projectService = new ProjectService(projectRepository, null);
+        projectService = new ProjectService(projectRepository, mock(io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceDirectoryService.class));
     }
 
     @Test
@@ -75,11 +76,11 @@ class ProjectServiceTest {
         JdbcTemplate jdbc = jdbcTemplate();
         ProjectRepository projects = new ProjectRepository(jdbc, new ObjectMapper());
         OrchestrationRuntimeRepository runtime = new OrchestrationRuntimeRepository(jdbc, new ObjectMapper());
-        ProjectService service = new ProjectService(projects, null, null, null, runtime);
+        ProjectService service = new ProjectService(projects, mock(io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceDirectoryService.class), runtime, null);
         Project project = service.createProject("Active", "desc", "agent-active", null);
         runtime.saveAssignment(new WorkAssignment(
             "assignment-active", "agent-active", null, null, AssignmentType.REPORT, 1,
-            OrchestrationStatus.RUNNING, null, null, project.id(), null, null,
+            OrchestrationStatus.RUNNING, null, null, "ws-1", "ws-1", project.id(),
             0, Map.of(), Map.of("projectId", project.id()), Map.of(), Map.of(),
             null, "lease-owner", Instant.now().plusSeconds(60), null, null, Instant.now(), null
         ));

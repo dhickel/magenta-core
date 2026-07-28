@@ -13,22 +13,21 @@ public record WorkAssignment(
     int priority,
     OrchestrationStatus status,
     String modelOverride,
-    String workspaceId,
+    String workspaceType,
+    String workspaceKey,
+    String workspaceIdentity,
     String projectId,
-    String effectiveWorkspaceId,
-    String effectiveWorkspaceKind,
-    String selectedWorkAreaId,
-    String outputRouteType,
-    String outputWorkAreaId,
-    String outputDirectRelativePath,
     int currentItemIndex,
     Map<String, Object> checkpoint,
     Map<String, Object> input,
     Map<String, Object> output,
     Map<String, Object> evidence,
     String errorText,
+    @com.fasterxml.jackson.annotation.JsonIgnore
     String leaseOwner,
     Instant leaseExpiresAt,
+    @com.fasterxml.jackson.annotation.JsonIgnore
+    long leaseFence,
     Instant createdAt,
     Instant updatedAt,
     Instant startedAt,
@@ -36,16 +35,22 @@ public record WorkAssignment(
     Instant lastProgressAt,
     Instant lastHeartbeatAt
 ) {
+    // Full constructor matching the old canonical shape (27 args without leaseFence,
+    // defaults leaseFence to 0).
     public WorkAssignment(
         String id,
         String agentId,
         String jobId,
         String jobItemId,
         AssignmentType assignmentType,
+        String runDisplayName,
         int priority,
         OrchestrationStatus status,
         String modelOverride,
-        String workspaceId,
+        String workspaceType,
+        String workspaceKey,
+        String workspaceIdentity,
+        String projectId,
         int currentItemIndex,
         Map<String, Object> checkpoint,
         Map<String, Object> input,
@@ -62,10 +67,10 @@ public record WorkAssignment(
         Instant lastHeartbeatAt
     ) {
         this(
-            id, agentId, jobId, jobItemId, assignmentType, null, priority, status, modelOverride, workspaceId,
-            null, null, null, null, null, null, null, currentItemIndex, checkpoint, input, output, evidence,
-            errorText, leaseOwner, leaseExpiresAt, createdAt, updatedAt, startedAt, completedAt, lastProgressAt,
-            lastHeartbeatAt
+            id, agentId, jobId, jobItemId, assignmentType, runDisplayName, priority, status, modelOverride,
+            workspaceType, workspaceKey, workspaceIdentity, projectId, currentItemIndex, checkpoint, input, output,
+            evidence, errorText, leaseOwner, leaseExpiresAt, 0L, createdAt, updatedAt, startedAt, completedAt,
+            lastProgressAt, lastHeartbeatAt
         );
     }
 
@@ -78,10 +83,9 @@ public record WorkAssignment(
         int priority,
         OrchestrationStatus status,
         String modelOverride,
-        String workspaceId,
-        String projectId,
-        String effectiveWorkspaceId,
-        String effectiveWorkspaceKind,
+        String workspaceType,
+        String workspaceKey,
+        String workspaceIdentity,
         int currentItemIndex,
         Map<String, Object> checkpoint,
         Map<String, Object> input,
@@ -98,10 +102,10 @@ public record WorkAssignment(
         Instant lastHeartbeatAt
     ) {
         this(
-            id, agentId, jobId, jobItemId, assignmentType, null, priority, status, modelOverride, workspaceId,
-            projectId, effectiveWorkspaceId, effectiveWorkspaceKind, null, null, null, null, currentItemIndex,
-            checkpoint, input, output, evidence, errorText, leaseOwner, leaseExpiresAt, createdAt, updatedAt,
-            startedAt, completedAt, lastProgressAt, lastHeartbeatAt
+            id, agentId, jobId, jobItemId, assignmentType, null, priority, status, modelOverride,
+            workspaceType, workspaceKey, workspaceIdentity, null, currentItemIndex, checkpoint, input, output,
+            evidence, errorText, leaseOwner, leaseExpiresAt, createdAt, updatedAt, startedAt, completedAt,
+            lastProgressAt, lastHeartbeatAt
         );
     }
 
@@ -114,116 +118,10 @@ public record WorkAssignment(
         int priority,
         OrchestrationStatus status,
         String modelOverride,
-        String workspaceId,
-        int currentItemIndex,
-        Map<String, Object> checkpoint,
-        Map<String, Object> input,
-        Map<String, Object> output,
-        Map<String, Object> evidence,
-        String errorText,
-        String leaseOwner,
-        Instant leaseExpiresAt,
-        Instant createdAt,
-        Instant updatedAt,
-        Instant startedAt,
-        Instant completedAt
-    ) {
-        this(
-            id, agentId, jobId, jobItemId, assignmentType, null, priority, status, modelOverride, workspaceId,
-            null, null, null, null, null, null, null, currentItemIndex, checkpoint, input, output, evidence,
-            errorText, leaseOwner, leaseExpiresAt, createdAt, updatedAt, startedAt, completedAt, null, null
-        );
-    }
-
-    public WorkAssignment(
-        String id,
-        String agentId,
-        String jobId,
-        String jobItemId,
-        AssignmentType assignmentType,
-        int priority,
-        OrchestrationStatus status,
-        String modelOverride,
-        String workspaceId,
+        String workspaceType,
+        String workspaceKey,
+        String workspaceIdentity,
         String projectId,
-        String effectiveWorkspaceId,
-        String effectiveWorkspaceKind,
-        int currentItemIndex,
-        Map<String, Object> checkpoint,
-        Map<String, Object> input,
-        Map<String, Object> output,
-        Map<String, Object> evidence,
-        String errorText,
-        String leaseOwner,
-        Instant leaseExpiresAt,
-        Instant createdAt,
-        Instant updatedAt,
-        Instant startedAt,
-        Instant completedAt
-    ) {
-        this(
-            id, agentId, jobId, jobItemId, assignmentType, null, priority, status, modelOverride, workspaceId,
-            projectId, effectiveWorkspaceId, effectiveWorkspaceKind, null, null, null, null, currentItemIndex,
-            checkpoint, input, output, evidence, errorText, leaseOwner, leaseExpiresAt, createdAt, updatedAt,
-            startedAt, completedAt, null, null
-        );
-    }
-
-    public WorkAssignment(
-        String id,
-        String agentId,
-        String jobId,
-        String jobItemId,
-        AssignmentType assignmentType,
-        int priority,
-        OrchestrationStatus status,
-        String modelOverride,
-        String workspaceId,
-        String projectId,
-        String effectiveWorkspaceId,
-        String effectiveWorkspaceKind,
-        String selectedWorkAreaId,
-        String outputRouteType,
-        String outputWorkAreaId,
-        String outputDirectRelativePath,
-        int currentItemIndex,
-        Map<String, Object> checkpoint,
-        Map<String, Object> input,
-        Map<String, Object> output,
-        Map<String, Object> evidence,
-        String errorText,
-        String leaseOwner,
-        Instant leaseExpiresAt,
-        Instant createdAt,
-        Instant updatedAt,
-        Instant startedAt,
-        Instant completedAt
-    ) {
-        this(
-            id, agentId, jobId, jobItemId, assignmentType, null, priority, status, modelOverride, workspaceId,
-            projectId, effectiveWorkspaceId, effectiveWorkspaceKind, selectedWorkAreaId, outputRouteType,
-            outputWorkAreaId, outputDirectRelativePath, currentItemIndex, checkpoint, input, output, evidence,
-            errorText, leaseOwner, leaseExpiresAt, createdAt, updatedAt, startedAt, completedAt, null, null
-        );
-    }
-
-    public WorkAssignment(
-        String id,
-        String agentId,
-        String jobId,
-        String jobItemId,
-        AssignmentType assignmentType,
-        int priority,
-        OrchestrationStatus status,
-        String modelOverride,
-        String workspaceId,
-        String projectId,
-        String effectiveWorkspaceId,
-        String effectiveWorkspaceKind,
-        String selectedWorkAreaId,
-        String outputRouteType,
-        String outputWorkAreaId,
-        String outputDirectRelativePath,
         int currentItemIndex,
         Map<String, Object> checkpoint,
         Map<String, Object> input,
@@ -240,11 +138,78 @@ public record WorkAssignment(
         Instant lastHeartbeatAt
     ) {
         this(
-            id, agentId, jobId, jobItemId, assignmentType, null, priority, status, modelOverride, workspaceId,
-            projectId, effectiveWorkspaceId, effectiveWorkspaceKind, selectedWorkAreaId, outputRouteType,
-            outputWorkAreaId, outputDirectRelativePath, currentItemIndex, checkpoint, input, output, evidence,
-            errorText, leaseOwner, leaseExpiresAt, createdAt, updatedAt, startedAt, completedAt, lastProgressAt,
-            lastHeartbeatAt
+            id, agentId, jobId, jobItemId, assignmentType, null, priority, status, modelOverride,
+            workspaceType, workspaceKey, workspaceIdentity, projectId, currentItemIndex, checkpoint, input, output,
+            evidence, errorText, leaseOwner, leaseExpiresAt, createdAt, updatedAt, startedAt, completedAt,
+            lastProgressAt, lastHeartbeatAt
         );
     }
+
+    public WorkAssignment(
+        String id,
+        String agentId,
+        String jobId,
+        String jobItemId,
+        AssignmentType assignmentType,
+        int priority,
+        OrchestrationStatus status,
+        String modelOverride,
+        String workspaceType,
+        String workspaceKey,
+        String workspaceIdentity,
+        int currentItemIndex,
+        Map<String, Object> checkpoint,
+        Map<String, Object> input,
+        Map<String, Object> output,
+        Map<String, Object> evidence,
+        String errorText,
+        String leaseOwner,
+        Instant leaseExpiresAt,
+        Instant createdAt,
+        Instant updatedAt,
+        Instant startedAt,
+        Instant completedAt
+    ) {
+        this(
+            id, agentId, jobId, jobItemId, assignmentType, null, priority, status, modelOverride,
+            workspaceType, workspaceKey, workspaceIdentity, null, currentItemIndex, checkpoint, input, output,
+            evidence, errorText, leaseOwner, leaseExpiresAt, createdAt, updatedAt, startedAt, completedAt,
+            null, null
+        );
+    }
+
+    public WorkAssignment(
+        String id,
+        String agentId,
+        String jobId,
+        String jobItemId,
+        AssignmentType assignmentType,
+        int priority,
+        OrchestrationStatus status,
+        String modelOverride,
+        String workspaceType,
+        String workspaceKey,
+        String workspaceIdentity,
+        String projectId,
+        int currentItemIndex,
+        Map<String, Object> checkpoint,
+        Map<String, Object> input,
+        Map<String, Object> output,
+        Map<String, Object> evidence,
+        String errorText,
+        String leaseOwner,
+        Instant leaseExpiresAt,
+        Instant createdAt,
+        Instant updatedAt,
+        Instant startedAt,
+        Instant completedAt
+    ) {
+        this(
+            id, agentId, jobId, jobItemId, assignmentType, null, priority, status, modelOverride,
+            workspaceType, workspaceKey, workspaceIdentity, projectId, currentItemIndex, checkpoint, input, output,
+            evidence, errorText, leaseOwner, leaseExpiresAt, createdAt, updatedAt, startedAt, completedAt,
+            null, null
+        );
+    }
+
 }

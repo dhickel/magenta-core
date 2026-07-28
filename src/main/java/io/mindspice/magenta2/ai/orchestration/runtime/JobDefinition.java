@@ -1,29 +1,18 @@
 package io.mindspice.magenta2.ai.orchestration.runtime;
 
+import com.fasterxml.jackson.annotation.JsonProperty;
 import java.time.Instant;
 import java.util.List;
+import org.springframework.util.StringUtils;
 
-/**
- * Defines a durable job that coordinates multiple work items (plans or workflows).
- * The persistent workspace flag is a legacy compatibility field; active job
- * runtime does not allocate job-owned workspace directories.
- *
- * @param id              unique identifier
- * @param title           human-readable title
- * @param summary         short description of the job's purpose
- * @param items           ordered list of work items
- * @param promptProfile   steering profile for job-level agent behavior
- * @param model           default model for job items
- * @param settingsOverrideJson JSON settings overrides applied at the job level
- * @param createdAt       creation timestamp
- * @param updatedAt       last update timestamp
- */
+/** Defines durable, task-like work coordinated by an agent. */
 public record JobDefinition(
     String id,
     String ownerAgentId,
     String projectId,
-    String workspaceId,
-    Boolean persistentWorkspaceEnabled,
+    String workspaceType,
+    String workspaceKey,
+    @JsonProperty(access = JsonProperty.Access.READ_ONLY) String workspaceIdentity,
     String status,
     String title,
     String summary,
@@ -34,42 +23,14 @@ public record JobDefinition(
     Instant createdAt,
     Instant updatedAt
 ) {
-    public JobDefinition(
-        String id,
-        String ownerAgentId,
-        String projectId,
-        String workspaceId,
-        String status,
-        String title,
-        String summary,
-        List<JobWorkItem> items,
-        String promptProfile,
-        String model,
-        String settingsOverrideJson,
-        Instant createdAt,
-        Instant updatedAt
-    ) {
-        this(id, ownerAgentId, projectId, workspaceId, false, status, title, summary, items,
-            promptProfile, model, settingsOverrideJson, createdAt, updatedAt);
-    }
-
-    public JobDefinition(
-        String id,
-        String ownerAgentId,
-        String projectId,
-        String workspaceId,
-        Boolean persistentWorkspaceEnabled,
-        String title,
-        String summary,
-        List<JobWorkItem> items,
-        String promptProfile,
-        String model,
-        String settingsOverrideJson,
-        Instant createdAt,
-        Instant updatedAt
-    ) {
-        this(id, ownerAgentId, projectId, workspaceId, persistentWorkspaceEnabled, null, title, summary, items,
-            promptProfile, model, settingsOverrideJson, createdAt, updatedAt);
+    public JobDefinition {
+        workspaceType = normalize(workspaceType);
+        workspaceKey = normalize(workspaceKey);
+        if ((workspaceType == null) != (workspaceKey == null)) {
+            throw new IllegalArgumentException("workspaceType and workspaceKey must be supplied together");
+        }
+        workspaceIdentity = workspaceType == null ? null : workspaceType + "/" + workspaceKey;
+        items = items == null ? List.of() : List.copyOf(items);
     }
 
     public JobDefinition(
@@ -83,7 +44,11 @@ public record JobDefinition(
         Instant createdAt,
         Instant updatedAt
     ) {
-        this(id, null, null, null, false, null, title, summary, items,
+        this(id, null, null, null, null, null, null, title, summary, items,
             promptProfile, model, settingsOverrideJson, createdAt, updatedAt);
+    }
+
+    private static String normalize(String value) {
+        return StringUtils.hasText(value) ? value.trim() : null;
     }
 }

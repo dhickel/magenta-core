@@ -23,8 +23,7 @@ class TaskStreamSupportTest {
     void orchestrationRunEventsEmitsStartedAndCompleted() {
         OrchestrationRunResult result = new OrchestrationRunResult(
             new WorkAssignment("assign-1", "agent-1", "job-1", null,
-                AssignmentType.TASK_RUN, 0, OrchestrationStatus.COMPLETED, null,
-                null, 0, Map.of(), Map.of(), Map.of(), Map.of(),
+                AssignmentType.TASK_RUN, 0, OrchestrationStatus.COMPLETED, null, null, null, null, 0, Map.of(), Map.of(), Map.of(), Map.of(),
                 null, null, null, null, null, null, null),
             "run-1", Map.of("output", "value")
         );
@@ -41,8 +40,7 @@ class TaskStreamSupportTest {
     void orchestrationRunEventsEmitsFailedOnNonCompletedStatus() {
         OrchestrationRunResult result = new OrchestrationRunResult(
             new WorkAssignment("assign-2", "agent-1", "job-1", null,
-                AssignmentType.TASK_RUN, 0, OrchestrationStatus.FAILED, null,
-                null, 0, Map.of(), Map.of(), Map.of(), Map.of(),
+                AssignmentType.TASK_RUN, 0, OrchestrationStatus.FAILED, null, null, null, null, 0, Map.of(), Map.of(), Map.of(), Map.of(),
                 "error occurred", null, null, null, null, null, null),
             "run-2", Map.of()
         );
@@ -123,7 +121,7 @@ class TaskStreamSupportTest {
     @Test
     void toContextWithRequestPopulatesFields() {
         var request = new TaskController.TaskRunRequest(
-            Map.of(), "conv-1", "agent-1", "job-1", "project-1", "ws-1", "model-1", 5
+            Map.of(), "conv-1", "agent-1", "job-1", "project-1", null, "ws-1", null, "model-1", 5
         );
 
         OrchestrationRunContext context = TaskStreamSupport.toContext(request);
@@ -131,7 +129,7 @@ class TaskStreamSupportTest {
         assertThat(context.agentId()).isEqualTo("agent-1");
         assertThat(context.jobId()).isEqualTo("job-1");
         assertThat(context.projectId()).isEqualTo("project-1");
-        assertThat(context.workspaceId()).isEqualTo("ws-1");
+        assertThat(context.workspaceKey()).isEqualTo("ws-1");
         assertThat(context.modelOverride()).isEqualTo("model-1");
         assertThat(context.priority()).isEqualTo(5);
     }

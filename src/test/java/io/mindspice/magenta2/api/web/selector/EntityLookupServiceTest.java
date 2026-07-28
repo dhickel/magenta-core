@@ -50,14 +50,7 @@ class EntityLookupServiceTest {
 
     private EntityLookupService service(AgentProfileService agents, ChatService chat) {
         return new EntityLookupService(
-            agents,
-            null,
-            null,
-            null,
-            null,
-            null,
-            null,
-            chat
+            agents, null, null, null, null, chat
         );
     }
 
@@ -65,7 +58,7 @@ class EntityLookupServiceTest {
         private final List<AgentProfile> agents;
 
         StubAgentProfileService(List<AgentProfile> agents) {
-            super(null, null, null);
+            super(null, null, null, null, null, null, null);
             this.agents = agents;
         }
 

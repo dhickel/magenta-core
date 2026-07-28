@@ -31,6 +31,10 @@ public class TurnContext {
     private List<ToolCallback> approvedTools;
     private boolean toolsEnabled;
 
+    // ── Trusted context state ──
+    private boolean terminalBindingFailure;
+    private String terminalBindingReason;
+
     // ── Tool loop state (set during execution) ──
     private List<Message> conversationHistory;
     private List<Message> activeToolMessages;
@@ -50,6 +54,14 @@ public class TurnContext {
         this.messagesToPersist = new ArrayList<>();
         this.activeToolMessages = new ArrayList<>();
     }
+
+    // ── Trusted context accessors ──
+
+    public boolean terminalBindingFailure() { return terminalBindingFailure; }
+    public void terminalBindingFailure(boolean v) { this.terminalBindingFailure = v; }
+
+    public String terminalBindingReason() { return terminalBindingReason; }
+    public void terminalBindingReason(String v) { this.terminalBindingReason = v; }
 
     // ── Getters and setters ──
 

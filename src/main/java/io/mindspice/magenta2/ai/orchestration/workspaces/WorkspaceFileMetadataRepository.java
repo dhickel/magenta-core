@@ -14,7 +14,6 @@ import org.springframework.util.StringUtils;
 @Repository
 public class WorkspaceFileMetadataRepository {
     public static final String NOTE_LABEL = "note";
-    public static final String WORK_AREA_LABEL = "work-area";
 
     private final JdbcTemplate jdbcTemplate;
 
@@ -22,7 +21,6 @@ public class WorkspaceFileMetadataRepository {
         this.jdbcTemplate = jdbcTemplate;
         ensureSchema();
         ensureSystemLabel(NOTE_LABEL, "Note");
-        ensureSystemLabel(WORK_AREA_LABEL, "Work Area");
     }
 
     public WorkspaceFileLabel ensureLabel(String slug, String displayName, boolean system) {
@@ -51,101 +49,97 @@ public class WorkspaceFileMetadataRepository {
     }
 
     public WorkspaceFileLabelAssignment addLabel(
-        WorkArea workArea,
-        String rootRelativePath,
+        String workspaceIdentity,
         String fileRelativePath,
         String labelSlug
     ) {
         WorkspaceFileLabel label = ensureLabel(labelSlug, labelSlug, false);
-        Optional<WorkspaceFileLabelAssignment> existing = findAssignment(
-            workArea.workspaceId(), normalizePath(fileRelativePath), label.id());
+        Optional<WorkspaceFileLabelAssignment> existing = findAnnotation(
+            workspaceIdentity, normalizePath(fileRelativePath), label.id());
         if (existing.isPresent()) {
             return existing.orElseThrow();
         }
         Instant now = Instant.now();
         jdbcTemplate.update(
             """
-                insert into workspace_file_label_assignments (
-                    id, workspace_id, owner_type, owner_id, root_relative_path, file_relative_path,
+                insert into workspace_file_annotations (
+                    id, workspace_identity, file_relative_path,
                     label_id, metadata_json, created_at, updated_at
                 )
-                values (?, ?, ?, ?, ?, ?, ?, '{}', ?, ?)
+                values (?, ?, ?, ?, '{}', ?, ?)
                 """,
             UUID.randomUUID().toString(),
-            workArea.workspaceId(),
-            workArea.ownerType().name(),
-            workArea.ownerId(),
-            normalizePath(rootRelativePath),
+            workspaceIdentity,
             normalizePath(fileRelativePath),
             label.id(),
             now.toString(),
             now.toString()
         );
-        return findAssignment(workArea.workspaceId(), normalizePath(fileRelativePath), label.id()).orElseThrow();
+        return findAnnotation(workspaceIdentity, normalizePath(fileRelativePath), label.id()).orElseThrow();
     }
 
-    public int removeLabel(WorkArea workArea, String fileRelativePath, String labelSlug) {
+    public int removeLabel(String workspaceIdentity, String fileRelativePath, String labelSlug) {
         Optional<WorkspaceFileLabel> label = findLabel(normalizeSlug(labelSlug));
         if (label.isEmpty()) {
             return 0;
         }
         return jdbcTemplate.update(
             """
-                delete from workspace_file_label_assignments
-                where workspace_id = ? and file_relative_path = ? and label_id = ?
+                delete from workspace_file_annotations
+                where workspace_identity = ? and file_relative_path = ? and label_id = ?
                 """,
-            workArea.workspaceId(),
+            workspaceIdentity,
             normalizePath(fileRelativePath),
             label.orElseThrow().id()
         );
     }
 
-    public List<WorkspaceFileLabelAssignment> labelsForPath(String workspaceId, String fileRelativePath) {
+    public List<WorkspaceFileLabelAssignment> labelsForPath(String workspaceIdentity, String fileRelativePath) {
         return jdbcTemplate.query(
             """
                 select a.*, l.id label_pk, l.slug, l.display_name, l.color, l.system_flag,
                     l.metadata_json label_metadata_json, l.created_at label_created_at, l.updated_at label_updated_at
-                from workspace_file_label_assignments a
+                from workspace_file_annotations a
                 join workspace_file_labels l on l.id = a.label_id
-                where a.workspace_id = ? and a.file_relative_path = ?
+                where a.workspace_identity = ? and a.file_relative_path = ?
                 order by l.system_flag desc, l.slug
                 """,
             (rs, rowNum) -> toAssignment(rs),
-            workspaceId,
+            workspaceIdentity,
             normalizePath(fileRelativePath)
         );
     }
 
-    public List<WorkspaceFileLabelAssignment> labelsForSubtree(String workspaceId, String subtreeRootRelativePath) {
+    public List<WorkspaceFileLabelAssignment> labelsForSubtree(String workspaceIdentity, String subtreeRootRelativePath) {
         String normalized = normalizePath(subtreeRootRelativePath);
+        String escaped = escapeLike(normalized);
         return jdbcTemplate.query(
             """
                 select a.*, l.id label_pk, l.slug, l.display_name, l.color, l.system_flag,
                     l.metadata_json label_metadata_json, l.created_at label_created_at, l.updated_at label_updated_at
-                from workspace_file_label_assignments a
+                from workspace_file_annotations a
                 join workspace_file_labels l on l.id = a.label_id
-                where a.workspace_id = ? and (a.file_relative_path = ? or a.file_relative_path like ?)
+                where a.workspace_identity = ? and (a.file_relative_path = ? or a.file_relative_path like ? escape '\\')
                 order by a.file_relative_path, l.slug
                 """,
             (rs, rowNum) -> toAssignment(rs),
-            workspaceId,
+            workspaceIdentity,
             normalized,
-            normalized + "/%"
+            escaped + "/%"
         );
     }
 
-    public void moveSubtree(WorkArea workArea, String sourceRootRelativePath, String targetRootRelativePath) {
-        List<WorkspaceFileLabelAssignment> assignments = labelsForSubtree(workArea.workspaceId(), sourceRootRelativePath);
+    public void moveSubtree(String workspaceIdentity, String sourceRootRelativePath, String targetRootRelativePath) {
+        List<WorkspaceFileLabelAssignment> assignments = labelsForSubtree(workspaceIdentity, sourceRootRelativePath);
         Instant now = Instant.now();
         for (WorkspaceFileLabelAssignment assignment : assignments) {
             String movedPath = replacePrefix(assignment.fileRelativePath(), sourceRootRelativePath, targetRootRelativePath);
             jdbcTemplate.update(
                 """
-                    update workspace_file_label_assignments
-                    set root_relative_path = ?, file_relative_path = ?, updated_at = ?
+                    update workspace_file_annotations
+                    set file_relative_path = ?, updated_at = ?
                     where id = ?
                     """,
-                normalizePath(targetRootRelativePath),
                 movedPath,
                 now.toString(),
                 assignment.id()
@@ -153,24 +147,21 @@ public class WorkspaceFileMetadataRepository {
         }
     }
 
-    public void copySubtree(WorkArea workArea, String sourceRootRelativePath, String targetRootRelativePath) {
-        List<WorkspaceFileLabelAssignment> assignments = labelsForSubtree(workArea.workspaceId(), sourceRootRelativePath);
+    public void copySubtree(String workspaceIdentity, String sourceRootRelativePath, String targetRootRelativePath) {
+        List<WorkspaceFileLabelAssignment> assignments = labelsForSubtree(workspaceIdentity, sourceRootRelativePath);
         Instant now = Instant.now();
         for (WorkspaceFileLabelAssignment assignment : assignments) {
             String copiedPath = replacePrefix(assignment.fileRelativePath(), sourceRootRelativePath, targetRootRelativePath);
             jdbcTemplate.update(
                 """
-                    insert or ignore into workspace_file_label_assignments (
-                        id, workspace_id, owner_type, owner_id, root_relative_path, file_relative_path,
+                    insert or ignore into workspace_file_annotations (
+                        id, workspace_identity, file_relative_path,
                         label_id, metadata_json, created_at, updated_at
                     )
-                    values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    values (?, ?, ?, ?, ?, ?, ?)
                     """,
                 UUID.randomUUID().toString(),
-                assignment.workspaceId(),
-                assignment.ownerType().name(),
-                assignment.ownerId(),
-                normalizePath(targetRootRelativePath),
+                workspaceIdentity,
                 copiedPath,
                 assignment.label().id(),
                 StringUtils.hasText(assignment.metadataJson()) ? assignment.metadataJson() : "{}",
@@ -180,16 +171,17 @@ public class WorkspaceFileMetadataRepository {
         }
     }
 
-    public int deleteSubtree(String workspaceId, String subtreeRootRelativePath) {
+    public int deleteSubtree(String workspaceIdentity, String subtreeRootRelativePath) {
         String normalized = normalizePath(subtreeRootRelativePath);
+        String escaped = escapeLike(normalized);
         return jdbcTemplate.update(
             """
-                delete from workspace_file_label_assignments
-                where workspace_id = ? and (file_relative_path = ? or file_relative_path like ?)
+                delete from workspace_file_annotations
+                where workspace_identity = ? and (file_relative_path = ? or file_relative_path like ? escape '\\')
                 """,
-            workspaceId,
+            workspaceIdentity,
             normalized,
-            normalized + "/%"
+            escaped + "/%"
         );
     }
 
@@ -201,17 +193,17 @@ public class WorkspaceFileMetadataRepository {
         );
     }
 
-    private Optional<WorkspaceFileLabelAssignment> findAssignment(String workspaceId, String fileRelativePath, String labelId) {
+    private Optional<WorkspaceFileLabelAssignment> findAnnotation(String workspaceIdentity, String fileRelativePath, String labelId) {
         return jdbcTemplate.query(
             """
                 select a.*, l.id label_pk, l.slug, l.display_name, l.color, l.system_flag,
                     l.metadata_json label_metadata_json, l.created_at label_created_at, l.updated_at label_updated_at
-                from workspace_file_label_assignments a
+                from workspace_file_annotations a
                 join workspace_file_labels l on l.id = a.label_id
-                where a.workspace_id = ? and a.file_relative_path = ? and a.label_id = ?
+                where a.workspace_identity = ? and a.file_relative_path = ? and a.label_id = ?
                 """,
             rs -> rs.next() ? Optional.of(toAssignment(rs)) : Optional.empty(),
-            workspaceId,
+            workspaceIdentity,
             fileRelativePath,
             labelId
         );
@@ -224,10 +216,7 @@ public class WorkspaceFileMetadataRepository {
     private WorkspaceFileLabelAssignment toAssignment(ResultSet rs) throws SQLException {
         return new WorkspaceFileLabelAssignment(
             rs.getString("id"),
-            rs.getString("workspace_id"),
-            WorkspaceOwnerType.valueOf(rs.getString("owner_type")),
-            rs.getString("owner_id"),
-            rs.getString("root_relative_path"),
+            rs.getString("workspace_identity"),
             rs.getString("file_relative_path"),
             new WorkspaceFileLabel(
                 rs.getString("label_pk"),
@@ -286,6 +275,14 @@ public class WorkspaceFileMetadataRepository {
         return path.trim().replace('\\', '/');
     }
 
+    /**
+     * Escape {@code %}, {@code _}, and the backslash character for SQL LIKE.
+     */
+    private String escapeLike(String value) {
+        if (value == null) return null;
+        return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_");
+    }
+
     private void ensureSchema() {
         jdbcTemplate.execute("""
             create table if not exists workspace_file_labels (
@@ -300,33 +297,25 @@ public class WorkspaceFileMetadataRepository {
             )
             """);
         jdbcTemplate.execute("""
-            create table if not exists workspace_file_label_assignments (
+            create table if not exists workspace_file_annotations (
                 id text primary key,
-                workspace_id text not null,
-                owner_type text not null,
-                owner_id text not null,
-                root_relative_path text not null,
+                workspace_identity text not null,
                 file_relative_path text not null,
                 label_id text not null,
                 metadata_json text not null default '{}',
                 created_at text not null,
                 updated_at text not null,
-                unique(workspace_id, file_relative_path, label_id),
-                foreign key(workspace_id) references workspaces(id),
+                unique(workspace_identity, file_relative_path, label_id),
                 foreign key(label_id) references workspace_file_labels(id)
             )
             """);
         jdbcTemplate.execute("""
-            create index if not exists idx_workspace_file_label_assignments_path
-                on workspace_file_label_assignments(workspace_id, file_relative_path)
+            create index if not exists idx_workspace_file_annotations_path
+                on workspace_file_annotations(workspace_identity, file_relative_path)
             """);
         jdbcTemplate.execute("""
-            create index if not exists idx_workspace_file_label_assignments_label
-                on workspace_file_label_assignments(label_id)
-            """);
-        jdbcTemplate.execute("""
-            create index if not exists idx_workspace_file_label_assignments_owner
-                on workspace_file_label_assignments(owner_type, owner_id)
+            create index if not exists idx_workspace_file_annotations_label
+                on workspace_file_annotations(label_id)
             """);
     }
 }

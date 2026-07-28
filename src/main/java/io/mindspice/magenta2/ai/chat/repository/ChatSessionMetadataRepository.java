@@ -20,6 +20,17 @@ public class ChatSessionMetadataRepository {
         ensureSchema();
     }
 
+    public boolean existsByConversationId(String conversationId) {
+        if (!StringUtils.hasText(conversationId)) {
+            return false;
+        }
+        Integer count = jdbcTemplate.queryForObject(
+                "select count(*) from ai_chat_session_metadata where conversation_id = ?",
+                Integer.class,
+                conversationId);
+        return count != null && count > 0;
+    }
+
     public void saveModel(String conversationId, String model) {
         if (!StringUtils.hasText(conversationId) || !StringUtils.hasText(model)) {
             return;

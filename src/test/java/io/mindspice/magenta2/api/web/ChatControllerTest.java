@@ -172,13 +172,11 @@ class ChatControllerTest {
             "{\"message\":\"ping\",\"surface\":\"browser\"}",
             ChatRequest.MsgRequest.class
         );
-        ChatRequest.MsgRequest avatar = objectMapper.readValue(
+        assertThat(browser.surface()).isEqualTo(ChatSessionSurface.BROWSER);
+        assertThatThrownBy(() -> objectMapper.readValue(
             "{\"message\":\"ping\",\"surface\":\"AvAtAr\"}",
             ChatRequest.MsgRequest.class
-        );
-
-        assertThat(browser.surface()).isEqualTo(ChatSessionSurface.BROWSER);
-        assertThat(avatar.surface()).isEqualTo(ChatSessionSurface.AVATAR);
+        )).hasMessageContaining("Unknown chat session surface");
         assertThatThrownBy(() -> objectMapper.readValue(
             "{\"message\":\"ping\",\"surface\":\"external\"}",
             ChatRequest.MsgRequest.class
@@ -235,6 +233,27 @@ class ChatControllerTest {
                 assertThat(exception.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
                 assertThat(exception.getReason()).isEqualTo("unknown command: exec-plan");
             });
+    }
+
+    @Test
+    void outputsChangedSideChannelIsNotPlanExecutionFinalMessage() throws Exception {
+        OutputsChangedStreamChatService stubService = new OutputsChangedStreamChatService(
+            List.of(CONVERSATION_ID),
+            Map.of(CONVERSATION_ID, "qwen3")
+        );
+        ActiveTurnRegistry turnRegistry = new ActiveTurnRegistry();
+        ChatController controller = new ChatController(stubService, turnRegistry);
+
+        SseEmitter emitter = controller.streamPlanExecution(CONVERSATION_ID, null);
+
+        assertThat(emitter).isNotNull();
+        assertThat(stubService.streamCompleted.await(5, TimeUnit.SECONDS)).isTrue();
+        // Plan finalization should use the assistant message, not outputs_changed
+        assertThat(stubService.savedFinalMessage).isNotNull();
+        assertThat(stubService.savedFinalMessage)
+            .as("plan execution final message should be assistant text, not outputs_changed")
+            .isNotEqualTo("conv-1");
+        assertThat(stubService.streamFinishedCalled).isTrue();
     }
 
     @Test
@@ -774,6 +793,46 @@ class ChatControllerTest {
         @Override
         public List<ChatMessage> history(String conversationId) {
             return List.of(new ChatMessage("assistant", "result", "<p>result</p>", null));
+        }
+    }
+
+    private static class OutputsChangedStreamChatService extends StubChatService {
+        private final CountDownLatch streamCompleted = new CountDownLatch(1);
+        private String savedFinalMessage;
+        private boolean streamFinishedCalled;
+
+        OutputsChangedStreamChatService(List<String> conversationIds, Map<String, String> modelsByConversationId) {
+            super(conversationIds, modelsByConversationId);
+        }
+
+        @Override
+        public Flux<ChatMessage> stream(ResolvedChatRequest request, ActiveTurn activeTurn) {
+            return Flux.just(
+                new ChatMessage("outputs_changed", request.conversationId(), null, null),
+                new ChatMessage("assistant", "final answer", "<p>final answer</p>", null)
+            ).doOnComplete(() -> streamCompleted.countDown());
+        }
+
+        @Override
+        public void handlePlanExecutionStreamFinished(String conversationId) {
+            handlePlanExecutionStreamFinished(conversationId, "final answer");
+        }
+
+        @Override
+        public void handlePlanExecutionStreamFinished(String conversationId, String finalMessage) {
+            savedFinalMessage = finalMessage;
+            streamFinishedCalled = true;
+            super.handlePlanExecutionStreamFinished(conversationId, finalMessage);
+        }
+
+        @Override
+        public ResolvedChatRequest resolveSavedPlanExecution(String conversationId) {
+            return new ResolvedChatRequest(conversationId, "Execute the saved plan.", "qwen3");
+        }
+
+        @Override
+        public ResolvedChatRequest resolveSavedPlanExecution(String conversationId, boolean clearContext) {
+            return resolveSavedPlanExecution(conversationId);
         }
     }
 

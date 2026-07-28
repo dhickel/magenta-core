@@ -19,30 +19,15 @@ final class AgentOperationalToolResponses {
 
     record WorkspaceStatusItem(
         String agentId,
-        String workspaceRelativePath,
+        String canonicalIdentity,
         String health,
         boolean exists,
         boolean writable,
         int activeRunCount,
-        int activeLeaseCount,
-        List<String> linkedProjectIds,
         long outputArtifactCount,
         long outputBytes,
         Instant lastActivityAt,
         String message
-    ) {
-    }
-
-    record WorkspaceLinkItem(
-        String id,
-        String workspaceId,
-        String label,
-        String linkType,
-        String target,
-        boolean readable,
-        boolean writable,
-        Instant createdAt,
-        Instant updatedAt
     ) {
     }
 
@@ -67,8 +52,6 @@ final class AgentOperationalToolResponses {
         AssignmentItem assignment,
         Instant lastProgressAt,
         Instant lastHeartbeatAt,
-        Long progressAgeSeconds,
-        Long heartbeatAgeSeconds,
         boolean suspectedStuck,
         List<LinkedRunItem> linkedRuns,
         List<AuditEventItem> auditEvents,
@@ -125,9 +108,10 @@ final class AgentOperationalToolResponses {
         String title,
         String ownerAgentId,
         String projectId,
-        String workspaceId,
+        String workspaceType,
+        String workspaceKey,
+        String workspaceIdentity,
         String status,
-        boolean persistentWorkspaceEnabled,
         int itemCount,
         Instant updatedAt
     ) {
@@ -137,10 +121,10 @@ final class AgentOperationalToolResponses {
         String id,
         String jobId,
         String assignmentId,
-        String workspaceId,
+        String workspaceType,
+        String workspaceKey,
+        String workspaceIdentity,
         JobRunStatus status,
-        String workspacePath,
-        String outputDir,
         Instant startedAt,
         Instant completedAt,
         Instant updatedAt
@@ -160,19 +144,6 @@ final class AgentOperationalToolResponses {
     }
 
     record ProjectEventItem(String id, String projectId, String type, String payloadPreview, Instant createdAt) {
-    }
-
-    record ProjectWorkspaceItem(
-        String workspaceId,
-        String ownerAgentId,
-        String rootKind,
-        String displayPath,
-        int linkCount,
-        String leaseId,
-        String leaseHolderAssignmentId,
-        String mountedAgentId,
-        boolean releaseRequested
-    ) {
     }
 
     record OutputItem(
@@ -203,16 +174,6 @@ final class AgentOperationalToolResponses {
         boolean directLineEnabled,
         int approvedToolCount,
         WorkspaceStatusItem workspace
-    ) {
-    }
-
-    record SystemOverviewItem(
-        int agents,
-        int activeAssignments,
-        int projects,
-        int jobs,
-        int schedules,
-        int outputs
     ) {
     }
 }

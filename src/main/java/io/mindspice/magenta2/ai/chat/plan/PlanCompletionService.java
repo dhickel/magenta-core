@@ -326,15 +326,7 @@ public class PlanCompletionService {
     }
 
     private List<Path> sessionArtifactCandidatePaths(Path filePath) {
-        List<Path> candidates = new ArrayList<>();
-        candidates.add(filePath);
-        if (filePath.getNameCount() > 1) {
-            String first = filePath.getName(0).toString();
-            if ("outputs".equals(first) || "workspace".equals(first)) {
-                candidates.add(filePath.subpath(1, filePath.getNameCount()));
-            }
-        }
-        return List.copyOf(candidates);
+        return List.of(filePath);
     }
 
     private ValidationResult parseValidation(String response) {

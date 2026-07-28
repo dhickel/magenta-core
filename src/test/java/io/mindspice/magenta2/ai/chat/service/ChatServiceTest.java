@@ -34,6 +34,8 @@ import io.mindspice.magenta2.ai.orchestration.agents.AgentProfileStatus;
 import io.mindspice.magenta2.ai.orchestration.runtime.OrchestrationTaskContext;
 import io.mindspice.magenta2.ai.orchestration.runtime.OrchestrationTaskContextHolder;
 import io.mindspice.magenta2.ai.orchestration.workspaces.AgentsMdResolver;
+import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceDescriptor;
+import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceKind;
 import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceDirectoryService;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -63,8 +65,20 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
+import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceDirectoryServiceTestSupport;
 
 class ChatServiceTest {
+
+    @Test
+    void extractsReasoningFromDedicatedDeepSeekMessage() {
+        var message = org.springframework.ai.deepseek.DeepSeekAssistantMessage.builder()
+            .content("final answer")
+            .reasoningContent("reasoning trace")
+            .build();
+        var generation = new org.springframework.ai.chat.model.Generation(message);
+
+        assertThat(ChatService.thinkingText(generation)).isEqualTo("reasoning trace");
+    }
 
     @TempDir
     Path tempDir;
@@ -299,7 +313,7 @@ class ChatServiceTest {
         ChatMemoryRepository memoryRepository = new ChatMemoryRepository(jdbcTemplate, objectMapper);
         ChatSessionMetadataRepository metadataRepository = new ChatSessionMetadataRepository(jdbcTemplate);
         Path dataRoot = Files.createDirectories(tempDir.resolve("validated-stream-data"));
-        WorkspaceDirectoryService directoryService = new WorkspaceDirectoryService(aiConfig(dataRoot));
+        WorkspaceDirectoryService directoryService = WorkspaceDirectoryServiceTestSupport.directoryService(dataRoot);
         PlanService planService = new PlanService(
             new PlanRepository(jdbcTemplate, objectMapper),
             memoryRepository,
@@ -339,7 +353,7 @@ class ChatServiceTest {
 
         chatService.handlePlanExecutionStreamFinished("conversation-validated", "Validated final message");
 
-        Path finalMessage = dataRoot.resolve("chats/conversation-validated/files/final-message.md");
+        Path finalMessage = dataRoot.resolve("workspace/chat/conversation-validated/final-message.md");
         assertThat(finalMessage).exists();
         assertThat(Files.readString(finalMessage)).isEqualTo("Validated final message\n");
     }
@@ -383,7 +397,7 @@ class ChatServiceTest {
         ChatSessionMetadataRepository metadataRepository = new ChatSessionMetadataRepository(jdbcTemplate);
         Path dataRoot = Files.createDirectories(tempDir.resolve("new-magenta-root/root"));
         ChatFileService chatFileService = new ChatFileService(
-            new io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceDirectoryService(aiConfig(dataRoot))
+            WorkspaceDirectoryServiceTestSupport.directoryService(dataRoot)
         );
         ChatService chatService = new ChatService(
             new RepositoryBackedChatMemory(memoryRepository),
@@ -413,7 +427,8 @@ class ChatServiceTest {
         String conversationId = "00000000-0000-0000-0000-000000000001";
         memoryRepository.saveAll(conversationId, List.of(new UserMessage("hello")));
         metadataRepository.saveSurfaceIfAbsent(conversationId, ChatSessionSurface.BROWSER);
-        Path files = Files.createDirectories(dataRoot.resolve("chats/" + conversationId + "/files/nested"));
+        // Phase 02: chat files are now under workspace/chat/{conversationId}
+        Path files = Files.createDirectories(dataRoot.resolve("workspace/chat/" + conversationId + "/nested"));
         Files.writeString(files.resolve("seeded.md"), "seeded");
 
         assertThat(chatService.listSessions())
@@ -445,15 +460,15 @@ class ChatServiceTest {
         );
 
         String browserConversationId = "00000000-0000-0000-0000-000000000010";
-        String avatarConversationId = "00000000-0000-0000-0000-000000000011";
+        String internalConversationId = "00000000-0000-0000-0000-000000000011";
         String agentConversationId = "00000000-0000-0000-0000-000000000012";
         String planningConversationId = "00000000-0000-0000-0000-000000000013";
 
         memoryRepository.saveAll(browserConversationId, List.of(new UserMessage("browser")));
         metadataRepository.saveSurfaceIfAbsent(browserConversationId, ChatSessionSurface.BROWSER);
 
-        memoryRepository.saveAll(avatarConversationId, List.of(new UserMessage("avatar")));
-        metadataRepository.saveSurfaceIfAbsent(avatarConversationId, ChatSessionSurface.AVATAR);
+        memoryRepository.saveAll(internalConversationId, List.of(new UserMessage("internal")));
+        metadataRepository.saveSurfaceIfAbsent(internalConversationId, ChatSessionSurface.INTERNAL);
 
         memoryRepository.saveAll(agentConversationId, List.of(new UserMessage("agent")));
         metadataRepository.saveOriginIfAbsent(agentConversationId, io.mindspice.magenta2.ai.chat.model.ChatSessionOrigin.AGENT_CHAT, "agent-1");
@@ -591,7 +606,7 @@ class ChatServiceTest {
         ToolTranscriptService transcriptService = new ToolTranscriptService(objectMapper);
         ContextUsageTracker usageTracker = new ContextUsageTracker();
         Path dataRoot = Files.createDirectories(tempDir.resolve("agents-md-tool-loop"));
-        Path workspaceRoot = Files.createDirectories(dataRoot.resolve("workspace/agent-1"));
+        Path workspaceRoot = Files.createDirectories(dataRoot.resolve("workspace/agent/agent-1"));
         Path outputRoot = Files.createDirectories(workspaceRoot.resolve("runs/run-1/outputs"));
         Files.createDirectories(workspaceRoot.resolve("a"));
         Files.createDirectories(workspaceRoot.resolve("b"));
@@ -619,6 +634,7 @@ class ChatServiceTest {
             config,
             metadataRepository,
             memoryRepository,
+            null,
             null,
             null,
             null
@@ -649,18 +665,20 @@ class ChatServiceTest {
             null,
             new AgentsMdResolver()
         );
-        OrchestrationTaskContextHolder.set(new OrchestrationTaskContext(
-            "agent-1",
+        OrchestrationTaskContextHolder.set(new OrchestrationTaskContext("agent-1",
             "TestAgent",
+            null,
+            null,
             null,
             null,
             null,
             "TASK_RUN",
             workspaceRoot.toString(),
             outputRoot.toString(),
+            null,
             workspaceRoot.toString(),
-            workspaceRoot.resolve("runs/run-1").toString()
-        ));
+            null, null, null, null, null,
+            new WorkspaceDescriptor(WorkspaceKind.AGENT, "agent-1", workspaceRoot), null));
 
         try {
             ChatResponse.MsgResponse response = chatService.chat("conversation-1", "read both files", "main");
@@ -672,7 +690,7 @@ class ChatServiceTest {
             assertThat(chatModel.prompts().get(2)).contains("nested-b-guidance");
             assertThat(chatModel.prompts().get(2)).doesNotContain("nested-a-guidance");
             assertThat(OrchestrationTaskContextHolder.current().activeRuntimePath())
-                .isEqualTo("workspace/b/file.txt");
+                .isEqualTo("b/file.txt");
         } finally {
             OrchestrationTaskContextHolder.clear();
         }
@@ -982,6 +1000,70 @@ class ChatServiceTest {
             .containsExactly("hello from side panel", "Agent answer");
     }
 
+    @Test
+    void fileMutatingToolNamesContainsExpectedTools() {
+        assertThat(ChatService.FILE_MUTATING_TOOL_NAMES)
+            .containsExactlyInAnyOrder("file_write", "file_append", "file_replace", "file_delete");
+    }
+
+    @Test
+    void fileWriteToolProducesOutputsChangedStreamSignal() {
+        JdbcTemplate jdbcTemplate = jdbcTemplate();
+        ObjectMapper objectMapper = new ObjectMapper();
+        ChatMemoryRepository memoryRepository = new ChatMemoryRepository(jdbcTemplate, objectMapper);
+        ChatSessionMetadataRepository metadataRepository = new ChatSessionMetadataRepository(jdbcTemplate);
+        ToolTranscriptService transcriptService = new ToolTranscriptService(objectMapper);
+        ContextUsageTracker usageTracker = new ContextUsageTracker();
+
+        FileWriteThenFinalChatModel chatModel = new FileWriteThenFinalChatModel();
+        ChatModelRouter router = new TestChatModelRouter(chatModel);
+        AiConfig config = aiConfig(Path.of("."), List.of("file_write"));
+        ContextManagementAdvisor contextAdvisor = new ContextManagementAdvisor(
+            memoryRepository,
+            config,
+            router,
+            new CharacterTokenEstimator(),
+            usageTracker,
+            transcriptService,
+            null
+        );
+
+        ToolCallingManager toolCallingManager = new SuccessToolCallingManager();
+        ChatToolRegistry toolRegistry = new ChatToolRegistry(
+            List.of(new NamedToolCallback("file_write")), List.of()
+        );
+
+        ChatService chatService = new ChatService(
+            new RepositoryBackedChatMemory(memoryRepository),
+            memoryRepository,
+            metadataRepository,
+            new ChatMarkdownRenderer(),
+            config,
+            contextAdvisor,
+            usageTracker,
+            router,
+            toolCallingManager,
+            toolRegistry,
+            transcriptService,
+            null
+        );
+
+        var messages = chatService.stream(
+            new ResolvedChatRequest("conv-1", "write a file", "main")
+        ).collectList().block();
+
+        assertThat(messages).isNotNull();
+        assertThat(messages).anySatisfy(msg -> {
+            assertThat(msg.role()).isEqualTo("outputs_changed");
+            assertThat(msg.text()).isEqualTo("conv-1");
+        });
+        // Read-only tools do not produce outputs_changed signals
+        long outputsChangedCount = messages.stream()
+            .filter(msg -> "outputs_changed".equals(msg.role()))
+            .count();
+        assertThat(outputsChangedCount).isEqualTo(1);
+    }
+
     private JdbcTemplate jdbcTemplate() {
         SingleConnectionDataSource dataSource = new SingleConnectionDataSource("jdbc:sqlite::memory:?foreign_keys=true", true);
         return new JdbcTemplate(dataSource);
@@ -1083,10 +1165,10 @@ class ChatServiceTest {
                 .collect(Collectors.joining("\n")));
             int call = calls.getAndIncrement();
             if (call == 0) {
-                return toolCallResponse("call-a", "{\"path\":\"workspace/a/file.txt\",\"startLine\":1,\"maxLines\":10}");
+                return toolCallResponse("call-a", "{\"path\":\"a/file.txt\",\"startLine\":1,\"maxLines\":10}");
             }
             if (call == 1) {
-                return toolCallResponse("call-b", "{\"path\":\"workspace/b/file.txt\",\"startLine\":1,\"maxLines\":10}");
+                return toolCallResponse("call-b", "{\"path\":\"b/file.txt\",\"startLine\":1,\"maxLines\":10}");
             }
             return new org.springframework.ai.chat.model.ChatResponse(List.of(
                 new Generation(new AssistantMessage("done"))
@@ -1276,6 +1358,62 @@ class ChatServiceTest {
         @Override
         public String call(String toolInput) {
             return "{\"ok\":true}";
+        }
+    }
+
+    private static final class FileWriteThenFinalChatModel implements ChatModel {
+        private final AtomicInteger calls = new AtomicInteger();
+
+        @Override
+        public org.springframework.ai.chat.model.ChatResponse call(Prompt prompt) {
+            if (calls.getAndIncrement() == 0) {
+                AssistantMessage toolCallMessage = AssistantMessage.builder()
+                    .content("")
+                    .toolCalls(List.of(new AssistantMessage.ToolCall(
+                        "call-1",
+                        "function",
+                        "file_write",
+                        "{\"path\":\"output.md\",\"content\":\"hello\"}"
+                    )))
+                    .build();
+                return new org.springframework.ai.chat.model.ChatResponse(
+                    List.of(new Generation(toolCallMessage))
+                );
+            }
+            return new org.springframework.ai.chat.model.ChatResponse(List.of(
+                new Generation(new AssistantMessage("done"))
+            ));
+        }
+    }
+
+    private static final class SuccessToolCallingManager implements ToolCallingManager {
+        @Override
+        public List<ToolDefinition> resolveToolDefinitions(ToolCallingChatOptions options) {
+            return List.of(new DefaultToolDefinition(
+                "file_write", "Write a file", "{\"type\":\"object\"}"
+            ));
+        }
+
+        @Override
+        public ToolExecutionResult executeToolCalls(
+            Prompt prompt,
+            org.springframework.ai.chat.model.ChatResponse response
+        ) {
+            AssistantMessage assistantMessage = response.getResult().getOutput();
+            AssistantMessage.ToolCall toolCall = assistantMessage.getToolCalls().getFirst();
+            ToolResponseMessage toolResponse = ToolResponseMessage.builder()
+                .responses(List.of(new ToolResponseMessage.ToolResponse(
+                    toolCall.id(),
+                    toolCall.name(),
+                    "{\"ok\":true,\"path\":\"output.md\"}"
+                )))
+                .build();
+            List<Message> history = new java.util.ArrayList<>(prompt.getInstructions());
+            history.add(assistantMessage);
+            history.add(toolResponse);
+            return ToolExecutionResult.builder()
+                .conversationHistory(history)
+                .build();
         }
     }
 

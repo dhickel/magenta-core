@@ -13,7 +13,8 @@ public record AgentsMdLayer(
     Path sourcePath,
     String relativeDirectory,
     String content,
-    int precedenceRank
+    int precedenceRank,
+    boolean truncated
 ) {
     public AgentsMdLayer {
         if (sourcePath == null) {
@@ -29,6 +30,12 @@ public record AgentsMdLayer(
             throw new IllegalArgumentException("precedenceRank must be >= 0");
         }
         relativeDirectory = normalize(relativeDirectory);
+    }
+
+    /** Backward-compatible constructor without truncation flag. */
+    public AgentsMdLayer(Path sourcePath, String relativeDirectory,
+                          String content, int precedenceRank) {
+        this(sourcePath, relativeDirectory, content, precedenceRank, false);
     }
 
     public boolean isRootLayer() {

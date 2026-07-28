@@ -5,8 +5,9 @@ SimplyPages UI refactor patterns for Magenta web surfaces.
 # Source References
 
 - `.internal-dev/reviews/simplypages-refactor.md`
-- `/home/hickelpickle/Code/Java/cannasite/java-html-framework/docs/reference/builders-shell-nav-banner-accountbar.md`
-- `/home/hickelpickle/Code/Java/cannasite/java-html-framework/docs/reference/chat-helper-api-reference.md`
+- `/home/dhickel/Code/Java/SimplyPages/docs/core/01-components-htmltag-and-module-lifecycle.md`
+- `/home/dhickel/Code/Java/SimplyPages/docs/patterns/03-htmx-endpoint-and-swap-patterns.md`
+- `/home/dhickel/Code/Java/SimplyPages/docs/security/01-security-boundaries-and-safe-rendering.md`
 - `src/main/java/io/mindspice/magenta2/api/web/FrontendController.java`
 
 # Key Takeaways
@@ -16,6 +17,8 @@ Use `ShellTemplate.renderWithContent(...)` with request-scoped SimplyPages compo
 `ShellBuilder.addCustomJs(...)` emits normal script tags. ES module files that use `import` must be rendered as explicit `<script type="module" src="...">` components or they will fail in the browser.
 
 Keep `/chat` visually close to the existing session workspace, but isolate its stable structure in SimplyPages components. The current live chat behavior still needs a small app-owned JS bridge for POST SSE token/tool updates.
+
+The project guide's former `cannasite/java-html-framework` documentation path is stale in this workspace. Use `/home/dhickel/Code/Java/SimplyPages/docs` and `/home/dhickel/Code/Java/SimplyPages/demo` for current framework documentation and examples.
 
 # Engine Relevance
 

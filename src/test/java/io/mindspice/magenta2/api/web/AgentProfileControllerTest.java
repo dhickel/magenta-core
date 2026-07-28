@@ -14,7 +14,6 @@ import io.mindspice.magenta2.ai.orchestration.agents.AgentProfile;
 import io.mindspice.magenta2.ai.orchestration.agents.AgentProfileRepository;
 import io.mindspice.magenta2.ai.orchestration.agents.AgentProfileService;
 import io.mindspice.magenta2.ai.orchestration.agents.AgentProfileStatus;
-import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceService;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpStatus;
@@ -31,7 +30,7 @@ class AgentProfileControllerTest {
 
     @Test
     void createRejectsBlankName() {
-        AgentProfileController controller = new AgentProfileController(stubService(), null);
+        AgentProfileController controller = new AgentProfileController(stubService());
         AgentProfile blankName = new AgentProfile(
             null, "  ", AgentProfileStatus.ACTIVE, "qwen3", null, List.of(), List.of(), true, null, null
         );
@@ -44,7 +43,7 @@ class AgentProfileControllerTest {
 
     @Test
     void getReturns404ForMissingId() {
-        AgentProfileController controller = new AgentProfileController(missingService(), null);
+        AgentProfileController controller = new AgentProfileController(missingService());
 
         assertThatThrownBy(() -> controller.get("non-existent"))
             .isInstanceOfSatisfying(ResponseStatusException.class, exception -> {
@@ -54,7 +53,7 @@ class AgentProfileControllerTest {
 
     @Test
     void updateReturns404ForMissingId() {
-        AgentProfileController controller = new AgentProfileController(missingService(), null);
+        AgentProfileController controller = new AgentProfileController(missingService());
         AgentProfile profile = new AgentProfile(
             "non-existent", "Test", AgentProfileStatus.ACTIVE, "qwen3", null,
             List.of(), List.of(), true, null, null
@@ -68,7 +67,7 @@ class AgentProfileControllerTest {
 
     @Test
     void createSucceedsWithValidProfile() {
-        AgentProfileController controller = new AgentProfileController(stubService(), null);
+        AgentProfileController controller = new AgentProfileController(stubService());
         AgentProfile valid = new AgentProfile(
             null, "Valid Agent", AgentProfileStatus.ACTIVE, "qwen3", null,
             List.of(), List.of(), true, null, null
@@ -82,7 +81,7 @@ class AgentProfileControllerTest {
 
     @Test
     void createReturns400ForInvalidPathSegmentId() {
-        AgentProfileController controller = new AgentProfileController(realService(), null);
+        AgentProfileController controller = new AgentProfileController(realService());
         AgentProfile invalid = new AgentProfile(
             "%2e%2e", "Invalid Agent", AgentProfileStatus.ACTIVE, "main", null,
             List.of(), List.of(), true, null, null
@@ -97,7 +96,7 @@ class AgentProfileControllerTest {
 
     @Test
     void updateReturns400ForInvalidPathAgentId() {
-        AgentProfileController controller = new AgentProfileController(realService(), null);
+        AgentProfileController controller = new AgentProfileController(realService());
         AgentProfile profile = new AgentProfile(
             "../projects/example", "Invalid Agent", AgentProfileStatus.ACTIVE, "main", null,
             List.of(), List.of(), true, null, null
@@ -112,7 +111,7 @@ class AgentProfileControllerTest {
 
     @Test
     void listReturnsProfiles() {
-        AgentProfileController controller = new AgentProfileController(stubService(), null);
+        AgentProfileController controller = new AgentProfileController(stubService());
 
         List<AgentProfile> result = controller.list();
 
@@ -121,7 +120,7 @@ class AgentProfileControllerTest {
     }
 
     private static AgentProfileService stubService() {
-        return new AgentProfileService(null, null, null) {
+        return new AgentProfileService(null, null, null, null, null, null, null) {
             @Override
             public List<AgentProfile> list() {
                 return List.of(new AgentProfile(
@@ -150,7 +149,7 @@ class AgentProfileControllerTest {
     }
 
     private static AgentProfileService missingService() {
-        return new AgentProfileService(null, null, null) {
+        return new AgentProfileService(null, null, null, null, null, null, null) {
             @Override
             public AgentProfile get(String id) {
                 throw new IllegalStateException("agent not found: " + id);
@@ -181,6 +180,10 @@ class AgentProfileControllerTest {
                 Map.of("main", new ModelConfig("main-remote", "http://localhost:11434", EndpointType.OLLAMA, 4096, 0, null)),
                 Map.of("legacy", new AgentConfig("main", "Prompt", List.of(), List.of("*")))
             ),
+            null,
+            null,
+            null,
+            null,
             null
         );
     }

@@ -28,6 +28,17 @@ public class ChatMemoryRepository implements org.springframework.ai.chat.memory.
         ensureMetadataColumn();
     }
 
+    public boolean existsByConversationId(String conversationId) {
+        if (!StringUtils.hasText(conversationId)) {
+            return false;
+        }
+        Integer count = jdbcTemplate.queryForObject(
+                "select count(*) from ai_chat_memory where conversation_id = ?",
+                Integer.class,
+                conversationId);
+        return count != null && count > 0;
+    }
+
     @Override
     public List<String> findConversationIds() {
         return jdbcTemplate.queryForList(
@@ -101,7 +112,10 @@ public class ChatMemoryRepository implements org.springframework.ai.chat.memory.
     }
 
     private Message toMessage(String messageTypeValue, String messageText, String metadataJson) {
-        MessageType messageType = MessageType.fromValue(messageTypeValue);
+        MessageType messageType = java.util.Arrays.stream(MessageType.values())
+            .filter(candidate -> candidate.getValue().equalsIgnoreCase(messageTypeValue))
+            .findFirst()
+            .orElseThrow(() -> new IllegalArgumentException("Unknown message type: " + messageTypeValue));
         Map<String, Object> metadata = metadata(metadataJson);
         return switch (messageType) {
             case USER -> new UserMessage(messageText);

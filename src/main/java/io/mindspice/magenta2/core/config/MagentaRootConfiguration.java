@@ -17,6 +17,7 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.core.Ordered;
 import org.springframework.core.PriorityOrdered;
 import org.springframework.core.env.Environment;
+import java.time.Clock;
 import org.springframework.util.StringUtils;
 
 @Configuration
@@ -24,6 +25,11 @@ import org.springframework.util.StringUtils;
 public class MagentaRootConfiguration {
 
     private static final String SQLITE_PREFIX = "jdbc:sqlite:";
+
+    @Bean
+    Clock clock() {
+        return Clock.systemUTC();
+    }
 
     @Bean
     static SqliteDataSourceParentDirectoryInitializer sqliteDataSourceParentDirectoryInitializer() {

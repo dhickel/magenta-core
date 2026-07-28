@@ -55,6 +55,7 @@ import io.mindspice.magenta2.ai.orchestration.runtime.Project;
 import io.mindspice.magenta2.ai.orchestration.runtime.ProjectAgentMembership;
 import io.mindspice.magenta2.ai.orchestration.runtime.ProjectService;
 import io.mindspice.magenta2.ai.orchestration.runtime.ReactionActionType;
+import io.mindspice.magenta2.ai.orchestration.runtime.RunSummaryService;
 import io.mindspice.magenta2.ai.orchestration.runtime.ScheduleService;
 import io.mindspice.magenta2.ai.orchestration.runtime.WorkAssignment;
 import io.mindspice.magenta2.ai.orchestration.settings.RuntimeSettings;
@@ -74,14 +75,12 @@ import io.mindspice.magenta2.ai.orchestration.workspaces.OutputArtifactService;
 import io.mindspice.magenta2.ai.orchestration.workspaces.RunOutputArtifact;
 import io.mindspice.magenta2.ai.orchestration.workspaces.AgentWorkspaceStatus;
 import io.mindspice.magenta2.ai.orchestration.workspaces.AgentWorkspaceStatusService;
-import io.mindspice.magenta2.ai.orchestration.workspaces.WorkArea;
-import io.mindspice.magenta2.ai.orchestration.workspaces.WorkAreaExplorerService;
-import io.mindspice.magenta2.ai.orchestration.workspaces.WorkAreaService;
-import io.mindspice.magenta2.ai.orchestration.workspaces.Workspace;
-import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceLease;
-import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceLink;
-import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceOwnerType;
-import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceService;
+import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceDescriptor;
+import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceDirectoryService;
+import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceExplorerService;
+import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceFileException;
+import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceKind;
+import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceResolutionException;
 import io.mindspice.magenta2.api.web.selector.EntityKind;
 import io.mindspice.magenta2.api.web.selector.EntityLookupService;
 import io.mindspice.magenta2.api.web.selector.EntitySelectorComponents;
@@ -130,6 +129,8 @@ public class OrchestrationController {
     private static final String AGENT_CHAT_JS = "/js/orchestration/agent-chat.js?v=2";
     private static final String PLANS_JS = "/js/orchestration/plans.js?v=4";
     private static final String PROJECTS_JS = "/js/orchestration/projects.js?v=3";
+    private static final String HTMX_ERRORS_JS = "/js/orchestration/htmx-errors.js?v=1";
+    private static final String SYSTEM_CHAT_JS = "/js/orchestration/system-chat.js?v=1";
     private static final ObjectMapper JSON = new ObjectMapper().findAndRegisterModules();
 
     private final ChatService chatService;
@@ -143,10 +144,9 @@ public class OrchestrationController {
     private final io.mindspice.magenta2.ai.orchestration.runtime.InboxService runtimeInboxService;
     private final OutputArtifactService outputArtifactService;
     private final RuntimeSettingsService runtimeSettingsService;
-    private final WorkspaceService workspaceService;
     private final ObjectProvider<AgentWorkspaceStatusService> workspaceStatusServiceRef;
-    private final ObjectProvider<WorkAreaService> workAreaServiceRef;
-    private final ObjectProvider<WorkAreaExplorerService> workAreaExplorerServiceRef;
+    private final ObjectProvider<WorkspaceDirectoryService> workspaceDirectoryServiceRef;
+    private final ObjectProvider<WorkspaceExplorerService> workspaceExplorerServiceRef;
     private final EntityLookupService entityLookupService;
     private final EntitySelectorComponents entitySelectorComponents;
 
@@ -154,6 +154,10 @@ public class OrchestrationController {
     private final PlanService planService;
     @Autowired(required = false)
     private SavedPlanChatService savedPlanChatService;
+    @Autowired(required = false)
+    private RunSummaryService runSummaryService;
+    @Autowired(required = false)
+    private RunOperationsFragments runOperationsFragments;
     private final AssignmentService assignmentService;
     private final ScheduleService scheduleService;
     private final EventReactionService eventReactionService;
@@ -174,7 +178,6 @@ public class OrchestrationController {
                                    io.mindspice.magenta2.ai.orchestration.runtime.InboxService runtimeInboxService,
                                    OutputArtifactService outputArtifactService,
                                    RuntimeSettingsService runtimeSettingsService,
-                                   WorkspaceService workspaceService,
                                    ObjectProvider<AgentWorkspaceStatusService> workspaceStatusServiceRef,
                                    PlanService planService,
                                    AssignmentService assignmentService,
@@ -195,7 +198,6 @@ public class OrchestrationController {
             runtimeInboxService,
             outputArtifactService,
             runtimeSettingsService,
-            workspaceService,
             workspaceStatusServiceRef,
             emptyObjectProvider(),
             emptyObjectProvider(),
@@ -221,10 +223,9 @@ public class OrchestrationController {
                                    io.mindspice.magenta2.ai.orchestration.runtime.InboxService runtimeInboxService,
                                    OutputArtifactService outputArtifactService,
                                    RuntimeSettingsService runtimeSettingsService,
-                                   WorkspaceService workspaceService,
                                    ObjectProvider<AgentWorkspaceStatusService> workspaceStatusServiceRef,
-                                   ObjectProvider<WorkAreaService> workAreaServiceRef,
-                                   ObjectProvider<WorkAreaExplorerService> workAreaExplorerServiceRef,
+                                   ObjectProvider<WorkspaceDirectoryService> workspaceDirectoryServiceRef,
+                                   ObjectProvider<WorkspaceExplorerService> workspaceExplorerServiceRef,
                                    PlanService planService,
                                    AssignmentService assignmentService,
                                    ScheduleService scheduleService,
@@ -243,10 +244,9 @@ public class OrchestrationController {
         this.runtimeInboxService = runtimeInboxService;
         this.outputArtifactService = outputArtifactService;
         this.runtimeSettingsService = runtimeSettingsService;
-        this.workspaceService = workspaceService;
         this.workspaceStatusServiceRef = workspaceStatusServiceRef;
-        this.workAreaServiceRef = workAreaServiceRef;
-        this.workAreaExplorerServiceRef = workAreaExplorerServiceRef;
+        this.workspaceDirectoryServiceRef = workspaceDirectoryServiceRef;
+        this.workspaceExplorerServiceRef = workspaceExplorerServiceRef;
         this.planService = planService;
         this.assignmentService = assignmentService;
         this.scheduleService = scheduleService;
@@ -311,6 +311,7 @@ public class OrchestrationController {
             .withChild(dashboardChatBand())
             .withChild(dashboardStatusStrip())
             .withChild(dashboardMainLayout())
+            .withChild(moduleScript(HTMX_ERRORS_JS))
             .withChild(moduleScript(DASHBOARD_JS));
         return renderPage(body, "/dashboard");
     }
@@ -322,7 +323,9 @@ public class OrchestrationController {
                     .withClass("dashboard-chat-label")
                     .withInnerText("System Chat"))
                 .withChild(new Div().withClass("dashboard-chat-band-inner")
-                    .withChild(new Paragraph("Use the existing chat flow for system-level planning and operations."))
+                    .withChild(new Paragraph("System chat is available from each agent's detail page."))
+                    .withChild(new Paragraph("Navigate to an agent and open the System Chat tab to start a restricted system conversation.")
+                        .withClass("orch-muted-note"))
                     .withChild(new HtmlTag("a")
                         .withAttribute("href", "/chat")
                         .withClass("orch-primary")
@@ -479,8 +482,7 @@ public class OrchestrationController {
                 statusBadgeHtml(w.status()),
                 new HtmlTag("span").withInnerText(
                     w.projectId() != null ? w.projectId() : "—"),
-                new HtmlTag("span").withInnerText(
-                    w.workspaceId() != null ? w.workspaceId() : "—")
+                new HtmlTag("span").withInnerText(displayValue(w.workspaceIdentity()))
             );
         }
         for (WorkAssignment assignment : activeAssignments) {
@@ -493,7 +495,7 @@ public class OrchestrationController {
                 statusBadgeHtml(assignment.status() != null ? assignment.status().name() : "unknown"),
                 new HtmlTag("span").withInnerText(displayValue(assignment.projectId())),
                 new HtmlTag("span").withInnerText(effectiveWorkspaceLabel(
-                    assignment.effectiveWorkspaceKind(), assignment.effectiveWorkspaceId()))
+                    assignment.workspaceType(), assignment.workspaceKey()))
             );
         }
         return table.render();
@@ -1720,7 +1722,6 @@ public class OrchestrationController {
             int priority = parseIntOrDefault(params.get("priority"), 9);
             validateSelectedEntity(EntityKind.MODEL, params.get("modelOverride"), false, "Model Override");
             validateSelectedEntity(EntityKind.PROJECT, params.get("projectId"), false, "Project");
-            validateSelectedEntity(EntityKind.WORKSPACE, params.get("workspaceId"), false, "Workspace");
             Map<String, Object> inputValues = parsePlanInputValues(plan, params);
             String runDisplayName = requireRunDisplayName(params.get("runDisplayName"), "task submissions");
             WorkAssignment assignment = assignmentService.create(new AssignmentRequest(
@@ -1729,11 +1730,8 @@ public class OrchestrationController {
                 priority,
                 nn(params.get("modelOverride")),
                 nn(params.get("projectId")),
-                nn(params.get("workspaceId")),
-                nn(params.get("selectedWorkAreaId")),
-                routeTypeParam(params),
-                nn(params.get("outputWorkAreaId")),
-                nn(params.get("outputDirectRelativePath")),
+                nn(params.get("workspaceType")),
+                nn(params.get("workspaceKey")),
                 Map.of("taskId", planId, "inputValues", inputValues)
             ));
             return submitResultFragment(assignment, plan).render();
@@ -2287,13 +2285,16 @@ public class OrchestrationController {
         Div panel = new Div().withClass("orch-panel");
         panel.withChild(Header.H2("Submit to Agent"));
 
+        String boundAgentId = defaultSubmissionAgentId();
         Form form = Form.create()
             .withHxPost("/plans/_submit/" + planId)
             .withHxTarget("#plan-submit-result")
             .withHxSwap("innerHTML");
 
         form.withChild(new Div().withClass("orch-form-stack")
-            .withChild(entitySelector("agentId", EntityKind.AGENT, null, "Agent", "agent", false))
+            .withChild(entitySelector("agentId", EntityKind.AGENT, boundAgentId, "Agent", "agent", false,
+                Map.of("workspaceSelectionContext", "task submission")))
+            .withChild(workspaceSelector(boundAgentId, "task submission"))
             .withChild(label("Model Override", modelSelectWithCurrent(
                 "modelOverride", null, chatService.availableModels())))
             .withChild(label("Priority", TextInput.number("priority")
@@ -2301,10 +2302,7 @@ public class OrchestrationController {
             .withChild(label("Run Name", TextInput.create("runDisplayName")
                 .withPlaceholder("e.g. Weekly research pass")))
             .withChild(entitySelector("projectId", EntityKind.PROJECT, null,
-                "Project", "optional project context", false))
-            .withChild(entitySelector("workspaceId", EntityKind.WORKSPACE, null,
-                "Compatibility Workspace", "optional compatibility workspace metadata", false))
-            .withChild(submitRoutingFields(Map.of())));
+                "Project", "optional project context", false)));
 
         // Generated input form from declared inputs
         if (!plan.inputs().isEmpty()) {
@@ -2477,10 +2475,13 @@ public class OrchestrationController {
     public String createWorkflowDraftEditor() {
         WorkflowDefinition created = workflowService.saveDefinition(new WorkflowDefinition(
             null,
+            WorkflowDefinition.CURRENT_SCHEMA_VERSION,
             "Untitled Workflow",
             "",
+            WorkflowDefinition.DEFAULT_MAX_CONCURRENCY,
             List.of(),
             List.of(),
+            Map.of(),
             null,
             null));
         return workflowEditorFragment(created).render();
@@ -2511,9 +2512,9 @@ public class OrchestrationController {
                 .render();
         }
         WorkflowDefinition created = workflowService.saveDefinition(new WorkflowDefinition(
-            null, title,
-            nn(params.get("summary")),
-            List.of(), List.of(), null, null));
+            null, WorkflowDefinition.CURRENT_SCHEMA_VERSION, title,
+            nn(params.get("summary")), WorkflowDefinition.DEFAULT_MAX_CONCURRENCY,
+            List.of(), List.of(), Map.of(), null, null));
         return workflowEditorFragment(created).render();
     }
 
@@ -2525,9 +2526,12 @@ public class OrchestrationController {
             current = workflowService.getDefinition(workflowId);
             WorkflowDefinition updated = new WorkflowDefinition(
                 workflowId,
+                current.schemaVersion(),
                 params.containsKey("title") ? nn(params.get("title")) : current.title(),
                 params.containsKey("summary") ? nn(params.get("summary")) : current.summary(),
+                current.maxConcurrency(),
                 current.nodes(), current.routes(),
+                current.uiLayout(),
                 current.createdAt(), current.updatedAt());
             workflowService.saveDefinition(updated);
             return workflowEditorFragment(workflowService.getDefinition(workflowId)).render();
@@ -2566,13 +2570,15 @@ public class OrchestrationController {
                 .max().orElse(0);
             String key = "node_" + (maxIdx + 1);
             nodes.add(new WorkflowNode(key, WorkflowNodeType.fromWireName(nodeType),
-                nn(params.get("planId")), key, null, Map.of(),
+                nn(params.get("planId")), key, null, List.of(), List.of(), Map.of(),
                 false, List.of(),
                 nn(params.get("messageTemplate")),
                 nn(params.get("resumePolicy"))));
             WorkflowDefinition updated = new WorkflowDefinition(
-                workflowId, current.title(), current.summary(),
-                nodes, current.routes(), current.createdAt(), current.updatedAt());
+                workflowId, current.schemaVersion(), current.title(), current.summary(),
+                current.maxConcurrency(),
+                nodes, current.routes(), current.uiLayout(),
+                current.createdAt(), current.updatedAt());
             workflowService.saveDefinition(updated);
             return workflowNodesSection(workflowService.getDefinition(workflowId)).render();
         } catch (Exception e) {
@@ -2593,8 +2599,10 @@ public class OrchestrationController {
                 .filter(r -> !nodeKey.equals(r.fromNodeKey()) && !nodeKey.equals(r.toNodeKey()))
                 .toList();
             WorkflowDefinition updated = new WorkflowDefinition(
-                workflowId, current.title(), current.summary(),
-                nodes, routes, current.createdAt(), current.updatedAt());
+                workflowId, current.schemaVersion(), current.title(), current.summary(),
+                current.maxConcurrency(),
+                nodes, routes, current.uiLayout(),
+                current.createdAt(), current.updatedAt());
             workflowService.saveDefinition(updated);
             // Refresh full editor
             return workflowEditorFragment(workflowService.getDefinition(workflowId)).render();
@@ -2620,6 +2628,8 @@ public class OrchestrationController {
                         params.containsKey("planId") ? nn(params.get("planId")) : old.planId(),
                         params.containsKey("label") ? nn(params.get("label")) : old.label(),
                         params.containsKey("inputName") ? nn(params.get("inputName")) : old.inputName(),
+                        old.inputPorts(),
+                        old.outputPorts(),
                         old.config(),
                         params.containsKey("parallel") ? "true".equals(params.get("parallel")) : old.parallel(),
                         old.inputBindings(),
@@ -2630,8 +2640,10 @@ public class OrchestrationController {
                 }
             }
             WorkflowDefinition updated = new WorkflowDefinition(
-                workflowId, current.title(), current.summary(),
-                nodes, current.routes(), current.createdAt(), current.updatedAt());
+                workflowId, current.schemaVersion(), current.title(), current.summary(),
+                current.maxConcurrency(),
+                nodes, current.routes(), current.uiLayout(),
+                current.createdAt(), current.updatedAt());
             workflowService.saveDefinition(updated);
             return workflowNodesSection(workflowService.getDefinition(workflowId)).render();
         } catch (Exception e) {
@@ -2675,8 +2687,10 @@ public class OrchestrationController {
                 nn(params.get("condition"))
             ));
             WorkflowDefinition updated = new WorkflowDefinition(
-                workflowId, current.title(), current.summary(),
-                current.nodes(), routes, current.createdAt(), current.updatedAt());
+                workflowId, current.schemaVersion(), current.title(), current.summary(),
+                current.maxConcurrency(),
+                current.nodes(), routes, current.uiLayout(),
+                current.createdAt(), current.updatedAt());
             workflowService.saveDefinition(updated);
             return workflowRoutesSection(workflowService.getDefinition(workflowId)).render();
         } catch (Exception e) {
@@ -2694,8 +2708,10 @@ public class OrchestrationController {
                 .filter(r -> !r.id().equals(routeId))
                 .toList();
             WorkflowDefinition updated = new WorkflowDefinition(
-                workflowId, current.title(), current.summary(),
-                current.nodes(), routes, current.createdAt(), current.updatedAt());
+                workflowId, current.schemaVersion(), current.title(), current.summary(),
+                current.maxConcurrency(),
+                current.nodes(), routes, current.uiLayout(),
+                current.createdAt(), current.updatedAt());
             workflowService.saveDefinition(updated);
             return workflowRoutesSection(workflowService.getDefinition(workflowId)).render();
         } catch (Exception e) {
@@ -2727,8 +2743,10 @@ public class OrchestrationController {
                 }
             }
             WorkflowDefinition updated = new WorkflowDefinition(
-                workflowId, current.title(), current.summary(),
-                current.nodes(), routes, current.createdAt(), current.updatedAt());
+                workflowId, current.schemaVersion(), current.title(), current.summary(),
+                current.maxConcurrency(),
+                current.nodes(), routes, current.uiLayout(),
+                current.createdAt(), current.updatedAt());
             workflowService.saveDefinition(updated);
             return workflowRoutesSection(workflowService.getDefinition(workflowId)).render();
         } catch (Exception e) {
@@ -2796,7 +2814,6 @@ public class OrchestrationController {
             int priority = parseIntOrDefault(params.get("priority"), 9);
             validateSelectedEntity(EntityKind.MODEL, params.get("modelOverride"), false, "Model Override");
             validateSelectedEntity(EntityKind.PROJECT, params.get("projectId"), false, "Project");
-            validateSelectedEntity(EntityKind.WORKSPACE, params.get("workspaceId"), false, "Workspace");
             String runDisplayName = requireRunDisplayName(params.get("runDisplayName"), "workflow submissions");
             WorkAssignment assignment = assignmentService.create(new AssignmentRequest(
                 agentId, null, null, AssignmentType.WORKFLOW_RUN,
@@ -2804,11 +2821,8 @@ public class OrchestrationController {
                 priority,
                 nn(params.get("modelOverride")),
                 nn(params.get("projectId")),
-                nn(params.get("workspaceId")),
-                nn(params.get("selectedWorkAreaId")),
-                routeTypeParam(params),
-                nn(params.get("outputWorkAreaId")),
-                nn(params.get("outputDirectRelativePath")),
+                nn(params.get("workspaceType")),
+                nn(params.get("workspaceKey")),
                 Map.of("workflowId", workflowId)
             ));
             return workflowSubmitResultFragment(assignment, wf).render();
@@ -3368,13 +3382,16 @@ public class OrchestrationController {
             return panel;
         }
 
+        String boundAgentId = defaultSubmissionAgentId();
         Form form = Form.create()
             .withHxPost("/workflows/_submit/" + workflowId)
             .withHxTarget("#workflow-submit-result")
             .withHxSwap("innerHTML");
 
         form.withChild(new Div().withClass("orch-form-stack")
-            .withChild(entitySelector("agentId", EntityKind.AGENT, null, "Agent", "agent", false))
+            .withChild(entitySelector("agentId", EntityKind.AGENT, boundAgentId, "Agent", "agent", false,
+                Map.of("workspaceSelectionContext", "workflow submission")))
+            .withChild(workspaceSelector(boundAgentId, "workflow submission"))
             .withChild(label("Model Override", modelSelectWithCurrent(
                 "modelOverride", null, chatService.availableModels())))
             .withChild(label("Priority", TextInput.number("priority")
@@ -3382,10 +3399,7 @@ public class OrchestrationController {
             .withChild(label("Run Name", TextInput.create("runDisplayName")
                 .withPlaceholder("e.g. Nightly workflow review")))
             .withChild(entitySelector("projectId", EntityKind.PROJECT, null,
-                "Project", "optional project context", false))
-            .withChild(entitySelector("workspaceId", EntityKind.WORKSPACE, null,
-                "Compatibility Workspace", "optional compatibility workspace metadata", false))
-            .withChild(submitRoutingFields(Map.of())));
+                "Project", "optional project context", false)));
 
         form.withChild(Button.create("Submit").withClass("orch-primary").withAttribute("type", "submit"));
         panel.withChild(form);
@@ -3577,19 +3591,9 @@ public class OrchestrationController {
             validateSelectedEntity(EntityKind.PROJECT, params.get("projectId"), false, "Project");
             validateSelectedEntity(EntityKind.MODEL, params.get("model"), false, "Default Model");
             JobDefinition created = jobService.saveDefinition(new JobDefinition(
-                null, // id - auto-generated
-                nn(params.get("ownerAgentId")),
-                nn(params.get("projectId")),
-                null, // workspaceId - auto-managed
-                "true".equalsIgnoreCase(params.get("persistentWorkspaceEnabled")),
-                "DRAFT",
-                title,
-                nn(params.get("summary")),
-                List.of(), // items start empty
-                nn(params.get("promptProfile")),
-                nn(params.get("model")),
-                null, // settingsOverrideJson
-                null, null // timestamps
+                null, nn(params.get("ownerAgentId")), nn(params.get("projectId")),
+                null, null, null, "DRAFT", title, nn(params.get("summary")), List.of(),
+                nn(params.get("promptProfile")), nn(params.get("model")), null, null, null
             ));
             return jobEditorFragment(created).render();
         } catch (Exception e) {
@@ -3611,10 +3615,7 @@ public class OrchestrationController {
                 jobId,
                 params.containsKey("ownerAgentId") ? nn(params.get("ownerAgentId")) : current.ownerAgentId(),
                 params.containsKey("projectId") ? nn(params.get("projectId")) : current.projectId(),
-                current.workspaceId(),
-                params.containsKey("persistentWorkspaceEnabledPresent")
-                    ? "true".equalsIgnoreCase(params.get("persistentWorkspaceEnabled"))
-                    : current.persistentWorkspaceEnabled(),
+                current.workspaceType(), current.workspaceKey(), current.workspaceIdentity(),
                 params.containsKey("status") ? nn(params.get("status")) : current.status(),
                 params.containsKey("title") ? nn(params.get("title")) : current.title(),
                 params.containsKey("summary") ? nn(params.get("summary")) : current.summary(),
@@ -3795,25 +3796,24 @@ public class OrchestrationController {
         Div panel = new Div().withClass("orch-panel");
         panel.withChild(Header.H2("Submit to Agent"));
         panel.withChild(new Div().withClass("orch-meta")
-            .withChild(new HtmlTag("span").withInnerText("Saved project: " + displayValue(job.projectId())))
-            .withChild(new HtmlTag("span").withInnerText("Compatibility workspace: " + displayValue(job.workspaceId()))));
+            .withChild(new HtmlTag("span").withInnerText("Saved project: " + displayValue(job.projectId()))));
 
+        String boundAgentId = defaultSubmissionAgentId();
         Form form = Form.create()
             .withHxPost("/jobs/_submit/" + jobId)
             .withHxTarget("#job-submit-result")
             .withHxSwap("innerHTML");
 
         form.withChild(new Div().withClass("orch-form-stack")
-            .withChild(entitySelector("agentId", EntityKind.AGENT, null, "Agent", "agent", false))
+            .withChild(entitySelector("agentId", EntityKind.AGENT, boundAgentId, "Agent", "agent", false,
+                Map.of("workspaceSelectionContext", "job submission")))
+            .withChild(workspaceSelector(boundAgentId, "job submission"))
             .withChild(entitySelector("modelOverride", EntityKind.MODEL, null,
                 "Model Override", "optional model", false))
             .withChild(entitySelector("projectId", EntityKind.PROJECT, nn(job.projectId()),
                 "Project Override", "optional project context", false, Map.of("agentId", nn(job.ownerAgentId()))))
-            .withChild(entitySelector("workspaceId", EntityKind.WORKSPACE, nn(job.workspaceId()),
-                "Compatibility Workspace", "optional compatibility workspace metadata", false))
             .withChild(label("Priority", TextInput.number("priority")
-                .withValue("9").withMin("0").withMax("100")))
-            .withChild(submitRoutingFields(Map.of("ownerType", "AGENT", "ownerId", nn(job.ownerAgentId())))));
+                .withValue("9").withMin("0").withMax("100"))));
 
         form.withChild(Button.create("Submit").withClass("orch-primary")
             .withAttribute("type", "submit"));
@@ -3836,10 +3836,8 @@ public class OrchestrationController {
             validateSelectedEntity(EntityKind.AGENT, agentId, true, "Agent");
             validateSelectedEntity(EntityKind.MODEL, params.get("modelOverride"), false, "Model Override");
             validateSelectedEntity(EntityKind.PROJECT, params.get("projectId"), false, "Project");
-            validateSelectedEntity(EntityKind.WORKSPACE, params.get("workspaceId"), false, "Workspace");
 
             String projectId = params.containsKey("projectId") ? nn(params.get("projectId")) : job.projectId();
-            String workspaceId = params.containsKey("workspaceId") ? nn(params.get("workspaceId")) : job.workspaceId();
 
             AssignmentRequest request = new AssignmentRequest(
                 agentId,
@@ -3849,11 +3847,8 @@ public class OrchestrationController {
                 parseIntOrDefault(params.get("priority"), 9),
                 nn(params.get("modelOverride")),
                 projectId,
-                workspaceId,
-                nn(params.get("selectedWorkAreaId")),
-                routeTypeParam(params),
-                nn(params.get("outputWorkAreaId")),
-                nn(params.get("outputDirectRelativePath")),
+                nn(params.get("workspaceType")),
+                nn(params.get("workspaceKey")),
                 Map.of("jobId", jobId)
             );
             WorkAssignment assignment = assignmentService.create(request);
@@ -3911,7 +3906,7 @@ public class OrchestrationController {
     public String jobOutputsFragment(@PathVariable String jobId) {
         try {
             List<RunOutputArtifact> artifacts = queryOutputs(
-                null, jobId, null, null, null, null, null, null, null, null, 40);
+                null, jobId, null, null, null, null, null, null, null, null, null, null, 40);
             if (artifacts.isEmpty()) {
                 return new Div().withClass("dashboard-empty")
                     .withInnerText("No outputs.").render();
@@ -3962,10 +3957,6 @@ public class OrchestrationController {
                 "Owner Agent", "agent", false))
             .withChild(entitySelector("projectId", EntityKind.PROJECT, isNew ? "" : nn(job.projectId()),
                 "Project", "optional project", false))
-            .withChild(new HtmlTag("input", true)
-                .withAttribute("type", "hidden")
-                .withAttribute("name", "persistentWorkspaceEnabledPresent")
-                .withAttribute("value", "true"))
             .withChild(label("Status", TextInput.create("status")
                 .withId("job-status")
                 .withValue(isNew ? "DRAFT" : nn(job.status())))));
@@ -3985,10 +3976,8 @@ public class OrchestrationController {
                 .withChild(new Div().withClass("orch-form-grid")
                     .withChild(label("ID", new HtmlTag("code").withInnerText(job.id())))
                     .withChild(label("Status", statusBadgeHtml(job.status())))
-                    .withChild(label("Workspace ID", new HtmlTag("code")
-                        .withInnerText(job.workspaceId() != null ? job.workspaceId() : "—")))
-                    .withChild(label("Legacy Workspace Flag", new HtmlTag("span")
-                        .withInnerText(job.persistentWorkspaceEnabled() ? "compatibility true" : "compatibility false")))
+                    .withChild(label("Workspace", new HtmlTag("code")
+                        .withInnerText(displayValue(job.workspaceIdentity()))))
                     .withChild(label("Created", new HtmlTag("span")
                         .withInnerText(job.createdAt() != null ? job.createdAt().toString() : "—")))));
             form.withChild(advanced);
@@ -4156,13 +4145,9 @@ public class OrchestrationController {
                     .withChild(new HtmlTag("span").withInnerText("Project: " + displayValue(firstNonBlank(summary.projectName(), summary.projectId(), null)))),
                 new Div().withClass("orch-meta")
                     .withChild(new HtmlTag("span").withInnerText(effectiveWorkspaceLabel(
-                        summary.effectiveWorkspaceKind(), summary.effectiveWorkspaceId())))
-                    .withChild(new HtmlTag("span").withInnerText(displayValue(summary.effectiveWorkspaceDisplayPath())))
-                    .withChild(new HtmlTag("span").withInnerText("Compatibility: "
-                        + displayValue(summary.compatibilityWorkspaceId()))),
+                        summary.workspaceType(), summary.workspaceKey())))
+                    .withChild(new HtmlTag("span").withInnerText(displayValue(summary.workspaceIdentity()))),
                 new Div().withClass("orch-meta")
-                    .withChild(new HtmlTag("span").withInnerText("Promoted output target: "
-                        + displayValue(summary.outputDirectory())))
                     .withChild(new HtmlTag("span").withInnerText("Child runs: "
                         + Integer.toString(summary.childRunIds() == null ? 0 : summary.childRunIds().size()))),
                 new HtmlTag("span").withInnerText(Integer.toString(summary.outputCount())),
@@ -4194,9 +4179,7 @@ public class OrchestrationController {
                     .withInnerText("No active agents available. Create an agent first.").render();
             }
             validateSelectedEntity(EntityKind.PROJECT, params.get("projectId"), false, "Project");
-            validateSelectedEntity(EntityKind.WORKSPACE, params.get("workspaceId"), false, "Workspace");
             String projectId = params.containsKey("projectId") ? nn(params.get("projectId")) : job.projectId();
-            String workspaceId = params.containsKey("workspaceId") ? nn(params.get("workspaceId")) : job.workspaceId();
             WorkAssignment assignment = assignmentService.create(new AssignmentRequest(
                 agentId,
                 jobId,
@@ -4205,11 +4188,8 @@ public class OrchestrationController {
                 9,
                 nn(job.model()),
                 projectId,
-                workspaceId,
-                nn(params.get("selectedWorkAreaId")),
-                routeTypeParam(params),
-                nn(params.get("outputWorkAreaId")),
-                nn(params.get("outputDirectRelativePath")),
+                nn(params.get("workspaceType")),
+                nn(params.get("workspaceKey")),
                 Map.of("jobId", jobId)
             ));
             return jobAssignmentCreatedPanel(assignment).render();
@@ -4375,7 +4355,7 @@ public class OrchestrationController {
             .withId("projects-page")
             .withAttribute("data-orchestration-page", "projects")
             .withChild(Header.H1("Projects"))
-            .withChild(new Paragraph("Shared project workspaces for durable context, membership, and cross-agent visibility."))
+            .withChild(new Paragraph("Projects group durable context, membership, attribution, and cross-agent visibility."))
             .withChild(new Div().withClass("browser-layout browser-layout-wide")
                 .withChild(new Div().withClass("browser-sidebar")
                     .withChild(new Div().withClass("browser-sidebar-header")
@@ -4628,7 +4608,7 @@ public class OrchestrationController {
     public String projectOutputsFragment(@PathVariable String projectId) {
         try {
             List<RunOutputArtifact> artifacts = queryOutputs(
-                null, null, null, null, projectId, null, null, null, null, null, 40);
+                null, null, null, null, projectId, null, null, null, null, null, null, null, 40);
             if (artifacts.isEmpty()) {
                 return new Div().withClass("dashboard-empty")
                     .withInnerText("No recent outputs.").render();
@@ -4649,287 +4629,6 @@ public class OrchestrationController {
         }
     }
 
-    @GetMapping("/projects/_detail/{projectId}/files")
-    @ResponseBody
-    public String projectFilesFragment(
-        @PathVariable String projectId,
-        @RequestParam(defaultValue = ".") String path
-    ) {
-        try {
-            WorkAreaExplorerService explorer = requireWorkAreaExplorerService();
-            String displayName = projectDirectoryDisplayName(projectId);
-            return projectFilesPanel(
-                projectId,
-                explorer.listOwnerRoot(WorkspaceOwnerType.PROJECT, projectId, displayName, path),
-                null,
-                null
-            ).render();
-        } catch (Exception e) {
-            return new Div().withId("project-files-section")
-                .withChild(new Div().withClass("orch-error").withInnerText("Project directory unavailable: " + e.getMessage()))
-                .render();
-        }
-    }
-
-    @GetMapping("/projects/_detail/{projectId}/files/edit")
-    @ResponseBody
-    public String projectFileEditorFragment(
-        @PathVariable String projectId,
-        @RequestParam String path
-    ) {
-        try {
-            WorkAreaExplorerService explorer = requireWorkAreaExplorerService();
-            WorkAreaExplorerService.FilePreview preview = explorer.previewOwnerRoot(
-                WorkspaceOwnerType.PROJECT,
-                projectId,
-                projectDirectoryDisplayName(projectId),
-                path
-            );
-            return projectFileEditor(projectId, preview).render();
-        } catch (Exception e) {
-            return new Div().withId("project-file-editor")
-                .withChild(new Div().withClass("orch-error").withInnerText("Cannot edit file: " + e.getMessage()))
-                .render();
-        }
-    }
-
-    @PutMapping("/projects/_detail/{projectId}/files/text")
-    @ResponseBody
-    public String saveProjectTextFile(
-        @PathVariable String projectId,
-        @RequestParam String path,
-        @RequestParam(defaultValue = "") String content
-    ) {
-        try {
-            WorkAreaExplorerService explorer = requireWorkAreaExplorerService();
-            String displayName = projectDirectoryDisplayName(projectId);
-            explorer.saveTextOwnerRoot(WorkspaceOwnerType.PROJECT, projectId, displayName, path, content);
-            String listPath = parentPath(path);
-            return projectFilesPanel(
-                projectId,
-                explorer.listOwnerRoot(WorkspaceOwnerType.PROJECT, projectId, displayName, listPath),
-                "Saved " + path + ".",
-                null
-            ).render();
-        } catch (Exception e) {
-            return new Div().withId("project-files-section")
-                .withChild(new Div().withClass("orch-error").withInnerText("Save failed: " + e.getMessage()))
-                .render();
-        }
-    }
-
-    @PostMapping("/projects/_detail/{projectId}/files/text")
-    @ResponseBody
-    public String createProjectTextFile(
-        @PathVariable String projectId,
-        @RequestParam(defaultValue = ".") String path,
-        @RequestParam String fileName
-    ) {
-        try {
-            WorkAreaExplorerService explorer = requireWorkAreaExplorerService();
-            String displayName = projectDirectoryDisplayName(projectId);
-            WorkAreaExplorerService.Entry created = explorer.createTextFileOwnerRoot(
-                WorkspaceOwnerType.PROJECT,
-                projectId,
-                displayName,
-                path,
-                fileName
-            );
-            return projectFilesPanel(
-                projectId,
-                explorer.listOwnerRoot(WorkspaceOwnerType.PROJECT, projectId, displayName, path),
-                "Created " + created.path() + ".",
-                null
-            ).render();
-        } catch (Exception e) {
-            return new Div().withId("project-files-section")
-                .withChild(new Div().withClass("orch-error").withInnerText("Create file failed: " + e.getMessage()))
-                .render();
-        }
-    }
-
-    @PostMapping("/projects/_detail/{projectId}/directories")
-    @ResponseBody
-    public String createProjectDirectory(
-        @PathVariable String projectId,
-        @RequestParam(defaultValue = ".") String path,
-        @RequestParam String directoryName
-    ) {
-        try {
-            WorkAreaExplorerService explorer = requireWorkAreaExplorerService();
-            String displayName = projectDirectoryDisplayName(projectId);
-            String childPath = ".".equals(projectPath(path)) ? directoryName : projectPath(path) + "/" + directoryName;
-            WorkAreaExplorerService.Entry created = explorer.createDirectoryOwnerRoot(
-                WorkspaceOwnerType.PROJECT,
-                projectId,
-                displayName,
-                childPath
-            );
-            return projectFilesPanel(
-                projectId,
-                explorer.listOwnerRoot(WorkspaceOwnerType.PROJECT, projectId, displayName, path),
-                "Created " + created.path() + ".",
-                null
-            ).render();
-        } catch (Exception e) {
-            return new Div().withId("project-files-section")
-                .withChild(new Div().withClass("orch-error").withInnerText("Create folder failed: " + e.getMessage()))
-                .render();
-        }
-    }
-
-    private String projectDirectoryDisplayName(String projectId) {
-        Project project = projectService.getProject(projectId);
-        return StringUtils.hasText(project.name()) ? project.name() + " Directory" : "Project Directory";
-    }
-
-    private WorkAreaExplorerService requireWorkAreaExplorerService() {
-        WorkAreaExplorerService service = workAreaExplorerServiceRef == null ? null : workAreaExplorerServiceRef.getIfAvailable();
-        if (service == null) {
-            throw new IllegalStateException("Work Area explorer service is unavailable");
-        }
-        return service;
-    }
-
-    private Component projectFilesPanel(
-        String projectId,
-        WorkAreaExplorerService.DirectoryListing listing,
-        String status,
-        Component editor
-    ) {
-        String currentPath = projectPath(listing.path());
-        Div panel = new Div().withId("project-files-section").withClass("project-files-panel");
-        Div toolbar = new Div().withClass("project-files-toolbar")
-            .withChild(new HtmlTag("span").withClass("project-files-path").withInnerText("Path: " + currentPath));
-        if (!".".equals(currentPath)) {
-            toolbar.withChild(Button.create("Up")
-                .withAttribute("type", "button")
-                .withAttribute("hx-get", "/projects/_detail/" + escapeAttr(projectId) + "/files?path=" + url(parentPath(currentPath)))
-                .withAttribute("hx-target", "#project-files-section")
-                .withAttribute("hx-swap", "outerHTML"));
-        }
-        toolbar.withChild(Button.create("Refresh")
-            .withAttribute("type", "button")
-            .withAttribute("hx-get", "/projects/_detail/" + escapeAttr(projectId) + "/files?path=" + url(currentPath))
-            .withAttribute("hx-target", "#project-files-section")
-            .withAttribute("hx-swap", "outerHTML"));
-        panel.withChild(toolbar);
-
-        String inputSuffix = Integer.toHexString(Objects.hash(projectId, currentPath));
-        String folderInputId = "project-new-folder-name-" + inputSuffix;
-        String textInputId = "project-new-text-name-" + inputSuffix;
-        Div createRow = new Div().withClass("project-file-create-row")
-            .withChild(TextInput.create("directoryName")
-                .withId(folderInputId)
-                .withAttribute("placeholder", "Folder name"))
-            .withChild(Button.create("New Folder")
-                .withAttribute("type", "button")
-                .withAttribute("hx-post", "/projects/_detail/" + escapeAttr(projectId) + "/directories?path=" + url(currentPath))
-                .withAttribute("hx-include", "#" + folderInputId)
-                .withAttribute("hx-target", "#project-files-section")
-                .withAttribute("hx-swap", "outerHTML"))
-            .withChild(TextInput.create("fileName")
-                .withId(textInputId)
-                .withAttribute("placeholder", "Text file name"))
-            .withChild(Button.create("New Text")
-                .withAttribute("type", "button")
-                .withAttribute("hx-post", "/projects/_detail/" + escapeAttr(projectId) + "/files/text?path=" + url(currentPath))
-                .withAttribute("hx-include", "#" + textInputId)
-                .withAttribute("hx-target", "#project-files-section")
-                .withAttribute("hx-swap", "outerHTML"));
-        panel.withChild(createRow);
-
-        if (StringUtils.hasText(status)) {
-            panel.withChild(new Div().withClass("orch-status").withInnerText(status));
-        }
-
-        Div rows = new Div().withClass("project-file-list");
-        if (!".".equals(currentPath)) {
-            rows.withChild(projectDirectoryRow(projectId, "..", parentPath(currentPath)));
-        }
-        for (WorkAreaExplorerService.Entry entry : listing.entries()) {
-            rows.withChild(projectFileRow(projectId, currentPath, entry));
-        }
-        if (listing.entries().isEmpty() && ".".equals(currentPath)) {
-            rows.withChild(new Div().withClass("dashboard-empty").withInnerText("No files yet."));
-        }
-        panel.withChild(rows);
-        panel.withChild(editor == null
-            ? new Div().withId("project-file-editor").withClass("project-file-editor-empty")
-                .withInnerText("Select Edit on a text file to modify it here.")
-            : editor);
-        return panel;
-    }
-
-    private Component projectDirectoryRow(String projectId, String label, String path) {
-        return new Div().withClass("project-file-row")
-            .withChild(new Div().withClass("project-file-name")
-                .withChild(new HtmlTag("strong").withInnerText(label))
-                .withChild(new HtmlTag("span").withInnerText("Folder")))
-            .withChild(Button.create("Open")
-                .withAttribute("type", "button")
-                .withAttribute("hx-get", "/projects/_detail/" + escapeAttr(projectId) + "/files?path=" + url(path))
-                .withAttribute("hx-target", "#project-files-section")
-                .withAttribute("hx-swap", "outerHTML"));
-    }
-
-    private Component projectFileRow(String projectId, String currentPath, WorkAreaExplorerService.Entry entry) {
-        if (entry.directory()) {
-            return projectDirectoryRow(projectId, entry.name(), entry.path());
-        }
-        Div actions = new Div().withClass("project-file-actions");
-        if (entry.canView()) {
-            actions.withChild(Button.create("Edit")
-                .withAttribute("type", "button")
-                .withAttribute("hx-get", "/projects/_detail/" + escapeAttr(projectId) + "/files/edit?path=" + url(entry.path()))
-                .withAttribute("hx-target", "#project-file-editor")
-                .withAttribute("hx-swap", "outerHTML"));
-        }
-        return new Div().withClass("project-file-row")
-            .withChild(new Div().withClass("project-file-name")
-                .withChild(new HtmlTag("strong").withInnerText(entry.name()))
-                .withChild(new HtmlTag("span").withInnerText(entry.fileType() + " · " + entry.sizeLabel()
-                    + " · modified " + (entry.modifiedAt() == null ? "unknown" : formatSince(entry.modifiedAt())))))
-            .withChild(actions);
-    }
-
-    private Component projectFileEditor(String projectId, WorkAreaExplorerService.FilePreview preview) {
-        Div editor = new Div().withId("project-file-editor").withClass("project-file-editor");
-        editor.withChild(new Div().withClass("project-file-editor-header")
-            .withChild(Header.H3("Editing " + preview.path()))
-            .withChild(Button.create("Save")
-                .withAttribute("type", "button")
-                .withAttribute("hx-put", "/projects/_detail/" + escapeAttr(projectId) + "/files/text?path=" + url(preview.path()))
-                .withAttribute("hx-include", "#project-file-editor [name='content']")
-                .withAttribute("hx-target", "#project-files-section")
-                .withAttribute("hx-swap", "outerHTML")));
-        if (!preview.text()) {
-            editor.withChild(new Div().withClass("dashboard-empty").withInnerText("This file cannot be edited as text."));
-            return editor;
-        }
-        editor.withChild(TextArea.create("content").withRows(12)
-            .withInnerText(preview.content() == null ? "" : preview.content()));
-        return editor;
-    }
-
-    private String projectPath(String path) {
-        return path == null || path.isBlank() ? "." : path;
-    }
-
-    private String parentPath(String path) {
-        String clean = projectPath(path);
-        int idx = clean.lastIndexOf('/');
-        if (idx < 0) {
-            return ".";
-        }
-        return idx == 0 ? clean.substring(0, 1) : clean.substring(0, idx);
-    }
-
-    private String url(String value) {
-        return URLEncoder.encode(projectPath(value), StandardCharsets.UTF_8);
-    }
-
-    // ── Project editor rendering ──
 
     private Component projectEditorFragment(Project project) {
         return projectEditorFragment(project, null);
@@ -4976,39 +4675,6 @@ public class OrchestrationController {
 
         // Agent membership section (only for existing)
         if (!isNew) {
-            // Workspace info
-            form.withChild(sectionHeader("Workspace", "Project workspace directory."));
-            try {
-                var ws = projectService.workspaceSummary(projectId);
-                form.withChild(new Div().withId("project-workspace-section")
-                    .withChild(new Div().withClass("orch-meta")
-                        .withChild(new HtmlTag("span").withInnerText(
-                            "Legacy initial agent: " + (ws.ownerAgentId() != null ? ws.ownerAgentId() : "—")))
-                        .withChild(new HtmlTag("span").withInnerText(
-                            "Kind: " + (ws.rootKind() != null ? ws.rootKind() : "—")))
-                        .withChild(new HtmlTag("span").withInnerText(
-                            "Path: " + (ws.displayPath() != null ? ws.displayPath() : "—")))
-                        .withChild(new HtmlTag("span").withInnerText(
-                            "Members: " + ws.linkCount()))
-                        .withChild(new HtmlTag("span").withInnerText(
-                            "Lease: " + (ws.leaseId() != null ? ws.leaseId() : "—")))
-                        .withChild(new HtmlTag("span").withInnerText(
-                            "Mounted Agent: " + (ws.mountedAgentId() != null ? ws.mountedAgentId() : "—")))
-                        .withChild(new HtmlTag("span").withInnerText(
-                            "Release Requested: " + ws.releaseRequested()))));
-                if (ws.leaseId() != null && !ws.releaseRequested()) {
-                    form.withChild(Button.create("Request release after current turn")
-                        .withAttribute("type", "button")
-                        .withAttribute("hx-post", "/projects/_detail/" + projectId + "/workspace/release")
-                        .withAttribute("hx-target", "#project-editor-container")
-                        .withAttribute("hx-swap", "innerHTML"));
-                }
-            } catch (Exception e) {
-                form.withChild(new Div().withId("project-workspace-section")
-                    .withChild(new Div().withClass("dashboard-empty")
-                        .withInnerText("Workspace: " + e.getMessage())));
-            }
-
             form.withChild(sectionHeader("Project Network", "Linked agents and membership context for this project."));
             form.withChild(new Div().withId("project-network-section")
                 .hxGet("/projects/_detail/" + projectId + "/network")
@@ -5036,7 +4702,7 @@ public class OrchestrationController {
                 .withChild(loadingPlaceholder()));
 
             // Recent outputs
-            form.withChild(sectionHeader("Recent Outputs", "Output artifacts attributed to this project workspace."));
+            form.withChild(sectionHeader("Recent Outputs", "Output artifacts attributed to this project."));
             form.withChild(new Div().withId("project-outputs-section")
                 .hxGet("/projects/_detail/" + projectId + "/outputs")
                 .hxTarget("#project-outputs-section")
@@ -5044,13 +4710,6 @@ public class OrchestrationController {
                 .hxSwap("innerHTML")
                 .withChild(loadingPlaceholder()));
 
-            form.withChild(sectionHeader("Project Directory", "Browse and edit files in this project's confined directory."));
-            form.withChild(new Div().withId("project-files-section")
-                .hxGet("/projects/_detail/" + projectId + "/files")
-                .hxTarget("#project-files-section")
-                .hxTrigger("load")
-                .hxSwap("innerHTML")
-                .withChild(loadingPlaceholder()));
 
             // Advanced metadata
             Div advanced = new Div().withClass("field-group");
@@ -5097,13 +4756,6 @@ public class OrchestrationController {
         return panel.render();
     }
 
-    @PostMapping("/projects/_detail/{projectId}/workspace/release")
-    @ResponseBody
-    public String requestProjectWorkspaceRelease(@PathVariable String projectId) {
-        projectService.requestWorkspaceRelease(projectId);
-        return projectEditor(projectId);
-    }
-
     // Deprecated: old project detail page, redirects to /projects
     // Kept for backward compatibility with existing links
     @GetMapping("/projects/{projectId}")
@@ -5114,7 +4766,7 @@ public class OrchestrationController {
             .withId("projects-page")
             .withAttribute("data-orchestration-page", "projects")
             .withChild(Header.H1("Projects"))
-            .withChild(new Paragraph("Shared project workspaces for durable context, membership, and cross-agent visibility."))
+            .withChild(new Paragraph("Projects group durable context, membership, attribution, and cross-agent visibility."))
             .withChild(new Div().withClass("browser-layout browser-layout-wide")
                 .withChild(new Div().withClass("browser-sidebar")
                     .withChild(new Div().withClass("browser-sidebar-header")
@@ -5319,14 +4971,16 @@ public class OrchestrationController {
         @RequestParam(value = "jobAssignmentId", required = false) String jobAssignmentId,
         @RequestParam(value = "jobRunId", required = false) String jobRunId,
         @RequestParam(value = "projectId", required = false) String projectId,
-        @RequestParam(value = "workspaceId", required = false) String workspaceId,
+        @RequestParam(value = "workspaceType", required = false) String workspaceType,
+        @RequestParam(value = "workspaceKey", required = false) String workspaceKey,
+        @RequestParam(value = "workspaceIdentity", required = false) String workspaceIdentity,
         @RequestParam(value = "runId", required = false) String runId,
         @RequestParam(value = "planId", required = false) String planId,
         @RequestParam(value = "runType", required = false) String runType,
         @RequestParam(value = "type", required = false) String type
     ) {
         List<RunOutputArtifact> artifacts = queryOutputs(
-            agentId, jobId, jobAssignmentId, jobRunId, projectId, workspaceId, runId, planId, runType, type, 100);
+            agentId, jobId, jobAssignmentId, jobRunId, projectId, workspaceType, workspaceKey, workspaceIdentity, runId, planId, runType, type, 100);
         if (artifacts.isEmpty()) {
             return new Div().withClass("dashboard-empty").withInnerText("No outputs found.").render();
         }
@@ -5378,7 +5032,7 @@ public class OrchestrationController {
                 .withChild(new HtmlTag("span").withInnerText("Run type: " + nn(artifact.runType())))
                 .withChild(new HtmlTag("span").withInnerText("Agent: " + nn(artifact.agentId())))
                 .withChild(new HtmlTag("span").withInnerText("Project: " + nn(artifact.projectId())))
-                .withChild(new HtmlTag("span").withInnerText("Workspace: " + nn(artifact.workspaceId())))
+                .withChild(new HtmlTag("span").withInnerText("Workspace: " + nn(artifact.workspaceIdentity())))
                 .withChild(new HtmlTag("span").withInnerText("Job: " + nn(artifact.jobId())))
                 .withChild(new HtmlTag("span").withInnerText("Job assignment: " + nn(artifact.jobAssignmentId())))
                 .withChild(new HtmlTag("span").withInnerText("Job run: " + nn(artifact.jobRunId())))
@@ -5416,7 +5070,9 @@ public class OrchestrationController {
             .withChild(entitySelector("agentId", EntityKind.AGENT, null, "Agent", "all agents", false))
             .withChild(entitySelector("jobId", EntityKind.JOB, null, "Job", "all jobs", false))
             .withChild(entitySelector("projectId", EntityKind.PROJECT, null, "Project", "all projects", false))
-            .withChild(TextInput.create("workspaceId").withPlaceholder("workspace ID"))
+            .withChild(TextInput.create("workspaceType").withPlaceholder("workspace type"))
+            .withChild(TextInput.create("workspaceKey").withPlaceholder("workspace key"))
+            .withChild(TextInput.create("workspaceIdentity").withPlaceholder("workspace identity"))
             .withChild(TextInput.create("planId").withPlaceholder("plan/workflow ID"))
             .withChild(TextInput.create("jobAssignmentId").withPlaceholder("job assignment ID"))
             .withChild(TextInput.create("jobRunId").withPlaceholder("job run ID"))
@@ -5433,7 +5089,7 @@ public class OrchestrationController {
                 label("plan", artifact.planId()),
                 label("agent", artifact.agentId()),
                 label("project", artifact.projectId()),
-                label("workspace", artifact.workspaceId()),
+                label("workspace", artifact.workspaceIdentity()),
                 label("job", artifact.jobId()),
                 label("assignment", artifact.jobAssignmentId()),
                 label("job run", artifact.jobRunId()),
@@ -5448,7 +5104,7 @@ public class OrchestrationController {
         return java.util.stream.Stream.of(
                 label("run", artifact.runId()),
                 label("project", artifact.projectId()),
-                label("workspace", artifact.workspaceId()),
+                label("workspace", artifact.workspaceIdentity()),
                 label("job", artifact.jobId()),
                 label("assignment", artifact.jobAssignmentId()),
                 label("job run", artifact.jobRunId()))
@@ -5466,7 +5122,9 @@ public class OrchestrationController {
         String jobAssignmentId,
         String jobRunId,
         String projectId,
-        String workspaceId,
+        String workspaceType,
+        String workspaceKey,
+        String workspaceIdentity,
         String runId,
         String planId,
         String runType,
@@ -5479,7 +5137,9 @@ public class OrchestrationController {
             jobAssignmentId,
             jobRunId,
             projectId,
-            workspaceId,
+            workspaceType,
+            workspaceKey,
+            workspaceIdentity,
             runId,
             planId,
             runType,
@@ -5490,7 +5150,9 @@ public class OrchestrationController {
         if (!direct.isEmpty()
             || StringUtils.hasText(runId)
             || StringUtils.hasText(planId)
-            || StringUtils.hasText(workspaceId)
+            || StringUtils.hasText(workspaceType)
+            || StringUtils.hasText(workspaceKey)
+            || StringUtils.hasText(workspaceIdentity)
             || StringUtils.hasText(jobAssignmentId)
             || StringUtils.hasText(jobRunId)
             || StringUtils.hasText(runType)) {
@@ -5637,7 +5299,11 @@ public class OrchestrationController {
             return status.health().name();
         }
         try {
-            workspaceService.agentWorkspace(agent.id(), null);
+            var wds = workspaceDirectoryServiceRef.getIfAvailable();
+            if (wds != null) {
+                wds.resolveForRead(
+                    io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceKind.AGENT, agent.id());
+            }
             return "READY";
         } catch (Exception e) {
             return "PENDING";
@@ -5719,8 +5385,10 @@ public class OrchestrationController {
             .withChild(Header.H1("Agent: " + (agent.name() != null ? agent.name() : agent.id())))
             .withChild(new Paragraph("Profile, queue, inbox, workspace, and history."))
             .withChild(agentDetailLayout(agent))
+            .withChild(moduleScript(HTMX_ERRORS_JS))
             .withChild(moduleScript(AGENTS_JS))
-            .withChild(moduleScript(AGENT_CHAT_JS));
+            .withChild(moduleScript(AGENT_CHAT_JS))
+            .withChild(moduleScript(SYSTEM_CHAT_JS));
         return renderPage(body, "/agents/" + agentId);
     }
 
@@ -5746,7 +5414,7 @@ public class OrchestrationController {
                 .withChild(agentChatPanel(agent.id())))
             .withChild(new Div().withClass("entity-detail-layout entity-detail-layout-full")
                 .withChild(new Div().withClass("entity-detail-main")
-                    .withChild(tabNav(agent.id(), "dashboard", "profile", "queue", "inbox", "jobs", "schedules", "reactions", "workspace", "outputs", "exec", "history", "submit"))
+                    .withChild(tabNav(agent.id(), "dashboard", "profile", "queue", "inbox", "jobs", "schedules", "reactions", "context", "files", "outputs", "system-chat", "exec", "history", "submit"))
                     .withChild(new Div().withClass("agent-profile-loader-marker")
                         .withAttribute("hidden", "hidden")
                         .withAttribute("hx-get", "/agents/_editor/" + escapeAttr(agent.id())))
@@ -5853,11 +5521,9 @@ public class OrchestrationController {
         section.withChild(Header.H2("Workspace Health"));
         Div grid = new Div().withClass("orch-form-grid");
         grid.withChild(agentMetaItem("Health", status.health() != null ? status.health().name() : "UNKNOWN"));
-        grid.withChild(agentMetaItem("Path", status.workspaceRelativePath() != null ? status.workspaceRelativePath() : "—"));
+        grid.withChild(agentMetaItem("Identity", status.canonicalIdentity() != null ? status.canonicalIdentity() : "—"));
         grid.withChild(agentMetaItem("Writable", status.writable() ? "Yes" : "No"));
         grid.withChild(agentMetaItem("Active Runs", String.valueOf(status.activeRunCount())));
-        grid.withChild(agentMetaItem("Active Leases", String.valueOf(status.activeLeaseCount())));
-        grid.withChild(agentMetaItem("Linked Projects", formatLinkedProjects(status.linkedProjectIds())));
         grid.withChild(agentMetaItem("Output Artifacts", String.valueOf(status.outputArtifactCount())));
         grid.withChild(agentMetaItem("Output Bytes", String.valueOf(status.outputBytes())));
         grid.withChild(agentMetaItem("Last Activity", status.lastActivityAt() != null ? formatSince(status.lastActivityAt()) : "—"));
@@ -5902,6 +5568,34 @@ public class OrchestrationController {
         card.withAttribute("hx-swap", "innerHTML");
         card.withAttribute("style", "cursor:pointer");
         return card;
+    }
+
+    @GetMapping("/agents/_detail/{agentId}/context")
+    @ResponseBody
+    public String agentContextTab(@PathVariable String agentId) {
+        String encoded = URLEncoder.encode(agentId, StandardCharsets.UTF_8);
+        return new Div().withId("agent-context-panel")
+            .withClass("orch-panel agent-context-panel")
+            .withAttribute("hx-get", "/api/agents/" + encoded + "/context/panel")
+            .withAttribute("hx-trigger", "load")
+            .withAttribute("hx-target", "#agent-context-panel")
+            .withAttribute("hx-swap", "outerHTML")
+            .withChild(new Paragraph("Loading context…").withClass("orch-muted"))
+            .render();
+    }
+
+    @GetMapping("/agents/_detail/{agentId}/system-chat")
+    @ResponseBody
+    public String agentSystemChatTab(@PathVariable String agentId) {
+        String encoded = URLEncoder.encode(agentId, StandardCharsets.UTF_8);
+        return new Div().withId("system-chat-panel")
+            .withClass("orch-panel system-chat-panel")
+            .withAttribute("hx-get", "/api/agents/" + encoded + "/system-chat/panel")
+            .withAttribute("hx-trigger", "load")
+            .withAttribute("hx-target", "#system-chat-panel")
+            .withAttribute("hx-swap", "outerHTML")
+            .withChild(new Paragraph("Loading system chat…").withClass("orch-muted"))
+            .render();
     }
 
     @GetMapping("/agents/_detail/{agentId}/queue")
@@ -5980,7 +5674,8 @@ public class OrchestrationController {
         HttpServletResponse response
     ) {
         try {
-            assignmentService.requeueWorkspaceBlockedAssignment(assignmentId);
+            // Workspace lease requeue is removed; this endpoint now resumes the assignment directly
+            assignmentService.resume(agentId, assignmentId);
             return agentQueueTab(agentId);
         } catch (IllegalArgumentException | IllegalStateException exception) {
             response.setStatus(assignmentLifecycleStatus(exception));
@@ -6340,7 +6035,6 @@ public class OrchestrationController {
         String assignmentType = templateString(template, "assignmentType", AssignmentType.JOB_RUN.name());
         int priority = templateInt(template, "priority", 0);
         String modelOverride = templateString(template, "modelOverride", "");
-        String workspaceId = templateString(template, "workspaceId", "");
         String inputJson = toJsonText(templateInput(template));
         boolean enabled = schedule != null && schedule.enabled();
 
@@ -6361,7 +6055,6 @@ public class OrchestrationController {
         grid.withChild(label("Assignment Type", assignmentTypeSelect("assignmentType", assignmentType)));
         grid.withChild(label("Priority", TextInput.number("priority").withMin("0").withMax("9").withValue(String.valueOf(priority))));
         grid.withChild(entitySelector("modelOverride", EntityKind.MODEL, modelOverride, "Model Override", "model", false));
-        grid.withChild(entitySelector("workspaceId", EntityKind.WORKSPACE, workspaceId, "Workspace", "workspace ID", false));
         grid.withChild(label("Enabled", Select.create("enabled")
             .addOption("true", "Enabled", enabled)
             .addOption("false", "Disabled", !enabled)));
@@ -6401,7 +6094,6 @@ public class OrchestrationController {
         String assignmentType = templateString(template, "assignmentType", AssignmentType.REPORT.name());
         int priority = templateInt(template, "priority", 0);
         String modelOverride = templateString(template, "modelOverride", "");
-        String workspaceId = templateString(template, "workspaceId", "");
         String inputJson = toJsonText(templateInput(template));
         boolean enabled = reaction != null && reaction.enabled();
         String filterJson = toJsonText(reaction == null ? Map.of() : reaction.filter());
@@ -6420,7 +6112,6 @@ public class OrchestrationController {
         grid.withChild(label("Assignment Type", assignmentTypeSelect("assignmentType", assignmentType)));
         grid.withChild(label("Priority", TextInput.number("priority").withMin("0").withMax("9").withValue(String.valueOf(priority))));
         grid.withChild(entitySelector("modelOverride", EntityKind.MODEL, modelOverride, "Model Override", "model", false));
-        grid.withChild(entitySelector("workspaceId", EntityKind.WORKSPACE, workspaceId, "Workspace", "workspace ID", false));
         grid.withChild(label("Enabled", Select.create("enabled")
             .addOption("true", "Enabled", enabled)
             .addOption("false", "Disabled", !enabled)));
@@ -6456,7 +6147,6 @@ public class OrchestrationController {
         }
         validateSelectedEntity(EntityKind.JOB, params.get("jobId"), true, "Job");
         validateSelectedEntity(EntityKind.MODEL, params.get("modelOverride"), false, "Model Override");
-        validateSelectedEntity(EntityKind.WORKSPACE, params.get("workspaceId"), false, "Workspace");
         Map<String, Object> assignmentTemplate = assignmentTemplate(
             agentId,
             normalize(params.get("jobId")),
@@ -6464,7 +6154,6 @@ public class OrchestrationController {
             AssignmentType.JOB_RUN,
             params.get("priority"),
             params.get("modelOverride"),
-            params.get("workspaceId"),
             params.get("inputJson")
         );
         return new AgentSchedule(
@@ -6488,7 +6177,6 @@ public class OrchestrationController {
         Map<String, String> params
     ) {
         validateSelectedEntity(EntityKind.MODEL, params.get("modelOverride"), false, "Model Override");
-        validateSelectedEntity(EntityKind.WORKSPACE, params.get("workspaceId"), false, "Workspace");
         Map<String, Object> assignmentTemplate = assignmentTemplate(
             agentId,
             normalize(params.get("jobId")),
@@ -6496,7 +6184,6 @@ public class OrchestrationController {
             AssignmentType.REPORT,
             params.get("priority"),
             params.get("modelOverride"),
-            params.get("workspaceId"),
             params.get("inputJson")
         );
         return new AgentEventReaction(
@@ -6519,7 +6206,6 @@ public class OrchestrationController {
         AssignmentType defaultAssignmentType,
         String priority,
         String modelOverride,
-        String workspaceId,
         String inputJson
     ) {
         Map<String, Object> template = new LinkedHashMap<>();
@@ -6528,7 +6214,6 @@ public class OrchestrationController {
         template.put("assignmentType", parseAssignmentType(assignmentType, defaultAssignmentType).name());
         template.put("priority", parsePriority(priority));
         template.put("modelOverride", normalize(modelOverride));
-        template.put("workspaceId", normalize(workspaceId));
         template.put("input", parseJsonMap(inputJson, "inputJson"));
         return template;
     }
@@ -6661,83 +6346,654 @@ public class OrchestrationController {
         return StringUtils.hasText(value) ? value.trim() : null;
     }
 
-    @GetMapping("/agents/_detail/{agentId}/workspace")
+    // ════════════════════════════════════════════════════════════════
+    //  Agent Files tab — filesystem explorer plus independently loaded run metadata
+    // ════════════════════════════════════════════════════════════════
+
+    @GetMapping("/agents/_detail/{agentId}/runs")
     @ResponseBody
-    public String agentWorkspaceTab(@PathVariable String agentId) {
-        AgentProfile agent = agentProfileService.get(agentId);
-        Div panel = new Div();
-        panel.withChild(Header.H2("Workspace"));
-
-        Workspace workspace = workspaceService.agentWorkspace(agent.id(), agent.name());
-        List<WorkspaceLink> links = workspaceService.links(workspace.id());
-        List<WorkspaceLease> activeLeases = workspaceService.activeLeases(workspace.id());
-        String outputHint = workspaceOutputHint(workspace);
-
-        panel.withChild(new Div().withClass("orch-meta")
-            .withChild(new HtmlTag("span").withInnerText("Agent: " + (agent.name() != null ? agent.name() : agentId)))
-            .withChild(new HtmlTag("span").withInnerText("Agent ID: " + agent.id()))
-            .withChild(new HtmlTag("span").withInnerText("Workspace ID: " + workspace.id()))
-            .withChild(new HtmlTag("span").withInnerText("Owner: "
-                + (workspace.ownerType() != null ? workspace.ownerType().name() : "—")
-                + ":" + nn(workspace.ownerId())))
-            .withChild(new HtmlTag("span").withInnerText("Display Name: " + nn(workspace.displayName())))
-            .withChild(new HtmlTag("span").withInnerText("Diagnostic Path: " + nn(workspace.rootRelativePath())))
-            .withChild(new HtmlTag("span").withInnerText("Final Output Target: " + outputHint))
-            .withChild(new HtmlTag("span").withInnerText("Metadata: " + nn(workspace.metadataJson())))
-            .withChild(new HtmlTag("span").withInnerText("Updated: "
-                + (workspace.updatedAt() != null ? formatSince(workspace.updatedAt()) : "—"))));
-
-        panel.withChild(Header.H3("Active Leases"));
-        if (activeLeases.isEmpty()) {
-            panel.withChild(new Div().withClass("dashboard-empty")
-                .withInnerText("No active leases."));
-        } else {
-            Table leasesTable = Table.create()
-                .withHeaders("Holder", "Mode", "Expires", "Created")
-                .withClass("dashboard-table");
-            for (WorkspaceLease lease : activeLeases) {
-                leasesTable.addRow(
-                    new HtmlTag("span").withInnerText(nn(lease.holderType()) + ":" + nn(lease.holderId())),
-                    new HtmlTag("span").withInnerText(lease.mode() != null ? lease.mode().name() : "—"),
-                    new HtmlTag("span").withInnerText(lease.expiresAt() != null ? lease.expiresAt().toString() : "—"),
-                    new HtmlTag("span").withInnerText(lease.createdAt() != null ? formatSince(lease.createdAt()) : "—")
-                );
+    public String agentRunGroups(
+        @PathVariable String agentId,
+        @RequestParam(defaultValue = "25") int limit,
+        @RequestParam(defaultValue = "false") boolean oob,
+        HttpServletResponse response
+    ) {
+        try {
+            agentProfileService.get(agentId);
+            if (runSummaryService == null || runOperationsFragments == null) {
+                response.setStatus(HttpServletResponse.SC_SERVICE_UNAVAILABLE);
+                return runFragments().error("Run metadata is unavailable on this deployment.").render();
             }
-            panel.withChild(leasesTable);
+            int boundedLimit = Math.min(Math.max(limit, 1), 100);
+            return runOperationsFragments.groups(agentId,
+                runSummaryService.findSummariesByWorkspace("agent", agentId, null, boundedLimit),
+                boundedLimit, oob).render();
+        } catch (IllegalStateException e) {
+            response.setStatus(HttpServletResponse.SC_NOT_FOUND);
+            return runFragments().error("Agent not found.").render();
+        } catch (RuntimeException e) {
+            log.warn("Run groups fragment failed for agent {}", agentId, e);
+            response.setStatus(HttpServletResponse.SC_INTERNAL_SERVER_ERROR);
+            return runFragments().error("Run metadata could not be loaded.").render();
         }
-
-        panel.withChild(Header.H3("Workspace Links"));
-        if (links.isEmpty()) {
-            panel.withChild(new Div().withClass("dashboard-empty")
-                .withInnerText("No workspace links configured."));
-            return panel.render();
-        }
-
-        Table table = Table.create()
-            .withHeaders("Label", "Type", "Target", "Access")
-            .withClass("dashboard-table");
-        for (WorkspaceLink link : links) {
-            String access = (link.readable() ? "r" : "-") + (link.writable() ? "w" : "-");
-            table.addRow(
-                new HtmlTag("span").withInnerText(link.label() != null ? link.label() : "link"),
-                new HtmlTag("span").withInnerText(link.linkType() != null ? link.linkType().name() : "PATH"),
-                new HtmlTag("code").withInnerText(link.target() != null ? link.target() : "—"),
-                new HtmlTag("span").withInnerText(access)
-            );
-        }
-        panel.withChild(table);
-        return panel.render();
     }
 
-    private String workspaceOutputHint(Workspace workspace) {
-        if (workspace == null || workspace.ownerType() == null || !StringUtils.hasText(workspace.ownerId())) {
-            return "—";
+    @GetMapping("/agents/_detail/{agentId}/runs/{taskRunId}")
+    @ResponseBody
+    public String agentRunDetail(
+        @PathVariable String agentId,
+        @PathVariable String taskRunId,
+        HttpServletResponse response
+    ) {
+        try {
+            agentProfileService.get(agentId);
+            if (!StringUtils.hasText(taskRunId) || taskRunId.contains("/") || taskRunId.contains("\\")) {
+                throw new IllegalArgumentException("Invalid taskRunId");
+            }
+            if (runSummaryService == null || runOperationsFragments == null) {
+                response.setStatus(HttpServletResponse.SC_SERVICE_UNAVAILABLE);
+                return runFragments().detail(null).render();
+            }
+            var summary = runSummaryService.findSummary(taskRunId).orElse(null);
+            if (summary == null
+                || !"agent".equalsIgnoreCase(summary.workspaceType())
+                || !agentId.equals(summary.workspaceKey())) {
+                response.setStatus(HttpServletResponse.SC_NOT_FOUND);
+                return runOperationsFragments.detail(null).render();
+            }
+            return runOperationsFragments.detail(runSummaryService.composeAudit(taskRunId).orElse(null)).render();
+        } catch (IllegalArgumentException e) {
+            response.setStatus(HttpServletResponse.SC_BAD_REQUEST);
+            return runFragments().detail(null).render();
+        } catch (IllegalStateException e) {
+            response.setStatus(HttpServletResponse.SC_NOT_FOUND);
+            return runFragments().detail(null).render();
+        } catch (RuntimeException e) {
+            log.warn("Run detail fragment failed for agent {}", agentId, e);
+            response.setStatus(HttpServletResponse.SC_INTERNAL_SERVER_ERROR);
+            return runFragments().detail(null).render();
         }
-        return switch (workspace.ownerType()) {
-            case AGENT -> "workspace/" + workspace.ownerId() + "/outputs";
-            case JOB -> "job-bound outputs promote through the selected Work Area or project";
-            case PROJECT -> "projects/" + workspace.ownerId();
+    }
+
+    private RunOperationsFragments runFragments() {
+        return runOperationsFragments != null ? runOperationsFragments : new RunOperationsFragments();
+    }
+
+    @GetMapping("/agents/_detail/{agentId}/files")
+    @ResponseBody
+    public String agentFilesTab(@PathVariable String agentId, HttpServletResponse response) {
+        WorkspaceDirectoryService dirService = workspaceDirectoryService();
+        WorkspaceExplorerService explorer = workspaceExplorerService();
+        try {
+            WorkspaceDescriptor descriptor = dirService.resolveForRead(WorkspaceKind.AGENT, agentId);
+            WorkspaceExplorerService.DirectoryListing listing = explorer.list(descriptor,
+                explorer.normalizeRelativePath("."));
+            String encodedAgentId = URLEncoder.encode(agentId, StandardCharsets.UTF_8);
+            return WorkspaceExplorerFragments.agentShell(encodedAgentId, listing, null, null, "home");
+        } catch (WorkspaceResolutionException e) {
+            response.setStatus(HttpServletResponse.SC_NOT_FOUND);
+            return WorkspaceExplorerFragments.agentListError("Agent not found.");
+        } catch (WorkspaceFileException e) {
+            response.setStatus(fileErrorStatus(e));
+            return WorkspaceExplorerFragments.agentListError(e.getMessage());
+        }
+    }
+
+    // ── Conceptual Files-area navigation routes ──
+
+    @GetMapping("/agents/_detail/{agentId}/files/area/{area}")
+    @ResponseBody
+    public String agentFilesArea(@PathVariable String agentId, @PathVariable String area,
+                                  HttpServletResponse response) {
+        String encodedAgentId = URLEncoder.encode(agentId, StandardCharsets.UTF_8);
+        WorkspaceExplorerService explorer = workspaceExplorerService();
+        WorkspaceDirectoryService dirService = workspaceDirectoryService();
+
+        return switch (area) {
+            case "skills" -> {
+                yield WorkspaceExplorerFragments.filesAreaEmpty(encodedAgentId, "skills",
+                        "Skills are managed through the Skills panel.");
+            }
+            case "scripts" -> {
+                try {
+                    WorkspaceDescriptor descriptor = dirService.resolveForRead(WorkspaceKind.AGENT, agentId);
+                    WorkspaceExplorerService.RelativePath scriptsPath = explorer.normalizeRelativePath("scripts");
+                    WorkspaceExplorerService.DirectoryListing listing;
+                    try {
+                        listing = explorer.list(descriptor, scriptsPath);
+                    } catch (WorkspaceFileException e) {
+                        if (e.reason() == WorkspaceFileException.Reason.NOT_FOUND) {
+                            yield WorkspaceExplorerFragments.filesAreaEmpty(encodedAgentId, "scripts",
+                                    "Script storage area. Create a 'scripts' directory to get started.");
+                        }
+                        throw e;
+                    }
+                    yield WorkspaceExplorerFragments.agentShell(encodedAgentId, listing, null, null, "scripts");
+                } catch (WorkspaceFileException e) {
+                    yield WorkspaceExplorerFragments.filesAreaEmpty(encodedAgentId, "scripts",
+                            "Scripts area: " + e.getMessage());
+                } catch (RuntimeException e) {
+                    yield WorkspaceExplorerFragments.filesAreaEmpty(encodedAgentId, "scripts",
+                            "Unable to list scripts area.");
+                }
+            }
+            case "apps" -> {
+                try {
+                    WorkspaceDescriptor descriptor = dirService.resolveForRead(WorkspaceKind.AGENT, agentId);
+                    WorkspaceExplorerService.RelativePath appsPath = explorer.normalizeRelativePath("apps");
+                    WorkspaceExplorerService.DirectoryListing listing;
+                    try {
+                        listing = explorer.list(descriptor, appsPath);
+                    } catch (WorkspaceFileException e) {
+                        if (e.reason() == WorkspaceFileException.Reason.NOT_FOUND) {
+                            yield WorkspaceExplorerFragments.filesAreaEmpty(encodedAgentId, "apps",
+                                    "App storage area. Create an 'apps' directory to get started.");
+                        }
+                        throw e;
+                    }
+                    yield WorkspaceExplorerFragments.agentShell(encodedAgentId, listing, null, null, "apps");
+                } catch (WorkspaceFileException e) {
+                    yield WorkspaceExplorerFragments.filesAreaEmpty(encodedAgentId, "apps",
+                            "Apps area: " + e.getMessage());
+                } catch (RuntimeException e) {
+                    yield WorkspaceExplorerFragments.filesAreaEmpty(encodedAgentId, "apps",
+                            "Unable to list apps area.");
+                }
+            }
+            case "home" -> {
+                try {
+                    WorkspaceDescriptor descriptor = dirService.resolveForRead(WorkspaceKind.AGENT, agentId);
+                    WorkspaceExplorerService.DirectoryListing listing = explorer.list(descriptor,
+                            explorer.normalizeRelativePath("."));
+                    yield WorkspaceExplorerFragments.agentShell(encodedAgentId, listing, null, null, "home");
+                } catch (WorkspaceFileException e) {
+                    yield WorkspaceExplorerFragments.agentEmptyRoot(encodedAgentId);
+                } catch (RuntimeException e) {
+                    yield WorkspaceExplorerFragments.agentListError(e.getMessage());
+                }
+            }
+            case "repos" -> {
+                try {
+                    WorkspaceDescriptor descriptor = dirService.resolveForRead(WorkspaceKind.AGENT, agentId);
+                    WorkspaceExplorerService.RelativePath reposPath = explorer.normalizeRelativePath("repos");
+                    WorkspaceExplorerService.DirectoryListing listing;
+                    try {
+                        listing = explorer.list(descriptor, reposPath);
+                    } catch (WorkspaceFileException e) {
+                        if (e.reason() == WorkspaceFileException.Reason.NOT_FOUND) {
+                            yield WorkspaceExplorerFragments.filesAreaEmpty(encodedAgentId, "repos",
+                                    "Stored Items: user-managed storage outside Magenta.");
+                        }
+                        throw e;
+                    }
+                    yield WorkspaceExplorerFragments.agentShell(encodedAgentId, listing, null, null, "repos");
+                } catch (WorkspaceFileException e) {
+                    yield WorkspaceExplorerFragments.filesAreaEmpty(encodedAgentId, "repos",
+                            "Stored Items: " + e.getMessage());
+                } catch (RuntimeException e) {
+                    yield WorkspaceExplorerFragments.filesAreaEmpty(encodedAgentId, "repos",
+                            "Unable to list stored items.");
+                }
+            }
+            case "projects" -> {
+                yield WorkspaceExplorerFragments.filesAreaProjects(encodedAgentId,
+                        "Project materializations are captured context containers. View details in the Context tab.");
+            }
+            case "tasks" -> {
+                yield WorkspaceExplorerFragments.filesAreaTasks(encodedAgentId);
+            }
+            case "outputs" -> {
+                yield WorkspaceExplorerFragments.filesAreaOutputs(encodedAgentId);
+            }
+            default -> WorkspaceExplorerFragments.agentListError("Unknown area: " + area);
         };
+    }
+
+    @GetMapping("/agents/_detail/{agentId}/files/list")
+    @ResponseBody
+    public String agentFilesList(
+        @PathVariable String agentId,
+        @RequestParam(defaultValue = ".") String path,
+        @RequestParam(required = false) String selected,
+        HttpServletResponse response
+    ) {
+        WorkspaceDirectoryService dirService = workspaceDirectoryService();
+        WorkspaceExplorerService explorer = workspaceExplorerService();
+        try {
+            WorkspaceDescriptor descriptor = resolveAgentDescriptor(agentId, dirService, response);
+            if (descriptor == null) return errorText(response);
+            WorkspaceExplorerService.RelativePath relativePath = explorer.normalizeRelativePath(path);
+            WorkspaceExplorerService.DirectoryListing listing = explorer.list(descriptor, relativePath);
+            String encodedAgentId = URLEncoder.encode(agentId, StandardCharsets.UTF_8);
+            WorkspaceExplorerService.Entry inspected = selected != null && !selected.isBlank()
+                ? explorer.inspect(descriptor, explorer.normalizeRelativePath(selected)) : null;
+            return WorkspaceExplorerFragments.agentShell(encodedAgentId, listing, inspected, selected);
+        } catch (WorkspaceFileException e) {
+            response.setStatus(fileErrorStatus(e));
+            String encoded = URLEncoder.encode(agentId, StandardCharsets.UTF_8);
+            return WorkspaceExplorerFragments.agentListError(e.getMessage());
+        }
+    }
+
+    @GetMapping("/agents/_detail/{agentId}/files/inspect")
+    @ResponseBody
+    public String agentFilesInspect(
+        @PathVariable String agentId,
+        @RequestParam String path,
+        HttpServletResponse response
+    ) {
+        WorkspaceDirectoryService dirService = workspaceDirectoryService();
+        WorkspaceExplorerService explorer = workspaceExplorerService();
+        try {
+            WorkspaceDescriptor descriptor = resolveAgentDescriptor(agentId, dirService, response);
+            if (descriptor == null) return errorText(response);
+            WorkspaceExplorerService.Entry entry = explorer.inspect(descriptor, explorer.normalizeRelativePath(path));
+            String encodedAgentId = URLEncoder.encode(agentId, StandardCharsets.UTF_8);
+            return WorkspaceExplorerFragments.agentInspector(encodedAgentId, entry, null, false);
+        } catch (WorkspaceFileException e) {
+            response.setStatus(fileErrorStatus(e));
+            return WorkspaceExplorerFragments.agentInspectorError(e.getMessage());
+        }
+    }
+
+    @GetMapping("/agents/_detail/{agentId}/files/viewer")
+    @ResponseBody
+    public String agentFilesViewer(
+        @PathVariable String agentId,
+        @RequestParam String path,
+        HttpServletResponse response
+    ) {
+        WorkspaceDirectoryService dirService = workspaceDirectoryService();
+        WorkspaceExplorerService explorer = workspaceExplorerService();
+        try {
+            WorkspaceDescriptor descriptor = resolveAgentDescriptor(agentId, dirService, response);
+            if (descriptor == null) return errorText(response);
+            WorkspaceExplorerService.FilePreview preview = explorer.preview(descriptor, explorer.normalizeRelativePath(path));
+            String encodedAgentId = URLEncoder.encode(agentId, StandardCharsets.UTF_8);
+            return WorkspaceExplorerFragments.agentViewer(encodedAgentId, preview);
+        } catch (WorkspaceFileException e) {
+            response.setStatus(fileErrorStatus(e));
+            String encoded = URLEncoder.encode(agentId, StandardCharsets.UTF_8);
+            return WorkspaceExplorerFragments.agentModalError(encoded, "Viewer Error", e.getMessage());
+        }
+    }
+
+    @GetMapping("/agents/_detail/{agentId}/files/text")
+    @ResponseBody
+    public String agentFilesTextViewer(
+        @PathVariable String agentId,
+        @RequestParam String path,
+        @RequestParam(defaultValue = "text") String tab,
+        HttpServletResponse response
+    ) {
+        WorkspaceDirectoryService dirService = workspaceDirectoryService();
+        WorkspaceExplorerService explorer = workspaceExplorerService();
+        try {
+            WorkspaceDescriptor descriptor = resolveAgentDescriptor(agentId, dirService, response);
+            if (descriptor == null) return errorText(response);
+            WorkspaceExplorerService.FilePreview preview = explorer.preview(descriptor, explorer.normalizeRelativePath(path));
+            String encodedAgentId = URLEncoder.encode(agentId, StandardCharsets.UTF_8);
+            return WorkspaceExplorerFragments.agentTextViewer(encodedAgentId, preview, tab);
+        } catch (WorkspaceFileException e) {
+            response.setStatus(fileErrorStatus(e));
+            String encoded = URLEncoder.encode(agentId, StandardCharsets.UTF_8);
+            return WorkspaceExplorerFragments.agentModalError(encoded, "Viewer Error", e.getMessage());
+        }
+    }
+
+    @GetMapping("/agents/_detail/{agentId}/files/actions")
+    @ResponseBody
+    public String agentFilesRecentActions(@PathVariable String agentId, HttpServletResponse response) {
+        WorkspaceDirectoryService dirService = workspaceDirectoryService();
+        WorkspaceExplorerService explorer = workspaceExplorerService();
+        try {
+            WorkspaceDescriptor descriptor = resolveAgentDescriptor(agentId, dirService, response);
+            if (descriptor == null) return errorText(response);
+            String encodedAgentId = URLEncoder.encode(agentId, StandardCharsets.UTF_8);
+            return WorkspaceExplorerFragments.agentRecentActions(encodedAgentId, explorer.recentActions(descriptor, 20));
+        } catch (WorkspaceFileException e) {
+            response.setStatus(fileErrorStatus(e));
+            String encoded = URLEncoder.encode(agentId, StandardCharsets.UTF_8);
+            return WorkspaceExplorerFragments.agentModalError(encoded, "Recent Actions Error", e.getMessage());
+        }
+    }
+
+    @GetMapping("/agents/_detail/{agentId}/files/modal/{action}")
+    @ResponseBody
+    public String agentFilesModal(
+        @PathVariable String agentId,
+        @PathVariable String action,
+        @RequestParam(defaultValue = ".") String path,
+        HttpServletResponse response
+    ) {
+        WorkspaceDirectoryService dirService = workspaceDirectoryService();
+        WorkspaceExplorerService explorer = workspaceExplorerService();
+        try {
+            WorkspaceDescriptor descriptor = resolveAgentDescriptor(agentId, dirService, response);
+            if (descriptor == null) return errorText(response);
+            WorkspaceExplorerService.RelativePath relativePath = explorer.normalizeRelativePath(path);
+            if (isFileMutationAction(action) && WorkspaceExplorerFragments.isReadOnlyRuntimePath(relativePath.value())) {
+                throw new WorkspaceFileException(WorkspaceFileException.Reason.INVALID,
+                    "Runtime-managed task and output paths are read-only.");
+            }
+            WorkspaceExplorerService.DeletePreflight preflight = null;
+            if ("delete".equals(action) || "delete-recursive".equals(action)) {
+                try {
+                    preflight = explorer.deletePreflight(descriptor, relativePath,
+                        "delete-recursive".equals(action)
+                            ? WorkspaceExplorerService.DeleteStep.DIRECTORY_RECURSIVE_CONFIRM
+                            : WorkspaceExplorerService.DeleteStep.INTENT);
+                } catch (WorkspaceFileException e) {
+                    if (e.reason() != WorkspaceFileException.Reason.NOT_FOUND) throw e;
+                }
+            }
+            String encodedAgentId = URLEncoder.encode(agentId, StandardCharsets.UTF_8);
+            return WorkspaceExplorerFragments.agentActionModal(encodedAgentId, action, relativePath.value(), preflight);
+        } catch (WorkspaceFileException e) {
+            response.setStatus(fileErrorStatus(e));
+            String encoded = URLEncoder.encode(agentId, StandardCharsets.UTF_8);
+            return WorkspaceExplorerFragments.agentModalError(encoded, "Action Error", e.getMessage());
+        }
+    }
+
+    @GetMapping("/agents/_detail/{agentId}/files/modal/close")
+    @ResponseBody
+    public String agentFilesModalClose() {
+        return "";
+    }
+
+    // ── File mutations ──
+
+    @PostMapping("/agents/_detail/{agentId}/files/create-folder")
+    @ResponseBody
+    public String agentFilesCreateFolder(
+        @PathVariable String agentId,
+        @RequestParam(defaultValue = ".") String path,
+        @RequestParam String name,
+        HttpServletResponse response
+    ) {
+        WorkspaceDirectoryService dirService = workspaceDirectoryService();
+        WorkspaceExplorerService explorer = workspaceExplorerService();
+        try {
+            WorkspaceDescriptor descriptor = resolveAgentWriteDescriptor(agentId, dirService, response);
+            if (descriptor == null) return errorText(response);
+            String childPath = ".".equals(path) ? name : path + "/" + name;
+            explorer.createDirectory(descriptor, explorer.normalizeRelativePath(childPath));
+            WorkspaceExplorerService.DirectoryListing listing = explorer.list(descriptor, explorer.normalizeRelativePath(path));
+            String encodedAgentId = URLEncoder.encode(agentId, StandardCharsets.UTF_8);
+            return WorkspaceExplorerFragments.agentMutationResponse(encodedAgentId, listing, null, null,
+                "Created " + childPath + ".");
+        } catch (WorkspaceFileException e) {
+            response.setStatus(fileErrorStatus(e));
+            String encoded = URLEncoder.encode(agentId, StandardCharsets.UTF_8);
+            return WorkspaceExplorerFragments.agentModalError(encoded, "Error", e.getMessage());
+        }
+    }
+
+    @PostMapping("/agents/_detail/{agentId}/files/create-text")
+    @ResponseBody
+    public String agentFilesCreateText(
+        @PathVariable String agentId,
+        @RequestParam(defaultValue = ".") String path,
+        @RequestParam String fileName,
+        HttpServletResponse response
+    ) {
+        WorkspaceDirectoryService dirService = workspaceDirectoryService();
+        WorkspaceExplorerService explorer = workspaceExplorerService();
+        try {
+            WorkspaceDescriptor descriptor = resolveAgentWriteDescriptor(agentId, dirService, response);
+            if (descriptor == null) return errorText(response);
+            WorkspaceExplorerService.Entry created = explorer.createTextFile(
+                descriptor, explorer.normalizeRelativePath(path), fileName);
+            WorkspaceExplorerService.DirectoryListing listing = explorer.list(descriptor, explorer.normalizeRelativePath(path));
+            WorkspaceExplorerService.FilePreview preview = explorer.preview(descriptor, explorer.normalizeRelativePath(created.path()));
+            WorkspaceExplorerService.Entry inspected = explorer.inspect(descriptor, explorer.normalizeRelativePath(created.path()));
+            String encodedAgentId = URLEncoder.encode(agentId, StandardCharsets.UTF_8);
+            return WorkspaceExplorerFragments.agentTextCreateResponse(encodedAgentId, preview, listing, inspected, null,
+                "Created " + created.path() + ".");
+        } catch (WorkspaceFileException e) {
+            response.setStatus(fileErrorStatus(e));
+            String encoded = URLEncoder.encode(agentId, StandardCharsets.UTF_8);
+            return WorkspaceExplorerFragments.agentModalError(encoded, "Error", e.getMessage());
+        }
+    }
+
+    @PostMapping("/agents/_detail/{agentId}/files/create-markdown")
+    @ResponseBody
+    public String agentFilesCreateMarkdown(
+        @PathVariable String agentId,
+        @RequestParam(defaultValue = ".") String path,
+        @RequestParam String fileName,
+        HttpServletResponse response
+    ) {
+        WorkspaceDirectoryService dirService = workspaceDirectoryService();
+        WorkspaceExplorerService explorer = workspaceExplorerService();
+        try {
+            WorkspaceDescriptor descriptor = resolveAgentWriteDescriptor(agentId, dirService, response);
+            if (descriptor == null) return errorText(response);
+            WorkspaceExplorerService.Entry created = explorer.createMarkdownFile(
+                descriptor, explorer.normalizeRelativePath(path), fileName);
+            WorkspaceExplorerService.DirectoryListing listing = explorer.list(descriptor, explorer.normalizeRelativePath(path));
+            WorkspaceExplorerService.FilePreview preview = explorer.preview(descriptor, explorer.normalizeRelativePath(created.path()));
+            WorkspaceExplorerService.Entry inspected = explorer.inspect(descriptor, explorer.normalizeRelativePath(created.path()));
+            String encodedAgentId = URLEncoder.encode(agentId, StandardCharsets.UTF_8);
+            return WorkspaceExplorerFragments.agentTextCreateResponse(encodedAgentId, preview, listing, inspected, null,
+                "Created " + created.path() + ".");
+        } catch (WorkspaceFileException e) {
+            response.setStatus(fileErrorStatus(e));
+            String encoded = URLEncoder.encode(agentId, StandardCharsets.UTF_8);
+            return WorkspaceExplorerFragments.agentModalError(encoded, "Error", e.getMessage());
+        }
+    }
+
+    @PostMapping("/agents/_detail/{agentId}/files/rename")
+    @ResponseBody
+    public String agentFilesRename(
+        @PathVariable String agentId,
+        @RequestParam String path,
+        @RequestParam String name,
+        HttpServletResponse response
+    ) {
+        WorkspaceDirectoryService dirService = workspaceDirectoryService();
+        WorkspaceExplorerService explorer = workspaceExplorerService();
+        try {
+            WorkspaceDescriptor descriptor = resolveAgentWriteDescriptor(agentId, dirService, response);
+            if (descriptor == null) return errorText(response);
+            WorkspaceExplorerService.Entry renamed = explorer.rename(descriptor, explorer.normalizeRelativePath(path), name);
+            String parent = parentPath(path);
+            WorkspaceExplorerService.DirectoryListing listing = explorer.list(descriptor, explorer.normalizeRelativePath(parent));
+            String encodedAgentId = URLEncoder.encode(agentId, StandardCharsets.UTF_8);
+            return WorkspaceExplorerFragments.agentMutationResponse(encodedAgentId, listing, null, null,
+                "Renamed to " + renamed.name() + ".");
+        } catch (WorkspaceFileException e) {
+            response.setStatus(fileErrorStatus(e));
+            String encoded = URLEncoder.encode(agentId, StandardCharsets.UTF_8);
+            return WorkspaceExplorerFragments.agentModalError(encoded, "Error", e.getMessage());
+        }
+    }
+
+    @PostMapping("/agents/_detail/{agentId}/files/copy")
+    @ResponseBody
+    public String agentFilesCopy(
+        @PathVariable String agentId,
+        @RequestParam String path,
+        @RequestParam String destination,
+        @RequestParam(required = false) String name,
+        HttpServletResponse response
+    ) {
+        WorkspaceDirectoryService dirService = workspaceDirectoryService();
+        WorkspaceExplorerService explorer = workspaceExplorerService();
+        try {
+            WorkspaceDescriptor descriptor = resolveAgentWriteDescriptor(agentId, dirService, response);
+            if (descriptor == null) return errorText(response);
+            explorer.copy(descriptor, explorer.normalizeRelativePath(path),
+                explorer.normalizeRelativePath(destination), name);
+            String parent = parentPath(path);
+            WorkspaceExplorerService.DirectoryListing listing = explorer.list(descriptor, explorer.normalizeRelativePath(parent));
+            String encodedAgentId = URLEncoder.encode(agentId, StandardCharsets.UTF_8);
+            return WorkspaceExplorerFragments.agentMutationResponse(encodedAgentId, listing, null, null,
+                "Copied " + path + ".");
+        } catch (WorkspaceFileException e) {
+            response.setStatus(fileErrorStatus(e));
+            String encoded = URLEncoder.encode(agentId, StandardCharsets.UTF_8);
+            return WorkspaceExplorerFragments.agentModalError(encoded, "Error", e.getMessage());
+        }
+    }
+
+    @PostMapping("/agents/_detail/{agentId}/files/move")
+    @ResponseBody
+    public String agentFilesMove(
+        @PathVariable String agentId,
+        @RequestParam String path,
+        @RequestParam String destination,
+        @RequestParam(required = false) String name,
+        HttpServletResponse response
+    ) {
+        WorkspaceDirectoryService dirService = workspaceDirectoryService();
+        WorkspaceExplorerService explorer = workspaceExplorerService();
+        try {
+            WorkspaceDescriptor descriptor = resolveAgentWriteDescriptor(agentId, dirService, response);
+            if (descriptor == null) return errorText(response);
+            explorer.move(descriptor, explorer.normalizeRelativePath(path),
+                explorer.normalizeRelativePath(destination), name);
+            String parent = parentPath(path);
+            WorkspaceExplorerService.DirectoryListing listing = explorer.list(descriptor, explorer.normalizeRelativePath(parent));
+            String encodedAgentId = URLEncoder.encode(agentId, StandardCharsets.UTF_8);
+            return WorkspaceExplorerFragments.agentMutationResponse(encodedAgentId, listing, null, null,
+                "Moved " + path + ".");
+        } catch (WorkspaceFileException e) {
+            response.setStatus(fileErrorStatus(e));
+            String encoded = URLEncoder.encode(agentId, StandardCharsets.UTF_8);
+            return WorkspaceExplorerFragments.agentModalError(encoded, "Error", e.getMessage());
+        }
+    }
+
+    @PostMapping("/agents/_detail/{agentId}/files/delete")
+    @ResponseBody
+    public String agentFilesDelete(
+        @PathVariable String agentId,
+        @RequestParam String path,
+        @RequestParam String step,
+        HttpServletResponse response
+    ) {
+        WorkspaceDirectoryService dirService = workspaceDirectoryService();
+        WorkspaceExplorerService explorer = workspaceExplorerService();
+        try {
+            WorkspaceDescriptor descriptor = resolveAgentWriteDescriptor(agentId, dirService, response);
+            if (descriptor == null) return errorText(response);
+            WorkspaceExplorerService.DeleteStep deleteStep = WorkspaceExplorerService.DeleteStep.valueOf(step.trim().toUpperCase(Locale.ROOT));
+            explorer.delete(descriptor, explorer.normalizeRelativePath(path), deleteStep);
+            String parent = parentPath(path);
+            WorkspaceExplorerService.DirectoryListing listing = explorer.list(descriptor, explorer.normalizeRelativePath(parent));
+            String encodedAgentId = URLEncoder.encode(agentId, StandardCharsets.UTF_8);
+            return WorkspaceExplorerFragments.agentMutationResponse(encodedAgentId, listing, null, null,
+                "Deleted " + path + ".");
+        } catch (IllegalArgumentException e) {
+            response.setStatus(HttpServletResponse.SC_BAD_REQUEST);
+            String encoded = URLEncoder.encode(agentId, StandardCharsets.UTF_8);
+            return WorkspaceExplorerFragments.agentModalError(encoded, "Error", "Invalid delete confirmation step.");
+        } catch (WorkspaceFileException e) {
+            response.setStatus(fileErrorStatus(e));
+            String encoded = URLEncoder.encode(agentId, StandardCharsets.UTF_8);
+            return WorkspaceExplorerFragments.agentModalError(encoded, "Error", e.getMessage());
+        }
+    }
+
+    @PutMapping("/agents/_detail/{agentId}/files/save-text")
+    @ResponseBody
+    public String agentFilesSaveText(
+        @PathVariable String agentId,
+        @RequestParam String path,
+        @RequestParam String content,
+        HttpServletResponse response
+    ) {
+        WorkspaceDirectoryService dirService = workspaceDirectoryService();
+        WorkspaceExplorerService explorer = workspaceExplorerService();
+        try {
+            WorkspaceDescriptor descriptor = resolveAgentWriteDescriptor(agentId, dirService, response);
+            if (descriptor == null) return errorText(response);
+            WorkspaceExplorerService.FilePreview preview = explorer.saveText(descriptor, explorer.normalizeRelativePath(path), content);
+            String parent = parentPath(path);
+            WorkspaceExplorerService.DirectoryListing listing = explorer.list(descriptor, explorer.normalizeRelativePath(parent));
+            WorkspaceExplorerService.Entry inspected = explorer.inspect(descriptor, explorer.normalizeRelativePath(path));
+            String encodedAgentId = URLEncoder.encode(agentId, StandardCharsets.UTF_8);
+            return WorkspaceExplorerFragments.agentTextSaveResponse(encodedAgentId, preview, listing, inspected, path,
+                "Saved " + path + ".");
+        } catch (WorkspaceFileException e) {
+            response.setStatus(fileErrorStatus(e));
+            String encoded = URLEncoder.encode(agentId, StandardCharsets.UTF_8);
+            return WorkspaceExplorerFragments.agentModalError(encoded, "Error", e.getMessage());
+        }
+    }
+
+    // ── Labels ──
+
+    @PostMapping("/agents/_detail/{agentId}/files/labels")
+    @ResponseBody
+    public String agentFilesAddLabel(
+        @PathVariable String agentId,
+        @RequestParam String path,
+        @RequestParam String label,
+        HttpServletResponse response
+    ) {
+        WorkspaceDirectoryService dirService = workspaceDirectoryService();
+        WorkspaceExplorerService explorer = workspaceExplorerService();
+        try {
+            WorkspaceDescriptor descriptor = resolveAgentWriteDescriptor(agentId, dirService, response);
+            if (descriptor == null) return errorText(response);
+            requireMutableAgentFilePath(path);
+            explorer.ensureTag(label, label);
+            explorer.addLabel(descriptor, path, label);
+            WorkspaceExplorerService.Entry inspected = explorer.inspect(descriptor, explorer.normalizeRelativePath(path));
+            String encodedAgentId = URLEncoder.encode(agentId, StandardCharsets.UTF_8);
+            return WorkspaceExplorerFragments.agentInspector(encodedAgentId, inspected, "Tagged " + path + ".", false);
+        } catch (IllegalArgumentException e) {
+            response.setStatus(HttpServletResponse.SC_BAD_REQUEST);
+            return WorkspaceExplorerFragments.agentInspectorError(e.getMessage());
+        } catch (WorkspaceFileException e) {
+            response.setStatus(fileErrorStatus(e));
+            return WorkspaceExplorerFragments.agentInspectorError(e.getMessage());
+        }
+    }
+
+    @DeleteMapping("/agents/_detail/{agentId}/files/labels")
+    @ResponseBody
+    public String agentFilesRemoveLabel(
+        @PathVariable String agentId,
+        @RequestParam String path,
+        @RequestParam String label,
+        HttpServletResponse response
+    ) {
+        WorkspaceDirectoryService dirService = workspaceDirectoryService();
+        WorkspaceExplorerService explorer = workspaceExplorerService();
+        try {
+            WorkspaceDescriptor descriptor = resolveAgentWriteDescriptor(agentId, dirService, response);
+            if (descriptor == null) return errorText(response);
+            requireMutableAgentFilePath(path);
+            explorer.removeLabel(descriptor, path, label);
+            WorkspaceExplorerService.Entry inspected = explorer.inspect(descriptor, explorer.normalizeRelativePath(path));
+            String encodedAgentId = URLEncoder.encode(agentId, StandardCharsets.UTF_8);
+            return WorkspaceExplorerFragments.agentInspector(encodedAgentId, inspected, "Removed tag from " + path + ".", false);
+        } catch (WorkspaceFileException e) {
+            response.setStatus(fileErrorStatus(e));
+            String encoded = URLEncoder.encode(agentId, StandardCharsets.UTF_8);
+            return WorkspaceExplorerFragments.agentInspectorError(e.getMessage());
+        }
+    }
+
+    private boolean isFileMutationAction(String action) {
+        return switch (action) {
+            case "create-folder", "create-text", "create-markdown", "rename", "copy", "move", "tag",
+                 "delete", "delete-recursive" -> true;
+            default -> false;
+        };
+    }
+
+    private void requireMutableAgentFilePath(String path) {
+        if (WorkspaceExplorerFragments.isReadOnlyRuntimePath(path)) {
+            throw new WorkspaceFileException(WorkspaceFileException.Reason.INVALID,
+                "Runtime-managed task and output paths are read-only.");
+        }
     }
 
     @GetMapping("/agents/_detail/{agentId}/outputs")
@@ -6747,7 +7003,7 @@ public class OrchestrationController {
         panel.withChild(Header.H2("Recent Outputs"));
 
         List<RunOutputArtifact> outputs = queryOutputs(
-            agentId, null, null, null, null, null, null, null, null, null, 20);
+            agentId, null, null, null, null, null, null, null, null, null, null, null, 20);
         if (outputs.isEmpty()) {
             panel.withChild(new Div().withClass("dashboard-empty").withInnerText("No recent outputs."));
             return panel.render();
@@ -6780,7 +7036,7 @@ public class OrchestrationController {
             .withHxTarget("#agent-exec-result")
             .withHxSwap("innerHTML");
         form.withChild(label("Command", TextInput.create("command").withPlaceholder("pwd")));
-        form.withChild(label("Working Directory", TextInput.create("workingDirectory").withValue("workspace")));
+        form.withChild(label("Working Directory", TextInput.create("workingDirectory").withValue(".")));
         form.withChild(Button.create("Run").withClass("orch-primary").withAttribute("type", "submit"));
         panel.withChild(form);
         panel.withChild(new Div().withId("agent-exec-result"));
@@ -6802,11 +7058,12 @@ public class OrchestrationController {
                 return new Div().withClass("orch-error").withInnerText("Shell execution service is unavailable.").render();
             }
             OrchestrationTaskContextHolder.set(new OrchestrationTaskContext(
-                agentId, agent.name(), null, null, null, null, null, null));
+                agentId, agent.name(), null, null, null, null, null, null, null, null, null, null, null,
+                null, null, null, null));
             try {
                 var result = shellService.exec(
                     required(params.get("command"), "command is required"),
-                    params.getOrDefault("workingDirectory", "workspace"),
+                    params.getOrDefault("workingDirectory", "."),
                     null);
                 return new Div().withClass("orch-panel")
                     .withChild(new Div().withClass("orch-meta")
@@ -6965,14 +7222,6 @@ public class OrchestrationController {
             .withClass("dashboard-table");
         for (var a : assignments) {
             Div actions = new Div().withClass("orch-actions");
-            if (a.status() == OrchestrationStatus.WAITING
-                && a.checkpoint() != null
-                && a.checkpoint().containsKey("workspaceBlocker")) {
-                actions.withChild(Button.create("Requeue Workspace")
-                    .withAttribute("hx-post", "/agents/_detail/" + agentId + "/queue/" + a.id() + "/requeue-workspace")
-                    .withAttribute("hx-target", "#agent-tab-panel")
-                    .withAttribute("hx-swap", "innerHTML"));
-            }
             if (a.status() == OrchestrationStatus.QUEUED || a.status() == OrchestrationStatus.RUNNING) {
                 actions.withChild(Button.create("Pause")
                     .withAttribute("hx-post", "/agents/_detail/" + agentId + "/queue/" + a.id() + "/pause")
@@ -7120,13 +7369,9 @@ public class OrchestrationController {
         meta.withChild(agentMetaItem("Run Name", displayValue(a.runDisplayName())));
         meta.withChild(agentMetaItem("Status", a.status() != null ? a.status().name() : "unknown"));
         meta.withChild(agentMetaItem("Project", displayValue(a.projectId())));
-        meta.withChild(agentMetaItem("Effective Workspace", effectiveWorkspaceLabel(a.effectiveWorkspaceKind(), a.effectiveWorkspaceId())));
-        meta.withChild(agentMetaItem("Diagnostic Workspace Path", displayValue(workspaceDisplayPath(a.effectiveWorkspaceId()))));
-        meta.withChild(agentMetaItem("Compatibility Workspace", displayValue(a.workspaceId())));
-        meta.withChild(agentMetaItem("Workspace Blocker",
-            a.checkpoint() != null && a.checkpoint().containsKey("workspaceBlocker")
-                ? String.valueOf(a.checkpoint().get("workspaceBlocker"))
-                : "—"));
+        meta.withChild(agentMetaItem("Effective Workspace", effectiveWorkspaceLabel(a.workspaceType(), a.workspaceKey())));
+        meta.withChild(agentMetaItem("Workspace Identity", displayValue(a.workspaceIdentity())));
+        meta.withChild(agentMetaItem("Workspace Key", displayValue(a.workspaceKey())));
         meta.withChild(agentMetaItem("Last Progress", diagnostics.lastProgressAt() != null ? formatSince(diagnostics.lastProgressAt()) : "—"));
         meta.withChild(agentMetaItem("Last Heartbeat", diagnostics.lastHeartbeatAt() != null ? formatSince(diagnostics.lastHeartbeatAt()) : "—"));
         meta.withChild(agentMetaItem("Progress Age", formatDuration(diagnostics.progressAge())));
@@ -7560,9 +7805,8 @@ public class OrchestrationController {
 
         form.withChild(entitySelector("projectId", EntityKind.PROJECT, null,
             "Project", "optional project context", false, Map.of("agentId", agent.id())));
-        form.withChild(entitySelector("workspaceId", EntityKind.WORKSPACE, null,
-            "Compatibility Workspace", "optional compatibility workspace metadata", false));
-        form.withChild(submitRoutingFields(Map.of("ownerType", "AGENT", "ownerId", agent.id())));
+
+        form.withChild(workspaceSelector(agent.id(), "direct agent submission"));
 
         form.withChild(new Div().withClass("orch-actions")
             .withChild(Button.create("Submit").withClass("orch-primary").withAttribute("type", "submit")));
@@ -7579,11 +7823,10 @@ public class OrchestrationController {
         String targetId,
         int priority,
         String modelOverride,
-        String projectId,
-        String workspaceId
+        String projectId
     ) {
-        return submitToAgent(agentId, assignmentType, targetId, priority, modelOverride, projectId, workspaceId,
-            "", "", "", "", "");
+        return submitToAgent(agentId, assignmentType, targetId, priority, modelOverride, projectId,
+            "", "", "");
     }
 
     @PostMapping("/agents/_submit/{agentId}")
@@ -7595,11 +7838,8 @@ public class OrchestrationController {
         @RequestParam(value = "priority", defaultValue = "0") int priority,
         @RequestParam(value = "modelOverride", defaultValue = "") String modelOverride,
         @RequestParam(value = "projectId", defaultValue = "") String projectId,
-        @RequestParam(value = "workspaceId", defaultValue = "") String workspaceId,
-        @RequestParam(value = "selectedWorkAreaId", defaultValue = "") String selectedWorkAreaId,
-        @RequestParam(value = "outputRouteType", defaultValue = "") String outputRouteType,
-        @RequestParam(value = "outputWorkAreaId", defaultValue = "") String outputWorkAreaId,
-        @RequestParam(value = "outputDirectRelativePath", defaultValue = "") String outputDirectRelativePath,
+        @RequestParam(value = "workspaceType", defaultValue = "") String workspaceType,
+        @RequestParam(value = "workspaceKey", defaultValue = "") String workspaceKey,
         @RequestParam(value = "runDisplayName", defaultValue = "") String runDisplayName
     ) {
         try {
@@ -7608,7 +7848,6 @@ public class OrchestrationController {
             validateSelectedEntity(targetKindForAssignment(type), targetId, true, "Target");
             validateSelectedEntity(EntityKind.MODEL, modelOverride, false, "Model Override");
             validateSelectedEntity(EntityKind.PROJECT, projectId, false, "Project");
-            validateSelectedEntity(EntityKind.WORKSPACE, workspaceId, false, "Workspace");
 
             java.util.Map<String, Object> input = new java.util.LinkedHashMap<>();
             if (type == AssignmentType.TASK_RUN) {
@@ -7627,11 +7866,8 @@ public class OrchestrationController {
                 agentId, jobId, null, type, normalizedRunDisplayName, priority,
                 modelOverride.isBlank() ? null : modelOverride.trim(),
                 nn(projectId),
-                nn(workspaceId),
-                nn(selectedWorkAreaId),
-                StringUtils.hasText(outputRouteType) ? outputRouteType : null,
-                nn(outputWorkAreaId),
-                nn(outputDirectRelativePath),
+                nn(workspaceType),
+                nn(workspaceKey),
                 input
             ));
 
@@ -7857,23 +8093,14 @@ public class OrchestrationController {
     }
 
     private Component assignmentContextMeta(WorkAssignment assignment) {
-        Div meta = new Div().withClass("orch-meta");
-        meta.withChild(new HtmlTag("span").withInnerText("Run name: " + displayValue(assignment.runDisplayName())));
-        meta.withChild(new HtmlTag("span").withInnerText("Project: " + displayValue(assignment.projectId())));
-        meta.withChild(new HtmlTag("span").withInnerText("Effective workspace: "
-            + effectiveWorkspaceLabel(assignment.effectiveWorkspaceKind(), assignment.effectiveWorkspaceId())));
-        meta.withChild(new HtmlTag("span").withInnerText("Selected Work Area: "
-            + displayValue(assignment.selectedWorkAreaId())));
-        meta.withChild(new HtmlTag("span").withInnerText("Output route: "
-            + displayValue(assignment.outputRouteType())));
-        meta.withChild(new HtmlTag("span").withInnerText("Compatibility workspace: "
-            + displayValue(assignment.workspaceId())));
-        if (assignment.status() == OrchestrationStatus.WAITING
-            && assignment.checkpoint() != null
-            && assignment.checkpoint().containsKey("workspaceBlocker")) {
-            meta.withChild(new HtmlTag("span").withInnerText("Workspace blocker: "
-                + displayValue(String.valueOf(assignment.checkpoint().get("workspaceBlocker")))));
+        Div meta = new Div().withClass("assignment-context-meta");
+        meta.withChild(new HtmlTag("span").withInnerText("Run: " + displayValue(assignment.runDisplayName())));
+        if (StringUtils.hasText(assignment.projectId())) {
+            meta.withChild(new HtmlTag("span").withChild(
+                new HtmlTag("code").withInnerText(assignment.projectId())));
         }
+        meta.withChild(new HtmlTag("span").withInnerText("Workspace: "
+            + effectiveWorkspaceLabel(assignment.workspaceType(), assignment.workspaceKey())));
         return meta;
     }
 
@@ -7885,16 +8112,11 @@ public class OrchestrationController {
         return prefix + (StringUtils.hasText(id) ? " " + id : "");
     }
 
-    private String workspaceDisplayPath(String workspaceId) {
-        if (!StringUtils.hasText(workspaceId)) {
+    private String workspaceDisplayPath(String workspaceKey) {
+        if (!StringUtils.hasText(workspaceKey)) {
             return null;
         }
-        try {
-            Workspace workspace = workspaceService.get(workspaceId);
-            return workspace.rootRelativePath();
-        } catch (RuntimeException exception) {
-            return null;
-        }
+        return "workspace/" + workspaceKey;
     }
 
     private String requireRunDisplayName(String value, String context) {
@@ -7947,25 +8169,169 @@ public class OrchestrationController {
         return new HtmlTag("label").withChild(new TextNode(text)).withChild(input);
     }
 
-    private Component submitRoutingFields(Map<String, String> context) {
-        Div group = new Div().withClass("orch-form-stack");
-        group.withChild(new HtmlTag("h4").withInnerText("Work Area / Outputs"));
-        group.withChild(entitySelector("selectedWorkAreaId", EntityKind.WORK_AREA, null,
-            "Selected Work Area", "blank uses Home", false, context));
-        Select routeType = Select.create("outputRouteType")
-            .addOption("", "Default: selected Work Area outputs", true)
-            .addOption(AssignmentRequest.OUTPUT_ROUTE_WORK_AREA, "Redirect to Work Area outputs", false)
-            .addOption(AssignmentRequest.OUTPUT_ROUTE_DIRECT_DIRECTORY, "Redirect to direct directory", false);
-        group.withChild(label("Output Route", routeType));
-        group.withChild(entitySelector("outputWorkAreaId", EntityKind.WORK_AREA, null,
-            "Output Work Area", "required for Work Area redirect", false, context));
-        group.withChild(label("Direct Output Directory", TextInput.create("outputDirectRelativePath")
-            .withPlaceholder("existing owner-root-relative directory")));
-        return group;
+    // ── Workspace selector routes ──
+
+    @GetMapping("/selectors/workspace/agent-selected")
+    @ResponseBody
+    public String workspaceAgentSelected(@RequestParam Map<String, String> params, HttpServletResponse response) {
+        String agentId = params.getOrDefault("value", "").trim();
+        String context = params.getOrDefault("selectorContext.workspaceSelectionContext", "submission");
+        WorkspaceDirectoryService dirService = workspaceDirectoryService();
+        try {
+            dirService.resolveForRead(WorkspaceKind.AGENT, agentId);
+            Component selectedAgent = entitySelector(
+                params.getOrDefault("name", "agentId"), EntityKind.AGENT, agentId,
+                params.get("label"), params.get("placeholder"),
+                Boolean.parseBoolean(params.getOrDefault("required", "false")),
+                Map.of("workspaceSelectionContext", context));
+            Component workspace = WorkspaceSelectionComponents.selectorControlOob(
+                agentId, dirService.listUserWorkspaces(), context);
+            return selectedAgent.render() + workspace.render();
+        } catch (WorkspaceResolutionException e) {
+            response.setStatus(HttpServletResponse.SC_NOT_FOUND);
+            return new Div().withClass("orch-status orch-status-error").withInnerText("Agent not found.").render();
+        }
     }
 
-    private String routeTypeParam(Map<String, String> params) {
-        return StringUtils.hasText(params.get("outputRouteType")) ? params.get("outputRouteType") : null;
+    @GetMapping("/selectors/workspace/select")
+    @ResponseBody
+    public String workspaceSelectorSelect(
+        @RequestParam String agentId,
+        @RequestParam(required = false) String type,
+        @RequestParam(required = false) String key,
+        @RequestParam(defaultValue = "submission") String context,
+        HttpServletResponse response
+    ) {
+        WorkspaceDirectoryService dirService = workspaceDirectoryService();
+        try {
+            dirService.resolveForRead(WorkspaceKind.AGENT, agentId);
+            boolean hasType = StringUtils.hasText(type);
+            boolean hasKey = StringUtils.hasText(key);
+            if (hasType != hasKey) {
+                throw new IllegalArgumentException("Workspace type and key must be selected together.");
+            }
+            if (hasType) {
+                if ("agent".equals(type)) {
+                    if (!agentId.equals(key)) throw new IllegalArgumentException("Agent workspace must match the bound agent.");
+                } else if ("user".equals(type)) {
+                    dirService.resolveForRead(WorkspaceKind.USER, key);
+                } else {
+                    throw new IllegalArgumentException("Only agent and declared user workspaces may be selected.");
+                }
+            }
+            List<WorkspaceDescriptor> userWorkspaces = dirService.listUserWorkspaces();
+            return WorkspaceSelectionComponents.selectorControl(agentId, userWorkspaces, type, key, context).render();
+        } catch (IllegalArgumentException | WorkspaceResolutionException e) {
+            response.setStatus(e instanceof WorkspaceResolutionException ? HttpServletResponse.SC_NOT_FOUND : HttpServletResponse.SC_BAD_REQUEST);
+            return WorkspaceSelectionComponents.selectorControl(agentId, safeListUserWorkspaces(dirService), null, null, context, e.getMessage()).render();
+        }
+    }
+
+    @PostMapping("/selectors/workspace/create")
+    @ResponseBody
+    public String workspaceSelectorCreate(
+        @RequestParam String agentId,
+        @RequestParam(required = false) String name,
+        @RequestParam(defaultValue = "submission") String context,
+        HttpServletResponse response
+    ) {
+        WorkspaceDirectoryService dirService = workspaceDirectoryService();
+        if (name == null || name.isBlank()) {
+            response.setStatus(HttpServletResponse.SC_BAD_REQUEST);
+            return WorkspaceSelectionComponents.selectorControl(
+                agentId, safeListUserWorkspaces(dirService), null, null, context, "Workspace name is required.").render();
+        }
+        try {
+            dirService.resolveForRead(WorkspaceKind.AGENT, agentId);
+            WorkspaceDescriptor created = dirService.createUserWorkspace(name.trim());
+            List<WorkspaceDescriptor> userWorkspaces = safeListUserWorkspaces(dirService);
+            return WorkspaceSelectionComponents.selectorControl(agentId, userWorkspaces, "user", created.key(), context).render();
+        } catch (WorkspaceResolutionException e) {
+            response.setStatus(e.reason() == WorkspaceResolutionException.Reason.CONFLICT
+                ? HttpServletResponse.SC_CONFLICT : HttpServletResponse.SC_BAD_REQUEST);
+            return WorkspaceSelectionComponents.selectorControl(agentId, safeListUserWorkspaces(dirService), null, null, context, e.getMessage()).render();
+        }
+    }
+
+    // ── Agent file operation helpers ──
+
+    private WorkspaceDescriptor resolveAgentDescriptor(
+        String agentId, WorkspaceDirectoryService dirService, HttpServletResponse response
+    ) {
+        try {
+            return dirService.resolveForRead(WorkspaceKind.AGENT, agentId);
+        } catch (WorkspaceResolutionException e) {
+            response.setStatus(HttpServletResponse.SC_NOT_FOUND);
+            return null;
+        }
+    }
+
+    private WorkspaceDescriptor resolveAgentWriteDescriptor(
+        String agentId, WorkspaceDirectoryService dirService, HttpServletResponse response
+    ) {
+        try {
+            // resolveForWrite lazily creates missing agent root
+            return dirService.resolveForWrite(WorkspaceKind.AGENT, agentId);
+        } catch (WorkspaceResolutionException e) {
+            response.setStatus(HttpServletResponse.SC_NOT_FOUND);
+            return null;
+        }
+    }
+
+    private int fileErrorStatus(WorkspaceFileException e) {
+        return switch (e.reason()) {
+            case INVALID -> HttpServletResponse.SC_BAD_REQUEST;
+            case NOT_FOUND -> HttpServletResponse.SC_NOT_FOUND;
+            case CONFLICT -> HttpServletResponse.SC_CONFLICT;
+        };
+    }
+
+    private static String parentPath(String path) {
+        String clean = path == null || path.isBlank() ? "." : path;
+        int idx = clean.lastIndexOf('/');
+        if (idx <= 0) return ".";
+        return clean.substring(0, idx);
+    }
+
+    private String errorText(HttpServletResponse response) {
+        return new Div().withClass("workspace-file-status-error").withInnerText("Agent not found.").render();
+    }
+
+    private WorkspaceExplorerService workspaceExplorerService() {
+        WorkspaceExplorerService svc = workspaceExplorerServiceRef.getIfAvailable();
+        if (svc == null) throw new IllegalStateException("WorkspaceExplorerService is unavailable");
+        return svc;
+    }
+
+    private WorkspaceDirectoryService workspaceDirectoryService() {
+        WorkspaceDirectoryService svc = workspaceDirectoryServiceRef.getIfAvailable();
+        if (svc == null) throw new IllegalStateException("WorkspaceDirectoryService is unavailable");
+        return svc;
+    }
+
+    private List<WorkspaceDescriptor> safeListUserWorkspaces(WorkspaceDirectoryService dirService) {
+        try {
+            return dirService.listUserWorkspaces();
+        } catch (Exception e) {
+            return List.of();
+        }
+    }
+
+    private String defaultSubmissionAgentId() {
+        return agentProfileService.list().stream()
+            .filter(agent -> agent.status() != null && !"DISABLED".equals(agent.status().name()))
+            .map(AgentProfile::id)
+            .findFirst()
+            .orElse("");
+    }
+
+    private Component workspaceSelector(String boundAgentId, String context) {
+        if (!StringUtils.hasText(boundAgentId)) {
+            return new Div().withClass("orch-status").withInnerText("Select an active agent to choose a workspace.");
+        }
+        WorkspaceDirectoryService dirService = workspaceDirectoryService();
+        return WorkspaceSelectionComponents.selectorControl(
+            boundAgentId, safeListUserWorkspaces(dirService), null, null, context);
     }
 
     private Component tabNav(String agentId, String... names) {

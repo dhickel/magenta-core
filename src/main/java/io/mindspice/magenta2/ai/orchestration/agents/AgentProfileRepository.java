@@ -46,6 +46,17 @@ public class AgentProfileRepository {
         );
     }
 
+    public boolean existsById(String id) {
+        if (!StringUtils.hasText(id)) {
+            return false;
+        }
+        Integer count = jdbcTemplate.queryForObject(
+                "select count(*) from agent_profiles where id = ?",
+                Integer.class,
+                id);
+        return count != null && count > 0;
+    }
+
     public Optional<AgentProfile> findByName(String name) {
         if (!StringUtils.hasText(name)) {
             return Optional.empty();
