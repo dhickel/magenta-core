@@ -40,26 +40,31 @@ Project materializations are agent-local context containers. A materialization m
 
 Materialization state is visible in the agent's **Context** panel at `/agents/{agentId}`. The context default can select a materialization (project context) or a personal area (`HOME`, `SCRIPTS`, or `APPS`). Changing the default affects only future work; existing captures retain their original selection.
 
-## Project Membership
+## Project Console
 
-Use `/projects` to organize work around a project record, manage agent memberships, and inspect project events. Projects are metadata and membership context. They do not create workspace directories, acquire filesystem leases, or own materialized links.
+Use `/projects` to organize work around a project record while retaining the project chooser sidebar. A selected project opens six focused tabs: **Dashboard**, **Members**, **Files**, **Jobs**, **Outputs**, and **Settings**. Projects remain metadata and membership context; they do not create workspace roots or acquire filesystem leases.
+
+The Dashboard shows the neutral **Tracked** project-record state, authoritative counts, member agent/status cards, active assignments, materialization health, and recent project-attributed jobs. Unsupported or unavailable facts are labelled unavailable rather than shown as zero.
 
 ### Create A Project
 
 1. Open `/projects`.
 2. Select **New Project**.
-3. Fill **Name**.
-4. Optionally fill description and Git repo URL.
-5. Choose manager type and default model if needed.
-6. Save.
+3. Fill **Name** and optionally a description.
+4. Optionally choose the **Owner Agent** used by the existing compatibility owner field.
+5. Create the project.
 
-### Edit A Project
+Validation stays inside the creation form and preserves submitted values. The browser UI does not display or submit the compatibility Git repository URL field.
 
-Select a project from the sidebar. You can update name, description, Git repo URL, manager type, and default model. Deleting a project is destructive and is blocked while active assignments, jobs, or runs still reference it.
+### Members And Materialized Files
 
-### Project Members
+The Members tab lists assigned members and roles. Use HTMX controls to add a member, choose a role, or remove a member. Membership removal is guarded while the agent has active assignments.
 
-The agents section lists assigned members and roles. Use HTMX controls to add a member, choose a role, or remove a member. Membership removal is guarded while the agent has active assignments.
+The Files tab is read-only. It selects only current members' exact project materialization records and revalidates membership, source project, lifecycle state, and generation for every read. It cannot expose the rest of an agent workspace or create, edit, move, tag, download, or delete materialization content. Provisioning and lifecycle actions remain on the owning agent's Context tab. Empty `READY`, missing, provisioning, failed, revoked, stale-generation, and unavailable states are shown distinctly.
+
+### Settings And Deletion
+
+Settings contains name, description, **Owner Agent**, manager type, default model, and compact metadata. The owner value is presentation-only for existing records; this UI does not transfer ownership. Save errors remain inline in the Settings tab. Deletion uses an inline confirmation and remains blocked while active assignments or job runs reference the project.
 
 ## Agent Files Tab
 

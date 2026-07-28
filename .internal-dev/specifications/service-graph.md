@@ -251,6 +251,7 @@ Each active consumer identified during repository inspection is listed with its 
 | `WorkspaceExplorerFragments` | stable run host | Render `#agent-run-groups` beside the filesystem browser and independently load `/agents/_detail/{agentId}/runs`. | Inject repositories, summary services, artifact services, or skill/schedule services into `WorkspaceExplorerService`. |
 | `RunSummaryService` | native lifecycle, measurements, skill activations, artifacts, causation | Build rebuildable summary/audit facts through exact persisted identifiers. | Become native status authority or infer attribution from display names, paths, or temporal proximity. |
 | `ArtifactFragments`, `SkillFragments`, `RuntimeHealthFragments`, `ScheduleReactionFragments` | each owning domain service | Render independent scoped HTMX hosts and update only the affected host. | Broaden scope through stale/OOB responses or move domain persistence into the Files explorer. |
+| Project Files web adapter | `ProjectService`, `AgentContextService`, `AgentMaterializationService`, `WorkspaceDirectoryService`, `WorkspaceExplorerService` | Revalidate current membership and exact project source, resolve the current generation through materialization authority, then pass one trusted `MaterializationLocation` to read-only explorer list/inspect/preview operations. | Construct a project workspace, derive identity from a path, browse the enclosing agent root, provision content, or expose explorer mutations. |
 
 ## Ownership Boundary
 

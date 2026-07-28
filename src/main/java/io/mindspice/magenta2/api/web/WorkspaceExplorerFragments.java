@@ -24,6 +24,8 @@ final class WorkspaceExplorerFragments {
     static final String AGENT_LIST_ID = "workspace-file-list";
     static final String AGENT_INSPECTOR_ID = "workspace-file-inspector";
     static final String AGENT_MODAL_ID = "workspace-file-modal";
+    static final String PROJECT_LIST_ID = "project-materialization-file-list";
+    static final String PROJECT_INSPECTOR_ID = "project-materialization-file-inspector";
 
     private static final String AGENT_FILES_PREFIX = "/agents/_detail/%s/files";
 
@@ -714,6 +716,100 @@ final class WorkspaceExplorerFragments {
 
     private static String escapeAttribute(String value) {
         return escape(value);
+    }
+
+    // ── Project materialization read-only fragments ──
+
+    static String projectMaterializationShell(
+        String projectId,
+        String agentId,
+        int generation,
+        WorkspaceExplorerService.DirectoryListing listing
+    ) {
+        String route = projectFilesRoute(projectId, agentId, generation);
+        return """
+            <div class="project-materialization-explorer" data-project-agent="%s" data-materialization-generation="%d">
+              <div class="workspace-file-explorer-toolbar">
+                <span class="orch-status-chip active">READY</span>
+                <span class="workspace-file-muted">Agent %s · generation %d · read-only</span>
+                <button type="button" class="button button-secondary small" data-htmx-error-swap="true" hx-get="%s&path=%s" hx-target="#%s" hx-swap="outerHTML">Refresh</button>
+              </div>
+              <div class="workspace-file-pathbar">%s</div>
+              <div class="workspace-file-explorer-layout project-materialization-layout">
+                %s
+                %s
+              </div>
+            </div>
+            """.formatted(
+            escapeAttribute(agentId), generation, escape(agentId), generation,
+            route, url(pathOrRoot(listing.path())), PROJECT_LIST_ID,
+            escape(".".equals(pathOrRoot(listing.path())) ? "Materialization root" : pathOrRoot(listing.path())),
+            projectMaterializationList(projectId, agentId, generation, listing),
+            projectMaterializationInspector(null, null)
+        );
+    }
+
+    static String projectMaterializationList(
+        String projectId,
+        String agentId,
+        int generation,
+        WorkspaceExplorerService.DirectoryListing listing
+    ) {
+        String currentPath = pathOrRoot(listing.path());
+        String route = projectFilesRoute(projectId, agentId, generation);
+        StringBuilder rows = new StringBuilder();
+        if (!".".equals(currentPath)) {
+            rows.append("<tr><td><button type=\"button\" class=\"button button-link small\" data-htmx-error-swap=\"true\" hx-get=\"")
+                .append(route).append("&path=").append(url(parentPath(currentPath)))
+                .append("\" hx-target=\"#").append(PROJECT_LIST_ID)
+                .append("\" hx-swap=\"outerHTML\">..</button></td><td>Folder</td><td>—</td><td>—</td><td></td></tr>");
+        }
+        for (WorkspaceExplorerService.Entry entry : listing.entries()) {
+            String action = entry.directory()
+                ? "hx-get=\"" + route + "&path=" + url(entry.path()) + "\" hx-target=\"#" + PROJECT_LIST_ID + "\""
+                : "hx-get=\"/projects/_detail/" + url(projectId) + "/files/preview?agentId=" + url(agentId)
+                    + "&generation=" + generation + "&path=" + url(entry.path()) + "\" hx-target=\"#" + PROJECT_INSPECTOR_ID + "\"";
+            rows.append("<tr><td><button type=\"button\" class=\"button button-link small\" data-htmx-error-swap=\"true\" ")
+                .append(action).append(entry.directory() ? " hx-swap=\"outerHTML\">" : " hx-swap=\"innerHTML\">")
+                .append(escape(entry.name())).append("</button></td>")
+                .append("<td>").append(escape(entry.fileType())).append("</td><td>").append(escape(entry.sizeLabel()))
+                .append("</td><td>").append(time(entry.modifiedAt())).append("</td><td><span class=\"orch-chip\">Read only</span></td></tr>");
+        }
+        if (listing.entries().isEmpty()) {
+            rows.append("<tr><td colspan=\"5\">Ready materialization is empty.</td></tr>");
+        }
+        return "<div id=\"" + PROJECT_LIST_ID + "\" class=\"workspace-file-table-region\"><table class=\"workspace-file-table\">"
+            + "<thead><tr><th>Name</th><th>Type</th><th>Size</th><th>Modified</th><th>Access</th></tr></thead><tbody>"
+            + rows + "</tbody></table></div>";
+    }
+
+    static String projectMaterializationInspector(WorkspaceExplorerService.FilePreview preview, String message) {
+        if (preview == null) {
+            String bodyClass = message == null ? "" : " class=\"orch-error\"";
+            return "<aside id=\"" + PROJECT_INSPECTOR_ID + "\" class=\"workspace-file-inspector-pane\"><h4>Preview</h4><p"
+                + bodyClass + ">" + escape(message == null ? "Select a file to preview." : message) + "</p></aside>";
+        }
+        String body;
+        if (preview.text() && "markdown".equals(preview.kind())) {
+            body = "<div class=\"workspace-file-rendered\">" + safeMarkdown(preview.content()) + "</div>";
+        } else if (preview.text()) {
+            body = "<pre class=\"project-materialization-preview\">" + escape(preview.content()) + "</pre>";
+        } else {
+            body = "<p>Inline preview is unavailable for this file type.</p>";
+        }
+        return "<aside id=\"" + PROJECT_INSPECTOR_ID + "\" class=\"workspace-file-inspector-pane\"><h4>"
+            + escape(fileName(preview.path())) + "</h4><p>" + escape(preview.path()) + " · "
+            + escape(sizeLabel(preview.size())) + "</p>" + body + "</aside>";
+    }
+
+    static String projectMaterializationState(String title, String message, String cssClass) {
+        return "<div class=\"project-files-state " + escapeAttribute(cssClass) + "\"><h3>" + escape(title)
+            + "</h3><p>" + escape(message) + "</p></div>";
+    }
+
+    private static String projectFilesRoute(String projectId, String agentId, int generation) {
+        return "/projects/_detail/" + url(projectId) + "/files/list?agentId=" + url(agentId)
+            + "&generation=" + generation;
     }
 
     // ── Agent-console Files tab fragments ──

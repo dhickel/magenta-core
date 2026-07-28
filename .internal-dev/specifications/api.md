@@ -158,6 +158,9 @@ These server-rendered routes are scoped browser adapters, not trusted filesystem
 | `/fragments/agents/{agentId}/schedules/*`, `/fragments/agents/{agentId}/reactions/*` | HTMX list, non-executing simulation preview, and bounded firing/attempt or dispatch audit fragments. |
 | `/artifacts`, `/artifacts/_search`, `/_detail/{artifactId}`, `/_preview/{artifactId}`, `/_lineage/{artifactId}`, `/_retention/{artifactId}` | Scoped artifact page and stable search/detail subfragments. FTS5-unavailable and integrity-failed states suppress unsupported search or byte access. |
 | `/skills/_trust/{logicalKey}`, `/skills/_trust/approve|reject|revoke`, `/skills/_snapshots/{logicalKey}` | Skill trust decision and immutable snapshot fragments; mutations refresh only the trust host. |
+| `GET /projects/_detail/{projectId}/{dashboard|members|files|jobs|outputs|settings}` | Project-scoped tab fragments targeting only `#project-tab-panel`; missing scope is `404` and unavailable service facts use controlled marked fragments. |
+| `GET /projects/_detail/{projectId}/files/list|preview` | Read-only current-member materialization reads requiring exact agent/project source, current generation, `READY`, and a trusted confined materialization location. Stale/lifecycle conflicts are `409`; missing project/member/materialization/path is `404`. |
+| `POST|DELETE /projects/_detail/{projectId}/members/**`, `PUT /projects/_editor/{projectId}`, `DELETE /projects/{projectId}` | Local HTMX mutation fragments. Validation is `400`, scoped absence `404`, guarded conflicts `409`, and infrastructure failure `503`. Failed mutations do not OOB-refresh unrelated regions. |
 
 The artifact REST family under `/api/artifacts` owns scoped metadata, preview/download, search/lineage, and retention operations. Request scope is workspace kind/key with optional exact task run; authorization is applied before counts or rows are calculated.
 

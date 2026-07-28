@@ -15,6 +15,7 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
+import java.util.Objects;
 
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
@@ -132,6 +133,28 @@ public class WorkspaceExplorerService {
     public FilePreview preview(WorkspaceDescriptor descriptor, RelativePath path) {
         requireBrowsable(descriptor.kind(), path.value());
         return preview(descriptor.root(), path);
+    }
+
+    /**
+     * Read-only listing rooted at an exact, generation-verified project materialization.
+     * The trusted location is resolved by the materialization authority; this service
+     * neither derives identity from its path nor creates missing content.
+     */
+    public DirectoryListing list(MaterializationLocation location, RelativePath path) {
+        Objects.requireNonNull(location, "location");
+        return listRoot(location.confinedPath(), path);
+    }
+
+    /** Read-only preview confined to an exact materialization root. */
+    public FilePreview preview(MaterializationLocation location, RelativePath path) {
+        Objects.requireNonNull(location, "location");
+        return previewRoot(location.confinedPath(), path);
+    }
+
+    /** Read-only inspection confined to an exact materialization root. */
+    public Entry inspect(MaterializationLocation location, RelativePath path) {
+        Objects.requireNonNull(location, "location");
+        return inspectRoot(location.confinedPath(), path);
     }
 
     public DownloadContent download(WorkspaceDescriptor descriptor, RelativePath path) {

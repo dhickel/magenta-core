@@ -1,9 +1,18 @@
-// Projects — HTMX-first (v=3)
-// Project list, editor, detail fragments, save/delete all handled by HTMX endpoints.
-// JS skeleton preserved for future interactive affordances.
+// Project console tab affordance only; HTMX owns navigation and all transport.
+(function () {
+    "use strict";
 
-document.addEventListener("DOMContentLoaded", () => {
-    const page = document.querySelector("[data-orchestration-page='projects']");
-    if (!page) return;
-    // HTMX-first: all CRUD and list loading handled via hx-get/hx-post/hx-put/hx-delete endpoints
-});
+    function activate(button) {
+        const tabs = button.closest(".project-tabs");
+        if (!tabs) return;
+        tabs.querySelectorAll("[data-project-tab]").forEach((candidate) => {
+            candidate.classList.toggle("active", candidate === button);
+            candidate.setAttribute("aria-selected", candidate === button ? "true" : "false");
+        });
+    }
+
+    document.addEventListener("click", (event) => {
+        const button = event.target.closest("[data-project-tab]");
+        if (button) activate(button);
+    });
+})();

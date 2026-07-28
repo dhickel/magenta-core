@@ -89,6 +89,14 @@ Focused artifact, skill trust/snapshot, runtime health/history, schedule, and re
 
 All operational surfaces use compact tables/panels, thin blue-gray borders, small radii, semantic chips, bounded overflow, and mobile stacking. Standard CRUD, filtering, refresh, pagination, and expansion are HTMX-first. Phase 10 added no transport JavaScript.
 
+## Project Operational Console
+
+`/projects` retains its chooser sidebar and renders a selected project as a six-tab operational console in this fixed order: Dashboard, Members, Files, Jobs, Outputs, Settings. The selected shell owns stable `#project-tab-panel`; each tab is independently HTMX-loadable and cannot replace the full detail shell. Direct `/projects/{projectId}` links load the same list/detail shell.
+
+Dashboard renders the neutral **Tracked** record state and only authoritative project-scoped member, assignment, job, output, profile, and materialization facts. Unsupported facts are unavailable, never fabricated zeroes. Members preserves role add/remove behavior and guarded conflicts. Settings labels the compatibility owner as **Owner Agent**, omits the browser Git repository URL field, preserves submitted values on failed saves, and uses inline deletion confirmation.
+
+Project Files is a read-only view of current members' exact project materializations. Every read revalidates project existence, membership, exact `sourceKind=project`/`sourceId`, lifecycle state, captured generation, trusted materialization location, and explorer confinement. It exposes no agent-workspace siblings or mutation controls. No-record, provisioning/not-provisioned, ready-empty, failed, revoked, stale-generation, missing-location, and unavailable states remain explicit. Provisioning actions stay on the owning agent Context tab.
+
 ## Retained Web Entries
 
 | id | page_or_fragment | status | intended_contract | observed_anchors | interaction_rule | validation | related_decisions | related_knowledge |

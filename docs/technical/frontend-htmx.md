@@ -45,6 +45,8 @@ HTMX routes should return server-rendered HTML fragments and preserve consistent
 
 For modal hosts, keep one stable target element in the page and return modal content for `innerHTML` swaps, or return the full target with `outerHTML`. Do not return a second element with the same id inside an `innerHTML` target. The workspace explorer uses `#workspace-file-modal` as its stable host and returns modal content without duplicating that id.
 
+The project chooser replaces only `#project-detail-container`. A selected project owns a stable `#project-tab-panel`; Dashboard, Members, Files, Jobs, Outputs, and Settings responses replace only that host. Form failures use the explicit marked non-2xx fragment contract and do not issue unrelated OOB refreshes. Successful create/save/delete operations may OOB-refresh only `#project-list` and, on deletion, clear the selected detail.
+
 ## JavaScript Islands
 
 Existing JavaScript is justified where persistent browser state, SSE, or client-side graph/editor interaction is simpler than pure HTMX.
@@ -56,7 +58,7 @@ Existing JavaScript is justified where persistent browser state, SSE, or client-
 - `orchestration/agent-chat.js`: agent side-panel SSE chat behavior.
 - `orchestration/agents.js`: agent detail/editor behaviors that need local UI state.
 - `orchestration/plans.js`: richer plan/workflow editor interactions where client-side state simplifies repeated node/field operations.
-- `orchestration/projects.js`: project detail interactions that coordinate fragment updates.
+- `orchestration/projects.js`: active-tab presentation only for the project console; all project navigation, CRUD, membership, and file reads remain HTMX transport.
 
 Do not turn ordinary CRUD into a JavaScript transport surface. If an interaction can be a form plus HTMX target/swap cleanly, keep it HTMX.
 
@@ -75,6 +77,7 @@ When adding or changing UI:
 - Keep controllers thin; rendering helpers/components should assemble view state, while services own domain behavior.
 - Follow existing orchestration page patterns before introducing new markup style.
 - For dense operational explorers, use details/list tables, stable row actions, a separate inspector, and HTMX fragments before reaching for decorative card grids. The Files surface uses independent `#agent-run-groups` and `#agent-run-detail` hosts: filesystem swaps cannot replace run metadata, and run responses cannot replace list/inspector/modal hosts. Run refresh is an OOB host swap; expansion, lineage navigation, and authorized artifact preview remain scoped HTMX requests.
+- The project Files tab reuses `WorkspaceExplorerFragments` in a materialization-specific read-only mode. Controllers pass a generation-verified `MaterializationLocation` to `WorkspaceExplorerService`; the explorer never reconstructs project identity from a path and exposes no mutation controls.
 
 If SimplyPages lacks a reasonable primitive, inspect `/home/hickelpickle/Code/Java/cannasite/java-html-framework/docs` and `/home/hickelpickle/Code/Java/cannasite/java-html-framework/demo`. If the library truly has a bug or missing primitive, document or fix the library rather than adding brittle page-level workarounds.
 

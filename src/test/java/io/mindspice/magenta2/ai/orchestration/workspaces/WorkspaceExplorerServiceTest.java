@@ -255,6 +255,31 @@ class WorkspaceExplorerServiceTest {
         return base.isEmpty() ? name : base + "/" + name;
     }
 
+    @Test
+    void materializationReadsAreConfinedToTrustedLocationAndNeverExposeAgentSiblings() throws Exception {
+        WorkspaceExplorerService explorer = explorer();
+        Path agentRoot = tempDir.resolve("agent-materialized");
+        Path materializationRoot = agentRoot.resolve("projects/materialized-key");
+        Files.createDirectories(materializationRoot);
+        Files.writeString(materializationRoot.resolve("brief.txt"), "project only");
+        Files.writeString(agentRoot.resolve("private.txt"), "agent private");
+
+        WorkspaceDescriptor descriptor = descriptor(WorkspaceKind.AGENT, "agent-1", agentRoot);
+        var key = io.mindspice.magenta2.ai.orchestration.context.AgentMaterializationRepository.MaterializationKey
+            .forProject("agent-1", "project-1");
+        MaterializationLocation location = new MaterializationLocation(
+            descriptor, key, 3, "workspace/agent/agent-1/projects/materialized-key", materializationRoot);
+
+        assertThat(explorer.list(location, path(".")).entries())
+            .extracting(WorkspaceExplorerService.Entry::name)
+            .containsExactly("brief.txt");
+        assertThat(explorer.preview(location, path("brief.txt")).content()).isEqualTo("project only");
+        assertThat(explorer.inspect(location, path("brief.txt")).name()).isEqualTo("brief.txt");
+        assertThatThrownBy(() -> explorer.list(location, explorer.normalizeRelativePath("../")))
+            .isInstanceOf(WorkspaceFileException.class);
+        assertThat(agentRoot.resolve("private.txt")).exists();
+    }
+
     private WorkspaceExplorerService.RelativePath path(String value) {
         return new WorkspaceExplorerService.RelativePath(value != null && !value.isBlank() ? value : ".");
     }

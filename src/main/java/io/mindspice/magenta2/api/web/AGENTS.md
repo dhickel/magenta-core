@@ -10,6 +10,7 @@ This package owns HTTP and web-facing entry points.
 - Expose runtime settings, agent profile, typed workspace/file explorer (under `/api/workspace/{type}/{id}` for agent/chat/user kinds and `GET|POST /api/workspace/user`), job, assignment, inbox, schedule, event-reaction, and agent side-panel chat APIs as thin orchestration entry points.
 - Expose assignment lifecycle controls, including guarded queue cleanup, retained terminal history, history purge, and read-only audit transcript fragments, through thin orchestration entry points.
 - Expose operational dashboard, scoped artifact, runtime summary/measurement/audit, and Files-adjacent run metadata as thin read models for orchestration UI pages.
+- Expose `/projects` as a chooser plus six-tab operational console. Project Files may browse only current members' exact generation-verified materializations through read-only explorer fragments; it never creates a project workspace or exposes agent-workspace siblings.
 - Expose Agent Skills management and agent-assignment endpoints as thin service adapters when that surface is implemented.
 - Keep inherited shell compatibility resources local to the web layer when a shell asset reference cannot be removed directly.
 - Own the current open-alpha HTTP posture: Magenta does not currently enforce built-in HTTP auth, authorization, or CSRF checks at the web/API layer; unsafe mutation/control routes must rely on explicit controller/service validation and domain ownership guards.

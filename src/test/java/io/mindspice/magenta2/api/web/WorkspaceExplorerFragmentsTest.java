@@ -84,6 +84,38 @@ class WorkspaceExplorerFragmentsTest {
     }
 
     @Test
+    void projectMaterializationExplorerIsReadOnlyAndScopedToProjectRoutes() {
+        WorkspaceExplorerService.Entry file = new WorkspaceExplorerService.Entry(
+            "brief.md", "brief.md", false, true, 12, Instant.EPOCH, Instant.EPOCH,
+            "Markdown", "12 B", WorkspaceExplorerService.ViewerKind.MARKDOWN, List.of(),
+            true, true, true, true, true, true
+        );
+        String html = WorkspaceExplorerFragments.projectMaterializationShell(
+            "project-1", "agent-1", 4,
+            new WorkspaceExplorerService.DirectoryListing(".", List.of(file)));
+
+        assertThat(html)
+            .contains("project-materialization-explorer", "Agent agent-1 · generation 4 · read-only")
+            .contains("/projects/_detail/project-1/files/list?agentId=agent-1&generation=4")
+            .contains("/projects/_detail/project-1/files/preview?agentId=agent-1&generation=4")
+            .doesNotContain("New Folder", "New Text", "New Markdown", "Rename", "Delete", "Add Tag",
+                "hx-post", "hx-put", "hx-delete", "/api/workspace/agent/agent-1");
+    }
+
+    @Test
+    void projectMaterializationReadyEmptyAndErrorsRemainDistinct() {
+        String empty = WorkspaceExplorerFragments.projectMaterializationList(
+            "project-1", "agent-1", 2,
+            new WorkspaceExplorerService.DirectoryListing(".", List.of()));
+        String stale = WorkspaceExplorerFragments.projectMaterializationState(
+            "Stale generation", "Refresh before reading.", "orch-error");
+
+        assertThat(empty).contains("Ready materialization is empty.");
+        assertThat(stale).contains("Stale generation", "orch-error")
+            .doesNotContain("READY");
+    }
+
+    @Test
     void markdownFailureKeepsEscapedRawTextAndVisibleError() {
         String html = WorkspaceExplorerFragments.renderedMarkdownForTest("<script>alert(1)</script>", ignored -> {
             throw new IllegalStateException("renderer failed");
