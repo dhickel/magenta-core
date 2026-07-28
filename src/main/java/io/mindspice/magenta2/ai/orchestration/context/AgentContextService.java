@@ -247,8 +247,26 @@ public class AgentContextService {
         }
 
         ContextBinding binding = contextRepository.findByBindingKey(bindingKey).orElse(null);
-        if (binding == null || !binding.agentId().equals(agentDescriptor.key())
-                || binding.selectionKind() != SelectionKind.MATERIALIZATION) {
+        return resolveBinding(agentDescriptor, binding);
+    }
+
+    /**
+     * Resolve an already captured binding exactly once. Callers that need the
+     * binding owner to select an independent execution descriptor must use this
+     * overload rather than look it up again through the binding key.
+     */
+    public BindingResolution resolveBinding(WorkspaceDescriptor agentDescriptor, ContextBinding binding) {
+        Objects.requireNonNull(agentDescriptor, "agentDescriptor");
+        if (agentDescriptor.kind() != WorkspaceKind.AGENT) {
+            throw new IllegalArgumentException("Binding resolution requires an AGENT descriptor");
+        }
+        if (binding == null || !binding.agentId().equals(agentDescriptor.key())) {
+            return BindingResolution.unavailable(binding);
+        }
+        if (binding.selectionKind() == SelectionKind.PERSONAL) {
+            return BindingResolution.resolved(binding, null);
+        }
+        if (binding.selectionKind() != SelectionKind.MATERIALIZATION) {
             return BindingResolution.unavailable(binding);
         }
 
@@ -268,7 +286,7 @@ public class AgentContextService {
                     binding.materializationKey(), binding.materializationGeneration());
             return BindingResolution.resolved(binding, location);
         } catch (IllegalArgumentException | IllegalStateException failure) {
-            log.debug("Materialization binding {} is stale during trusted location resolution", bindingKey);
+            log.debug("Materialization binding is stale during trusted location resolution");
             return BindingResolution.stale(binding);
         }
     }
@@ -369,7 +387,7 @@ public class AgentContextService {
 
     public record BindingResolution(ContextOutcome outcome, ContextBinding binding,
                                     MaterializationLocation location) {
-        static BindingResolution resolved(ContextBinding binding, MaterializationLocation location) {
+        public static BindingResolution resolved(ContextBinding binding, MaterializationLocation location) {
             return new BindingResolution(ContextOutcome.AVAILABLE, binding, location);
         }
         static BindingResolution unavailable(ContextBinding binding) {

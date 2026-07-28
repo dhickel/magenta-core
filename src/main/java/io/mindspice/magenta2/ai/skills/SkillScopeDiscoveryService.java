@@ -29,6 +29,7 @@ import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceKind;
 import io.mindspice.magenta2.core.config.MagentaRootProperties;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
@@ -40,13 +41,27 @@ public class SkillScopeDiscoveryService {
     private final WorkspaceDirectoryService workspaceDirectoryService;
     private final MagentaRootProperties magentaRootProperties;
     private final AgentSkillParser parser;
+    private final AgentSkillAssignmentRepository assignmentRepository;
+    private final SkillTrustService skillTrustService;
 
+    @Autowired
     public SkillScopeDiscoveryService(WorkspaceDirectoryService workspaceDirectoryService,
                                       MagentaRootProperties magentaRootProperties,
-                                      AgentSkillParser parser) {
+                                      AgentSkillParser parser,
+                                      AgentSkillAssignmentRepository assignmentRepository,
+                                      SkillTrustService skillTrustService) {
         this.workspaceDirectoryService = workspaceDirectoryService;
         this.magentaRootProperties = magentaRootProperties;
         this.parser = parser;
+        this.assignmentRepository = assignmentRepository;
+        this.skillTrustService = skillTrustService;
+    }
+
+    /** Compatibility constructor for isolated discovery fixtures. */
+    public SkillScopeDiscoveryService(WorkspaceDirectoryService workspaceDirectoryService,
+                                      MagentaRootProperties magentaRootProperties,
+                                      AgentSkillParser parser) {
+        this(workspaceDirectoryService, magentaRootProperties, parser, null, null);
     }
 
     public ScopeDiscoveryResult discoverAll(SkillResolutionContext context) {
@@ -66,7 +81,7 @@ public class SkillScopeDiscoveryService {
         Map<String, CandidateObservation> observations = new LinkedHashMap<>();
         for (DiscoveredCandidate discovered : concat(workspace, bound, project, global)) {
             observations.putIfAbsent(discovered.candidate().identityKey(),
-                    new CandidateObservation(discovered.candidate(), true, discovered.diagnostics(),
+                    new CandidateObservation(discovered.candidate(), discovered.available(), discovered.diagnostics(),
                             scanTime, scanId));
         }
         return new ScopeDiscoveryResult(candidates(workspace), candidates(bound), candidates(project),
@@ -99,18 +114,18 @@ public class SkillScopeDiscoveryService {
             if (!skillsRoot.startsWith(location.confinedPath())) {
                 log.warn("Materialization .skills escapes root for {}",
                         authority.serializedKey());
-                return List.of();
+                return unavailableMaterializationCandidates(authority, scanTime);
             }
 
             if (!Files.isDirectory(skillsRoot, LinkOption.NOFOLLOW_LINKS)
                     || Files.isSymbolicLink(skillsRoot)) {
-                return List.of();
+                return unavailableMaterializationCandidates(authority, scanTime);
             }
 
-            // Encode materialization identity for trust-service re-resolution:
-            // mat/<agentId>/<serializedKey>/<capturedGeneration>
-            String rootId = "mat/" + authority.agentId() + "/"
-                    + authority.serializedKey() + "/" + authority.capturedGeneration();
+            // The persisted scope id is opaque. The exact authority itself is
+            // retained as a typed value for approval rereads and is never
+            // recovered by parsing a candidate/root string.
+            String rootId = "project/" + authority.scopeIdentity();
             List<DiscoveredCandidate> result = new ArrayList<>();
             try (Stream<Path> stream = Files.list(skillsRoot)) {
                 stream.filter(path -> path.getFileName().toString().endsWith(".md"))
@@ -118,15 +133,40 @@ public class SkillScopeDiscoveryService {
                         .forEach(path -> {
                             DiscoveredCandidate candidate = discoverFlatSkill(
                                     SkillScope.PROJECT, rootId, skillsRoot, path, scanTime);
-                            if (candidate != null) result.add(candidate);
+                            if (candidate != null) {
+                                if (skillTrustService != null) {
+                                    skillTrustService.retainMaterializationAuthority(
+                                            candidate.candidate(), authority);
+                                }
+                                result.add(candidate);
+                            }
                         });
             }
             return List.copyOf(result);
         } catch (IllegalArgumentException | IllegalStateException | IOException e) {
             log.debug("Materialization skill authority is unavailable for {}",
                     authority.serializedKey());
+            return unavailableMaterializationCandidates(authority, scanTime);
+        }
+    }
+
+    /**
+     * A previously observed higher-precedence materialization candidate still
+     * occupies its logical key when its exact authority is now unavailable.
+     * This prevents disclosure from a lower scope during a stale/revoked
+     * materialization window.
+     */
+    private List<DiscoveredCandidate> unavailableMaterializationCandidates(
+            MaterializationSkillAuthority authority, Instant scanTime) {
+        if (assignmentRepository == null) {
             return List.of();
         }
+        String rootId = "project/" + authority.scopeIdentity();
+        return assignmentRepository.findAllCandidates().stream()
+                .filter(candidate -> candidate.scopeType() == SkillScope.PROJECT)
+                .filter(candidate -> candidate.authoritativeRootId().equals(rootId))
+                .map(candidate -> new DiscoveredCandidate(candidate, false, List.of()))
+                .toList();
     }
 
     private List<DiscoveredCandidate> discoverWorkspace(SkillScope scope, String rootId,
@@ -378,7 +418,12 @@ public class SkillScopeDiscoveryService {
         return discovered.stream().map(DiscoveredCandidate::candidate).toList();
     }
 
-    private record DiscoveredCandidate(CandidateVersion candidate, List<AgentSkillDiagnostic> diagnostics) { }
+    private record DiscoveredCandidate(CandidateVersion candidate, boolean available,
+                                       List<AgentSkillDiagnostic> diagnostics) {
+        private DiscoveredCandidate(CandidateVersion candidate, List<AgentSkillDiagnostic> diagnostics) {
+            this(candidate, true, diagnostics);
+        }
+    }
 
     public record ScopeDiscoveryResult(List<CandidateVersion> workspaceCandidates,
                                        List<CandidateVersion> boundAgentCandidates,

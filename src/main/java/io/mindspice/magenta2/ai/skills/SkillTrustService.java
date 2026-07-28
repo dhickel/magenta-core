@@ -17,12 +17,12 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.UUID;
 import java.util.stream.Stream;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import io.mindspice.magenta2.ai.orchestration.context.AgentMaterializationRepository;
 import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceDirectoryService;
 import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceDescriptor;
 import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceKind;
@@ -43,6 +43,8 @@ public class SkillTrustService {
     private final MagentaRootProperties magentaRootProperties;
     private final AgentSkillParser parser;
     private final ObjectMapper objectMapper;
+    private final java.util.Map<String, MaterializationSkillAuthority> materializationAuthorities
+            = new ConcurrentHashMap<>();
 
     public SkillTrustService(SkillSnapshotRepository snapshotRepository,
                              AgentSkillAssignmentRepository assignmentRepository,
@@ -56,6 +58,22 @@ public class SkillTrustService {
         this.magentaRootProperties = magentaRootProperties;
         this.parser = parser;
         this.objectMapper = objectMapper;
+    }
+
+    /**
+     * Retain the typed authority captured during discovery for later approval
+     * rereads. The persisted candidate scope identity is deliberately opaque;
+     * it is never parsed into filesystem authority.
+     */
+    void retainMaterializationAuthority(CandidateVersion candidate,
+                                        MaterializationSkillAuthority authority) {
+        Objects.requireNonNull(candidate, "candidate");
+        Objects.requireNonNull(authority, "authority");
+        if (candidate.scopeType() != SkillScope.PROJECT
+                || !candidate.authoritativeRootId().equals("project/" + authority.scopeIdentity())) {
+            throw new IllegalArgumentException("Candidate does not match materialization authority");
+        }
+        materializationAuthorities.put(candidate.authoritativeRootId(), authority);
     }
 
     // ── Approval ──
@@ -262,7 +280,7 @@ public class SkillTrustService {
 
         if (candidate.provenance() == SkillProvenance.WORKSPACE_FLAT) {
             // Flat workspace or materialization skill: a single .md file
-            Path skillsRoot = resolveSkillsRoot(candidate.authoritativeRootId());
+            Path skillsRoot = resolveSkillsRoot(candidate);
             if (skillsRoot == null) throw new IllegalArgumentException("Skills root not found");
             markdownFile = skillsRoot.resolve(candidate.logicalKey() + ".md").normalize();
             if (!markdownFile.startsWith(skillsRoot))
@@ -360,25 +378,25 @@ public class SkillTrustService {
     // ── Helper methods ──
 
     /**
-     * Resolve a workspace descriptor or materialization location from the
-     * candidate's authoritative root id.
-     *
-     * <p>Ordinary workspace ids use {@code agent/<id>} or {@code user/<name>}.
-     * Materialization-scoped ids use
-     * {@code mat/<agentId>/<serializedKey>/<capturedGeneration>} and require
-     * re-resolution through the materialization and directory services.
+     * Resolve a workspace descriptor or captured materialization location for
+     * a candidate. Materialization authority is retained as a typed value at
+     * discovery and is never recovered by parsing a persisted root string.
      */
-    private Path resolveSkillsRoot(String authoritativeRootId) {
-        if (!authoritativeRootId.contains("/"))
-            throw new IllegalArgumentException("Invalid authority: " + authoritativeRootId);
-
-        // Materialization-scoped: mat/<agentId>/<serializedKey>/<generation>
-        if (authoritativeRootId.startsWith("mat/")) {
-            return resolveMaterializationSkillsRoot(authoritativeRootId);
+    private Path resolveSkillsRoot(CandidateVersion candidate) {
+        MaterializationSkillAuthority authority = materializationAuthorities.get(
+                candidate.authoritativeRootId());
+        if (authority != null) {
+            return resolveMaterializationSkillsRoot(authority);
+        }
+        if (candidate.scopeType() == SkillScope.PROJECT) {
+            throw new IllegalArgumentException("Materialization skill authority is unavailable");
         }
 
-        // Ordinary workspace: <kind>/<key>
+        String authoritativeRootId = candidate.authoritativeRootId();
         int slash = authoritativeRootId.indexOf('/');
+        if (slash < 1 || slash != authoritativeRootId.lastIndexOf('/')) {
+            throw new IllegalArgumentException("Invalid workspace authority");
+        }
         String kind = authoritativeRootId.substring(0, slash);
         String key = authoritativeRootId.substring(slash + 1);
         WorkspaceKind wk = switch (kind) {
@@ -391,42 +409,24 @@ public class SkillTrustService {
     }
 
     /**
-     * Re-resolve a materialization-scoped skills root from the candidate's
-     * encoded authority. Verifies owner, generation, readiness, and
-     * confinement before returning the {@code .skills} directory path.
+     * Re-resolve a materialization-scoped skills root from the exact typed
+     * captured authority. The directory service revalidates owner, generation,
+     * readiness, canonical root-relative identity, and confinement.
      */
-    private Path resolveMaterializationSkillsRoot(String rootId) {
-        // Parse: mat/<agentId>/<serializedKey>/<capturedGeneration>
-        String[] parts = rootId.split("/", 4);
-        if (parts.length != 4) {
-            throw new IllegalArgumentException(
-                    "Malformed materialization authority: " + rootId);
-        }
-        String agentId = parts[1];
-        String serializedKey = parts[2];
-        int capturedGeneration;
-        try {
-            capturedGeneration = Integer.parseInt(parts[3]);
-        } catch (NumberFormatException e) {
-            throw new IllegalArgumentException(
-                    "Invalid generation in materialization authority: " + rootId);
-        }
-
-        var key = AgentMaterializationRepository.MaterializationKey.fromSerialized(
-                agentId, serializedKey);
-
-        // Re-resolve through directory service — verifies owner, generation, readiness
+    private Path resolveMaterializationSkillsRoot(MaterializationSkillAuthority authority) {
         var agentDescriptor = workspaceDirectoryService.resolveForRead(
-                WorkspaceKind.AGENT, agentId);
+                WorkspaceKind.AGENT, authority.agentId());
         var location = workspaceDirectoryService.resolveMaterializationLocation(
-                agentDescriptor, key, capturedGeneration);
+                agentDescriptor, authority.materializationKey(), authority.capturedGeneration());
+        if (!location.materializationKey().serialized().equals(authority.rootRelativeIdentity())
+                || location.generation() != authority.capturedGeneration()) {
+            throw new IllegalArgumentException("Materialization authority no longer matches its location");
+        }
 
         Path skillsRoot = location.confinedPath().resolve(".skills").normalize();
         if (!skillsRoot.startsWith(location.confinedPath())) {
-            throw new IllegalArgumentException(
-                    "Materialization .skills escapes root: " + rootId);
+            throw new IllegalArgumentException("Materialization .skills escapes root");
         }
-
         return skillsRoot;
     }
 

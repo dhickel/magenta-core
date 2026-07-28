@@ -46,6 +46,9 @@ import io.mindspice.magenta2.ai.chat.repository.AuditRepository;
 import io.mindspice.magenta2.ai.chat.repository.ChatSessionMetadataRepository;
 import io.mindspice.magenta2.ai.chat.service.turn.PromptContextAssembler;
 import io.mindspice.magenta2.ai.chat.service.turn.TerminalTurnRepair;
+import io.mindspice.magenta2.ai.chat.service.turn.TrustedContextPolicyAssembler;
+import io.mindspice.magenta2.ai.chat.service.turn.TrustedContextPolicyAssembler.TrustedPolicyResult;
+import io.mindspice.magenta2.ai.chat.service.turn.TurnContext;
 import io.mindspice.magenta2.ai.chat.service.turn.ToolAccessPolicy;
 import io.mindspice.magenta2.ai.chat.service.turn.TurnAuditWriter;
 import io.mindspice.magenta2.ai.chat.service.turn.TurnDiagnostic;
@@ -60,6 +63,12 @@ import io.mindspice.magenta2.ai.config.user.AgentConfig;
 import io.mindspice.magenta2.ai.config.user.AiConfig;
 import io.mindspice.magenta2.ai.config.user.ModelConfig;
 import io.mindspice.magenta2.ai.orchestration.agents.AgentProfile;
+import io.mindspice.magenta2.ai.orchestration.context.AgentContextService;
+import io.mindspice.magenta2.ai.orchestration.context.AgentContextService.BindingResolution;
+import io.mindspice.magenta2.ai.orchestration.context.AgentContextService.ContextOutcome;
+import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceDescriptor;
+import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceDirectoryService;
+import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceKind;
 import io.mindspice.magenta2.ai.execution.ActiveTurnPhase;
 import io.mindspice.magenta2.ai.execution.ActiveTurnRegistry.ActiveTurn;
 import io.mindspice.magenta2.ai.execution.ConversationTurnCoordinator;
@@ -165,6 +174,12 @@ public class ChatService {
     private final ToolAccessPolicy toolAccessPolicy;
     private final TerminalTurnRepair turnRepair;
     private final TurnAuditWriter turnAuditWriter;
+
+    // Setter-injected to preserve lightweight constructor fixtures while the
+    // production service always resolves immutable bindings before a turn.
+    private AgentContextService agentContextService;
+    private WorkspaceDirectoryService workspaceDirectoryService;
+    private final ThreadLocal<TrustedPolicyResult> activeTrustedPolicies = new ThreadLocal<>();
 
     public ChatService(
         ChatMemory chatMemory,
@@ -382,6 +397,13 @@ public class ChatService {
         this.turnAuditWriter = new TurnAuditWriter(auditService, auditRepository);
     }
 
+    @Autowired(required = false)
+    void setTrustedContextServices(AgentContextService agentContextService,
+                                   WorkspaceDirectoryService workspaceDirectoryService) {
+        this.agentContextService = agentContextService;
+        this.workspaceDirectoryService = workspaceDirectoryService;
+    }
+
     public ChatService(
         ChatMemory chatMemory,
         ChatMemoryRepository chatMemoryRepository,
@@ -490,7 +512,9 @@ public class ChatService {
         }
         boolean installedChatContext = turnContext == null
             && installChatFileContextIfNeeded(resolvedRequest.conversationId(), previousContext);
+        TrustedPolicyResult previousPolicy = activeTrustedPolicies.get();
         try {
+            installTrustedPolicy(resolvedRequest);
             List<ToolCallback> approvedTools = approvedTools(resolvedRequest, approvedToolNames);
             if (!approvedTools.isEmpty() && supportsTools(resolvedRequest.model())) {
                 try {
@@ -504,6 +528,7 @@ public class ChatService {
             }
             return plainChat(resolvedRequest);
         } finally {
+            restoreTrustedPolicy(previousPolicy);
             restoreContext(previousContext, installedTurnContext || installedChatContext);
         }
     }
@@ -632,8 +657,19 @@ public class ChatService {
         return Flux.defer(() -> {
             OrchestrationTaskContext previousContext = OrchestrationTaskContextHolder.current();
             boolean installedChatContext = installChatFileContextIfNeeded(request.conversationId(), previousContext);
-            return streamNowWithContext(request, activeTurn)
-                .doFinally(signal -> restoreContext(previousContext, installedChatContext));
+            TrustedPolicyResult previousPolicy = activeTrustedPolicies.get();
+            try {
+                installTrustedPolicy(request);
+                return streamNowWithContext(request, activeTurn)
+                    .doFinally(signal -> {
+                        restoreTrustedPolicy(previousPolicy);
+                        restoreContext(previousContext, installedChatContext);
+                    });
+            } catch (RuntimeException exception) {
+                restoreTrustedPolicy(previousPolicy);
+                restoreContext(previousContext, installedChatContext);
+                return Flux.error(exception);
+            }
         });
     }
 
@@ -1065,14 +1101,16 @@ public class ChatService {
         requireTaskService();
         ResolvedTaskExecution execution = resolveTaskExecution(taskId, inputValues, conversationId, modelOverride);
         return Flux.create(sink -> {
-            sink.next(TaskExecutionEvent.started(execution.conversationId(), execution.runId()));
-            TaskRun started = taskService.getRun(execution.runId());
-            if (started.status() != TaskRunStatus.RUNNING) {
-                sink.next(TaskExecutionEvent.finished(execution.conversationId(), started));
-                sink.complete();
-                return;
-            }
+            TrustedPolicyResult previousPolicy = activeTrustedPolicies.get();
             try {
+                installTrustedPolicy(execution.request());
+                sink.next(TaskExecutionEvent.started(execution.conversationId(), execution.runId()));
+                TaskRun started = taskService.getRun(execution.runId());
+                if (started.status() != TaskRunStatus.RUNNING) {
+                    sink.next(TaskExecutionEvent.finished(execution.conversationId(), started));
+                    sink.complete();
+                    return;
+                }
                 ChatMessage finalMessage = toolChatMessageWithRetry(
                     execution.request(),
                     approvedTools(execution.request()),
@@ -1098,6 +1136,8 @@ public class ChatService {
                 }
                 sink.next(TaskExecutionEvent.finished(execution.conversationId(), current));
                 sink.complete();
+            } finally {
+                restoreTrustedPolicy(previousPolicy);
             }
         });
     }
@@ -2358,7 +2398,93 @@ public class ChatService {
 
     String effectiveSystemPrompt(ResolvedChatRequest request) {
         PlanMode mode = interactionMode(request.conversationId());
-        return promptAssembler.mergeModePrompt(mode, request.conversationId());
+        TrustedPolicyResult policy = activeTrustedPolicies.get();
+        if (policy == null) {
+            policy = resolveTrustedPolicy(request);
+        }
+        if (policy == null) {
+            // Compatibility fixtures without context persistence still use the
+            // typed composition path; production never reaches this branch.
+            return promptAssembler.mergeModePrompt(mode, request.conversationId(), null);
+        }
+
+        TurnContext turn = new TurnContext();
+        turn.resolvedRequest(request);
+        turn.interactionMode(mode);
+        promptAssembler.assemble(turn, policy);
+        if (turn.terminalBindingFailure()) {
+            throw new TrustedContextUnavailableException();
+        }
+        return turn.systemPrompt();
+    }
+
+    /**
+     * Resolve the immutable binding once at the turn boundary, before tool
+     * selection or model construction. Lightweight legacy fixtures omit both
+     * services and retain their no-policy behavior; a partially wired runtime
+     * fails closed instead.
+     */
+    private void installTrustedPolicy(ResolvedChatRequest request) {
+        TrustedPolicyResult current = resolveTrustedPolicy(request);
+        if (current != null) {
+            activeTrustedPolicies.set(current);
+            if (current.isTerminal()) {
+                throw new TrustedContextUnavailableException();
+            }
+        }
+    }
+
+    private void restoreTrustedPolicy(TrustedPolicyResult previous) {
+        if (previous == null) {
+            activeTrustedPolicies.remove();
+        } else {
+            activeTrustedPolicies.set(previous);
+        }
+    }
+
+    private TrustedPolicyResult resolveTrustedPolicy(ResolvedChatRequest request) {
+        if (agentContextService == null && workspaceDirectoryService == null) {
+            return null;
+        }
+        if (agentContextService == null || workspaceDirectoryService == null) {
+            return TrustedPolicyResult.terminal(ContextOutcome.UNAVAILABLE);
+        }
+
+        String bindingKey = request.contextBindingKey();
+        OrchestrationTaskContext runtimeContext = OrchestrationTaskContextHolder.current();
+        if (!StringUtils.hasText(bindingKey) && runtimeContext != null) {
+            bindingKey = runtimeContext.contextBindingKey();
+        }
+        if (!StringUtils.hasText(bindingKey)) {
+            return TrustedPolicyResult.terminal(ContextOutcome.UNAVAILABLE);
+        }
+
+        var bindingLookup = agentContextService.getBinding(bindingKey);
+        if (bindingLookup.outcome() != ContextOutcome.AVAILABLE || bindingLookup.value() == null) {
+            return TrustedPolicyResult.terminal(ContextOutcome.UNAVAILABLE);
+        }
+        try {
+            WorkspaceDescriptor agentDescriptor = workspaceDirectoryService.resolveForRead(
+                    WorkspaceKind.AGENT, bindingLookup.value().agentId());
+            WorkspaceDescriptor executionDescriptor = runtimeContext != null
+                    && runtimeContext.workspaceDescriptor() != null
+                    ? runtimeContext.workspaceDescriptor() : agentDescriptor;
+            if (executionDescriptor.kind() == WorkspaceKind.CHAT) {
+                return TrustedPolicyResult.terminal(ContextOutcome.UNAVAILABLE);
+            }
+            BindingResolution bindingResolution = agentContextService.resolveBinding(
+                    agentDescriptor, bindingLookup.value());
+            return TrustedContextPolicyAssembler.create(executionDescriptor, bindingResolution).assemble();
+        } catch (IllegalArgumentException | IllegalStateException exception) {
+            logger.debug("Trusted context could not be resolved for a chat turn");
+            return TrustedPolicyResult.terminal(ContextOutcome.UNAVAILABLE);
+        }
+    }
+
+    private static final class TrustedContextUnavailableException extends IllegalStateException {
+        private TrustedContextUnavailableException() {
+            super("The selected context is unavailable. This turn did not run.");
+        }
     }
 
     private PlanMode interactionMode(String conversationId) {

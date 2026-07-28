@@ -165,7 +165,7 @@ public class TrustedContextPolicyAssembler {
                     Objects.requireNonNull(executionDescriptor, "executionDescriptor"));
         }
 
-        static TrustedPolicyResult terminal(ContextOutcome outcome) {
+        public static TrustedPolicyResult terminal(ContextOutcome outcome) {
             if (outcome == ContextOutcome.AVAILABLE) {
                 throw new IllegalArgumentException("Terminal result requires a non-AVAILABLE outcome");
             }
