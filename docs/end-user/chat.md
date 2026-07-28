@@ -83,6 +83,26 @@ Deleting or clearing a session removes the visible conversation history and any 
 - **Another stream is active**: direct overlapping stream calls are still rejected, but normal browser messages submitted mid-turn are queued and sent after the active response finishes.
 - **Model unavailable**: choose a model from the dropdown or update model settings.
 
+## System Chat vs Normal Chat
+
+Magenta has two distinct chat surfaces:
+
+| Surface | Location | Purpose | Authority |
+| --- | --- | --- | --- |
+| **Normal chat** | `/chat` | Conversational assistant and anonymous plan drafting | Configured chat tools, subject to their individual capability gates |
+| **System chat** | `/agents/{agentId}` System Chat panel | Operational monitoring and queue-operation proposals | Fixed deny-by-default profile; bounded non-secret reads; restricted tools; non-executing proposals only |
+
+System chat is exclusively agent-scoped and server-created. It uses a server-owned fixed prompt and tool set; runtime settings currently supply its enabled state and model. It can read bounded agent-status, workspace-metadata, and assignment-lifecycle facts, and can propose queue operations (pause, resume, retry, replay, cancel) on assignments. Proposals require explicit user confirmation through the ordinary lifecycle control plane before execution.
+
+System chat cannot:
+- Write files or invoke processes
+- Approve or activate skills
+- Access other agents
+- Execute its own proposals
+- Be selected or created through the `/chat` surface
+
+System chat SSE streaming uses safe `textContent`-only rendering in `system-chat.js`. It is the only new JavaScript transport added for operational surfaces; all other agent console interactions use HTMX.
+
 ## Alpha Limits
 
-Chat and operational pages are intentionally separate. Use `/chat` for conversation and anonymous execution. Use `/plans`, `/workflows`, `/jobs`, and `/agents` for saved definitions and agent submission. Plan status and session lists can become stale after concurrent browser tabs edit the same conversation, so refresh before making destructive changes.
+Chat and operational pages are intentionally separate. Use `/chat` for conversation and anonymous execution. Use `/plans`, `/workflows`, `/jobs`, and `/agents` for saved definitions and agent submission. System chat provides operational monitoring and proposal creation through the agent console. Plan status and session lists can become stale after concurrent browser tabs edit the same conversation, so refresh before making destructive changes.

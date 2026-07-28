@@ -85,15 +85,9 @@ The default agent field uses a searchable selector where available. Model fields
 
 ### System Chat
 
-System chat settings include:
+System chat settings control only its enabled state and model. The system-chat prompt, callback allowlist, and context bound are fixed server-owned safeguards; older stored context-limit, approved-tool, and prompt values do not broaden that profile.
 
-- Enabled state.
-- Model.
-- Context limit percent.
-- Approved tools.
-- System prompt.
-
-The regular `/chat` page remains the canonical conversation surface. System chat settings control bounded dashboard/system-chat behavior.
+The regular `/chat` page remains the canonical conversation surface.
 
 ### Available Models
 

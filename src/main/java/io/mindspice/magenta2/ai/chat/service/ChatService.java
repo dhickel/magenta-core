@@ -548,12 +548,12 @@ public class ChatService {
         if (!StringUtils.hasText(model)) {
             model = defaultModel();
         }
-        ResolvedChatRequest resolvedRequest = requestResolver.resolve(new ChatRequest.MsgRequest(
+        ResolvedChatRequest resolvedRequest = requestResolver.resolveForAgent(new ChatRequest.MsgRequest(
             request.conversationId(),
             request.message(),
             model,
             request.planningModel()
-        ));
+        ), agent.id());
         markAgentConversation(resolvedRequest.conversationId(), agent.id());
         OrchestrationTaskContext turnContext = new OrchestrationTaskContext(
             agent.id(), agent.name(), null, null, null, null,

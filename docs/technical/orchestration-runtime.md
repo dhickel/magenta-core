@@ -120,7 +120,7 @@ Projects are durable membership, tracking, and visibility abstractions. They are
 - Default agent/model.
 - Planning, summary, and compaction model choices.
 - Context buffer percent.
-- System chat model, prompt, approved tools, context limit, and enabled flag.
+- System-chat enabled state and model. Legacy stored prompt, approved-tool, and context-limit values do not affect the fixed server-owned system-chat profile.
 - Assignment history auto-purge days.
 
 The settings service falls back to legacy file config where persisted values are unset.

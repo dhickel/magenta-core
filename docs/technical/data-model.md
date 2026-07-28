@@ -1,6 +1,6 @@
 # Data Model
 
-Primary Magenta SQLite schema is initialized from [`schema.sql`](../../src/main/resources/schema.sql) and evolved by checksum-protected ordered resources in [`db/migrations`](../../src/main/resources/db/migrations). Migration-owned structures use `SchemaMigrationRunner`; older unrelated repositories may still add compatibility columns for warm databases. See [Schema Migrations 001–009](migrations-001-009.md).
+Primary Magenta SQLite schema is initialized from [`schema.sql`](../../src/main/resources/schema.sql) and evolved by checksum-protected ordered resources 001-013 in [`db/migrations`](../../src/main/resources/db/migrations). Migration-owned structures use `SchemaMigrationRunner`; older unrelated repositories may still add compatibility columns for warm databases. The [001–009 guide](migrations-001-009.md) covers the original immutable foundation; migrations 010-013 are documented below.
 
 ## Avatar Personal Data (Removed)
 
@@ -102,6 +102,30 @@ Source package: [`ai/orchestration/runtime`](../../src/main/java/io/mindspice/ma
 - `project_events`: append-only project event log.
 
 Projects are membership, tracking, and visibility records, not executable work units or filesystem selectors.
+
+## Agent Materialization, Context, And Bindings
+
+Source package: [`ai/orchestration/context`](../../src/main/java/io/mindspice/magenta2/ai/orchestration/context). Migrations 010-012.
+
+- `agent_materializations`: generation-safe project materializations per agent. Fields: `agent_id`, `materialization_key` (`v1-PROJECT-<sha256>`), `materialization_kind` (`PROJECT`), `source_kind` (`project`), `source_id` (project id), `generation` (monotonic >= 1), `state` (`PROVISIONING`, `READY`, `FAILED`, `REVOKED`), `root_relative_path` (data-root-relative, verified but not authorizing), `failure_detail`, timestamps. Unique per `(agent_id, materialization_key)`.
+- `context_defaults`: versioned context defaults per agent. Fields: `agent_id` (PK), `version` (monotonic >= 1), `selection_kind` (`MATERIALIZATION` or `PERSONAL`), `materialization_key`/`materialization_generation` (when MATERIALIZATION), `personal_selection` (`HOME`, `SCRIPTS`, `APPS` when PERSONAL), `reason`, timestamps. Updated with expected-version CAS.
+- `context_bindings`: insert-only immutable binding snapshots. Fields: `id` (autoincrement PK), `agent_id`, globally unique `binding_key`, `selection_kind`, `materialization_key`/`materialization_generation` or `personal_selection`, and `captured_at`. Bindings are never retargeted.
+- `binding_owner_links`: typed owner-to-binding links. Fields: `owner_type`, `owner_id`, `binding_key`, and `created_at`; an owner pair is unique and cannot be retargeted.
+- `operation_idempotency`: durable binding-capture and owner-link operation results keyed by operation type/key with a request digest.
+- `assignment_binding_operations`: one durable, race-safe submission decision per `operation_key` (PK). Fields: `request_digest` (64-char hex), `operation_state` (`RESERVED` or `COMPLETED`), `binding_key`, `assignment_id`, `task_run_id`, timestamps. `RESERVED` rows have null binding/assignment/run; `COMPLETED` rows have binding and assignment (the run id is recorded when available). Same key/digest converges; contradictory reuse conflicts.
+
+Important invariants:
+- Default changes affect only future captures; existing bindings retain their captured selection indefinitely.
+- Materialization `READY` means safe local availability; content is out-of-band.
+- Assignment-binding operations are the single durable decision point preventing races between context capture and work submission.
+
+## System Chat Proposals
+
+Source package: [`ai/chat/system`](../../src/main/java/io/mindspice/magenta2/ai/chat/system). Migration 013.
+
+- `system_chat_action_proposals`: persisted queue-operation proposals. Fields: `id` (PK), `conversation_id`, `agent_id`, `target_kind` (`ASSIGNMENT`), `target_id` (assignment id), `action` (`PAUSE`, `RESUME`, `RETRY`, `REPLAY`, `CANCEL`), `expected_state_or_revision`, `canonical_payload_digest` (64-char hex), `operation_key`, `proposal_state` (`PENDING`, `CONFIRMING`, `CONFIRMED`, `DENIED`, `CANCELLED`, `STALE`, `UNAVAILABLE`), `confirmation_operation_key`, `linked_operation_id`, `confirmed_at`, `audit_facts_json`, timestamps. Unique per `operation_key` and per `(target_kind, target_id, action, canonical_payload_digest)`.
+
+Proposals are non-executing; confirmation passes through the ordinary scoped lifecycle control plane.
 
 ## Typed Workspaces and Outputs
 

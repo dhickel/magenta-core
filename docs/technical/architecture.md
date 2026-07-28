@@ -11,8 +11,10 @@ Source anchors:
 - Runtime orchestration: [`ai/orchestration/runtime`](../../src/main/java/io/mindspice/magenta2/ai/orchestration/runtime)
 - Workflow engine: [`ai/orchestration/workflow`](../../src/main/java/io/mindspice/magenta2/ai/orchestration/workflow)
 - Workspaces and outputs: [`ai/orchestration/workspaces`](../../src/main/java/io/mindspice/magenta2/ai/orchestration/workspaces) — `WorkspaceDirectoryService` constructs trusted `WorkspaceDescriptor` values; `WorkspacePathLayout` owns structural paths; explorer, metadata, action logging, execution, tools, and output services consume descriptors.
+- Agent context and materialization: [`ai/orchestration/context`](../../src/main/java/io/mindspice/magenta2/ai/orchestration/context) — `AgentContextService` owns versioned defaults, insert-only immutable bindings, and context capture; `AgentMaterializationService` owns generation-safe project materialization lifecycle.
+- System chat: [`ai/chat/system`](../../src/main/java/io/mindspice/magenta2/ai/chat/system) — `SystemChatService` provides a fixed deny-by-default profile with bounded reads, restricted tools, and user-confirmable queue-operation proposals. Runtime settings currently supply enabled state and model; the prompt, callback allowlist, and context bound are server-owned constants.
 - AI configuration: [`ai/config/user`](../../src/main/java/io/mindspice/magenta2/ai/config/user)
-- Schema: [`schema.sql`](../../src/main/resources/schema.sql)
+- Schema: [`schema.sql`](../../src/main/resources/schema.sql) and ordered migrations 001-013 in [`db/migrations`](../../src/main/resources/db/migrations)
 
 ## Request Flow
 
@@ -61,11 +63,13 @@ Typical flows:
 
 The execution path is split into explicit layers rather than one generic workspace/runtime model:
 
+- **Context and binding layer** owns agent-scoped versioned context defaults (`MATERIALIZATION` or `PERSONAL` area selection), generation-safe project materializations (`PROVISIONING`/`READY`/`FAILED`/`REVOKED`), insert-only immutable bindings, and durable assignment-binding operations linking capture, assignment, and lifecycle reservation. Materialization `READY` means safe local availability, not acquired content.
 - **Task-run lifecycle** reserves canonical native run identity, attempts, retry/replay lineage, assignment fences, writer claims, and trusted workspace-relative run locations. Native task/workflow/job rows remain status truth.
 - **Artifact publication/access** owns idempotent reservation, run-local staging, create-only promotion, digest/size integrity, reconciliation, scoped search/preview/download/lineage, and retention blockers.
-- **Skill control plane** resolves digest-qualified candidates and exact overlays, then separates trust decisions, immutable snapshots, activation, revocation, executable authorization, and package/resource audit. Model-visible instructions come only from approved snapshots.
+- **Skill control plane** resolves digest-qualified candidates and exact overlays, then separates trust decisions, immutable snapshots, activation, revocation, executable authorization, and package/resource audit. Model-visible instructions come only from approved snapshots. Prompt integration uses fixed provenance order with labelled untrusted guidance.
 - **Observability** rebuilds `run_summaries` from native facts and records one `run_measurements` row per model/tool invocation. Missing facts stay unavailable.
 - **Automation** stores revisioned schedules and reactions with fenced claims, immutable firing/dispatch snapshots, append-only attempts, operation-key digest idempotency, causation, dedupe, and suppression.
+- **System chat** provides a fixed deny-by-default profile per agent with bounded agent-status, workspace-metadata, and assignment-lifecycle reads, a restricted tool registry, and persisted user-confirmable queue-operation proposals confirmed through the ordinary lifecycle control plane.
 
 The web layer composes these through independent HTMX hosts. It does not inject persistence-backed concerns into `WorkspaceExplorerService`.
 
@@ -85,7 +89,7 @@ The schema groups into these domains:
 - Observability and automation: `run_summaries`, `run_measurements`, revisioned schedule definitions/claims/firings/attempts, and reaction definitions/dispatches/attempts.
 - Jobs/projects/workspace metadata/settings: `job_definitions`, `job_runs`, `job_recurrences`, `projects`, memberships/events, file labels/actions, compatibility `run_output_artifacts`, and `runtime_settings`.
 
-See [Data Model](data-model.md) and [Schema Migrations 001–009](migrations-001-009.md). Ordered resources are contiguous through `009-warm-database-compatibility.sql`; schedule/reaction hardening remains immutable version 008, while version 009 records the runner-owned warm-bookkeeping compatibility release without changing schema end state.
+See [Data Model](data-model.md) and the historical [Schema Migrations 001–009](migrations-001-009.md) guide. Ordered resources are contiguous through `013-system-chat-proposals.sql`: versions 010-012 add materialization/context/binding persistence and version 013 adds system-chat proposals. Schedule/reaction hardening remains immutable version 008, while version 009 records the runner-owned warm-bookkeeping compatibility release without changing schema end state.
 
 ## Streaming Model
 

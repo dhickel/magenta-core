@@ -16,6 +16,30 @@ Agent and chat workspaces do not require prior explicit creation. If the entity 
 
 Each workspace can contain a reserved legacy/non-task `outputs/` directory. New task, workflow, and job runs are canonical children at `tasks/<taskPathKey>/<taskRunId>/`; their `outputs/` and `staging/` children are lazy and publication-owned. Explorer mutations cannot modify reserved output, task, staging, or skill structures.
 
+## Agent Workspace Areas
+
+Each agent workspace recognizes nine conceptual areas in the Files tab:
+
+| Area | Purpose | Mutability |
+| --- | --- | --- |
+| `.skills` | Agent skill files | Delegates to skill-owned view |
+| `scripts` | Script storage | Confined read/write (storage only, no execution) |
+| `apps` | Application storage | Confined read/write (storage only, no execution) |
+| `home` | Personal files | Confined read/write |
+| `repos` | User-managed external storage | Read-only from Magenta; no Magenta provisioning or mutation |
+| `projects` | Materialized project context | Delegates to context/materialization panel |
+| `tasks` | Task run child directories | Read-only lifecycle/model |
+| `outputs` | Legacy publication | Read-only publication model |
+| Unknown children | Existing content not in recognized areas | Read-only; no implicit migration or write grant |
+
+Conceptual area navigation is non-materializing: selecting an area does not create absent directories. An absent or empty area renders a controlled empty state.
+
+## Agent Materialization (Project Context)
+
+Project materializations are agent-local context containers. A materialization may be provisioned for a project, producing a `READY` local container beneath the agent workspace. `READY` means only that the canonical location is safely available, not that the project's files have been acquired. An empty `READY` container is normal and is truthfully distinguished from an unavailable or failed materialization.
+
+Materialization state is visible in the agent's **Context** panel at `/agents/{agentId}`. The context default can select a materialization (project context) or a personal area (`HOME`, `SCRIPTS`, or `APPS`). Changing the default affects only future work; existing captures retain their original selection.
+
 ## Project Membership
 
 Use `/projects` to organize work around a project record, manage agent memberships, and inspect project events. Projects are metadata and membership context. They do not create workspace directories, acquire filesystem leases, or own materialized links.

@@ -20,6 +20,35 @@ Agent and chat roots may be absent on reads. A successful write or execution att
 
 Projects remain membership and attribution metadata. They do not select, create, link, or lease execution roots.
 
+## Agent Workspace Areas
+
+Each agent workspace has nine conceptual lazy areas recognized in the Files tab:
+
+| Area | Location | Behavior |
+| --- | --- | --- |
+| `.skills` | `<agent-root>/.skills/` | Owned by the skill control plane; Files tab delegates to the skill-owned view. |
+| `scripts` | `<agent-root>/scripts/` | Storage only, not execution authority. Confined reads/writes through the explorer. |
+| `apps` | `<agent-root>/apps/` | Storage only, not execution authority. Confined reads/writes through the explorer. |
+| `home` | `<agent-root>/home/` | Personal confined storage. Confined reads/writes through the explorer. |
+| `repos` | `<agent-root>/repos/` | User-managed storage outside Magenta. Existing descendants are descriptor-confined read-only; Magenta never provisions, mutates, interprets, or assigns application behavior to this area. |
+| `projects` | `<agent-root>/projects/<stable-key>/` | Owned by context/materialization services. This is an agent-local context container, not a project workspace root. `READY` means safe local availability, not acquired content. |
+| `tasks` | `<agent-root>/tasks/<taskPathKey>/<taskRunId>/` | Owned by the task lifecycle; uses lifecycle/publication read models. |
+| `outputs` | `<agent-root>/outputs/` | Legacy/non-task publication; uses publication read models. |
+| Unknown children | `<agent-root>/*` | Retain only already-permitted reads; not implicitly migrated, relocated, or writable. |
+
+Conceptual area navigation is non-materializing: selecting an area does not create absent directories. An absent area renders a controlled unprovisioned/empty state.
+
+## Agent Materialization
+
+Project materializations are agent-scoped local context containers. They use stable framed identity-derived keys (`v1-PROJECT-<sha256>` from the project id) and a four-state lifecycle:
+
+- `PROVISIONING`: provisioning in progress; location not yet available.
+- `READY`: canonical location is safely available. This is a local availability assertion, not a content-acquisition guarantee. The container may be empty.
+- `FAILED`: provisioning failed; `failure_detail` records the cause.
+- `REVOKED`: materialization has been revoked; location may no longer be valid.
+
+Each materialization carries a monotonic generation. Trusted ready-location resolution validates an expected generation, while provisioning uses the loaded generation for its state-transition CAS and idempotency identity. Provisioning and reconciliation use verified descriptor-confined primitives; a persisted root-relative assertion verifies a location but never authorizes it. Content, when present, is supplied out-of-band.
+
 ## Execution selection
 
 Executable submissions carry `workspaceType` and `workspaceKey` together. Omitting both selects the bound agent. Exactly one value is invalid. Explicit agent selection must match the bound agent, an existing user workspace may override it, and chat workspaces cannot execute work.

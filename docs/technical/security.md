@@ -71,6 +71,12 @@ The security contract forbids claim secrets, owners used as capabilities, fence 
 
 These endpoints need secret-free, scope-qualified response paths. The scoped agent Files run fragments and HTMX attempt tables do not render claim/fence fields, but that does not repair the JSON routes.
 
+## Context And Binding Immutability
+
+Context defaults use expected-version CAS: concurrent updates conflict, and stale-version updates are rejected. Bindings are insert-only immutable snapshots; they are never retargeted or updated after capture. Assignment-binding operations provide a single durable decision point (`RESERVED` → `COMPLETED`) that links context capture, assignment insertion, and lifecycle reservation. Reusing an operation key with the same canonical request digest converges; contradictory reuse conflicts without mutation.
+
+Trusted ready-location resolution validates an expected generation, and provisioning's state transition uses the loaded generation for CAS. Stale generation, revoked, non-ready, or failed state prevents mutation. Provisioning uses descriptor-confined held-handle primitives; a persisted root-relative path assertion verifies a location but never authorizes it.
+
 ## Snapshot Immutability And Revocation
 
 Skill approval is digest-qualified. The service re-reads the confined candidate, verifies identity and digest, and stores immutable snapshot metadata/resource bytes. Runtime disclosure and activation read the approved snapshot, never the mutable candidate source. Source edits create a new pending candidate. Revocation blocks new activation while preserving historical activation evidence and allowing only explicitly recorded same-run resume rehydration.
@@ -102,6 +108,15 @@ Agent tools are controlled outside HTTP security:
 - Artifact preview/download rechecks workspace/task-run scope and verifies digest plus size for the exact bytes returned. Integrity failure suppresses byte access.
 
 These checks should stay in tool/workspace services, not controllers.
+
+## System Chat Boundary
+
+System chat (`SystemChatService`) is a fixed deny-by-default profile per agent. It is server-created; runtime settings currently supply enabled state and model, while the system prompt, callback allowlist, and context bound are server-owned constants. It cannot be selected or created through the public `INTERNAL` surface.
+
+- **Bounded reads:** `SystemChatBoundedReadService` provides non-secret agent-status counts, workspace metadata facts (type/size only), and assignment lifecycle facts. It returns no file content, paths, secrets, project attribution, or cross-agent data.
+- **Restricted tools:** `SystemChatToolRegistry` allows only read-only query tools and proposal creation. File write, shell execution, skill approval/activation, and cross-agent access are denied at the tool boundary.
+- **Proposal confirmation gating:** Proposals (`PAUSE`, `RESUME`, `RETRY`, `REPLAY`, `CANCEL` on assignments) are persisted with exact target, action, canonical payload digest, and operation key. They are non-executing. Confirmation passes through the ordinary scoped lifecycle control plane requiring exact matching proposal, target, state, confirmation, operation key, and authorization. A proposal cannot execute itself.
+- **SSE render safety:** `system-chat.js` uses bounded event parsing, `textContent`-only rendering, verifies returned conversation belongs to the mounted agent, and cleanly cancels/resets on terminal, error, abort, or host replacement. No `innerHTML`, generic fetch helpers, or HTML injection.
 
 ## Additional Safety Controls
 

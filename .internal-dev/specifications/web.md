@@ -39,6 +39,34 @@ Magenta web surfaces are operational tools, not marketing pages. They should be 
 
 User-workspace creation and execution workspace selection controls are reusable SimplyPages fragments mounted only where a submission surface exposes workspace choice. No generic user/chat workspace browser is mounted as a page-level surface.
 
+## Agent Console Composition
+
+`/agents/{agentId}` composes stable independent HTMX hosts within the operational console shell:
+
+| host | rendered by | contract |
+| --- | --- | --- |
+| `#agent-context-panel` | `AgentContextFragments` | Displays versioned context defaults (materialization or personal area), materialization summaries with state/availability, and immutable binding summaries. Materialization `READY` means safe local availability, not acquired content. |
+| `#agent-queue-panel` | `OrchestrationController` | Enriched assignment-queue rows with authorized captured context and project attribution. No second queue, no persistence queries from explorer services. |
+| `#agent-skills-panel` | `SkillFragments` | Agent-scoped skill assignment, activation history, and control-plane state. Separate from Files `.skills` conceptual area. |
+| `#system-chat-panel` | `SystemChatFragments` | Fixed-profile system chat with bounded history (`#system-chat-history`) and user-confirmable proposals (`#system-chat-proposals`). SSE stream rendered through `system-chat.js` (the only new JavaScript transport). |
+| `#agent-run-groups` and `#agent-run-detail` | `RunOperationsFragments` (existing) | Bounded run groups, expansion, and authorized artifact preview. |
+| Files list/inspector/modal | `WorkspaceExplorerFragments` (existing) | Confined filesystem browser with conceptual area navigation. |
+
+Each host is independently loaded through HTMX. A response replaces only its own host. Stale responses must not replace `#agent-tab-panel` as a broad target. A proposal confirmation may OOB-refresh `#system-chat-proposals` and its same-domain status host. System-chat SSE is the only new JavaScript transport; standard CRUD, filtering, form submissions, and fragment replacement remain HTMX-first.
+
+### Conceptual Files Area Navigation
+
+The Files tab provides non-materializing conceptual area navigation:
+
+- **Skills**: opens the skill-owned view; Files explorer list remains unchanged.
+- **Scripts**, **Apps**, **Home**: descriptor-confined explorer behavior only. Scripts and apps are storage, not execution authority.
+- **Stored Items** (`repos`): user-managed storage outside Magenta. Existing descendants may be listed/read only through the already-permitted descriptor-confined read path; controls that create, change, delete, interpret, or provision content are absent.
+- **Projects**: opens captured context/materialization facts. An empty `READY` project context is truthfully presented as an empty local container, not imported content.
+- **Tasks** and **Outputs**: use lifecycle/publication read models.
+- **Unknown children**: retain only already-permitted reads; no implicit migration, relocation, deletion, or write grant.
+
+An absent conceptual area renders a controlled unprovisioned/empty state and performs no write.
+
 ## Files And Run Operations Composition
 
 The Files tab composes two independent columns inside `#agent-files-explorer`: the confined filesystem browser and `#agent-run-groups`. The run host loads after the filesystem shell and expands a selected row into `#agent-run-detail`. Groups are bounded and deterministic by persisted source kind; every run retains its own canonical id, so duplicate display names or renamed/deleted definitions cannot merge records.
@@ -66,7 +94,7 @@ All operational surfaces use compact tables/panels, thin blue-gray borders, smal
 | id | page_or_fragment | status | intended_contract | observed_anchors | interaction_rule | validation | related_decisions | related_knowledge |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | WEB-20260525-05 | Top navigation | active | Primary shell nav links should be consistent across home, chat, dashboard, and agent shells; full-page shell nav uses full-page anchors unless HTMX swapping is explicitly intended. Avatar link removed. | `AppNavigation` and shell builders | Avoid accidental HTMX route swaps for full document navigation. | Controller tests. | none | `shell-navigation-htmx-vs-full-page.md` |
-| WEB-20260525-06 | Agent history tab content | deferred | Replace static history placeholders with real agent run history when the query contract is accepted. | Agent detail history tab | Pagination/date filtering can be separate scope. | Controller/service/browser checks. | none | `agent-detail-workspace-health-pattern.md` |
+| WEB-20260525-06 | Agent history tab content | deferred | Replace static history content with real agent run history when the query contract is accepted. | Agent detail history tab | Pagination/date filtering can be separate scope. | Controller/service/browser checks. | none | `agent-detail-workspace-health-pattern.md` |
 | WEB-20260525-07 | Browser chat mid-turn queue | active | The `/chat` composer shows server-backed queued cards between the planning panel and input when normal messages are submitted during an active stream. The client must keep `?conversationId=` aligned with the active chat so plain reload restores queued cards, then retry draining until the existing active stream lock clears. Pending-card renders must be scoped to the active conversation and latest pending-list request so stale `CLAIMED` responses cannot repaint a drained queue. | `#chat-queued-messages-panel`, `chat-client.js`, `.planning-question-card` | Planning answers continue through plan answer routes; slash commands submitted mid-turn show wait feedback instead of queueing. Background queued drains may continue and ack after session switch, but must not steal the visible chat session or append messages into another active conversation. | Focused Playwright checks for slow-turn queueing, session-switch/away-and-return stale-card cleanup, reload persistence, FIFO drain, command/planning negatives, desktop/mobile screenshots. | none | `event-delegation-sse-dom-replacement.md`, `chat-planning-composer-architecture.md` |
 | WEB-20260525-08 | Browser chat model selectors | active | The `/chat` Agent Model and Planning Model selectors display configured model aliases as the visible option text and submit alias keys as values. Provider `remoteModelName` values remain routing details, not primary chat UI labels. | `FrontendController.chatToolbar()`, `ChatService.availableModelOptions()` | If a selected/default value is only known by remote model name, map it back to the configured alias before selecting the option. | Controller rendering tests and focused browser check when selector behavior changes. | none | `spring-ai-model-options-routing.md` |
 | WEB-20260727-01 | Browser chat Outputs panel mid-stream refresh | active | The browser chat Outputs panel (`#chat-session-files-body`) refreshes via `loadActiveFiles()` when an `outputs_changed` SSE event arrives during a stream, in addition to the existing terminal refresh on `done` and error recovery. The event carries only `conversationId`; the client matches it against both the stream conversation and `activeConversationId()` before calling the listing endpoint. | `chat-client.js` SSE event handlers in both `sendMessage` and `executeApprovedPlan` stream callbacks, `loadActiveFiles()`, `fileLoadConversationId` guard. | No loading state or panel clearing; current content remains until the new listing renders. Rapid events serialize through the SSE parser's await-on-callback behavior. Stale or background-conversation events never overwrite the active panel. | Focused Playwright validation: mid-stream file appearance, append/replace refresh without duplicates, conversation switch safety, stream-completion and error-recovery terminal refresh. | none | `chat-file-panel-auto-refresh.md` |
@@ -90,7 +118,7 @@ This file owns page/fragment UX contracts. SimplyPages component mechanics belon
 
 | id | status | observed_drift | routing | review_after |
 | --- | --- | --- | --- | --- |
-| DRIFT-20260525-06 | watching | Some history and observability panels are baseline or placeholder surfaces. | Deferred features before expanding UI claims. | 2026-06-24 |
+| DRIFT-20260525-06 | watching | Some history and observability panels remain baseline/incomplete surfaces. | Deferred features before expanding UI claims. | 2026-06-24 |
 
 ## Validation Expectations
 

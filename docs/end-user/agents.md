@@ -72,17 +72,42 @@ Event reactions can enqueue assignments when matching runtime events occur, when
 
 If schedules or reactions are disabled, the tab shows the required feature flag. See [Schedules and Reactions](schedules-and-reactions.md) for revision, simulation, firing/dispatch audit, and enqueue-versus-completion semantics.
 
+## Context Panel
+
+The **Context** panel shows the agent's versioned context defaults and materialization summaries. It displays:
+
+- The current context selection: a materialization (project-local context container) or a personal area (`HOME`, `SCRIPTS`, or `APPS`).
+- Materialization state: `PROVISIONING`, `READY`, `FAILED`, or `REVOKED`. `READY` means the local container is safely available, not that content has been acquired. An empty `READY` container is truthfully shown as empty.
+- Immutable binding summaries captured for conversations, assignments, and runs.
+
+Context defaults can be changed with expected-version CAS; changes affect only future captures. Existing bindings retain their captured selection indefinitely.
+
+## System Chat Panel
+
+The **System Chat** panel provides a restricted operational chat per agent. It:
+
+- Uses a fixed server-created profile; its enabled state and model come from runtime settings, while its prompt, tools, and context bound are server-owned.
+- Has bounded non-secret reads of agent status, workspace metadata, and assignment lifecycle facts; it does not expose file contents, paths, or project attribution.
+- Can propose queue operations (`PAUSE`, `RESUME`, `RETRY`, `REPLAY`, `CANCEL`) on assignments.
+- Proposals are non-executing: confirmation passes through the ordinary lifecycle control plane requiring exact matching target, state, and authorization.
+- Cannot write files, invoke processes, approve/activate skills, broaden authority, or execute its own proposal.
+
+System chat is exclusively agent-scoped and server-created; it cannot be selected through the normal `/chat` surface. Proposals display semantic state chips (`PENDING`, `CONFIRMING`, `CONFIRMED`, `DENIED`, `CANCELLED`, `STALE`, `UNAVAILABLE`).
+
 ## Workspace (Files Tab)
 
-The **Files** tab combines the agent's workspace file explorer with an independently loaded **Task Runs** operations panel. The explorer remains bound to `workspace/agent/<agentId>/` and provides:
+The **Files** tab combines the agent's workspace file explorer with conceptual area navigation and an independently loaded **Task Runs** operations panel. The explorer remains bound to `workspace/agent/<agentId>/` and provides:
 
-- Confined folder navigation.
-- File and directory create, rename, move, copy, and delete.
+- Conceptual area navigation: `.skills` (skill-owned view), `scripts`, `apps`, `home` (confined storage), `repos` (user-managed read-only storage outside Magenta), `projects` (materialization facts), `tasks` and `outputs` (lifecycle/publication read models).
+- Confined folder navigation within the selected area.
+- File and directory create, rename, move, copy, and delete (where permitted by area policy).
 - Text and Markdown viewing and editing.
 - Image preview and download.
 - Labels, tags, and recent action history.
 
-All operations stay confined to the agent's workspace root. The reserved `tasks/` and `outputs/` subtrees remain visible but read-only through the explorer; task runtime and output publication own those writes. The explorer uses HTMX for standard CRUD operations with OOB list, inspector, and modal refreshes.
+All operations stay confined to the agent's workspace root. The reserved `tasks/`, `.skills/`, run-local `outputs/`/`staging/`, and legacy workspace-root `outputs/` structures are read-only through the explorer. `scripts` and `apps` are storage only, not execution authority. `repos` is user-managed storage outside Magenta: files may be listed and read, but Magenta provides no provisioning, mutation, or interpretation controls.
+
+The explorer uses HTMX for standard CRUD operations with OOB list, inspector, and modal refreshes.
 
 The Task Runs panel groups the most recently updated task, workflow, and job runs. Select a run to inspect normalized status/outcome, source-supported timestamps, wall and active elapsed time, attempts, safe current-claim state, retry/replay lineage, model/tool call counts, and run-local artifact states. Published recent artifacts offer an authorized HTMX preview. `Unavailable` means the source fact was not recorded; it does not mean zero, healthy, or successful. `Partial` means the run is active or not fully reconciled. Integrity-failed artifacts are counted but their bytes are not offered for preview or download.
 
@@ -98,14 +123,11 @@ The outputs tab lists recent artifacts associated with the agent. For filtering,
 
 ## Exec Tab
 
-The exec tab runs a bounded shell command in the agent workspace when the shell execution service is available.
+The exec tab reports that workspace shell execution is unavailable in the current alpha. Host process confinement and process-tree revocation are not proven, so Magenta does not execute workspace shell commands.
 
 Fields:
 
-- **Command**: executable and arguments.
-- **Working Directory**: defaults to the agent workspace root.
-
-Use exec for small diagnostics. If the service is unavailable or the command is outside the allowlist, the UI returns an error.
+No command is run from this tab. Use the Files and diagnostics surfaces for inspection; a future shell capability requires proven process confinement.
 
 ## History Tab
 

@@ -71,7 +71,7 @@ Persisted settings include:
 - Default model.
 - Planning, summary, and compaction model.
 - Context buffer percent.
-- System chat model, prompt, approved tools, context limit, enabled flag.
+- System chat model and enabled flag. Legacy stored prompt, approved-tool, and context-limit fields do not broaden the fixed system-chat profile; its prompt, callback allowlist, and context bound are server-owned.
 - Assignment history auto-purge days.
 - Retain temp work.
 
@@ -141,7 +141,7 @@ New Magenta-owned persisted path columns store data-root-relative values. Legacy
 - SQLite FTS5 is probed at runtime. When absent, artifact search is unavailable; scoped metadata/detail remains available and no unapproved broad search fallback runs.
 - Filesystem mutation confinement requires supported Linux 64-bit/default-provider relative-handle operations. Unsupported providers fail closed.
 - Host process confinement is not available, so workspace shell and executable skill-resource authorization fail closed. Instruction approval remains usable through immutable snapshots.
-- Ordered migration resources are contiguous through `009-warm-database-compatibility.sql`. Migration 008 remains the immutable schedule/reaction schema owner; migration 009 marks the warm-bookkeeping compatibility release. The runner transactionally normalizes known legacy bookkeeping and replaces the known pre-foundation task-run prototype only when all prototype tables are empty. Startup still rejects checksum drift, gaps, malformed names, non-empty prototype state, and incompatible partial migration-owned structures. See [Schema Migrations 001–009](migrations-001-009.md).
+- Ordered migration resources are contiguous through `013-system-chat-proposals.sql`. Migration 008 remains the immutable schedule/reaction schema owner; migration 009 marks the warm-bookkeeping compatibility release; migrations 010-012 add materialization/context/binding persistence; and migration 013 adds system-chat proposals. The runner transactionally normalizes known legacy bookkeeping and replaces the known pre-foundation task-run prototype only when all prototype tables are empty. Startup still rejects checksum drift, gaps, malformed names, non-empty prototype state, and incompatible partial migration-owned structures. See [Data Model](data-model.md); the [001–009 guide](migrations-001-009.md) remains a historical foundation reference.
 - Reconciliation never promotes task staging without a live writer capability. Retention reports active attempts/claims/downloads/references/lineage/legal pins or unresolved reconciliation as blockers.
 
 ## Schedules and Recurrence

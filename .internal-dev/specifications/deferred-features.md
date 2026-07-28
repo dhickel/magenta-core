@@ -52,6 +52,16 @@ created: 2026-05-25
 - No skill is auto-trusted. Immutable digest-bound snapshots and revocation are implemented and are the only model disclosure/activation source.
 - Project filesystem roots remain intentionally absent, not deferred implementation work. Project-scope skill discovery activates only when an explicit trusted project authority exists; Magenta does not guess one.
 
+## 2026-07-27 Agent Workspace Establishment Reconciliation
+
+- Agent workspace areas (`ARCH-20260727-01`): `scripts`, `apps`, `home`, `repos`, `projects`, `.skills`, `tasks`, and `outputs` are active conceptual areas in the Files tab. `repos` is user-managed storage outside Magenta with descriptor-confined read-only access; no application-specific controls exist. Script and app execution authority remain intentionally unavailable.
+- Materialization, context defaults, and bindings (`ARCH-20260727-02`): generation-safe materializations, versioned CAS-guarded defaults, insert-only immutable bindings, and assignment-binding operations are active. Materialization `READY` is a safe-availability assertion, not a content-acquisition guarantee.
+- Prompt context and skill composition (`ARCH-20260727-03`): fixed provenance prompt order, labelled untrusted guidance, generation-bound materialization skill authority, and snapshot-only skill disclosure are active. `WORKSPACE.md` is optional bounded guidance, not configuration.
+- System chat (`ARCH-20260727-04`): fixed deny-by-default profile, bounded non-secret agent-status/workspace-metadata/assignment-lifecycle reads, restricted tools, user-confirmable queue-operation proposals, and explicit confirmation gating are active. Runtime settings supply enabled state and model only; its prompt, callback allowlist, and context bound are server-owned. System chat cannot write files, invoke processes, approve skills, or execute proposals.
+- Agent console (`ARCH-20260727-05`): independent HTMX hosts for context, queue, skills, system chat, runs, and Files are active in `/agents/{agentId}`.
+- **Deferred**: materialization content acquisition (provisioning creates an empty container; content is out-of-band), user-managed repos controls (read-only from Magenta), script/app execution (storage only), cross-agent context browsing, and broader system-chat authority remain intentionally unavailable.
+- **Unavailable**: process confinement for shell/skill executable authorization remains unproven; FTS5 remains capability-dependent.
+
 ## Review Log
 
 | reviewed_on | reviewer | outcome | notes |

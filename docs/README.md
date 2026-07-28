@@ -42,7 +42,7 @@ Technical docs:
 - [Frontend HTMX](technical/frontend-htmx.md)
 - [Security](technical/security.md)
 - [Configuration and Operations](technical/configuration-operations.md)
-- [Schema Migrations 001–009](technical/migrations-001-009.md)
+- [Schema migration foundation (001–009)](technical/migrations-001-009.md) and [current migration ownership through 013](technical/data-model.md)
 
 API docs:
 

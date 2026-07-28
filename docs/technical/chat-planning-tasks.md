@@ -151,7 +151,7 @@ Actual execution is handled later by orchestration runner services. This keeps H
 Model choices come from both file-backed AI config and runtime settings:
 
 - File config in `ai.config.user` defines model endpoints and legacy agent defaults.
-- `RuntimeSettingsService` provides default model, planning model, summary/compaction model, system chat settings, and tool defaults.
+- `RuntimeSettingsService` provides default model, planning model, summary/compaction model, system-chat enabled/model settings, and tool defaults. The system-chat prompt, callback allowlist, and context bound remain server-owned.
 - `ChatModelRouter` resolves concrete model clients for chat turns.
 
 Tools are controlled by `ChatToolRegistry` and per-agent approved tools. Shell execution also consults agent shell command allowlists and the explicit unsafe wildcard override from file config.

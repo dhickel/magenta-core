@@ -77,15 +77,30 @@ public class RequestResolver {
                 msgRequest.model(),
                 msgRequest.planningModel(),
                 msgRequest.surface(),
-                msgRequest.contextCapture()
+                msgRequest.contextCapture(),
+                null
             );
         }
         throw new IllegalArgumentException("message request is required");
     }
 
+    /**
+     * Resolves an agent-scoped chat turn using the server-resolved route agent
+     * for immutable context capture. Existing conversations must already be
+     * bound to that same agent; a side-panel route can never retarget them.
+     */
+    @Transactional
+    ResolvedChatRequest resolveForAgent(ChatRequest.MsgRequest request, String agentId) {
+        if (request == null || !StringUtils.hasText(agentId)) {
+            throw new IllegalArgumentException("Agent-scoped chat request requires an agent");
+        }
+        return resolve(request.conversationId(), request.message(), request.model(), request.planningModel(),
+                request.surface(), request.contextCapture(), agentId.trim());
+    }
+
     @Transactional
     public ResolvedChatRequest resolve(String conversationId, String message, String model, String planningModel) {
-        return resolve(conversationId, message, model, planningModel, null, null);
+        return resolve(conversationId, message, model, planningModel, null, null, null);
     }
 
     @Transactional
@@ -96,7 +111,7 @@ public class RequestResolver {
         String planningModel,
         ChatSessionSurface surface
     ) {
-        return resolve(conversationId, message, model, planningModel, surface, null);
+        return resolve(conversationId, message, model, planningModel, surface, null, null);
     }
 
     @Transactional
@@ -108,9 +123,21 @@ public class RequestResolver {
         ChatSessionSurface surface,
         String contextCapture
     ) {
+        return resolve(conversationId, message, model, planningModel, surface, contextCapture, null);
+    }
+
+    private ResolvedChatRequest resolve(
+        String conversationId,
+        String message,
+        String model,
+        String planningModel,
+        ChatSessionSurface surface,
+        String contextCapture,
+        String boundAgentId
+    ) {
         String resolvedConversationId = StringUtils.hasText(conversationId) ? conversationId : UUID.randomUUID().toString();
         boolean newConversation = !conversationExists(resolvedConversationId);
-        String bindingKey = resolveContextBinding(resolvedConversationId, newConversation, contextCapture);
+        String bindingKey = resolveContextBinding(resolvedConversationId, newConversation, contextCapture, boundAgentId);
         if (newConversation) {
             chatSessionMetadataRepository.saveOriginIfAbsent(resolvedConversationId, ChatSessionOrigin.CHAT, null);
             if (surface != null) {
@@ -138,7 +165,7 @@ public class RequestResolver {
      * model. Chat-session metadata is not a second binding store.
      */
     private String resolveContextBinding(String conversationId, boolean newConversation,
-                                         String contextCapture) {
+                                         String contextCapture, String boundAgentId) {
         if (StringUtils.hasText(contextCapture)
                 && !"default".equalsIgnoreCase(contextCapture.trim())) {
             throw new IllegalArgumentException("Unsupported context capture selector");
@@ -153,14 +180,22 @@ public class RequestResolver {
             if (link.outcome() != AgentContextService.ContextOutcome.AVAILABLE || link.value() == null) {
                 throw new IllegalStateException("Existing conversation has no immutable binding owner link");
             }
+            if (StringUtils.hasText(boundAgentId)) {
+                var binding = agentContextService.getBinding(link.value().bindingKey());
+                if (binding.outcome() != AgentContextService.ContextOutcome.AVAILABLE || binding.value() == null
+                        || !boundAgentId.equals(binding.value().agentId())) {
+                    throw new IllegalStateException("Existing conversation binding does not belong to the route agent");
+                }
+            }
             return link.value().bindingKey();
         }
-        String defaultAgentId = aiConfig == null ? null : aiConfig.defaultAgent();
-        if (!StringUtils.hasText(defaultAgentId)) {
+        String captureAgentId = StringUtils.hasText(boundAgentId)
+                ? boundAgentId : aiConfig == null ? null : aiConfig.defaultAgent();
+        if (!StringUtils.hasText(captureAgentId)) {
             throw new IllegalStateException("A server-resolved default agent is required for context capture");
         }
         String bindingKey = "conversation:" + conversationId;
-        agentContextService.captureDefaultOrPersonalHome(defaultAgentId, bindingKey,
+        agentContextService.captureDefaultOrPersonalHome(captureAgentId, bindingKey,
             "conversation-capture:" + conversationId);
         agentContextService.linkOwner("CONVERSATION", conversationId, bindingKey,
             "conversation-owner-link:" + conversationId);
