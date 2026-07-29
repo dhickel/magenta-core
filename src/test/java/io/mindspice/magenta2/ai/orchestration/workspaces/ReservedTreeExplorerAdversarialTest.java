@@ -2,10 +2,13 @@ package io.mindspice.magenta2.ai.orchestration.workspaces;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 import java.util.stream.Stream;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.datasource.SingleConnectionDataSource;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -34,6 +37,21 @@ class ReservedTreeExplorerAdversarialTest {
     private WorkspaceDescriptor descriptor(String id, Path root) {
         return new WorkspaceDescriptor(WorkspaceKind.AGENT, id,
                 root.toAbsolutePath().normalize());
+    }
+
+    private WorkspaceDescriptor userDescriptor(String name, Path root) {
+        return new WorkspaceDescriptor(WorkspaceKind.USER, name,
+                root.toAbsolutePath().normalize());
+    }
+
+    private WorkspaceExplorerService explorerWithDb() {
+        var jdbc = new JdbcTemplate(
+                new SingleConnectionDataSource(
+                        "jdbc:sqlite::memory:?foreign_keys=true", true));
+        var actionLogRepo = new WorkspaceFileActionLogRepository(jdbc);
+        var metadataRepo = new WorkspaceFileMetadataRepository(jdbc);
+        var metadataService = new WorkspaceFileMetadataService(metadataRepo, actionLogRepo);
+        return new WorkspaceExplorerService(metadataService, actionLogRepo);
     }
 
     private WorkspaceExplorerService.RelativePath path(String value) {
@@ -415,6 +433,353 @@ class ReservedTreeExplorerAdversarialTest {
     }
 
     // ── Workspace outputs are browsable but not mutable ──
+
+    // ── AGENT workspace area classification ──
+
+    @Test
+    void agentHomeDescendantIsMutableButHomeRootIsDenied() throws Exception {
+        WorkspaceExplorerService explorer = explorerWithDb();
+        Path root = Files.createDirectories(tempDir.resolve("agent-home"));
+        WorkspaceDescriptor descriptor = descriptor("agent-home", root);
+
+        // home/<child> is AGENT_PERSONAL_DESCENDANT → mutable
+        explorer.createDirectory(descriptor, path("home/notes"));
+        explorer.createMarkdownFile(descriptor, path("home/notes"), "readme.md");
+        explorer.saveText(descriptor, path("home/notes/readme.md"), "# AGENT notes");
+        assertThat(explorer.preview(descriptor, path("home/notes/readme.md")).content())
+                .isEqualTo("# AGENT notes");
+
+        // home area root itself is AGENT_CANONICAL_AREA_ROOT → denied for mutation
+        assertThatThrownBy(() ->
+                explorer.rename(descriptor, path("home"), "home2"))
+                .isInstanceOf(WorkspaceFileException.class);
+        assertThatThrownBy(() ->
+                explorer.delete(descriptor, path("home"),
+                        WorkspaceExplorerService.DeleteStep.DIRECTORY_RECURSIVE_CONFIRM))
+                .isInstanceOf(WorkspaceFileException.class);
+    }
+
+    @Test
+    void agentUnknownChildIsImmutable() throws Exception {
+        WorkspaceExplorerService explorer = explorerWithDb();
+        Path root = Files.createDirectories(tempDir.resolve("agent-unknown"));
+        Files.createDirectories(root.resolve("misc"));
+        Files.writeString(root.resolve("misc/notes.txt"), "secret");
+        WorkspaceDescriptor descriptor = descriptor("agent-unknown", root);
+
+        // AGENT_UNKNOWN_CHILD → browse allowed, mutation denied
+        assertThat(explorer.preview(descriptor, path("misc/notes.txt")).content())
+                .isEqualTo("secret");
+        assertThatThrownBy(() ->
+                explorer.saveText(descriptor, path("misc/notes.txt"), "changed"))
+                .isInstanceOf(WorkspaceFileException.class)
+                .hasMessageContaining("protected");
+        assertThatThrownBy(() ->
+                explorer.createDirectory(descriptor, path("misc/new")))
+                .isInstanceOf(WorkspaceFileException.class)
+                .hasMessageContaining("protected");
+    }
+
+    // ── USER workspace area classification ──
+
+    @Test
+    void userHomeIsMutableOrdinaryContent() throws Exception {
+        WorkspaceExplorerService explorer = explorerWithDb();
+        Path root = Files.createDirectories(tempDir.resolve("user-home"));
+        WorkspaceDescriptor descriptor = userDescriptor("alice", root);
+
+        // USER workspace: all non-reserved paths are ORDINARY_CONTENT → mutable
+        // home/ area root is just a directory, not an AGENT canonical area
+        explorer.createDirectory(descriptor, path("home"));
+        explorer.createTextFile(descriptor, path("home"), "notes.txt");
+        explorer.saveText(descriptor, path("home/notes.txt"), "# User home");
+        assertThat(explorer.preview(descriptor, path("home/notes.txt")).content())
+                .isEqualTo("# User home");
+
+        // home/<child> is also mutable
+        explorer.createDirectory(descriptor, path("home/sub"));
+        explorer.createTextFile(descriptor, path("home/sub"), "todo.txt");
+        assertThat(root.resolve("home/sub/todo.txt")).isRegularFile();
+    }
+
+    @Test
+    void userUnknownChildIsMutableOrdinaryContent() throws Exception {
+        WorkspaceExplorerService explorer = explorerWithDb();
+        Path root = Files.createDirectories(tempDir.resolve("user-misc"));
+        WorkspaceDescriptor descriptor = userDescriptor("bob", root);
+
+        // USER workspace: unknown children are ORDINARY_CONTENT → mutable
+        explorer.createDirectory(descriptor, path("misc"));
+        explorer.createTextFile(descriptor, path("misc"), "notes.txt");
+        explorer.saveText(descriptor, path("misc/notes.txt"), "# User misc");
+        assertThat(explorer.preview(descriptor, path("misc/notes.txt")).content())
+                .isEqualTo("# User misc");
+        explorer.createDirectory(descriptor, path("misc/sub"));
+        assertThat(root.resolve("misc/sub")).isDirectory();
+    }
+
+    // ── Reserved-tree denial for both AGENT and USER ──
+
+    @Test
+    void outputsDeniedForMutationInBothAgentAndUser() throws Exception {
+        WorkspaceExplorerService explorer = explorerWithDb();
+
+        for (WorkspaceKind kind : new WorkspaceKind[]{WorkspaceKind.AGENT, WorkspaceKind.USER}) {
+            String name = kind.token() + "-outputs";
+            Path root = Files.createDirectories(tempDir.resolve(name));
+            Files.createDirectories(root.resolve("outputs"));
+            Files.writeString(root.resolve("outputs/result.txt"), "data");
+            WorkspaceDescriptor descriptor = kind == WorkspaceKind.AGENT
+                    ? descriptor(name, root) : userDescriptor(name, root);
+
+            assertThatThrownBy(() ->
+                    explorer.saveText(descriptor, path("outputs/result.txt"), "changed"))
+                    .isInstanceOf(WorkspaceFileException.class)
+                    .hasMessageContaining("protected");
+            assertThatThrownBy(() ->
+                    explorer.createDirectory(descriptor, path("outputs/new")))
+                    .isInstanceOf(WorkspaceFileException.class)
+                    .hasMessageContaining("protected");
+        }
+    }
+
+    @Test
+    void tasksDeniedForMutationInBothAgentAndUser() throws Exception {
+        WorkspaceExplorerService explorer = explorerWithDb();
+        String taskKey = "v1-task-" + "a".repeat(64);
+
+        for (WorkspaceKind kind : new WorkspaceKind[]{WorkspaceKind.AGENT, WorkspaceKind.USER}) {
+            String name = kind.token() + "-tasks";
+            Path root = Files.createDirectories(tempDir.resolve(name));
+            Files.createDirectories(root.resolve("tasks/" + taskKey + "/run-1"));
+            Files.writeString(root.resolve("tasks/" + taskKey + "/run-1/notes.txt"), "note");
+            WorkspaceDescriptor descriptor = kind == WorkspaceKind.AGENT
+                    ? descriptor(name, root) : userDescriptor(name, root);
+
+            assertThatThrownBy(() ->
+                    explorer.saveText(descriptor,
+                            path("tasks/" + taskKey + "/run-1/notes.txt"), "changed"))
+                    .isInstanceOf(WorkspaceFileException.class)
+                    .hasMessageContaining("protected");
+        }
+    }
+
+    @Test
+    void skillsDeniedForMutationInBothAgentAndUser() throws Exception {
+        WorkspaceExplorerService explorer = explorerWithDb();
+
+        for (WorkspaceKind kind : new WorkspaceKind[]{WorkspaceKind.AGENT, WorkspaceKind.USER}) {
+            String name = kind.token() + "-skills";
+            Path root = Files.createDirectories(tempDir.resolve(name));
+            WorkspaceDescriptor descriptor = kind == WorkspaceKind.AGENT
+                    ? descriptor(name, root) : userDescriptor(name, root);
+
+            assertThatThrownBy(() ->
+                    explorer.createDirectory(descriptor, path(".skills/new")))
+                    .isInstanceOf(WorkspaceFileException.class);
+        }
+    }
+
+    // ── Cross-boundary rename/move/copy reserved-tree denial ──
+
+    @Test
+    void rejectsRenameMoveCopyIntoTasksForBothKinds() throws Exception {
+        WorkspaceExplorerService explorer = explorerWithDb();
+        String taskKey = "v1-task-" + "a".repeat(64);
+
+        for (WorkspaceKind kind : new WorkspaceKind[]{WorkspaceKind.AGENT, WorkspaceKind.USER}) {
+            String name = kind.token() + "-cross-tasks";
+            Path root = Files.createDirectories(tempDir.resolve(name));
+            WorkspaceDescriptor descriptor = kind == WorkspaceKind.AGENT
+                    ? descriptor(name, root) : userDescriptor(name, root);
+
+            // Create in writable area (home/ for AGENT, arbitrary for USER)
+            // AGENT home area root is auto-provisioned lazily when creating descendants.
+            String srcBase = kind == WorkspaceKind.AGENT ? "home" : "";
+            String srcDir = mkRel(srcBase, "src");
+
+            explorer.createDirectory(descriptor, path(srcDir));
+            explorer.createTextFile(descriptor, path(srcDir), "notes.txt");
+
+            // Create tasks structure for targeting
+            Files.createDirectories(root.resolve("tasks/" + taskKey + "/run-1"));
+
+            String srcPath = srcDir + "/notes.txt";
+            String tasksTarget = "tasks/" + taskKey + "/run-1";
+
+            // Move into tasks → denied
+            assertThatThrownBy(() ->
+                    explorer.move(descriptor, path(srcPath), path(tasksTarget), null))
+                    .isInstanceOf(WorkspaceFileException.class)
+                    .hasMessageContaining("protected");
+
+            // Copy into tasks → denied
+            assertThatThrownBy(() ->
+                    explorer.copy(descriptor, path(srcPath), path(tasksTarget), null))
+                    .isInstanceOf(WorkspaceFileException.class)
+                    .hasMessageContaining("protected");
+        }
+    }
+
+    @Test
+    void rejectsMutatingOutputsAcrossRenameMoveCopySourceAndDestination() throws Exception {
+        WorkspaceExplorerService explorer = explorerWithDb();
+
+        for (WorkspaceKind kind : new WorkspaceKind[]{WorkspaceKind.AGENT, WorkspaceKind.USER}) {
+            String name = kind.token() + "-outputs-cross";
+            Path root = Files.createDirectories(tempDir.resolve(name));
+            Files.createDirectories(root.resolve("outputs"));
+            Files.writeString(root.resolve("outputs/r.txt"), "data");
+            WorkspaceDescriptor descriptor = kind == WorkspaceKind.AGENT
+                    ? descriptor(name, root) : userDescriptor(name, root);
+
+            // AGENT home area root is auto-provisioned lazily.
+            String srcBase = kind == WorkspaceKind.AGENT ? "home" : "";
+            String srcDir = mkRel(srcBase, "src");
+
+            explorer.createDirectory(descriptor, path(srcDir));
+            explorer.createTextFile(descriptor, path(srcDir), "a.txt");
+
+            // Move ordinary into outputs → destination denied
+            assertThatThrownBy(() ->
+                    explorer.move(descriptor, path(srcDir + "/a.txt"), path("outputs"), null))
+                    .isInstanceOf(WorkspaceFileException.class)
+                    .hasMessageContaining("protected");
+
+            // Copy ordinary into outputs → destination denied
+            assertThatThrownBy(() ->
+                    explorer.copy(descriptor, path(srcDir + "/a.txt"), path("outputs"), null))
+                    .isInstanceOf(WorkspaceFileException.class)
+                    .hasMessageContaining("protected");
+        }
+    }
+
+    // ── Cross-kind non-interference: prior AGENT operation does not leak into USER ──
+
+    @Test
+    void priorAgentOperationDoesNotAffectUserClassification() throws Exception {
+        WorkspaceExplorerService explorer = explorerWithDb();
+
+        // AGENT: create in personal area
+        Path agentRoot = Files.createDirectories(tempDir.resolve("agent-cross"));
+        WorkspaceDescriptor agentDesc = descriptor("agent-cross", agentRoot);
+        explorer.createDirectory(agentDesc, path("home/notes"));
+        explorer.createTextFile(agentDesc, path("home/notes"), "a.txt");
+
+        // Rename within AGENT personal area
+        explorer.rename(agentDesc, path("home/notes/a.txt"), "b.txt");
+        assertThat(agentRoot.resolve("home/notes/b.txt")).isRegularFile();
+
+        // USER: unknown child should be mutable (ORDINARY_CONTENT)
+        // If AGENT kind leaked, this would be denied as AGENT_UNKNOWN_CHILD
+        Path userRoot = Files.createDirectories(tempDir.resolve("user-cross"));
+        WorkspaceDescriptor userDesc = userDescriptor("charlie", userRoot);
+        explorer.createDirectory(userDesc, path("misc"));
+        explorer.createTextFile(userDesc, path("misc"), "notes.txt");
+        explorer.saveText(userDesc, path("misc/notes.txt"), "# Charlie's notes");
+        assertThat(explorer.preview(userDesc, path("misc/notes.txt")).content())
+                .isEqualTo("# Charlie's notes");
+
+        // USER: home root should be mutable (unlike AGENT where it's denied)
+        // If AGENT kind leaked, this would be AGENT_CANONICAL_AREA_ROOT → denied
+        explorer.createDirectory(userDesc, path("home"));
+        explorer.createTextFile(userDesc, path("home"), "root.txt");
+        explorer.saveText(userDesc, path("home/root.txt"), "# User home root");
+        assertThat(explorer.preview(userDesc, path("home/root.txt")).content())
+                .isEqualTo("# User home root");
+    }
+
+    @Test
+    void priorUserOperationDoesNotAffectAgentClassification() throws Exception {
+        WorkspaceExplorerService explorer = explorerWithDb();
+
+        // USER: create in ordinary content (unknown child area)
+        Path userRoot = Files.createDirectories(tempDir.resolve("user-cross2"));
+        WorkspaceDescriptor userDesc = userDescriptor("dave", userRoot);
+        explorer.createDirectory(userDesc, path("misc"));
+        explorer.createTextFile(userDesc, path("misc"), "notes.txt");
+        explorer.saveText(userDesc, path("misc/notes.txt"), "# Dave's stuff");
+
+        // USER: home root mutable
+        explorer.createDirectory(userDesc, path("home"));
+        explorer.createTextFile(userDesc, path("home"), "info.txt");
+        explorer.saveText(userDesc, path("home/info.txt"), "# Dave's home");
+
+        // AGENT: unknown child should remain denied for mutation
+        // If USER kind leaked, AGENT_UNKNOWN_CHILD would become ORDINARY_CONTENT → ALLOW
+        Path agentRoot = Files.createDirectories(tempDir.resolve("agent-cross2"));
+        Files.createDirectories(agentRoot.resolve("misc"));
+        Files.writeString(agentRoot.resolve("misc/notes.txt"), "secret");
+        WorkspaceDescriptor agentDesc = descriptor("agent-cross2", agentRoot);
+
+        assertThatThrownBy(() ->
+                explorer.saveText(agentDesc, path("misc/notes.txt"), "changed"))
+                .isInstanceOf(WorkspaceFileException.class)
+                .hasMessageContaining("protected");
+        assertThat(Files.readString(agentRoot.resolve("misc/notes.txt")))
+                .isEqualTo("secret");
+
+        // AGENT: home root should remain denied for mutation
+        // (rename of area root is denied for AGENT_CANONICAL_AREA_ROOT)
+        Files.createDirectories(agentRoot.resolve("home"));
+        assertThatThrownBy(() ->
+                explorer.rename(agentDesc, path("home"), "home2"))
+                .isInstanceOf(WorkspaceFileException.class);
+    }
+
+    @Test
+    void rejectsReservedSourcesAndSkillsDestinationsForRenameMoveCopyInBothKinds() throws Exception {
+        WorkspaceExplorerService explorer = explorerWithDb();
+        String taskKey = "v1-task-" + "a".repeat(64);
+
+        for (WorkspaceKind kind : new WorkspaceKind[]{WorkspaceKind.AGENT, WorkspaceKind.USER}) {
+            String name = kind.token() + "-reserved-source";
+            Path root = Files.createDirectories(tempDir.resolve(name));
+            WorkspaceDescriptor descriptor = kind == WorkspaceKind.AGENT
+                ? descriptor(name, root) : userDescriptor(name, root);
+            String ordinaryDir = mkRel(kind == WorkspaceKind.AGENT ? "home" : "", "ordinary");
+            String destinationDir = mkRel(kind == WorkspaceKind.AGENT ? "home" : "", "destination");
+            explorer.createDirectory(descriptor, path(ordinaryDir));
+            explorer.createDirectory(descriptor, path(destinationDir));
+            explorer.createTextFile(descriptor, path(ordinaryDir), "source.txt");
+
+            List<String> reservedSources = List.of(
+                "outputs/result.txt",
+                "tasks/" + taskKey + "/run-1/result.txt",
+                ".skills/managed/result.txt");
+            for (String reservedSource : reservedSources) {
+                Path source = root.resolve(reservedSource);
+                Files.createDirectories(source.getParent());
+                Files.writeString(source, "protected");
+
+                // Rename has a same-parent target, so this proves source rejection.
+                assertThatThrownBy(() -> explorer.rename(descriptor, path(reservedSource), "renamed.txt"))
+                    .isInstanceOf(WorkspaceFileException.class)
+                    .hasMessageContaining("protected");
+                assertThatThrownBy(() -> explorer.move(descriptor, path(reservedSource), path(destinationDir), null))
+                    .isInstanceOf(WorkspaceFileException.class)
+                    .hasMessageContaining("protected");
+                assertThatThrownBy(() -> explorer.copy(descriptor, path(reservedSource), path(destinationDir), null))
+                    .isInstanceOf(WorkspaceFileException.class)
+                    .hasMessageContaining("protected");
+                assertThat(source).isRegularFile();
+            }
+
+            // .skills is also rejected as a move/copy destination for both kinds.
+            assertThatThrownBy(() -> explorer.move(descriptor, path(ordinaryDir + "/source.txt"),
+                path(".skills/managed"), null))
+                .isInstanceOf(WorkspaceFileException.class)
+                .hasMessageContaining("protected");
+            assertThatThrownBy(() -> explorer.copy(descriptor, path(ordinaryDir + "/source.txt"),
+                path(".skills/managed"), null))
+                .isInstanceOf(WorkspaceFileException.class)
+                .hasMessageContaining("protected");
+        }
+    }
+
+    private static String mkRel(String base, String name) {
+        return base.isEmpty() ? name : base + "/" + name;
+    }
 
     @Test
     void workspaceOutputsAreBrowsableButNotMutable() throws Exception {
