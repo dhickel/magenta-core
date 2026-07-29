@@ -505,7 +505,7 @@ public class OrchestrationRunnerService {
         String jobId = StringUtils.hasText(assignment.jobId())
             ? assignment.jobId() : text(assignment.input().get("jobId"), null);
         JobDefinition job = jobService.getDefinition(jobId);
-        jobService.updateDefinitionStatus(job.id(), "RUNNING");
+        // Definition status is definition-owned; the runner only manages JobRun lifecycle.
         String projectId = resolveProjectId(assignment);
         JobRun jobRun = resumeOrStartJobRun(assignment, job, projectId);
         installJobWorkspaceContext(jobRun);
@@ -522,7 +522,6 @@ public class OrchestrationRunnerService {
         current = assignmentService.saveIfLeaseOwner(current, leaseOwner);
         if (current.status() == OrchestrationStatus.CANCEL_REQUESTED) {
             jobService.cancelRunFromAssignment(jobRun.id());
-            jobService.updateDefinitionStatus(job.id(), "CANCELLED");
             return cancel(current);
         }
         int start = Math.max(assignment.currentItemIndex(),
@@ -532,7 +531,6 @@ public class OrchestrationRunnerService {
             if (current.status() == OrchestrationStatus.INTERRUPTED) return current;
             if (current.status() == OrchestrationStatus.CANCEL_REQUESTED) {
                 jobService.cancelRunFromAssignment(jobRun.id());
-                jobService.updateDefinitionStatus(job.id(), "CANCELLED");
                 return cancel(current);
             }
             JobWorkItem item = items.get(i);
@@ -543,7 +541,6 @@ public class OrchestrationRunnerService {
             if (!itemResult.succeeded()) {
                 jobService.updateWorkItemRun(jobRun.id(), item.key(), "FAILED",
                     itemResult.childRunId(), mapValue(itemResult.output()), itemResult.errorText());
-                jobService.updateDefinitionStatus(job.id(), "FAILED");
                 String errorText = itemResult.errorText();
                 current = checkpointed(current, i + 1, mergeCheckpoint(current.checkpoint(), Map.of(
                     "jobId", job.id(), "jobRunId", jobRun.id(),
@@ -562,7 +559,6 @@ public class OrchestrationRunnerService {
             current = assignmentService.saveIfLeaseOwner(current, leaseOwner);
         }
         jobRun = jobService.completeRun(jobRun.id(), "Job run completed");
-        jobService.updateDefinitionStatus(job.id(), "COMPLETED");
         eventService.publish(EventType.JOB_STATUS_CHANGED, "JOB", job.id(),
             Map.of("jobId", job.id(), "status", "COMPLETED"));
         return complete(current, outputs, evidence);

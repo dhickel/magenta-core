@@ -449,6 +449,7 @@ class PublicRunSubmissionControllerTest {
                     "CODING_CENTRIC",
                     "model-a",
                     null,
+                    1,
                     Instant.now(),
                     Instant.now()
                 );

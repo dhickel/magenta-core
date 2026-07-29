@@ -19,7 +19,7 @@ class JobRepositoryTest {
         repo.saveDefinition(new JobDefinition(
             "job-1", "agent-1", "project-1", "agent", "agent-1", null, "ACTIVE",
             "Test Job", "Summary", List.of(planItem("step1", "plan-1", 0)),
-            null, null, null, Instant.now(), Instant.now()));
+            null, null, null, 1, Instant.now(), Instant.now()));
 
         JobDefinition found = repo.findDefinition("job-1").orElseThrow();
         assertThat(found.workspaceType()).isEqualTo("agent");
@@ -62,6 +62,34 @@ class JobRepositoryTest {
     }
 
     @Test
+    void definitionCasRejectsStaleWriter() {
+        JobRepository repo = repository();
+        JobDefinition saved = repo.saveDefinition(jobDef("job-cas", "Initial"));
+        JobDefinition candidate = new JobDefinition(saved.id(), "agent-2", saved.projectId(),
+            saved.workspaceType(), saved.workspaceKey(), null, saved.status(), saved.title(), saved.summary(),
+            saved.items(), saved.promptProfile(), saved.model(), saved.settingsOverrideJson(), 0,
+            saved.createdAt(), saved.updatedAt());
+
+        JobDefinition updated = repo.saveDefinitionCAS(candidate, saved.definitionVersion()).orElseThrow();
+        assertThat(updated.ownerAgentId()).isEqualTo("agent-2");
+        assertThat(updated.definitionVersion()).isEqualTo(saved.definitionVersion() + 1);
+        assertThat(repo.saveDefinitionCAS(candidate, saved.definitionVersion())).isEmpty();
+    }
+
+    @Test
+    void oneJobRunPerAssignmentConvergesOnExistingRun() {
+        JobRepository repo = repository();
+        repo.saveDefinition(jobDef("job-link", "Linked"));
+        JobRun first = repo.saveRun(new JobRun("run-first", "job-link", "assignment-link", "agent", "agent-1", null,
+            JobRunStatus.QUEUED, List.of(), null, null, Instant.now(), Instant.now(), null, null));
+        JobRun replay = repo.saveRun(new JobRun("run-second", "job-link", "assignment-link", "agent", "agent-1", null,
+            JobRunStatus.QUEUED, List.of(), null, null, Instant.now(), Instant.now(), null, null));
+
+        assertThat(replay.id()).isEqualTo(first.id());
+        assertThat(repo.findRunsByJobId("job-link")).hasSize(1);
+    }
+
+    @Test
     void deletesDefinitionAndRuns() {
         JobRepository repo = repository();
         repo.saveDefinition(jobDef("job-3", "Delete"));
@@ -84,7 +112,7 @@ class JobRepositoryTest {
 
     private JobDefinition jobDef(String id, String title) {
         return new JobDefinition(id, "agent-1", null, "agent", "agent-1", null, "ACTIVE",
-            title, "Summary", List.of(planItem("step", "plan", 0)), null, null, null,
+            title, "Summary", List.of(planItem("step", "plan", 0)), null, null, null, 1,
             Instant.now(), Instant.now());
     }
 

@@ -3611,7 +3611,7 @@ public class OrchestrationController {
             JobDefinition created = jobService.saveDefinition(new JobDefinition(
                 null, nn(params.get("ownerAgentId")), nn(params.get("projectId")),
                 null, null, null, "DRAFT", title, nn(params.get("summary")), List.of(),
-                nn(params.get("promptProfile")), nn(params.get("model")), null, null, null
+                nn(params.get("promptProfile")), nn(params.get("model")), null, 0, null, null
             ));
             return jobEditorFragment(created).render();
         } catch (Exception e) {
@@ -3641,6 +3641,7 @@ public class OrchestrationController {
                 params.containsKey("promptProfile") ? nn(params.get("promptProfile")) : current.promptProfile(),
                 params.containsKey("model") ? nn(params.get("model")) : current.model(),
                 current.settingsOverrideJson(),
+                current.definitionVersion(),
                 current.createdAt(),
                 current.updatedAt()
             );

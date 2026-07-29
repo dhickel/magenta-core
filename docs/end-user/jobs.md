@@ -68,7 +68,7 @@ Save recurrence from the job editor. Recurrence config does not prove the schedu
 
 Saved jobs expose two operational actions:
 
-- **Start Run** creates a job assignment using the job owner agent or the first active agent.
+- **Start Run** creates a job assignment using the job's preferred owner agent. If no preferred agent is set, choose an explicit agent; Magenta never selects an arbitrary fallback agent.
 - **Submit to Agent** opens a form where you choose the agent, priority, optional project metadata, an existing declared user workspace override, and an optional model override before submitting.
 
 The submit form shows the job's saved project. Project association is metadata and membership context only.
@@ -76,6 +76,10 @@ The submit form shows the job's saved project. Project association is metadata a
 Before dispatch, Magenta reserves a stable job run identity. Each plan or workflow work item receives its own linked sibling run, so retry/recovery cannot alias the assignment or parent job. Operator retry/replay creates a new lineage-linked run; resume reuses the current run with a new attempt. Assignment-owned child outputs publish beneath each canonical run-local `outputs/` location with create-only placement and integrity metadata. Scoped attribution and artifact operations are available through `/api/artifacts`.
 
 Recurring jobs also start by creating job assignments. Use the run panel to confirm the assignment id and job run id after a recurrence fires.
+
+## Project Jobs
+
+A project's **Jobs** tab provides a bounded definition list, definition detail, and redacted run history. Updating **Preferred Executor** uses a version check and affects only future submissions; existing assignments and runs retain their original agent attribution.
 
 ## Runs, Cancellation, Outputs, Events
 

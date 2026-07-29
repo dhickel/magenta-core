@@ -7,6 +7,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
+import org.springframework.dao.DataAccessException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Transactional;
@@ -73,14 +74,15 @@ public class JobRepository {
         Instant now = Instant.now();
         Instant createdAt = def.createdAt() == null ? now : def.createdAt();
         Instant updatedAt = now;
+        int nextVersion = def.definitionVersion() + 1;
         jdbcTemplate.update(
             """
                 insert into job_definitions (
                     id, owner_agent_id, project_id, workspace_type, workspace_key, workspace_identity, status,
                     title, summary, items_json, prompt_profile,
-                    model, settings_override_json, created_at, updated_at
+                    model, settings_override_json, definition_version, created_at, updated_at
                 )
-                values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 on conflict(id) do update set
                     owner_agent_id = excluded.owner_agent_id,
                     project_id = excluded.project_id,
@@ -94,13 +96,39 @@ public class JobRepository {
                     prompt_profile = excluded.prompt_profile,
                     model = excluded.model,
                     settings_override_json = excluded.settings_override_json,
+                    definition_version = excluded.definition_version,
                     updated_at = excluded.updated_at
                 """,
             def.id(), def.ownerAgentId(), def.projectId(), def.workspaceType(), def.workspaceKey(), def.workspaceIdentity(),
             def.status(), def.title(), def.summary(), json(def.items()), def.promptProfile(),
-            def.model(), def.settingsOverrideJson(), createdAt.toString(), updatedAt.toString()
+            def.model(), def.settingsOverrideJson(), nextVersion, createdAt.toString(), updatedAt.toString()
         );
         return findDefinition(def.id()).orElseThrow();
+    }
+
+    /**
+     * CAS save: only updates if the persisted version matches expectedVersion.
+     * Returns the updated definition or empty if the version check fails.
+     */
+    public Optional<JobDefinition> saveDefinitionCAS(JobDefinition def, int expectedVersion) {
+        Instant now = Instant.now();
+        int updated = jdbcTemplate.update(
+            """
+                update job_definitions set
+                    owner_agent_id = ?, project_id = ?, workspace_type = ?, workspace_key = ?,
+                    workspace_identity = ?, status = ?, title = ?, summary = ?, items_json = ?,
+                    prompt_profile = ?, model = ?, settings_override_json = ?,
+                    definition_version = definition_version + 1,
+                    updated_at = ?
+                where id = ? and definition_version = ?
+                """,
+            def.ownerAgentId(), def.projectId(), def.workspaceType(), def.workspaceKey(),
+            def.workspaceIdentity(), def.status(), def.title(), def.summary(), json(def.items()),
+            def.promptProfile(), def.model(), def.settingsOverrideJson(),
+            now.toString(), def.id(), expectedVersion
+        );
+        if (updated == 0) return Optional.empty();
+        return findDefinition(def.id());
     }
 
     public void deleteDefinition(String id) {
@@ -194,7 +222,8 @@ public class JobRepository {
         Instant now = Instant.now();
         Instant createdAt = run.createdAt() == null ? now : run.createdAt();
         Instant updatedAt = now;
-        jdbcTemplate.update(
+        try {
+            jdbcTemplate.update(
             """
                 insert into job_runs (
                     id, job_id, job_assignment_id, workspace_type, workspace_key, workspace_identity,
@@ -219,7 +248,14 @@ public class JobRepository {
             run.workspaceIdentity(), run.status().name(), json(run.workItemRuns()),
             run.finalMessage(), run.errorText(), createdAt.toString(), updatedAt.toString(),
             instant(run.startedAt()), instant(run.completedAt())
-        );
+            );
+        } catch (DataAccessException conflict) {
+            JobRun existing = findRunByAssignmentId(run.jobAssignmentId()).orElse(null);
+            if (existing != null && existing.jobId().equals(run.jobId())) {
+                return existing;
+            }
+            throw conflict;
+        }
         return findRun(run.id()).orElseThrow();
     }
 
@@ -291,6 +327,7 @@ public class JobRepository {
             rs.getString("prompt_profile"),
             rs.getString("model"),
             rs.getString("settings_override_json"),
+            getIntOrDefault(rs, "definition_version", 1),
             Instant.parse(rs.getString("created_at")),
             Instant.parse(rs.getString("updated_at"))
         );
@@ -363,6 +400,15 @@ public class JobRepository {
         }
     }
 
+    private int getIntOrDefault(ResultSet rs, String column, int defaultValue) throws SQLException {
+        try {
+            int value = rs.getInt(column);
+            return rs.wasNull() ? defaultValue : value;
+        } catch (SQLException ignored) {
+            return defaultValue;
+        }
+    }
+
     private String selectionType(ResultSet rs, String agentColumn) throws SQLException {
         String type = getNullable(rs, "workspace_type");
         String key = getNullable(rs, "workspace_key");
@@ -421,6 +467,10 @@ public class JobRepository {
         if (!definitionColumns.contains("status")) {
             jdbcTemplate.execute("alter table job_definitions add column status text");
         }
+        if (!definitionColumns.contains("definition_version")) {
+            jdbcTemplate.execute("alter table job_definitions add column definition_version integer default 1");
+            jdbcTemplate.execute("update job_definitions set definition_version = 1 where definition_version is null");
+        }
         jdbcTemplate.execute("""
             create table if not exists job_runs (
                 id text primary key,
@@ -450,6 +500,11 @@ public class JobRepository {
         addColumnIfMissing(runColumns, "job_runs", "workspace_type");
         addColumnIfMissing(runColumns, "job_runs", "workspace_key");
         addColumnIfMissing(runColumns, "job_runs", "workspace_identity");
+        jdbcTemplate.execute("""
+            create unique index if not exists idx_job_runs_assignment_unique
+            on job_runs (job_assignment_id)
+            where job_assignment_id is not null
+            """);
         jdbcTemplate.execute("""
             create table if not exists job_recurrences (
                 id text primary key,

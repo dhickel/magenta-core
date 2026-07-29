@@ -48,7 +48,7 @@ public final class ProjectConsoleFragments {
         new ProjectTab("overview",   "Dashboard",  "dashboard",  true),
         new ProjectTab("work",       "Queue",      "queue",      true),
         new ProjectTab("work",       "Tasks",      "tasks",      true),
-        new ProjectTab("work",       "Jobs",       "jobs",       false),
+        new ProjectTab("work",       "Jobs",       "jobs",       true),
         new ProjectTab("work",       "Outputs",    "outputs",    false),
         new ProjectTab("context",    "Files",      "files",      false),
         new ProjectTab("context",    "Chat",       "chat",       false),

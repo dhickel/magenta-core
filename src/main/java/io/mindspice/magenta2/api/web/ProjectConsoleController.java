@@ -27,6 +27,8 @@ import io.mindspice.magenta2.ai.orchestration.context.AgentMaterializationReposi
 import io.mindspice.magenta2.ai.orchestration.context.AgentMaterializationService;
 import io.mindspice.magenta2.ai.orchestration.runtime.AssignmentService;
 import io.mindspice.magenta2.ai.orchestration.runtime.JobDefinition;
+import io.mindspice.magenta2.ai.orchestration.runtime.JobRun;
+import io.mindspice.magenta2.ai.orchestration.runtime.JobRunStatus;
 import io.mindspice.magenta2.ai.orchestration.runtime.JobService;
 import io.mindspice.magenta2.ai.orchestration.runtime.Project;
 import io.mindspice.magenta2.ai.orchestration.runtime.ProjectAgentMembership;
@@ -608,15 +610,182 @@ public class ProjectConsoleController {
             return unavailableProjectTab(projectId, "Jobs", "work", response);
         }
         try {
-            projectService.getProject(projectId);
+            Project project = projectService.getProject(projectId);
+            List<JobDefinition> jobs = projectJobs(projectId);
             Div panel = new Div().withClass("project-jobs-tab").withChild(Header.H2("Jobs"));
-            return panel.withChild(projectJobRows(projectJobs(projectId), true)).render();
+            panel.withChild(new Paragraph("Project-attributed job definitions. Definition status and version reflect the canonical definition state. Runs belong to JobRun.")
+                .withClass("orch-muted-note"));
+            if (jobs.isEmpty()) {
+                return panel.withChild(new Div().withClass("dashboard-empty")
+                    .withInnerText("No project-attributed job definitions.")).render();
+            }
+            Div rows = new Div().withClass("project-operational-list");
+            for (JobDefinition job : jobs) {
+                Div row = new Div().withClass("project-job-row")
+                    .withChild(new Div().withClass("project-job-main")
+                        .withChild(new HtmlTag("strong")
+                            .withInnerText(dv(job.title())))
+                        .withChild(new HtmlTag("span").withClass("orch-chip")
+                            .withInnerText(dv(job.status())))
+                        .withChild(new HtmlTag("span").withClass("workspace-file-muted")
+                            .withInnerText("v" + job.definitionVersion()
+                                + (job.updatedAt() != null ? " · " + formatSince(job.updatedAt()) : ""))))
+                    .withChild(new Div().withClass("project-job-actions")
+                        .withChild(Button.create("Detail").withClass("orch-secondary small")
+                            .withAttribute("hx-get", "/projects/_detail/" + e(projectId)
+                                + "/jobs/" + e(job.id()))
+                            .withAttribute("hx-target", "#project-jobs-detail")
+                            .withAttribute("hx-swap", "innerHTML")
+                            .withAttribute("data-htmx-error-swap", "true")));
+                rows.withChild(row);
+            }
+            panel.withChild(rows);
+            panel.withChild(new Div().withId("project-jobs-detail").withClass("project-jobs-detail-panel"));
+            return panel.render();
         } catch (IllegalArgumentException e) {
             response.setStatus(HttpServletResponse.SC_NOT_FOUND);
             return fragments.errorNotFound("Project not found.");
         } catch (RuntimeException e) {
+            log.warn("Project jobs unavailable for {}", projectId, e);
             response.setStatus(HttpServletResponse.SC_SERVICE_UNAVAILABLE);
             return fragments.errorUnavailable("Project jobs are unavailable.");
+        }
+    }
+
+    /** Job definition detail with run history and preferred-agent update. */
+    @GetMapping("/projects/_detail/{projectId}/jobs/{jobId}")
+    @ResponseBody
+    public String projectJobDetailFragment(@PathVariable String projectId, @PathVariable String jobId,
+                                            HttpServletResponse response) {
+        try {
+            Project project = projectService.getProject(projectId);
+            JobDefinition job = jobService.getDefinition(jobId);
+            if (job.projectId() == null || !job.projectId().equals(projectId)) {
+                response.setStatus(HttpServletResponse.SC_NOT_FOUND);
+                return fragments.errorNotFound("Job is not in this project.");
+            }
+            List<JobRun> runs = jobService.listRuns(jobId);
+            List<ProjectAgentMembership> members = sortedProjectMembers(projectId);
+
+            Div panel = new Div().withClass("project-job-detail");
+            panel.withChild(Header.H3(dv(job.title())));
+            panel.withChild(new Div().withClass("orch-meta")
+                .withChild(new HtmlTag("span").withInnerText("ID: " + job.id()))
+                .withChild(new HtmlTag("span").withInnerText("Version: " + job.definitionVersion()))
+                .withChild(new HtmlTag("span").withInnerText("Status: " + dv(job.status())))
+                .withChild(new HtmlTag("span").withInnerText("Preferred Executor: "
+                    + dv(job.ownerAgentId())))
+                .withChild(new HtmlTag("span").withInnerText("Items: " + job.items().size()))
+                .withChild(new HtmlTag("span").withInnerText(
+                    "Updated: " + (job.updatedAt() != null ? formatSince(job.updatedAt()) : "—"))));
+
+            // Preferred-agent update (future-only: affects only later submissions)
+            if (!project.archived() && !members.isEmpty()) {
+                panel.withChild(new Div().withClass("project-job-agent-update")
+                    .withChild(new HtmlTag("label").withInnerText("Preferred Executor (future submissions only): "))
+                    .withChild(TextInput.create("expectedVersion").withValue(String.valueOf(job.definitionVersion()))
+                        .withAttribute("type", "hidden"))
+                    .withChild(agentSelectForMembers("preferredAgentId", members,
+                        job.ownerAgentId()))
+                    .withChild(Button.create("Update").withClass("orch-primary small")
+                        .withAttribute("hx-put", "/projects/_detail/" + e(projectId)
+                            + "/jobs/" + e(jobId) + "/preferred-agent")
+                        .withAttribute("hx-target", "#project-jobs-detail")
+                        .withAttribute("hx-swap", "innerHTML")
+                        .withAttribute("hx-include", "closest .project-job-agent-update")
+                        .withAttribute("data-htmx-error-swap", "true")));
+            }
+
+            // Run history (bounded, DTO-safe)
+            panel.withChild(Header.H4("Runs"));
+            if (runs.isEmpty()) {
+                panel.withChild(new Div().withClass("dashboard-empty")
+                    .withInnerText("No runs for this job."));
+            } else {
+                Div runRows = new Div().withClass("project-job-runs-list");
+                for (JobRun run : runs) {
+                    Div rr = new Div().withClass("project-job-run-row")
+                        .withChild(new HtmlTag("span").withInnerText(dv(run.status().name())))
+                        .withChild(new HtmlTag("span").withClass("workspace-file-muted")
+                            .withInnerText("Run: " + run.id().substring(0, 8) + "…"))
+                        .withChild(new HtmlTag("span").withInnerText(
+                            run.startedAt() != null ? formatSince(run.startedAt()) : "Not started"));
+                    if (run.isTerminal()) {
+                        rr.withChild(new HtmlTag("span").withClass(
+                            run.status() == JobRunStatus.COMPLETED ? "orch-status-chip active"
+                                : "orch-status-chip disabled")
+                            .withInnerText(run.status() == JobRunStatus.COMPLETED ? "Passed" : "Terminal"));
+                    }
+                    runRows.withChild(rr);
+                }
+                panel.withChild(runRows);
+            }
+
+            return panel.render();
+        } catch (IllegalArgumentException e) {
+            response.setStatus(HttpServletResponse.SC_NOT_FOUND);
+            return fragments.errorNotFound("Job not found.");
+        } catch (RuntimeException e) {
+            log.warn("Job detail unavailable for {}", jobId, e);
+            response.setStatus(HttpServletResponse.SC_SERVICE_UNAVAILABLE);
+            return fragments.errorUnavailable("Job detail is temporarily unavailable.");
+        }
+    }
+
+    /**
+     * Update the preferred executor ({@code owner_agent_id}) for future
+     * submissions. This never affects existing assignments or runs. The
+     * owner_agent_id is the sole persisted preference; contradictory aliases
+     * are rejected at the service boundary.
+     */
+    @PutMapping("/projects/_detail/{projectId}/jobs/{jobId}/preferred-agent")
+    @ResponseBody
+    public String updateJobPreferredAgent(@PathVariable String projectId, @PathVariable String jobId,
+                                           @RequestParam Map<String, String> params,
+                                           HttpServletResponse response) {
+        try {
+            projectService.getProject(projectId);
+            JobDefinition job = jobService.getDefinition(jobId);
+            if (job.projectId() == null || !job.projectId().equals(projectId)) {
+                response.setStatus(HttpServletResponse.SC_BAD_REQUEST);
+                return fragments.errorBadRequest("Job is not in this project.");
+            }
+            String newAgentId = cleanNullable(params.get("preferredAgentId"));
+            if (newAgentId != null && !projectService.isMember(projectId, newAgentId)) {
+                response.setStatus(HttpServletResponse.SC_BAD_REQUEST);
+                return fragments.errorBadRequest("Agent is not a project member.");
+            }
+
+            int expectedVersion;
+            try {
+                expectedVersion = Integer.parseInt(params.getOrDefault("expectedVersion", ""));
+            } catch (NumberFormatException e) {
+                response.setStatus(HttpServletResponse.SC_BAD_REQUEST);
+                return fragments.errorBadRequest("Definition version is required.");
+            }
+            if (expectedVersion < 1) {
+                response.setStatus(HttpServletResponse.SC_BAD_REQUEST);
+                return fragments.errorBadRequest("Definition version is invalid.");
+            }
+
+            // CAS update of preferred agent only (future submissions only)
+            JobDefinition updated = new JobDefinition(
+                job.id(), newAgentId, job.projectId(), job.workspaceType(), job.workspaceKey(),
+                null, job.status(), job.title(), job.summary(), job.items(),
+                job.promptProfile(), job.model(), job.settingsOverrideJson(),
+                0, job.createdAt(), job.updatedAt());
+            var result = jobService.saveDefinitionCAS(updated, expectedVersion);
+            if (result.isEmpty()) {
+                response.setStatus(HttpServletResponse.SC_CONFLICT);
+                return fragments.errorConflict("Definition was modified; reload and try again.");
+            }
+            return projectJobDetailFragment(projectId, jobId, response);
+        } catch (IllegalArgumentException e) {
+            response.setStatus(HttpServletResponse.SC_BAD_REQUEST);
+            return fragments.errorBadRequest(e.getMessage());
+        } catch (RuntimeException e) {
+            response.setStatus(HttpServletResponse.SC_SERVICE_UNAVAILABLE);
+            return fragments.errorUnavailable(e.getMessage());
         }
     }
 
@@ -1373,15 +1542,18 @@ public class ProjectConsoleController {
         for (JobDefinition job : jobs) {
             Div row = new Div().withClass("project-job-row")
                 .withChild(new Div().withClass("project-job-main")
-                    .withChild(new HtmlTag("a").withAttribute("href", "/jobs/" + e(job.id()))
-                        .withInnerText(StringUtils.hasText(job.title()) ? job.title() : job.id()))
+                    .withChild(new HtmlTag("strong").withInnerText(dv(job.title())))
                     .withChild(statusBadgeHtml(job.status()))
                     .withChild(new HtmlTag("span").withClass("workspace-file-muted")
-                        .withInnerText(job.updatedAt() == null ? "Updated unavailable" : formatSince(job.updatedAt()))));
+                        .withInnerText("v" + job.definitionVersion()
+                            + (job.updatedAt() == null ? " · Updated unavailable"
+                                : " · " + formatSince(job.updatedAt())))));
             if (includeRuns) {
+                List<JobRun> runs = jobService.listRuns(job.id());
+                long runCount = runs.size();
                 row.withChild(new Div().withClass("project-job-runs")
                     .withChild(new HtmlTag("span")
-                        .withInnerText("Bounded project run facts are unavailable from the current job query contract.")));
+                        .withInnerText(runCount + " run" + (runCount == 1 ? "" : "s"))));
             }
             rows.withChild(row);
         }
@@ -1490,6 +1662,15 @@ public class ProjectConsoleController {
                 .withAttribute("hx-get", "/projects/_detail/" + project.id() + "/delete-confirm")
                 .withAttribute("hx-target", "#project-settings-delete").withAttribute("hx-swap", "innerHTML")));
         return panel.render();
+    }
+
+    private Select agentSelectForMembers(String name, List<ProjectAgentMembership> members, String selected) {
+        Select select = Select.create(name);
+        select.addOption("", "-- none --", !StringUtils.hasText(selected));
+        for (ProjectAgentMembership member : members) {
+            select.addOption(member.agentId(), member.agentId(), member.agentId().equals(selected));
+        }
+        return select;
     }
 
     // ── Select helpers ──

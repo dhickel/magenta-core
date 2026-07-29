@@ -8,6 +8,7 @@ import io.mindspice.magenta2.ai.orchestration.agents.AgentProfileService;
 import io.mindspice.magenta2.ai.orchestration.context.AgentContextService;
 import io.mindspice.magenta2.ai.orchestration.context.AgentMaterializationService;
 import io.mindspice.magenta2.ai.orchestration.runtime.AssignmentService;
+import io.mindspice.magenta2.ai.orchestration.runtime.JobDefinition;
 import io.mindspice.magenta2.ai.orchestration.runtime.JobService;
 import io.mindspice.magenta2.ai.orchestration.runtime.Project;
 import io.mindspice.magenta2.ai.orchestration.runtime.ProjectService;
@@ -23,6 +24,7 @@ import org.junit.jupiter.api.Test;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class ProjectConsoleControllerTest {
@@ -122,6 +124,33 @@ class ProjectConsoleControllerTest {
         HttpServletResponse response = mock(HttpServletResponse.class);
         String html = controller.projectDetailFragment("missing", null, response);
         assertThat(html).contains("not found");
+    }
+
+    @Test
+    void preferredAgentUpdateUsesSubmittedDefinitionVersion() {
+        JobService jobs = mock(JobService.class);
+        JobDefinition job = new JobDefinition("job-1", "agent-owner", "project-1", "agent", "agent-owner",
+            null, "DRAFT", "Job", "Summary", List.of(), null, null, null, 3, Instant.now(), Instant.now());
+        when(jobs.getDefinition("job-1")).thenReturn(job);
+        when(jobs.saveDefinitionCAS(any(), org.mockito.ArgumentMatchers.eq(3)))
+            .thenReturn(java.util.Optional.of(job));
+        when(jobs.listRuns("job-1")).thenReturn(List.of());
+        when(projectService.isMember("project-1", "agent-owner")).thenReturn(true);
+
+        ProjectConsoleController versioned = new ProjectConsoleController(
+            projectService, jobs, mock(AgentProfileService.class), mock(AssignmentService.class),
+            mock(OutputArtifactService.class), new ProjectConsoleFragments(), mock(EntityLookupService.class),
+            mock(EntitySelectorComponents.class), mock(AgentContextService.class), mock(AgentMaterializationService.class),
+            mock(WorkspaceDirectoryService.class), mock(WorkspaceExplorerService.class),
+            mock(io.mindspice.magenta2.ai.orchestration.tasks.WorkTaskService.class),
+            mock(io.mindspice.magenta2.ai.chat.plan.PlanService.class),
+            mock(io.mindspice.magenta2.ai.orchestration.runtime.ProjectOperationsAccessService.class));
+
+        String html = versioned.updateJobPreferredAgent("project-1", "job-1",
+            Map.of("preferredAgentId", "agent-owner", "expectedVersion", "3"), mock(HttpServletResponse.class));
+
+        verify(jobs).saveDefinitionCAS(any(), org.mockito.ArgumentMatchers.eq(3));
+        assertThat(html).contains("Version: 3");
     }
 
     @Test

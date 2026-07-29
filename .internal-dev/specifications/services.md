@@ -48,6 +48,7 @@ Services own use-case behavior and hide persistence, transport, filesystem, and 
 - `ScheduleService` owns versioned six-field cron/IANA-timezone definitions, revision-qualified firing identities, operation-key digest idempotency, persisted owner/fence claims, retry attempts, restart/misfire handling, and capability-free simulation.
 - `EventReactionService` owns revision-qualified dispatch identity, immutable event/template snapshots, operation-key digest idempotency, causation/deduplication, loop/depth/rate suppression, append-only attempts, and capability-free simulation.
 - `WorkspaceExplorerService` remains exclusively responsible for confined filesystem operations. Cross-domain run/artifact/skill/runtime/automation panels are composed in web fragments and never added to this service.
+- `JobReassignmentService` atomically revoke-and-clones only a queued, unleased, nonterminal project Job assignment with no `JobRun`, a matching expected row version, active project scope, and eligible destination member. Its server-bound operation digest includes actor, action, scope, source, destination, and expected version; successful replay returns the one persisted successor. Source attribution is never rewritten; the successor captures a fresh destination binding and lifecycle reservation. Failure after revoke rolls back the complete operation. Work Task provenance remains deliberately unavailable until its transactional append-attempt participant exists.
 
 ## Ownership Boundary
 

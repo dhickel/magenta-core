@@ -11,7 +11,7 @@ This package owns durable agent, assignment, job, project, schedule, event, and 
 - Persist execution selection as `workspaceType`, `workspaceKey`, and internally derived `workspaceIdentity`.
 - Treat project ids as membership and attribution metadata only. Agent-scoped project materializations are generation-bound supplemental context containers, never workspace roots; immutable context bindings/defaults use durable operation-key and digest idempotency. Assignment submission reserves its operation before capture, then persists mandatory assignment/task-run owner links; runners validate those links and binding state/generation before provisioning.
 - Resolve one `WorkspaceDescriptor` at each execution-attempt boundary and carry that selection through tools, prompts, child work, and output publication.
-- Treat jobs as task-like executable work that owns no filesystem directory.
+- Treat jobs as task-like executable work that owns no filesystem directory. `JobDefinition` owns reusable fields and `JobRun` owns native execution state; queued reassignment revoke-and-clones through `JobReassignmentService` and never retargets an existing assignment.
 
 ### Change guidance
 - Controllers remain thin; services own validation and use cases; repositories own schema compatibility.

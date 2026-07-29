@@ -44,7 +44,7 @@ class JobServiceTest {
     void rejectsIncompleteSelection() {
         assertThatThrownBy(() -> new JobDefinition(
             null, "agent-1", null, "agent", null, null, "DRAFT", "Bad", null,
-            List.of(), null, null, null, null, null))
+            List.of(), null, null, null, 1, null, null))
             .isInstanceOf(IllegalArgumentException.class)
             .hasMessageContaining("supplied together");
     }
@@ -134,7 +134,7 @@ class JobServiceTest {
 
     private JobDefinition def(String id, String title, List<JobWorkItem> items) {
         return new JobDefinition(id, "agent-1", null, "agent", "agent-1", null, "DRAFT",
-            title, "Summary", items, null, null, null, null, null);
+            title, "Summary", items, null, null, null, 1, null, null);
     }
 
     private JobWorkItem item(String key) {

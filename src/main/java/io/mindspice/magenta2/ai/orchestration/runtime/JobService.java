@@ -134,6 +134,8 @@ public class JobService {
         }
         Instant now = Instant.now();
         Instant createdAt = def.createdAt() == null ? now : def.createdAt();
+        int existingVersion = jobRepository.findDefinition(id)
+            .map(JobDefinition::definitionVersion).orElse(0);
         jobRepository.findDefinition(id)
             .filter(existing -> jobExecutionAffectingChanged(existing, def, items))
             .ifPresent(existing -> requireJobExecutionMutationAllowed(id));
@@ -148,8 +150,45 @@ public class JobService {
             def.title(), def.summary(),
             orderedItems(items),
             def.promptProfile(), def.model(), def.settingsOverrideJson(),
+            existingVersion,
             createdAt, def.updatedAt()
         ));
+    }
+
+    /**
+     * CAS save for definition fields. Only commits if the persisted version
+     * matches expectedVersion. Returns the updated definition or empty on
+     * version conflict.
+     */
+    public Optional<JobDefinition> saveDefinitionCAS(JobDefinition def, int expectedVersion) {
+        String id = StringUtils.hasText(def.id()) ? def.id() : UUID.randomUUID().toString();
+        if (!StringUtils.hasText(def.title())) {
+            throw new IllegalArgumentException("Job title is required");
+        }
+        List<JobWorkItem> items = def.items() == null ? List.of() : def.items();
+        for (JobWorkItem item : items) {
+            if (item.type() == JobWorkItemType.PLAN && !StringUtils.hasText(item.planId())) {
+                throw new IllegalArgumentException(
+                    "Work item '" + item.key() + "' has type PLAN but no planId");
+            }
+            if (item.type() == JobWorkItemType.WORKFLOW && !StringUtils.hasText(item.workflowId())) {
+                throw new IllegalArgumentException(
+                    "Work item '" + item.key() + "' has type WORKFLOW but no workflowId");
+            }
+        }
+        return jobRepository.saveDefinitionCAS(new JobDefinition(
+            id,
+            normalize(def.ownerAgentId()),
+            normalize(def.projectId()),
+            normalize(def.workspaceType()),
+            normalize(def.workspaceKey()),
+            null,
+            StringUtils.hasText(def.status()) ? def.status().trim() : "DRAFT",
+            def.title(), def.summary(),
+            orderedItems(items),
+            def.promptProfile(), def.model(), def.settingsOverrideJson(),
+            0, def.createdAt(), def.updatedAt()
+        ), expectedVersion);
     }
 
     public List<JobWorkItem> listItems(String jobId) {
@@ -193,16 +232,15 @@ public class JobService {
     }
 
     /**
-     * Update a job definition's status. Used by the runner to synchronize
-     * definition status with run lifecycle.
+     * Removed: the runner owned no definition state fields. Definition status
+     * is a definition-level publishing concern, never a per-run lifecycle write.
+     * Use {@link #saveDefinition} or {@link #saveDefinitionCAS} for
+     * definition-owned field changes.
      */
+    @Deprecated
     public void updateDefinitionStatus(String jobId, String status) {
-        JobDefinition def = getDefinition(jobId);
-        saveDefinition(new JobDefinition(
-            def.id(), def.ownerAgentId(), def.projectId(), def.workspaceType(), def.workspaceKey(),
-            def.workspaceIdentity(), status, def.title(), def.summary(), def.items(), def.promptProfile(),
-            def.model(), def.settingsOverrideJson(), def.createdAt(), def.updatedAt()
-        ));
+        throw new UnsupportedOperationException(
+            "Definition status is definition-owned; the runner cannot write it");
     }
 
     public void deleteDefinition(String id) {
@@ -682,7 +720,8 @@ public class JobService {
             definition.workspaceType(), definition.workspaceKey(), definition.workspaceIdentity(),
             definition.status(), definition.title(),
             definition.summary(), items, definition.promptProfile(), definition.model(),
-            definition.settingsOverrideJson(), definition.createdAt(), definition.updatedAt()
+            definition.settingsOverrideJson(), definition.definitionVersion(),
+            definition.createdAt(), definition.updatedAt()
         );
     }
 

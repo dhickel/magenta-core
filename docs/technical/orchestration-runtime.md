@@ -82,7 +82,9 @@ User-facing jobs are task-like executable work bound to an agent and optional pr
 
 `JobExecutionSummary` bridges the definition, assignment, agent/project attribution, typed workspace selection, job run status, child run ids, output count, and lifecycle timestamps. It exposes no compatibility workspace id or host path.
 
-Job recurrence/start behavior is assignment-routed. Recurrence firing enqueues `JOB_RUN` assignments and advances recurrence timestamps; direct job run allocation is reserved for assignment-owned runner execution.
+Job recurrence/start behavior is assignment-routed. Recurrence firing enqueues `JOB_RUN` assignments and advances recurrence timestamps; direct job run allocation is reserved for assignment-owned runner execution. `owner_agent_id` is the sole persisted preferred executor and applies only to later submissions; absent preference requires an explicit executor rather than an arbitrary fallback. Definition updates use `definition_version` CAS where an operator is updating a current view, and runners never write definition lifecycle status.
+
+`JobReassignmentService` atomically revokes and replaces only a queued, unleased, nonterminal source assignment with no `JobRun`. It binds idempotency to the server actor, project scope, source, destination, and expected assignment version; source revocation, a destination-agent context capture, fresh lifecycle reservation, successor, and durable operation record commit together. The source row is never retargeted, and its workspace, checkpoint, lease, outputs, artifacts, results, and cancellation state are not copied. A failed successor creation rolls back the revoke. Running, leased, terminal, native-run, archived, out-of-scope, and ineligible-member cases fail closed.
 
 The alpha mutation policy is conservative. Project deletion and membership removal are blocked while active work references the project or member agent. Job deletion and execution-affecting edits, including item changes, project/default agent, recurrence, and model changes, are blocked while non-terminal job assignments or runs exist. Label-only edits remain allowed where services permit them.
 

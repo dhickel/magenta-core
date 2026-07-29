@@ -93,7 +93,8 @@ public class JobController {
                 jobId, definition.ownerAgentId(), definition.projectId(),
                 definition.workspaceType(), definition.workspaceKey(), definition.workspaceIdentity(), definition.status(),
                 definition.title(), definition.summary(), definition.items(), definition.promptProfile(),
-                definition.model(), definition.settingsOverrideJson(), definition.createdAt(), definition.updatedAt()
+                definition.model(), definition.settingsOverrideJson(), definition.definitionVersion(),
+                definition.createdAt(), definition.updatedAt()
             ));
         } catch (IllegalArgumentException e) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, e.getMessage());
@@ -354,11 +355,8 @@ public class JobController {
         if (normalized != null) {
             return normalized;
         }
-        return agentProfileService.list().stream()
-            .filter(agent -> agent.status() != null && !"DISABLED".equals(agent.status().name()))
-            .findFirst()
-            .map(agent -> agent.id())
-            .orElseThrow(() -> new ResponseStatusException(HttpStatus.BAD_REQUEST, "No active agents available"));
+        throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+            "Job submission requires an explicit agent or a preferred executor");
     }
 
     private String normalize(String value, String fallback) {

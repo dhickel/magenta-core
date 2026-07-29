@@ -230,6 +230,9 @@ public final class SchemaMigrationRunner {
             java.util.stream.Stream.concat(FOUNDATION_TABLES_V14.stream(),
                     java.util.stream.Stream.of("work_task_definitions", "work_task_attempts", "work_task_operations")).toList());
     private static final List<String> FOUNDATION_TABLES_V16 = FOUNDATION_TABLES_V15;
+    private static final List<String> FOUNDATION_TABLES_V17 = List.copyOf(
+            java.util.stream.Stream.concat(FOUNDATION_TABLES_V16.stream(),
+                    java.util.stream.Stream.of("job_reassignment_operations")).toList());
     private static final Set<String> FOUNDATION_INDEXES_V10 = Set.of(
             "idx_skill_candidate_versions_lookup", "idx_skill_candidate_observations_candidate",
             "idx_skill_candidate_observations_scan", "idx_skill_exact_assignments_target",
@@ -284,6 +287,14 @@ public final class SchemaMigrationRunner {
                             "idx_work_task_defs_promoted_plan",
                             "idx_work_task_attempts_task",
                             "idx_work_assignments_task_origin_active"))
+                    .collect(java.util.stream.Collectors.toSet()));
+    private static final Set<String> FOUNDATION_INDEXES_V16 = FOUNDATION_INDEXES_V15;
+    private static final Set<String> FOUNDATION_INDEXES_V17 = java.util.Set.copyOf(
+            java.util.stream.Stream.concat(FOUNDATION_INDEXES_V16.stream(),
+                    java.util.stream.Stream.of(
+                            "idx_job_runs_assignment_unique",
+                            "idx_job_reassignment_source",
+                            "idx_job_reassignment_destination"))
                     .collect(java.util.stream.Collectors.toSet()));
 
     private static final Map<String, List<String>> FOUNDATION_COLUMNS = Map.ofEntries(
@@ -409,7 +420,13 @@ public final class SchemaMigrationRunner {
             Map.entry("work_task_attempts", List.of("id", "task_id", "assignment_id",
                     "attempt_order", "predecessor_attempt_id", "created_at")),
             Map.entry("work_task_operations", List.of("operation_type", "operation_key",
-                    "request_digest", "operation_state", "task_id", "result_json", "created_at"))
+                    "request_digest", "operation_state", "task_id", "result_json", "created_at")),
+            Map.entry("job_reassignment_operations", List.of("operation_key", "request_digest",
+                    "operation_state", "scope_text", "expected_version",
+                    "source_assignment_id", "destination_agent_id",
+                    "successor_assignment_id", "successor_task_run_id",
+                    "lineage_parent_id", "terminal_outcome", "failure_class",
+                    "created_at", "completed_at"))
     );
 
 
@@ -489,6 +506,7 @@ public final class SchemaMigrationRunner {
                     ensureV14Columns(connection, resource.version());
                     ensureV15Columns(connection, resource.version());
                     ensureV16WorkTaskIntegrity(connection, resource.version());
+                    ensureV17JobDefinitionVersion(connection, resource.version());
                     ScriptUtils.executeSqlScript(connection, new EncodedResource(
                             new ByteArrayResource(resource.bytes(), resource.name()), StandardCharsets.UTF_8));
                     ensureV14ImmutableAttributionTrigger(connection, resource.version());
@@ -499,6 +517,7 @@ public final class SchemaMigrationRunner {
                 // Fresh schema is marked as already migrated, so corrective trigger bodies
                 // that cannot pass through ScriptUtils must also be installed here.
                 ensureV16WorkTaskIntegrity(connection, latestVersion);
+                ensureV17JobDefinitionVersion(connection, latestVersion);
                 ensureV14ImmutableAttributionTrigger(connection, latestVersion);
                 validateOwnedSchema(connection, latestVersion);
                 statement.execute("commit");
@@ -783,6 +802,17 @@ public final class SchemaMigrationRunner {
         }
     }
 
+    /** SQLite-safe conditional column installation for migration 017. */
+    private void ensureV17JobDefinitionVersion(Connection connection, int version) throws SQLException {
+        if (version != 17 || tableColumns(connection, "job_definitions").contains("definition_version")) {
+            return;
+        }
+        try (Statement statement = connection.createStatement()) {
+            statement.execute("alter table job_definitions add column definition_version integer default 1");
+            statement.execute("update job_definitions set definition_version = 1 where definition_version is null");
+        }
+    }
+
     /** SQLite-safe corrective shape for a migration 015 checksum that is already durable. */
     private void ensureV16WorkTaskIntegrity(Connection connection, int version) throws SQLException {
         if (version != 16) {
@@ -867,7 +897,8 @@ public final class SchemaMigrationRunner {
         if (latestVersion < 1) {
             return;
         }
-        List<String> expectedTables = latestVersion >= 16 ? FOUNDATION_TABLES_V16
+        List<String> expectedTables = latestVersion >= 17 ? FOUNDATION_TABLES_V17
+                : latestVersion >= 16 ? FOUNDATION_TABLES_V16
                 : latestVersion >= 15 ? FOUNDATION_TABLES_V15
                 : latestVersion >= 14 ? FOUNDATION_TABLES_V14
                 : latestVersion >= 13 ? FOUNDATION_TABLES_V13
@@ -1132,6 +1163,10 @@ public final class SchemaMigrationRunner {
                 throw new MigrationException("Missing migration-owned v15 indexes: "
                         + FOUNDATION_INDEXES_V15.stream().filter(index -> !allIndexes.contains(index)).toList());
             }
+            if (latestVersion >= 17 && !allIndexes.containsAll(FOUNDATION_INDEXES_V17)) {
+                throw new MigrationException("Missing migration-owned v17 indexes: "
+                        + FOUNDATION_INDEXES_V17.stream().filter(index -> !allIndexes.contains(index)).toList());
+            }
             List<String> assignments = tableColumns(connection, "work_assignments");
             if (!assignments.containsAll(List.of("source_definition_id", "origin_definition_id", "context_binding_key", "row_version"))
                     || !objectNames(connection, "trigger", "work_assignments_immutable_attribution")
@@ -1155,6 +1190,18 @@ public final class SchemaMigrationRunner {
                     || !controlOps.contains("'reserved', 'completed', 'conflict', 'stale'")
                     || !controlOps.contains("length(request_digest) = 64")) {
                 throw new MigrationException("assignment_control_operations is missing required constraints");
+            }
+        }
+        if (latestVersion >= 17) {
+            String reassignmentOps = normalized(tableSql(connection, "job_reassignment_operations"));
+            if (!reassignmentOps.contains("operation_key text not null check")
+                    || !reassignmentOps.contains("unique (successor_assignment_id)")
+                    || !reassignmentOps.contains("length(request_digest) = 64")
+                    || !reassignmentOps.contains("operation_state text not null check")
+                    || !reassignmentOps.contains("'reserved', 'completed', 'conflict', 'failed'")
+                    || !reassignmentOps.contains("expected_version integer not null check")
+                    || !reassignmentOps.contains("length(source_assignment_id) between 1 and 255")) {
+                throw new MigrationException("job_reassignment_operations is missing required constraints");
             }
         }
         if (latestVersion >= 6) {

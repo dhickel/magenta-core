@@ -89,9 +89,9 @@ class AgentToolAuthorizationServiceTest {
             .hasMessageContaining("current agent");
 
         JobDefinition ownerJob = new JobDefinition("job-owner", "agent-1", null, "agent", "agent-1", null, "ACTIVE",
-            "Owned", null, List.of(), null, null, null, Instant.now(), Instant.now());
+            "Owned", null, List.of(), null, null, null, 1, Instant.now(), Instant.now());
         JobDefinition projectJob = new JobDefinition("job-project", "agent-9", "project-1", "agent", "agent-9", null, "ACTIVE",
-            "Project", null, List.of(), null, null, null, Instant.now(), Instant.now());
+            "Project", null, List.of(), null, null, null, 1, Instant.now(), Instant.now());
         when(jobService.getDefinition("job-owner")).thenReturn(ownerJob);
         when(jobService.getDefinition("job-project")).thenReturn(projectJob);
         when(projectService.isMember("project-1", "agent-1")).thenReturn(true);

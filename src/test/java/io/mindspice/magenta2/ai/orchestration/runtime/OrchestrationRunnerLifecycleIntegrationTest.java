@@ -38,6 +38,8 @@ class OrchestrationRunnerLifecycleIntegrationTest {
     @Autowired TaskRunLifecycleService lifecycle;
     @Autowired JdbcTemplate jdbc;
     @Autowired AgentContextService contexts;
+    @Autowired JobReassignmentService reassignments;
+    @Autowired ProjectService projects;
 
     @DynamicPropertySource
     static void properties(DynamicPropertyRegistry registry) {
@@ -55,7 +57,7 @@ class OrchestrationRunnerLifecycleIntegrationTest {
         contexts.initializeDefaultToPersonal(agentId, PersonalSelection.HOME, "integration fixture");
         JobDefinition job = jobs.saveDefinition(new JobDefinition(null, agentId, null,
             "agent", agentId, null, "DRAFT", "Empty lifecycle job", "Summary",
-            List.of(), null, null, null, null, null));
+            List.of(), null, null, null, 1, null, null));
 
         WorkAssignment queued = assignments.create(new AssignmentRequest(
             agentId, job.id(), null, AssignmentType.JOB_RUN, null, 0, null, null,
@@ -88,7 +90,7 @@ class OrchestrationRunnerLifecycleIntegrationTest {
             "local", "Prompt", List.of(), List.of(), true, null, null));
         JobDefinition job = jobs.saveDefinition(new JobDefinition(null, agentId, null,
             "agent", agentId, null, "DRAFT", "Idempotent job", "Summary", List.of(),
-            null, null, null, null, null));
+            null, null, null, 1, null, null));
         AssignmentRequest request = new AssignmentRequest(agentId, job.id(), null, AssignmentType.JOB_RUN,
             null, 0, null, null, null, null, Map.of("jobId", job.id()), "same-operation");
 
@@ -111,7 +113,7 @@ class OrchestrationRunnerLifecycleIntegrationTest {
             "local", "Prompt", List.of(), List.of(), true, null, null));
         JobDefinition job = jobs.saveDefinition(new JobDefinition(null, agentId, null,
             "agent", agentId, null, "DRAFT", "Race job", "Summary", List.of(),
-            null, null, null, null, null));
+            null, null, null, 1, null, null));
         AssignmentRequest request = new AssignmentRequest(agentId, job.id(), null, AssignmentType.JOB_RUN,
             null, 0, null, null, null, null, Map.of("jobId", job.id()), "concurrent-operation");
         CountDownLatch ready = new CountDownLatch(2);
@@ -149,7 +151,7 @@ class OrchestrationRunnerLifecycleIntegrationTest {
             "local", "Prompt", List.of(), List.of(), true, null, null));
         JobDefinition job = jobs.saveDefinition(new JobDefinition(null, agentId, null,
             "agent", agentId, null, "DRAFT", "Child link job", "Summary", List.of(),
-            null, null, null, null, null));
+            null, null, null, 1, null, null));
         WorkAssignment parent = assignments.create(new AssignmentRequest(agentId, job.id(), null,
             AssignmentType.JOB_RUN, null, 0, null, null, null, null, Map.of("jobId", job.id()), "child-parent"));
         String parentRunId = parent.checkpoint().get("taskRunId").toString();
@@ -178,7 +180,7 @@ class OrchestrationRunnerLifecycleIntegrationTest {
             "local", "Prompt", List.of(), List.of(), true, null, null));
         JobDefinition job = jobs.saveDefinition(new JobDefinition(null, agentId, null,
             "agent", agentId, null, "DRAFT", "Stale binding job", "Summary", List.of(),
-            null, null, null, null, null));
+            null, null, null, 1, null, null));
         WorkAssignment queued = assignments.create(new AssignmentRequest(agentId, job.id(), null,
             AssignmentType.JOB_RUN, null, 0, null, null, null, null, Map.of("jobId", job.id()), "stale-op"));
         String taskRunId = queued.checkpoint().get("taskRunId").toString();
@@ -197,7 +199,7 @@ class OrchestrationRunnerLifecycleIntegrationTest {
             "local", "Prompt", List.of(), List.of(), true, null, null));
         JobDefinition job = jobs.saveDefinition(new JobDefinition(null, agentId, null,
             "agent", agentId, null, "DRAFT", "Lineage job", "Summary", List.of(),
-            null, null, null, null, null));
+            null, null, null, 1, null, null));
         WorkAssignment source = assignments.create(new AssignmentRequest(agentId, job.id(), null,
             AssignmentType.JOB_RUN, null, 0, null, null, null, null, Map.of("jobId", job.id()), "lineage-source"));
         assertThat(runner.runAssignment(source.id()).status()).isEqualTo(OrchestrationStatus.COMPLETED);
@@ -210,6 +212,105 @@ class OrchestrationRunnerLifecycleIntegrationTest {
         assertThat(retryBinding).isNotEqualTo(sourceBinding);
         assertThat(jdbc.queryForObject("select binding_key from binding_owner_links where owner_type = 'TASK_RUN' and owner_id = ?",
             String.class, retryRunId)).isEqualTo(retryBinding);
+    }
+
+    @Test
+    void reassignmentIsAtomicIdempotentAndCapturesDestinationContext() {
+        ReassignmentFixture fixture = reassignmentFixture();
+
+        WorkAssignment successor = reassignments.reassign("reassign-replay", "project:" + fixture.projectId(),
+            fixture.source().id(), fixture.destinationAgentId(), fixture.source().rowVersion());
+        WorkAssignment replay = reassignments.reassign("reassign-replay", "project:" + fixture.projectId(),
+            fixture.source().id(), fixture.destinationAgentId(), fixture.source().rowVersion());
+
+        assertThat(replay.id()).isEqualTo(successor.id());
+        assertThat(successor.agentId()).isEqualTo(fixture.destinationAgentId());
+        assertThat(successor.workspaceIdentity()).isEqualTo("agent/" + fixture.destinationAgentId());
+        assertThat(successor.sourceDefinitionId()).isEqualTo(fixture.job().id());
+        assertThat(successor.originDefinitionId()).isEqualTo("REASSIGNMENT/reassign-replay");
+        assertThat(assignments.get(fixture.source().id()).status()).isEqualTo(OrchestrationStatus.CANCELLED);
+        assertThat(assignments.get(fixture.source().id()).rowVersion()).isEqualTo(fixture.source().rowVersion() + 1);
+        assertThat(jdbc.queryForObject("select count(*) from work_assignments where job_id = ?", Integer.class,
+            fixture.job().id())).isEqualTo(2);
+        assertThat(jdbc.queryForObject("select successor_assignment_id from job_reassignment_operations where operation_key = ?",
+            String.class, "reassign-replay")).isEqualTo(successor.id());
+        assertThat(jdbc.queryForObject("select successor_task_run_id from job_reassignment_operations where operation_key = ?",
+            String.class, "reassign-replay")).isEqualTo(successor.checkpoint().get("taskRunId"));
+    }
+
+    @Test
+    void reassignmentRejectsDigestConflictAndCannotCreateAnotherSuccessor() {
+        ReassignmentFixture fixture = reassignmentFixture();
+        WorkAssignment successor = reassignments.reassign("reassign-conflict", "project:" + fixture.projectId(),
+            fixture.source().id(), fixture.destinationAgentId(), fixture.source().rowVersion());
+
+        assertThatThrownBy(() -> reassignments.reassign("reassign-conflict", "project:" + fixture.projectId(),
+            fixture.source().id(), fixture.sourceAgentId(), fixture.source().rowVersion()))
+            .isInstanceOf(JobReassignmentService.OperationConflictException.class);
+        assertThatThrownBy(() -> reassignments.reassign("another-reassign", "project:" + fixture.projectId(),
+            fixture.source().id(), fixture.destinationAgentId(), fixture.source().rowVersion()))
+            .isInstanceOf(JobReassignmentService.ReassignmentConflictException.class);
+        assertThat(jdbc.queryForObject("select count(*) from work_assignments where job_id = ?", Integer.class,
+            fixture.job().id())).isEqualTo(2);
+        assertThat(assignments.get(successor.id()).originDefinitionId()).isEqualTo("REASSIGNMENT/reassign-conflict");
+    }
+
+    @Test
+    void reassignmentFailureRollsBackRevocationAndCanBeRetried() {
+        ReassignmentFixture fixture = reassignmentFixture();
+        jdbc.execute("""
+            create trigger injected_reassignment_failure before insert on work_assignments
+            when new.agent_id = '%s'
+            begin select raise(abort, 'injected successor failure'); end
+            """.formatted(fixture.destinationAgentId()));
+
+        assertThatThrownBy(() -> reassignments.reassign("reassign-rollback", "project:" + fixture.projectId(),
+            fixture.source().id(), fixture.destinationAgentId(), fixture.source().rowVersion()))
+            .isInstanceOf(RuntimeException.class);
+        assertThat(assignments.get(fixture.source().id()).status()).isEqualTo(OrchestrationStatus.QUEUED);
+        assertThat(jdbc.queryForObject("select count(*) from job_reassignment_operations where operation_key = ?",
+            Integer.class, "reassign-rollback")).isZero();
+
+        jdbc.execute("drop trigger injected_reassignment_failure");
+        WorkAssignment successor = reassignments.reassign("reassign-rollback", "project:" + fixture.projectId(),
+            fixture.source().id(), fixture.destinationAgentId(), fixture.source().rowVersion());
+        assertThat(successor.agentId()).isEqualTo(fixture.destinationAgentId());
+    }
+
+    @Test
+    void reassignmentFencesAnUnstartedSourceBeforeRunnerCanAllocateJobRun() {
+        ReassignmentFixture fixture = reassignmentFixture();
+        reassignments.reassign("reassign-fence", "project:" + fixture.projectId(), fixture.source().id(),
+            fixture.destinationAgentId(), fixture.source().rowVersion());
+
+        WorkAssignment result = runner.runAssignment(fixture.source().id());
+        assertThat(result.status()).isEqualTo(OrchestrationStatus.CANCELLED);
+        assertThat(jdbc.queryForObject("select count(*) from job_runs where job_assignment_id = ?", Integer.class,
+            fixture.source().id())).isZero();
+    }
+
+    private ReassignmentFixture reassignmentFixture() {
+        String sourceAgentId = "reassign-source-" + UUID.randomUUID();
+        String destinationAgentId = "reassign-destination-" + UUID.randomUUID();
+        agents.create(new AgentProfile(sourceAgentId, "Source " + sourceAgentId, AgentProfileStatus.ACTIVE,
+            "local", "Prompt", List.of(), List.of(), true, null, null));
+        agents.create(new AgentProfile(destinationAgentId, "Destination " + destinationAgentId, AgentProfileStatus.ACTIVE,
+            "local", "Prompt", List.of(), List.of(), true, null, null));
+        contexts.initializeDefaultToPersonal(sourceAgentId, PersonalSelection.HOME, "fixture");
+        contexts.initializeDefaultToPersonal(destinationAgentId, PersonalSelection.HOME, "fixture");
+        Project project = projects.createProject("Reassignment " + UUID.randomUUID(), null, sourceAgentId, null);
+        projects.addAgent(project.id(), destinationAgentId, "member");
+        JobDefinition job = jobs.saveDefinition(new JobDefinition(null, sourceAgentId, project.id(),
+            "agent", sourceAgentId, null, "DRAFT", "Reassignment job", "Summary", List.of(),
+            null, null, null, 1, null, null));
+        WorkAssignment source = assignments.create(new AssignmentRequest(sourceAgentId, job.id(), null,
+            AssignmentType.JOB_RUN, null, 0, null, project.id(), null, null,
+            Map.of("jobId", job.id()), "source-" + UUID.randomUUID()));
+        return new ReassignmentFixture(project.id(), sourceAgentId, destinationAgentId, job, source);
+    }
+
+    private record ReassignmentFixture(String projectId, String sourceAgentId, String destinationAgentId,
+                                       JobDefinition job, WorkAssignment source) {
     }
 
     private static Path config() {

@@ -5,7 +5,15 @@ import java.time.Instant;
 import java.util.List;
 import org.springframework.util.StringUtils;
 
-/** Defines durable, task-like work coordinated by an agent. */
+/**
+ * Defines durable, task-like work coordinated by an agent.
+ * <p>
+ * {@code ownerAgentId} is the sole persisted preferred executor. Contradictory
+ * aliases (e.g. checkpoint-supplied agent hints) are rejected at the boundary;
+ * preferences never infer fallback execution. Definition fields are
+ * definition-owned; {@link JobRun} owns native identity/state/result.
+ * {@code definitionVersion} is a CAS guard (not a user-facing revision).
+ */
 public record JobDefinition(
     String id,
     String ownerAgentId,
@@ -20,6 +28,8 @@ public record JobDefinition(
     String promptProfile,
     String model,
     String settingsOverrideJson,
+    @JsonProperty(access = JsonProperty.Access.READ_ONLY)
+    int definitionVersion,
     Instant createdAt,
     Instant updatedAt
 ) {
@@ -33,6 +43,7 @@ public record JobDefinition(
         items = items == null ? List.of() : List.copyOf(items);
     }
 
+    /** Legacy compact constructor (version 1). */
     public JobDefinition(
         String id,
         String title,
@@ -45,7 +56,7 @@ public record JobDefinition(
         Instant updatedAt
     ) {
         this(id, null, null, null, null, null, null, title, summary, items,
-            promptProfile, model, settingsOverrideJson, createdAt, updatedAt);
+            promptProfile, model, settingsOverrideJson, 1, createdAt, updatedAt);
     }
 
     private static String normalize(String value) {
