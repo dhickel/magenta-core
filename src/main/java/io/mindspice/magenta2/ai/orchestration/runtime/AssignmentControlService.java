@@ -106,10 +106,9 @@ public class AssignmentControlService {
             throw new StaleRevisionException("Expected rowVersion " + expectedRowVersion
                 + " but current is " + current.rowVersion());
         }
-        if (current.status().isTerminal() || current.status() == OrchestrationStatus.RUNNING
-                || current.status() == OrchestrationStatus.CANCEL_REQUESTED) {
+        if (current.status() != OrchestrationStatus.QUEUED) {
             repository.completeControlOperation(key, "PRIORITY_CAS", "CONFLICT",
-                "assignment is not queued/leased: " + current.status());
+                "assignment is not queued: " + current.status());
             throw new OperationConflictException(
                 "Cannot change priority of assignment in state " + current.status());
         }

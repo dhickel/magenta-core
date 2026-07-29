@@ -1708,13 +1708,11 @@ public class OrchestrationRuntimeRepository {
                 set priority = ?, row_version = row_version + 1, updated_at = ?
                 where id = ? and project_id = ?
                   and row_version = ?
-                  and status not in (?, ?, ?, ?)
+                  and status = ?
                   and (lease_owner is null or lease_owner = '')
                 """,
-            newPriority, Instant.now().toString(),
-            assignmentId, projectId, expectedRowVersion,
-            OrchestrationStatus.CANCELLED.name(), OrchestrationStatus.FAILED.name(),
-            OrchestrationStatus.COMPLETED.name(), OrchestrationStatus.NEEDS_REVIEW.name()
+            newPriority, Instant.now().toString(), assignmentId, projectId, expectedRowVersion,
+            OrchestrationStatus.QUEUED.name()
         );
         if (updated != 1) {
             throw new IllegalStateException(

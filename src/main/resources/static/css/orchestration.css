@@ -3983,3 +3983,190 @@
         padding: 0.2rem 0.3rem;
     }
 }
+
+/* ── Project grouped tabs ── */
+.project-tabs-grouped {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0;
+    border-bottom: 2px solid var(--color-border, #c8d4dd);
+    padding: 0;
+    margin: 0 0 1rem 0;
+}
+
+.project-tab-group {
+    display: flex;
+    flex-direction: column;
+    border-right: 1px solid var(--color-border-light, #e0e6eb);
+}
+
+.project-tab-group:last-child {
+    border-right: none;
+}
+
+.project-tab-group-label {
+    font-size: 0.65rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--color-muted, #6b7c8a);
+    padding: 0.3rem 0.5rem 0;
+    margin: 0;
+    line-height: 1.2;
+}
+
+.project-tab-group .btn,
+.project-tab-group button {
+    background: none;
+    border: none;
+    border-radius: 0;
+    padding: 0.35rem 0.65rem;
+    font-size: 0.8rem;
+    color: var(--color-text-secondary, #4a5568);
+    cursor: pointer;
+    text-align: left;
+    border-bottom: 2px solid transparent;
+    margin: 0;
+    transition: color 0.15s, border-color 0.15s;
+}
+
+.project-tab-group .btn:hover,
+.project-tab-group button:hover:not(:disabled) {
+    color: var(--color-primary, #2563eb);
+    border-bottom-color: var(--color-primary-light, #93c5fd);
+}
+
+.project-tab-group .btn.active,
+.project-tab-group button.active {
+    color: var(--color-primary, #2563eb);
+    border-bottom-color: var(--color-primary, #2563eb);
+    font-weight: 600;
+}
+
+.project-tab-group button:disabled,
+.project-tab-group button.tab-unavailable {
+    color: var(--color-muted, #9ca3af);
+    cursor: not-allowed;
+    opacity: 0.5;
+}
+
+/* ── Project unavailable tab state ── */
+.project-unavailable-tab {
+    padding: 1.5rem;
+    text-align: center;
+}
+
+.project-tab-state {
+    padding: 1rem;
+    border-radius: 6px;
+    border: 1px solid var(--color-border, #c8d4dd);
+    background: var(--color-surface, #f9fafb);
+}
+
+.project-tab-state.unavailable {
+    border-color: var(--color-border-light, #e5e7eb);
+    background: var(--color-surface, #f9fafb);
+}
+
+.project-tab-state .orch-muted-note {
+    font-size: 0.8rem;
+    color: var(--color-muted, #9ca3af);
+    margin-top: 0.5rem;
+}
+
+/* ── Project queue panel ── */
+.project-queue-panel {
+    padding: 0;
+}
+
+.project-queue-subnav {
+    display: flex;
+    gap: 0.5rem;
+    margin: 0 0 1rem 0;
+    border-bottom: 1px solid var(--color-border-light, #e5e7eb);
+    padding-bottom: 0.5rem;
+}
+
+.project-queue-subnav .btn,
+.project-queue-subnav button {
+    background: none;
+    border: 1px solid var(--color-border, #c8d4dd);
+    border-radius: 4px;
+    padding: 0.3rem 0.75rem;
+    font-size: 0.8rem;
+    cursor: pointer;
+    color: var(--color-text-secondary, #4a5568);
+}
+
+.project-queue-subnav .btn.active,
+.project-queue-subnav button.active {
+    background: var(--color-primary, #2563eb);
+    color: #fff;
+    border-color: var(--color-primary, #2563eb);
+}
+
+.project-queue-cursor-meta {
+    display: block;
+    font-size: 0.7rem;
+    color: var(--color-muted, #9ca3af);
+    margin-bottom: 0.5rem;
+}
+
+.project-queue-table code {
+    font-size: 0.7rem;
+    background: var(--color-surface, #f3f4f6);
+    padding: 0.15rem 0.3rem;
+    border-radius: 3px;
+}
+
+.project-queue-status {
+    margin: 0.5rem 0;
+    padding: 0.5rem;
+    border-radius: 4px;
+}
+
+.project-queue-status .orch-status-disabled {
+    background: var(--color-surface, #f9fafb);
+    border: 1px solid var(--color-border-light, #e5e7eb);
+    color: var(--color-muted, #9ca3af);
+    padding: 0.5rem;
+    border-radius: 4px;
+}
+
+/* ── Inline priority form ── */
+.orch-form-inline-priority {
+    display: inline-flex;
+    gap: 0.25rem;
+    align-items: center;
+}
+
+.orch-form-inline-priority input[type="text"],
+.orch-form-inline-priority input[type="number"] {
+    width: 3rem;
+    padding: 0.2rem 0.3rem;
+    font-size: 0.75rem;
+    text-align: center;
+}
+
+/* ── Project detail shell spacing ── */
+.project-detail-shell .project-detail-heading {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    margin-bottom: 0.75rem;
+}
+
+.project-detail-shell .entity-title {
+    flex: 1;
+}
+
+/* ── Project tab panel host ── */
+#project-tab-panel {
+    min-height: 300px;
+}
+
+/* ── Queue inspector/transcript hosts ── */
+#project-queue-inspector,
+#project-queue-transcript {
+    margin-top: 1rem;
+    min-height: 80px;
+}

@@ -102,12 +102,12 @@ public class AssignmentQueryService {
      * List active (non-terminal) assignments for a scope with deterministic
      * ordering (priority desc, then created_at asc).
      */
-    List<WorkAssignment> listActive(AssignmentScope scope, int limit) {
+    public List<WorkAssignment> listActive(AssignmentScope scope, int limit) {
         int clamped = clampLimit(limit);
         return switch (scope) {
             case AgentScope s -> repository.findActiveAssignmentsForAgent(s.agentId(), clamped);
             case ProjectScope s -> {
-                requireActiveProject(s.projectId());
+                requireProject(s.projectId(), false);
                 yield repository.findActiveAssignmentsForProject(s.projectId(), clamped);
             }
         };
@@ -117,15 +117,32 @@ public class AssignmentQueryService {
      * List terminal (history) assignments for a scope with deterministic
      * ordering (completed_at desc).
      */
-    List<WorkAssignment> listHistory(AssignmentScope scope, int limit) {
+    public List<WorkAssignment> listHistory(AssignmentScope scope, int limit) {
         int clamped = clampLimit(limit);
         return switch (scope) {
             case AgentScope s -> repository.findTerminalAssignmentsForAgent(s.agentId(), clamped);
             case ProjectScope s -> {
-                requireActiveProject(s.projectId());
+                requireProject(s.projectId(), true);
                 yield repository.findTerminalAssignmentsForProject(s.projectId(), clamped);
             }
         };
+    }
+
+    /** Re-resolve one assignment under the supplied sealed scope. */
+    public AssignmentListEntry resolveEntry(AssignmentScope scope, String assignmentId) {
+        if (!StringUtils.hasText(assignmentId)) {
+            throw new IllegalArgumentException("Assignment id is required");
+        }
+        WorkAssignment assignment = repository.findAssignment(assignmentId)
+            .orElseThrow(() -> new IllegalArgumentException("Assignment not found"));
+        if (!matchesScope(assignment, scope)) {
+            throw new IllegalArgumentException("Assignment not found");
+        }
+        if (scope instanceof ProjectScope projectScope) {
+            boolean terminal = assignment.status() != null && assignment.status().isTerminal();
+            requireProject(projectScope.projectId(), terminal);
+        }
+        return AssignmentListEntry.from(assignment, computeAllowedActions(assignment, scope));
     }
 
     // ════════════════════════════════════════════════════════════════
@@ -138,7 +155,7 @@ public class AssignmentQueryService {
      * and the ordered member identities seen on this page so the server can
      * validate and re-resolve on the next page.
      */
-    CursorSnapshot snapshotCursor(AssignmentScope scope, String filter,
+    public CursorSnapshot snapshotCursor(AssignmentScope scope, String filter,
                                           List<WorkAssignment> members) {
         String scopeDigest = sha256(scope.label());
         String requestDigest = sha256("filter=" + (filter != null ? filter : "active")
@@ -150,7 +167,7 @@ public class AssignmentQueryService {
         repository.deleteExpiredAssignmentQuerySnapshots(Instant.now());
         repository.insertAssignmentQuerySnapshot(snapshotId, scopeDigest, requestDigest, memberList, expiresAt);
 
-        String payload = String.join("\u001f", snapshotId, scopeDigest, requestDigest, expiresAt.toString());
+        String payload = String.join("\u001f", snapshotId, scopeDigest, requestDigest, expiresAt.toString(), "0");
         String signature = sign(payload);
 
         return new CursorSnapshot(snapshotId, scopeDigest, requestDigest, expiresAt, memberIds,
@@ -162,7 +179,10 @@ public class AssignmentQueryService {
      * expired, cross-scope, or unknown cursors. Re-reads every displayed
      * member canonically under the original scope.
      */
-    CursorPage resolveCursor(AssignmentScope scope, String filter, CursorSnapshot cursor) {
+    public CursorPage resolveCursor(AssignmentScope scope, String filter, CursorSnapshot cursor) {
+        if (scope instanceof ProjectScope projectScope) {
+            requireProject(projectScope.projectId(), "history".equals(filter));
+        }
         if (cursor == null) {
             throw new InvalidCursorException("Cursor is required");
         }
@@ -180,7 +200,7 @@ public class AssignmentQueryService {
             throw new InvalidCursorException("Cursor scope, request, or expiry is invalid");
         }
         String payload = String.join("\u001f", cursor.snapshotId(), cursor.scopeDigest(),
-            cursor.requestDigest(), cursor.expiresAt().toString());
+            cursor.requestDigest(), cursor.expiresAt().toString(), String.valueOf(cursor.offset()));
         String expectedSig = sign(payload);
         if (!MessageDigest.isEqual(expectedSig.getBytes(StandardCharsets.UTF_8),
                 cursor.signature().getBytes(StandardCharsets.UTF_8))) {
@@ -198,14 +218,22 @@ public class AssignmentQueryService {
             throw new InvalidCursorException("Cursor membership is invalid");
         }
         boolean active = !"history".equals(filter);
-        List<AssignmentListEntry> members = memberIds.stream()
+        if (cursor.offset() < 0 || cursor.offset() > memberIds.size()) {
+            throw new InvalidCursorException("Cursor position is invalid");
+        }
+        int end = Math.min(cursor.offset() + DEFAULT_PAGE_SIZE, memberIds.size());
+        List<AssignmentListEntry> members = memberIds.subList(cursor.offset(), end).stream()
             .map(id -> repository.findAssignment(id).orElse(null))
             .filter(Objects::nonNull)
             .filter(a -> matchesScope(a, scope))
             .filter(a -> active != a.status().isTerminal())
             .map(a -> AssignmentListEntry.from(a, computeAllowedActions(a, scope)))
             .toList();
-        return new CursorPage(members, cursor);
+        CursorSnapshot next = end < memberIds.size()
+            ? cursor.withOffset(end, sign(String.join("\u001f", cursor.snapshotId(), cursor.scopeDigest(),
+                cursor.requestDigest(), cursor.expiresAt().toString(), String.valueOf(end))))
+            : null;
+        return new CursorPage(members, cursor, next);
     }
 
     // ════════════════════════════════════════════════════════════════
@@ -225,10 +253,7 @@ public class AssignmentQueryService {
         String runDisplayName,
         int priority,
         OrchestrationStatus status,
-        String modelOverride,
         String projectId,
-        String workspaceType,
-        String workspaceKey,
         int rowVersion,
         Instant createdAt,
         Instant updatedAt,
@@ -240,8 +265,7 @@ public class AssignmentQueryService {
         public static AssignmentListEntry from(WorkAssignment a, List<String> allowedActions) {
             return new AssignmentListEntry(
                 a.id(), a.agentId(), a.jobId(), a.assignmentType(), a.runDisplayName(),
-                a.priority(), a.status(), a.modelOverride(), a.projectId(),
-                a.workspaceType(), a.workspaceKey(), a.rowVersion(),
+                a.priority(), a.status(), a.projectId(), a.rowVersion(),
                 a.createdAt(), a.updatedAt(), a.startedAt(), a.completedAt(),
                 allowedActions);
         }
@@ -286,18 +310,30 @@ public class AssignmentQueryService {
         Instant expiresAt,
         List<String> memberIds,
         String signature,
-        String filter
+        String filter,
+        int offset
     ) {
+        public CursorSnapshot(String snapshotId, String scopeDigest, String requestDigest,
+                              Instant expiresAt, List<String> memberIds, String signature,
+                              String filter) {
+            this(snapshotId, scopeDigest, requestDigest, expiresAt, memberIds, signature, filter, 0);
+        }
+
         public CursorSnapshot(String scopeDigest, String requestDigest, Instant expiresAt,
                               List<String> memberIds, String signature, String filter) {
-            this(null, scopeDigest, requestDigest, expiresAt, memberIds, signature, filter);
+            this(null, scopeDigest, requestDigest, expiresAt, memberIds, signature, filter, 0);
+        }
+
+        CursorSnapshot withOffset(int nextOffset, String nextSignature) {
+            return new CursorSnapshot(snapshotId, scopeDigest, requestDigest, expiresAt, memberIds,
+                nextSignature, filter, nextOffset);
         }
 
         public String encode() {
             String raw = String.join("\u001e",
                 snapshotId, scopeDigest, requestDigest, expiresAt.toString(),
                 String.join("\u001d", memberIds), signature,
-                filter != null ? filter : "active");
+                filter != null ? filter : "active", String.valueOf(offset));
             return Base64.getUrlEncoder().withoutPadding().encodeToString(
                 raw.getBytes(StandardCharsets.UTF_8));
         }
@@ -308,25 +344,25 @@ public class AssignmentQueryService {
             }
             try {
                 String raw = new String(Base64.getUrlDecoder().decode(encoded), StandardCharsets.UTF_8);
-                String[] parts = raw.split("\u001e", 7);
-                if (parts.length != 7) {
+                String[] parts = raw.split("\u001e", 8);
+                if (parts.length != 8) {
                     throw new InvalidCursorException("Malformed cursor payload");
                 }
                 List<String> ids = parts[4].isEmpty()
                     ? List.of()
                     : List.of(parts[4].split("\u001d"));
-                return new CursorSnapshot(
-                    parts[0], parts[1], parts[2], Instant.parse(parts[3]),
-                    ids, parts[5], parts[6]);
+                return new CursorSnapshot(parts[0], parts[1], parts[2], Instant.parse(parts[3]),
+                    ids, parts[5], parts[6], Integer.parseInt(parts[7]));
             } catch (Exception e) {
-                throw new InvalidCursorException("Failed to decode cursor: " + e.getMessage());
+                throw new InvalidCursorException("Malformed cursor");
             }
         }
     }
 
     public record CursorPage(
         List<AssignmentListEntry> members,
-        CursorSnapshot cursor
+        CursorSnapshot cursor,
+        CursorSnapshot nextCursor
     ) {}
 
     // ════════════════════════════════════════════════════════════════
@@ -344,12 +380,11 @@ public class AssignmentQueryService {
         return Math.clamp(limit > 0 ? limit : DEFAULT_PAGE_SIZE, 1, MAX_PAGE_SIZE);
     }
 
-    private void requireActiveProject(String projectId) {
+    private void requireProject(String projectId, boolean allowArchivedHistory) {
         Project project = projectRepository.findById(projectId)
-            .orElseThrow(() -> new IllegalArgumentException("Project not found: " + projectId));
-        if (project.archived()) {
-            throw new ProjectOperationsAccessService.ProjectAccessDeniedException(
-                "Project is archived: " + projectId);
+            .orElseThrow(() -> new IllegalArgumentException("Project not found"));
+        if (project.archived() && !allowArchivedHistory) {
+            throw new ProjectOperationsAccessService.ProjectAccessDeniedException("Project is archived");
         }
     }
 

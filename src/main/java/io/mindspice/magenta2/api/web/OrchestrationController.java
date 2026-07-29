@@ -41,6 +41,9 @@ import io.mindspice.magenta2.ai.orchestration.runtime.OrchestrationTaskContext;
 import io.mindspice.magenta2.ai.orchestration.runtime.OrchestrationTaskContextHolder;
 import io.mindspice.magenta2.ai.orchestration.runtime.AgentEventReaction;
 import io.mindspice.magenta2.ai.orchestration.runtime.AgentSchedule;
+import io.mindspice.magenta2.ai.orchestration.runtime.AssignmentQueryService;
+import io.mindspice.magenta2.ai.orchestration.runtime.AssignmentQueryService.AgentScope;
+import io.mindspice.magenta2.ai.orchestration.runtime.AssignmentQueryService.AssignmentListEntry;
 import io.mindspice.magenta2.ai.orchestration.runtime.AssignmentRequest;
 import io.mindspice.magenta2.ai.orchestration.runtime.AssignmentService;
 import io.mindspice.magenta2.ai.orchestration.runtime.AssignmentService.AssignmentDiagnostics;
@@ -135,7 +138,6 @@ public class OrchestrationController {
     private static final String AGENTS_JS = "/js/orchestration/agents.js?v=1";
     private static final String AGENT_CHAT_JS = "/js/orchestration/agent-chat.js?v=2";
     private static final String PLANS_JS = "/js/orchestration/plans.js?v=4";
-    private static final String PROJECTS_JS = "/js/orchestration/projects.js?v=4";
     private static final String HTMX_ERRORS_JS = "/js/orchestration/htmx-errors.js?v=1";
     private static final String SYSTEM_CHAT_JS = "/js/orchestration/system-chat.js?v=1";
     private static final ObjectMapper JSON = new ObjectMapper().findAndRegisterModules();
@@ -169,6 +171,7 @@ public class OrchestrationController {
     private AgentContextService agentContextService;
     @Autowired(required = false)
     private AgentMaterializationService agentMaterializationService;
+    private final AssignmentQueryService assignmentQueryService;
     private final AssignmentService assignmentService;
     private final ScheduleService scheduleService;
     private final EventReactionService eventReactionService;
@@ -192,6 +195,7 @@ public class OrchestrationController {
                                    ObjectProvider<AgentWorkspaceStatusService> workspaceStatusServiceRef,
                                    PlanService planService,
                                    AssignmentService assignmentService,
+                                   AssignmentQueryService assignmentQueryService,
                                    ScheduleService scheduleService,
                                    EventReactionService eventReactionService,
                                    WorkflowService workflowService,
@@ -214,6 +218,7 @@ public class OrchestrationController {
             emptyObjectProvider(),
             planService,
             assignmentService,
+            assignmentQueryService,
             scheduleService,
             eventReactionService,
             workflowService,
@@ -239,6 +244,7 @@ public class OrchestrationController {
                                    ObjectProvider<WorkspaceExplorerService> workspaceExplorerServiceRef,
                                    PlanService planService,
                                    AssignmentService assignmentService,
+                                   AssignmentQueryService assignmentQueryService,
                                    ScheduleService scheduleService,
                                    EventReactionService eventReactionService,
                                    WorkflowService workflowService,
@@ -260,6 +266,7 @@ public class OrchestrationController {
         this.workspaceExplorerServiceRef = workspaceExplorerServiceRef;
         this.planService = planService;
         this.assignmentService = assignmentService;
+        this.assignmentQueryService = assignmentQueryService;
         this.scheduleService = scheduleService;
         this.eventReactionService = eventReactionService;
         this.workflowService = workflowService;
@@ -4356,773 +4363,7 @@ public class OrchestrationController {
     }
 
     // ════════════════════════════════════════════════════════════════
-    //  Projects (tabbed operational console)
-    // ════════════════════════════════════════════════════════════════
-
-    @GetMapping("/projects")
-    @ResponseBody
-    public String projects() {
-        return renderPage(projectsPage(null), "/projects");
-    }
-
-    @GetMapping("/projects/{projectId}")
-    @ResponseBody
-    public String projectDetail(@PathVariable String projectId, HttpServletResponse response) {
-        try {
-            projectService.getProject(projectId);
-            return renderPage(projectsPage(projectId), "/projects/" + projectId);
-        } catch (IllegalArgumentException e) {
-            response.setStatus(HttpServletResponse.SC_NOT_FOUND);
-            return renderPage(projectsPage(null), "/projects");
-        }
-    }
-
-    private Component projectsPage(String selectedProjectId) {
-        Div detail = new Div().withId("project-detail-container");
-        if (StringUtils.hasText(selectedProjectId)) {
-            detail.withAttribute("hx-get", "/projects/_detail/" + escapeAttr(selectedProjectId))
-                .withAttribute("hx-trigger", "load")
-                .withAttribute("hx-swap", "innerHTML")
-                .withChild(loadingPlaceholder());
-        } else {
-            detail.withChild(projectEditorEmptyState());
-        }
-        return new Div()
-            .withId("projects-page")
-            .withAttribute("data-orchestration-page", "projects")
-            .withAttribute("data-selected-project-id", nn(selectedProjectId))
-            .withChild(Header.H1("Projects"))
-            .withChild(new Paragraph("Project metadata, membership, materialized context, jobs, and outputs."))
-            .withChild(new Div().withClass("browser-layout browser-layout-wide project-console-layout")
-                .withChild(new Div().withClass("browser-sidebar project-chooser")
-                    .withChild(new Div().withClass("browser-sidebar-header")
-                        .withChild(Button.create("New Project").withClass("orch-primary")
-                            .withAttribute("data-htmx-error-swap", "true")
-                            .hxGet("/projects/_editor/_new")
-                            .hxTarget("#project-detail-container").hxSwap("innerHTML")))
-                    .withChild(new Div().withId("project-list").withClass("entity-list")
-                        .hxGet("/projects/_list").hxTrigger("load").hxSwap("innerHTML")
-                        .withChild(loadingPlaceholder())))
-                .withChild(new Div().withClass("browser-detail").withChild(detail)))
-            .withChild(moduleScript(HTMX_ERRORS_JS))
-            .withChild(moduleScript(PROJECTS_JS));
-    }
-
-    private Component projectEditorEmptyState() {
-        return new Div().withClass("orch-panel")
-            .withChild(new Div().withClass("dashboard-empty")
-                .withInnerText("Select a project from the list or create a new one."));
-    }
-
-    @GetMapping("/projects/_list")
-    @ResponseBody
-    public String projectsListFragment() {
-        List<Project> projects = projectService.listProjects();
-        if (projects.isEmpty()) {
-            return new Div().withClass("dashboard-empty").withInnerText("No projects.").render();
-        }
-        Div list = new Div();
-        for (Project project : projects) {
-            list.withChild(new HtmlTag("button").withClass("tool-item project-list-item")
-                .withAttribute("data-project-id", project.id())
-                .hxGet("/projects/_detail/" + escapeAttr(project.id()))
-                .hxTarget("#project-detail-container").hxSwap("innerHTML")
-                .withAttribute("data-htmx-error-swap", "true")
-                .withChild(new HtmlTag("strong").withInnerText(displayValue(project.name())))
-                .withChild(new HtmlTag("span").withClass("orch-status-chip tracked").withInnerText("Tracked"))
-                .withChild(new Paragraph(StringUtils.hasText(project.description())
-                    ? project.description() : "No description")));
-        }
-        return list.render();
-    }
-
-    private String projectListOobFragment() {
-        return "<div id=\"project-list\" hx-swap-oob=\"innerHTML\">" + projectsListFragment() + "</div>";
-    }
-
-    @GetMapping("/projects/_editor/_new")
-    @ResponseBody
-    public String newProjectEditor() {
-        return projectCreateFragment(Map.of(), null).render();
-    }
-
-    @PostMapping("/projects/_editor")
-    @ResponseBody
-    public String createProject(@RequestParam Map<String, String> params, HttpServletResponse response) {
-        String name = params.getOrDefault("name", "").trim();
-        if (name.isBlank()) {
-            response.setStatus(HttpServletResponse.SC_BAD_REQUEST);
-            return projectCreateFragment(params, "Name is required.").render();
-        }
-        try {
-            Project created = projectService.createProject(name, nn(params.get("description")),
-                nn(params.get("ownerAgentId")), null);
-            return projectDetailLayout(created).render() + projectListOobFragment();
-        } catch (IllegalArgumentException e) {
-            response.setStatus(HttpServletResponse.SC_BAD_REQUEST);
-            return projectCreateFragment(params, e.getMessage()).render();
-        } catch (IllegalStateException e) {
-            response.setStatus(HttpServletResponse.SC_CONFLICT);
-            return projectCreateFragment(params, e.getMessage()).render();
-        } catch (RuntimeException e) {
-            log.warn("Project creation failed", e);
-            response.setStatus(HttpServletResponse.SC_SERVICE_UNAVAILABLE);
-            return projectCreateFragment(params, "Project creation is temporarily unavailable.").render();
-        }
-    }
-
-    private Component projectCreateFragment(Map<String, String> values, String error) {
-        Div container = new Div().withClass("orch-panel project-create-form");
-        container.withChild(Header.H2("New Project"));
-        if (StringUtils.hasText(error)) {
-            container.withChild(new Div().withClass("orch-error").withInnerText(error));
-        }
-        Form form = Form.create().withHxPost("/projects/_editor");
-        form.withClass("orch-form-stack").withAttribute("data-htmx-error-swap", "true");
-        form.withHxTarget("#project-detail-container").withHxSwap("innerHTML")
-            .withChild(label("Name", TextInput.create("name").withId("project-name")
-                .withValue(values.getOrDefault("name", ""))))
-            .withChild(label("Description", TextArea.create("description").withId("project-description")
-                .withRows(4).withValue(values.getOrDefault("description", ""))))
-            .withChild(label("Owner Agent", agentSelect("ownerAgentId",
-                values.getOrDefault("ownerAgentId", "")).withId("project-owner-agent")))
-            .withChild(new Div().withClass("tool-actions")
-                .withChild(Button.create("Create Project").withClass("orch-primary")
-                    .withAttribute("type", "submit")));
-        return container.withChild(form);
-    }
-
-    @GetMapping({"/projects/_editor/{projectId}", "/projects/_detail/{projectId}"})
-    @ResponseBody
-    public String projectDetailFragment(@PathVariable String projectId, HttpServletResponse response) {
-        try {
-            return projectDetailLayout(projectService.getProject(projectId)).render();
-        } catch (IllegalArgumentException e) {
-            response.setStatus(HttpServletResponse.SC_NOT_FOUND);
-            return new Div().withClass("orch-error").withInnerText("Project not found.").render();
-        }
-    }
-
-    private Component projectDetailLayout(Project project) {
-        return new Div().withClass("entity-detail-layout entity-detail-layout-full project-detail-shell")
-            .withAttribute("data-project-id", project.id())
-            .withChild(new Div().withClass("entity-detail-main")
-                .withChild(new Div().withClass("project-detail-heading")
-                    .withChild(new Div().withClass("entity-title")
-                        .withChild(Header.H2(displayValue(project.name())))
-                        .withChild(new Paragraph(StringUtils.hasText(project.description())
-                            ? project.description() : "No description")))
-                    .withChild(new HtmlTag("span").withClass("orch-status-chip tracked").withInnerText("Tracked")))
-                .withChild(projectTabNav(project.id()))
-                .withChild(new Div().withId("project-tab-panel").withClass("orch-panel")
-                    .withAttribute("hx-get", "/projects/_detail/" + escapeAttr(project.id()) + "/dashboard")
-                    .withAttribute("hx-trigger", "load").withAttribute("hx-swap", "innerHTML")
-                    .withChild(loadingPlaceholder())));
-    }
-
-    private Component projectTabNav(String projectId) {
-        HtmlTag nav = new HtmlTag("nav").withClass("orch-tabs project-tabs")
-            .withAttribute("aria-label", "Project views");
-        for (String tab : List.of("dashboard", "members", "files", "jobs", "outputs", "settings")) {
-            Button button = Button.create(capitalize(tab));
-            if ("dashboard".equals(tab)) button.withClass("active");
-            button.withAttribute("data-project-tab", tab)
-                .withAttribute("data-tab-button", "true")
-                .withAttribute("hx-get", "/projects/_detail/" + escapeAttr(projectId) + "/" + tab)
-                .withAttribute("hx-target", "#project-tab-panel")
-                .withAttribute("hx-swap", "innerHTML")
-                .withAttribute("data-htmx-error-swap", "true");
-            nav.withChild(button);
-        }
-        return nav;
-    }
-
-    @GetMapping("/projects/_detail/{projectId}/dashboard")
-    @ResponseBody
-    public String projectDashboardTab(@PathVariable String projectId, HttpServletResponse response) {
-        try {
-            Project project = projectService.getProject(projectId);
-            List<ProjectAgentMembership> members = sortedProjectMembers(projectId);
-            List<AssignmentService.AssignmentSummary> assignments = assignmentService.activeSummariesForProject(projectId);
-            List<JobDefinition> jobs = projectJobs(projectId);
-            String materializationCount = availableMaterializationCount(members);
-
-            Div panel = new Div().withClass("project-dashboard");
-            panel.withChild(new Div().withClass("project-dashboard-identity")
-                .withChild(agentMetaItem("Project", displayValue(project.name())))
-                .withChild(agentMetaItem("Record State", "Tracked"))
-                .withChild(agentMetaItem("Owner Agent", displayValue(project.ownerAgentId())))
-                .withChild(agentMetaItem("ID", project.id())));
-            Div counters = new Div().withClass("agent-dashboard-counters project-dashboard-counters");
-            counters.withChild(projectCounterCard("Members", String.valueOf(members.size()), projectId, "members"));
-            counters.withChild(projectCounterCard("Active Assignments", String.valueOf(assignments.size()), projectId, "dashboard"));
-            counters.withChild(projectCounterCard("Jobs", String.valueOf(jobs.size()), projectId, "jobs"));
-            counters.withChild(projectCounterCard("Available Materializations", materializationCount, projectId, "files"));
-            panel.withChild(counters);
-
-            panel.withChild(sectionHeader("Member Agents", "Current project members and agent-local materialization health."));
-            panel.withChild(projectMemberCards(projectId, members, false));
-            panel.withChild(sectionHeader("Active Assignments", "Current assignments explicitly attributed to this project."));
-            panel.withChild(projectAssignments(assignments));
-            panel.withChild(sectionHeader("Recent Jobs", "Most recently updated project-attributed job definitions."));
-            panel.withChild(projectJobRows(jobs.stream().limit(5).toList(), false));
-            return panel.render();
-        } catch (IllegalArgumentException e) {
-            response.setStatus(HttpServletResponse.SC_NOT_FOUND);
-            return new Div().withClass("orch-error").withInnerText("Project not found.").render();
-        } catch (RuntimeException e) {
-            log.warn("Project dashboard unavailable for {}", projectId, e);
-            response.setStatus(HttpServletResponse.SC_SERVICE_UNAVAILABLE);
-            return new Div().withClass("orch-error").withInnerText("Project dashboard is temporarily unavailable.").render();
-        }
-    }
-
-    private Component projectCounterCard(String label, String value, String projectId, String tab) {
-        return new Div().withClass("agent-counter-card")
-            .withAttribute("hx-get", "/projects/_detail/" + escapeAttr(projectId) + "/" + tab)
-            .withAttribute("hx-target", "#project-tab-panel").withAttribute("hx-swap", "innerHTML")
-            .withChild(new HtmlTag("strong").withInnerText(value))
-            .withChild(new HtmlTag("span").withInnerText(label));
-    }
-
-    private List<ProjectAgentMembership> sortedProjectMembers(String projectId) {
-        return projectService.listMembers(projectId).stream()
-            .sorted(Comparator.comparing(ProjectAgentMembership::agentId,
-                Comparator.nullsLast(String.CASE_INSENSITIVE_ORDER)))
-            .toList();
-    }
-
-    private List<JobDefinition> projectJobs(String projectId) {
-        return jobService.listDefinitions(null, projectId, null).stream()
-            .sorted(Comparator.comparing(JobDefinition::updatedAt,
-                Comparator.nullsLast(Comparator.reverseOrder())).thenComparing(JobDefinition::id))
-            .limit(40).toList();
-    }
-
-    private Component projectMemberCards(String projectId, List<ProjectAgentMembership> members, boolean removable) {
-        if (members.isEmpty()) return new Div().withClass("dashboard-empty").withInnerText("No project members yet.");
-        Div cards = new Div().withClass("project-member-grid");
-        for (ProjectAgentMembership member : members) {
-            AgentProfile profile = null;
-            try { profile = agentProfileService.get(member.agentId()); } catch (RuntimeException ignored) { }
-            String state = materializationState(member.agentId(), projectId);
-            Div card = new Div().withClass("project-member-card")
-                .withChild(new Div().withClass("project-member-card-heading")
-                    .withChild(new HtmlTag("a").withAttribute("href", "/agents/" + escapeAttr(member.agentId()))
-                        .withInnerText(profile != null ? displayValue(profile.name()) : displayValue(member.agentId())))
-                    .withChild(statusBadgeHtml(profile != null && profile.status() != null
-                        ? profile.status().name() : "unavailable")))
-                .withChild(new Div().withClass("orch-meta")
-                    .withChild(new HtmlTag("span").withInnerText("ID: " + displayValue(member.agentId())))
-                    .withChild(new HtmlTag("span").withInnerText("Role: " + displayValue(member.role())))
-                    .withChild(new HtmlTag("span").withInnerText("Materialization: " + state)));
-            if (removable) {
-                card.withChild(Button.create("Remove").withClass("orch-danger")
-                    .withAttribute("hx-delete", "/projects/_detail/" + escapeAttr(projectId)
-                        + "/members/" + escapeAttr(member.agentId()))
-                    .withAttribute("hx-confirm", "Remove this project member?")
-                    .withAttribute("hx-target", "#project-tab-panel")
-                    .withAttribute("hx-swap", "innerHTML")
-                    .withAttribute("data-htmx-error-swap", "true"));
-            }
-            cards.withChild(card);
-        }
-        return cards;
-    }
-
-    private String materializationState(String agentId, String projectId) {
-        if (agentContextService == null) return "Unavailable";
-        try {
-            MaterializationRecord record = exactProjectMaterialization(agentId, projectId);
-            return record == null ? "Not provisioned" : record.state().name();
-        } catch (RuntimeException e) {
-            return "Unavailable";
-        }
-    }
-
-    private String availableMaterializationCount(List<ProjectAgentMembership> members) {
-        if (agentContextService == null || agentMaterializationService == null) return "Unavailable";
-        int count = 0;
-        try {
-            for (ProjectAgentMembership member : members) {
-                MaterializationRecord record = exactProjectMaterialization(member.agentId(), member.projectId());
-                if (record == null || record.state() != MaterializationState.READY) continue;
-                WorkspaceDescriptor descriptor = workspaceDirectoryService().resolveForRead(WorkspaceKind.AGENT, member.agentId());
-                agentMaterializationService.resolveReadyLocation(descriptor, record.materializationKey(), record.generation());
-                count++;
-            }
-            return String.valueOf(count);
-        } catch (RuntimeException e) {
-            return "Unavailable";
-        }
-    }
-
-    private Component projectAssignments(List<AssignmentService.AssignmentSummary> assignments) {
-        if (assignments.isEmpty()) return new Div().withClass("dashboard-empty").withInnerText("No active assignments.");
-        Div rows = new Div().withClass("project-operational-list");
-        assignments.stream().sorted(Comparator.comparing(AssignmentService.AssignmentSummary::updatedAt,
-            Comparator.nullsLast(Comparator.reverseOrder()))).limit(10).forEach(assignment ->
-            rows.withChild(new Div().withClass("orch-row")
-                .withChild(new HtmlTag("strong").withInnerText(displayValue(assignment.id())))
-                .withChild(new HtmlTag("span").withInnerText(displayValue(assignment.agentId())))
-                .withChild(statusBadgeHtml(assignment.status() == null ? null : assignment.status().name()))));
-        return rows;
-    }
-
-    @GetMapping({"/projects/_detail/{projectId}/members", "/projects/_detail/{projectId}/agents"})
-    @ResponseBody
-    public String projectMembersTab(@PathVariable String projectId, HttpServletResponse response) {
-        return projectMembersTab(projectId, Map.of(), null, response);
-    }
-
-    private String projectMembersTab(String projectId, Map<String, String> values, String error,
-                                     HttpServletResponse response) {
-        try {
-            projectService.getProject(projectId);
-            Div panel = new Div().withClass("project-members-tab");
-            panel.withChild(Header.H2("Members"));
-            if (StringUtils.hasText(error)) panel.withChild(new Div().withClass("orch-error").withInnerText(error));
-            Div controls = new Div().withId("project-member-add-controls").withClass("orch-form-inline");
-            controls.withChild(entitySelector("agentId", EntityKind.AGENT, values.get("agentId"),
-                "Agent", "agent", true, Map.of("projectId", projectId)));
-            Select role = Select.create("role");
-            String selectedRole = values.getOrDefault("role", "member");
-            role.addOption("member", "Member", "member".equals(selectedRole));
-            role.addOption("maintainer", "Maintainer", "maintainer".equals(selectedRole));
-            role.addOption("viewer", "Viewer", "viewer".equals(selectedRole));
-            controls.withChild(role).withChild(Button.create("Add Member").withClass("orch-primary")
-                .withAttribute("type", "button")
-                .withAttribute("hx-post", "/projects/_detail/" + projectId + "/members")
-                .withAttribute("hx-target", "#project-tab-panel").withAttribute("hx-swap", "innerHTML")
-                .withAttribute("hx-include", "#project-member-add-controls")
-                .withAttribute("data-htmx-error-swap", "true"));
-            panel.withChild(controls);
-            panel.withChild(projectMemberCards(projectId, sortedProjectMembers(projectId), true));
-            return panel.render();
-        } catch (IllegalArgumentException e) {
-            response.setStatus(HttpServletResponse.SC_NOT_FOUND);
-            return new Div().withClass("orch-error").withInnerText("Project not found.").render();
-        }
-    }
-
-    @PostMapping({"/projects/_detail/{projectId}/members", "/projects/_detail/{projectId}/agents"})
-    @ResponseBody
-    public String addProjectAgent(@PathVariable String projectId, @RequestParam Map<String, String> params,
-                                  HttpServletResponse response) {
-        try {
-            validateSelectedEntity(EntityKind.AGENT, params.get("agentId"), true, "Agent");
-            projectService.addAgent(projectId, params.get("agentId"), nn(params.get("role")));
-            return projectMembersTab(projectId, Map.of(), null, response);
-        } catch (IllegalArgumentException e) {
-            response.setStatus(HttpServletResponse.SC_BAD_REQUEST);
-            return projectMembersTab(projectId, params, e.getMessage(), response);
-        } catch (IllegalStateException e) {
-            response.setStatus(HttpServletResponse.SC_CONFLICT);
-            return projectMembersTab(projectId, params, e.getMessage(), response);
-        }
-    }
-
-    @DeleteMapping({"/projects/_detail/{projectId}/members/{agentId}",
-        "/projects/_detail/{projectId}/agents/{agentId}"})
-    @ResponseBody
-    public String removeProjectAgent(@PathVariable String projectId, @PathVariable String agentId,
-                                     HttpServletResponse response) {
-        try {
-            projectService.getProject(projectId);
-            if (!projectService.isMember(projectId, agentId)) {
-                response.setStatus(HttpServletResponse.SC_NOT_FOUND);
-                return projectMembersTab(projectId, Map.of(), "Project member not found.", response);
-            }
-            projectService.removeAgent(projectId, agentId);
-            return projectMembersTab(projectId, Map.of(), null, response);
-        } catch (IllegalArgumentException e) {
-            response.setStatus(HttpServletResponse.SC_NOT_FOUND);
-            return projectMembersTab(projectId, Map.of(), e.getMessage(), response);
-        } catch (IllegalStateException e) {
-            response.setStatus(HttpServletResponse.SC_CONFLICT);
-            return projectMembersTab(projectId, Map.of(), e.getMessage(), response);
-        }
-    }
-
-    @GetMapping("/projects/_detail/{projectId}/files")
-    @ResponseBody
-    public String projectFilesTab(@PathVariable String projectId,
-                                  @RequestParam(required = false) String agentId,
-                                  @RequestParam(required = false) Integer generation,
-                                  HttpServletResponse response) {
-        try {
-            projectService.getProject(projectId);
-            List<ProjectAgentMembership> members = sortedProjectMembers(projectId);
-            Div panel = new Div().withClass("project-files-tab").withChild(Header.H2("Files"))
-                .withChild(new Paragraph("Read-only agent-local project materializations. Lifecycle actions remain on the owning agent Context tab."));
-            if (members.isEmpty()) {
-                return panel.withChild(new Div().withClass("dashboard-empty").withInnerText("No project members are available.")).render();
-            }
-            if (agentContextService == null || agentMaterializationService == null) {
-                response.setStatus(HttpServletResponse.SC_SERVICE_UNAVAILABLE);
-                return panel.withChild(new Div().withClass("orch-error").withInnerText("Materialization facts are unavailable.")).render();
-            }
-            List<MaterializationRecord> records = members.stream()
-                .map(member -> exactProjectMaterialization(member.agentId(), projectId))
-                .filter(Objects::nonNull)
-                .sorted(Comparator.comparing(MaterializationRecord::agentId)).toList();
-            if (records.isEmpty()) {
-                return panel.withChild(new Div().withClass("project-files-state")
-                    .withChild(Header.H3("No materialization record"))
-                    .withChild(new Paragraph("No current member has materialized this project. Use an agent Context tab to provision one."))).render();
-            }
-            MaterializationRecord selected = records.stream().filter(r -> r.agentId().equals(agentId)).findFirst().orElse(null);
-            if (StringUtils.hasText(agentId) && selected == null) {
-                response.setStatus(HttpServletResponse.SC_NOT_FOUND);
-                return panel.withChild(new Div().withClass("orch-error").withInnerText("Selected member materialization was not found.")).render();
-            }
-            if (selected == null) selected = records.get(0);
-            panel.withChild(projectMaterializationSelector(projectId, records, selected.agentId()));
-            panel.withChild(new RawHtml(projectMaterializationContent(projectId, selected, generation, ".", response)));
-            return panel.render();
-        } catch (IllegalArgumentException e) {
-            response.setStatus(HttpServletResponse.SC_NOT_FOUND);
-            return new Div().withClass("orch-error").withInnerText("Project not found.").render();
-        } catch (RuntimeException e) {
-            log.warn("Project files unavailable for {}", projectId, e);
-            response.setStatus(HttpServletResponse.SC_SERVICE_UNAVAILABLE);
-            return new Div().withClass("orch-error").withInnerText("Project files are temporarily unavailable.").render();
-        }
-    }
-
-    private Component projectMaterializationSelector(String projectId, List<MaterializationRecord> records,
-                                                      String selectedAgentId) {
-        Div selector = new Div().withClass("project-materialization-selector");
-        for (MaterializationRecord record : records) {
-            Button button = Button.create(record.agentId() + " · " + record.state().name());
-            if (record.agentId().equals(selectedAgentId)) button.withClass("active");
-            button.withAttribute("hx-get", "/projects/_detail/" + escapeAttr(projectId) + "/files?agentId="
-                    + URLEncoder.encode(record.agentId(), StandardCharsets.UTF_8)
-                    + "&generation=" + record.generation())
-                .withAttribute("hx-target", "#project-tab-panel").withAttribute("hx-swap", "innerHTML")
-                .withAttribute("data-htmx-error-swap", "true");
-            selector.withChild(button);
-        }
-        return selector;
-    }
-
-    @GetMapping("/projects/_detail/{projectId}/files/list")
-    @ResponseBody
-    public String projectMaterializationList(@PathVariable String projectId,
-                                             @RequestParam String agentId,
-                                             @RequestParam int generation,
-                                             @RequestParam(defaultValue = ".") String path,
-                                             HttpServletResponse response) {
-        try {
-            projectService.getProject(projectId);
-            if (!projectService.isMember(projectId, agentId)) {
-                response.setStatus(HttpServletResponse.SC_NOT_FOUND);
-                return new Div().withClass("orch-error").withInnerText("Project member not found.").render();
-            }
-            MaterializationRecord record = exactProjectMaterialization(agentId, projectId);
-            if (record == null) {
-                response.setStatus(HttpServletResponse.SC_NOT_FOUND);
-                return new Div().withClass("orch-error").withInnerText("Materialization record not found.").render();
-            }
-            if (record.generation() != generation) {
-                response.setStatus(HttpServletResponse.SC_CONFLICT);
-                return WorkspaceExplorerFragments.projectMaterializationState("Stale generation",
-                    "The selected materialization changed. Refresh the Files tab before reading it.", "orch-error");
-            }
-            if (record.state() != MaterializationState.READY) {
-                response.setStatus(HttpServletResponse.SC_CONFLICT);
-                return WorkspaceExplorerFragments.projectMaterializationState("Materialization unavailable",
-                    "The selected materialization is " + record.state().name() + ".", "orch-error");
-            }
-            MaterializationLocation location = resolveProjectMaterialization(record, generation);
-            WorkspaceExplorerService.DirectoryListing listing = workspaceExplorerService().list(location,
-                workspaceExplorerService().normalizeRelativePath(path));
-            return WorkspaceExplorerFragments.projectMaterializationList(projectId, agentId, generation, listing);
-        } catch (WorkspaceFileException e) {
-            response.setStatus(fileErrorStatus(e));
-            return new Div().withClass("orch-error").withInnerText(e.getMessage()).render();
-        } catch (RuntimeException e) {
-            response.setStatus(HttpServletResponse.SC_SERVICE_UNAVAILABLE);
-            return new Div().withClass("orch-error").withInnerText("Materialization read is unavailable.").render();
-        }
-    }
-
-    @GetMapping("/projects/_detail/{projectId}/files/preview")
-    @ResponseBody
-    public String projectMaterializationPreview(@PathVariable String projectId,
-                                                @RequestParam String agentId,
-                                                @RequestParam int generation,
-                                                @RequestParam String path,
-                                                HttpServletResponse response) {
-        try {
-            projectService.getProject(projectId);
-            if (!projectService.isMember(projectId, agentId)) throw new IllegalArgumentException("Project member not found");
-            MaterializationRecord record = exactProjectMaterialization(agentId, projectId);
-            if (record == null) throw new IllegalArgumentException("Materialization not found");
-            MaterializationLocation location = resolveProjectMaterialization(record, generation);
-            WorkspaceExplorerService.FilePreview preview = workspaceExplorerService().preview(location,
-                workspaceExplorerService().normalizeRelativePath(path));
-            return WorkspaceExplorerFragments.projectMaterializationInspector(preview, null);
-        } catch (IllegalArgumentException e) {
-            response.setStatus(HttpServletResponse.SC_NOT_FOUND);
-            return WorkspaceExplorerFragments.projectMaterializationInspector(null,
-                "Project member, materialization, or file was not found.");
-        } catch (IllegalStateException e) {
-            response.setStatus(HttpServletResponse.SC_CONFLICT);
-            return new Div().withClass("orch-error").withInnerText(e.getMessage()).render();
-        } catch (WorkspaceFileException e) {
-            response.setStatus(fileErrorStatus(e));
-            return new Div().withClass("orch-error").withInnerText(e.getMessage()).render();
-        } catch (RuntimeException e) {
-            log.warn("Project materialization preview unavailable for {}", projectId, e);
-            response.setStatus(HttpServletResponse.SC_SERVICE_UNAVAILABLE);
-            return WorkspaceExplorerFragments.projectMaterializationInspector(null,
-                "Materialization preview is temporarily unavailable.");
-        }
-    }
-
-    private String projectMaterializationContent(String projectId, MaterializationRecord record,
-                                                 Integer requestedGeneration, String path,
-                                                 HttpServletResponse response) {
-        if (requestedGeneration != null && requestedGeneration != record.generation()) {
-            response.setStatus(HttpServletResponse.SC_CONFLICT);
-            return WorkspaceExplorerFragments.projectMaterializationState("Stale generation",
-                "The selected materialization changed. Refresh the Files tab before reading it.", "orch-error");
-        }
-        return switch (record.state()) {
-            case PROVISIONING -> WorkspaceExplorerFragments.projectMaterializationState("Not provisioned",
-                "Lifecycle state: PROVISIONING. The local container is not ready; continue from the owning agent Context tab.", "provisioning");
-            case FAILED -> WorkspaceExplorerFragments.projectMaterializationState("Failed",
-                "Materialization provisioning failed. Review the owning agent Context tab.", "failed");
-            case REVOKED -> WorkspaceExplorerFragments.projectMaterializationState("Revoked",
-                "This materialization is revoked and cannot be browsed.", "revoked");
-            case READY -> {
-                try {
-                    MaterializationLocation location = resolveProjectMaterialization(record, record.generation());
-                    WorkspaceExplorerService.DirectoryListing listing = workspaceExplorerService().list(location,
-                        workspaceExplorerService().normalizeRelativePath(path));
-                    yield WorkspaceExplorerFragments.projectMaterializationShell(projectId, record.agentId(),
-                        record.generation(), listing);
-                } catch (WorkspaceFileException e) {
-                    if (e.reason() == WorkspaceFileException.Reason.NOT_FOUND) {
-                        yield WorkspaceExplorerFragments.projectMaterializationState("Ready location missing",
-                            "The materialization record is READY but its verified directory is unavailable.", "missing");
-                    }
-                    throw e;
-                } catch (IllegalArgumentException e) {
-                    yield WorkspaceExplorerFragments.projectMaterializationState("Ready location missing",
-                        "The materialization record is READY but its verified directory is unavailable.", "missing");
-                }
-            }
-        };
-    }
-
-    private MaterializationRecord exactProjectMaterialization(String agentId, String projectId) {
-        if (agentContextService == null) return null;
-        return agentContextService.materializations(agentId).stream()
-            .filter(record -> "project".equals(record.sourceKind()) && projectId.equals(record.sourceId())
-                && agentId.equals(record.agentId()))
-            .findFirst().orElse(null);
-    }
-
-    private MaterializationLocation resolveProjectMaterialization(MaterializationRecord record, int generation) {
-        if (agentMaterializationService == null) throw new IllegalStateException("Materialization authority is unavailable");
-        WorkspaceDescriptor descriptor = workspaceDirectoryService().resolveForRead(WorkspaceKind.AGENT, record.agentId());
-        return agentMaterializationService.resolveReadyLocation(descriptor, record.materializationKey(), generation);
-    }
-
-    @GetMapping("/projects/_detail/{projectId}/jobs")
-    @ResponseBody
-    public String projectJobsFragment(@PathVariable String projectId, HttpServletResponse response) {
-        try {
-            projectService.getProject(projectId);
-            Div panel = new Div().withClass("project-jobs-tab").withChild(Header.H2("Jobs"));
-            return panel.withChild(projectJobRows(projectJobs(projectId), true)).render();
-        } catch (IllegalArgumentException e) {
-            response.setStatus(HttpServletResponse.SC_NOT_FOUND);
-            return new Div().withClass("orch-error").withInnerText("Project not found.").render();
-        } catch (RuntimeException e) {
-            response.setStatus(HttpServletResponse.SC_SERVICE_UNAVAILABLE);
-            return new Div().withClass("orch-error").withInnerText("Project jobs are unavailable.").render();
-        }
-    }
-
-    private Component projectJobRows(List<JobDefinition> jobs, boolean includeRuns) {
-        if (jobs.isEmpty()) return new Div().withClass("dashboard-empty").withInnerText("No project-attributed jobs.");
-        Div rows = new Div().withClass("project-operational-list");
-        for (JobDefinition job : jobs) {
-            Div row = new Div().withClass("project-job-row")
-                .withChild(new Div().withClass("project-job-main")
-                    .withChild(new HtmlTag("a").withAttribute("href", "/jobs/" + escapeAttr(job.id()))
-                        .withInnerText(StringUtils.hasText(job.title()) ? job.title() : job.id()))
-                    .withChild(statusBadgeHtml(job.status()))
-                    .withChild(new HtmlTag("span").withClass("workspace-file-muted")
-                        .withInnerText(job.updatedAt() == null ? "Updated unavailable" : formatSince(job.updatedAt()))));
-            if (includeRuns) {
-                row.withChild(new Div().withClass("project-job-runs")
-                    .withChild(new HtmlTag("span")
-                        .withInnerText("Bounded project run facts are unavailable from the current job query contract.")));
-            }
-            rows.withChild(row);
-        }
-        return rows;
-    }
-
-    @GetMapping("/projects/_detail/{projectId}/outputs")
-    @ResponseBody
-    public String projectOutputsFragment(@PathVariable String projectId, HttpServletResponse response) {
-        try {
-            projectService.getProject(projectId);
-            List<RunOutputArtifact> artifacts = queryOutputs(
-                null, null, null, null, projectId, null, null, null, null, null, null, null, 40);
-            Div panel = new Div().withClass("project-outputs-tab").withChild(Header.H2("Outputs"));
-            if (artifacts.isEmpty()) {
-                return panel.withChild(new Div().withClass("dashboard-empty")
-                    .withInnerText("No project-attributed outputs.")).render();
-            }
-            Div rows = new Div().withClass("project-operational-list");
-            for (RunOutputArtifact artifact : artifacts) {
-                Div row = new Div().withClass("orch-row")
-                    .withChild(new HtmlTag("strong").withInnerText(displayValue(artifact.outputName())))
-                    .withChild(new HtmlTag("span").withInnerText(outputCompactContext(artifact)));
-                if (StringUtils.hasText(artifact.workspaceType()) && StringUtils.hasText(artifact.workspaceKey())) {
-                    row.withChild(new HtmlTag("a").withClass("button button-secondary small")
-                        .withAttribute("href", "/api/artifacts/" + escapeAttr(artifact.id()) + "/download?workspaceKind="
-                            + URLEncoder.encode(artifact.workspaceType(), StandardCharsets.UTF_8) + "&workspaceKey="
-                            + URLEncoder.encode(artifact.workspaceKey(), StandardCharsets.UTF_8))
-                        .withInnerText("Download"));
-                } else {
-                    row.withChild(new HtmlTag("span").withClass("orch-chip").withInnerText("Download unavailable"));
-                }
-                rows.withChild(row);
-            }
-            return panel.withChild(rows).render();
-        } catch (IllegalArgumentException e) {
-            response.setStatus(HttpServletResponse.SC_NOT_FOUND);
-            return new Div().withClass("orch-error").withInnerText("Project not found.").render();
-        } catch (RuntimeException e) {
-            response.setStatus(HttpServletResponse.SC_SERVICE_UNAVAILABLE);
-            return new Div().withClass("orch-error").withInnerText("Project outputs are unavailable.").render();
-        }
-    }
-
-    @GetMapping("/projects/_detail/{projectId}/settings")
-    @ResponseBody
-    public String projectSettingsTab(@PathVariable String projectId, HttpServletResponse response) {
-        try {
-            return projectSettingsFragment(projectService.getProject(projectId), Map.of(), null).render();
-        } catch (IllegalArgumentException e) {
-            response.setStatus(HttpServletResponse.SC_NOT_FOUND);
-            return new Div().withClass("orch-error").withInnerText("Project not found.").render();
-        }
-    }
-
-    @PutMapping("/projects/_editor/{projectId}")
-    @ResponseBody
-    public String updateProject(@PathVariable String projectId, @RequestParam Map<String, String> params,
-                                HttpServletResponse response) {
-        Project existing;
-        try {
-            existing = projectService.getProject(projectId);
-        } catch (IllegalArgumentException e) {
-            response.setStatus(HttpServletResponse.SC_NOT_FOUND);
-            return new Div().withClass("orch-error").withInnerText("Project not found.").render();
-        }
-        if (!StringUtils.hasText(params.get("name"))) {
-            response.setStatus(HttpServletResponse.SC_BAD_REQUEST);
-            return projectSettingsFragment(existing, params, "Name is required.").render();
-        }
-        try {
-            Project updated = projectService.updateProject(projectId, params.get("name"),
-                params.get("description"), null, params.get("workTypeProfile"), params.get("model"), null);
-            return projectSettingsFragment(updated, Map.of(), "Project saved.").render() + projectListOobFragment();
-        } catch (IllegalArgumentException e) {
-            response.setStatus(HttpServletResponse.SC_BAD_REQUEST);
-            return projectSettingsFragment(existing, params, e.getMessage()).render();
-        } catch (RuntimeException e) {
-            response.setStatus(HttpServletResponse.SC_SERVICE_UNAVAILABLE);
-            return projectSettingsFragment(existing, params, "Project settings are temporarily unavailable.").render();
-        }
-    }
-
-    private Component projectSettingsFragment(Project project, Map<String, String> values, String message) {
-        boolean submitted = !values.isEmpty();
-        Div panel = new Div().withClass("project-settings-tab").withChild(Header.H2("Settings"));
-        if (StringUtils.hasText(message)) {
-            panel.withChild(new Div().withClass(message.endsWith("saved.") ? "orch-status" : "orch-error")
-                .withInnerText(message));
-        }
-        Form form = Form.create().withHxPut("/projects/_editor/" + project.id());
-        form.withClass("orch-form-stack").withAttribute("data-htmx-error-swap", "true");
-        form.withHxTarget("#project-tab-panel").withHxSwap("innerHTML")
-            .withChild(label("Name", TextInput.create("name").withId("project-name")
-                .withValue(submitted ? values.getOrDefault("name", "") : nn(project.name()))))
-            .withChild(label("Description", TextArea.create("description").withId("project-description")
-                .withRows(4).withValue(submitted ? values.getOrDefault("description", "") : nn(project.description()))))
-            .withChild(new Div().withClass("orch-form-grid")
-                .withChild(label("Owner Agent", TextInput.create("ownerAgentDisplay")
-                    .withValue(displayValue(project.ownerAgentId())).withAttribute("disabled", "disabled")))
-                .withChild(label("Manager Type", worktypeSelect(submitted
-                    ? values.get("workTypeProfile") : project.promptProfile())))
-                .withChild(label("Default Model", modelSelectWithCurrent("model", submitted
-                    ? values.get("model") : project.model(), List.of()))))
-            .withChild(new Div().withClass("tool-actions")
-                .withChild(Button.create("Save Settings").withClass("orch-primary").withAttribute("type", "submit")));
-        panel.withChild(form);
-        panel.withChild(new HtmlTag("details").withClass("project-metadata")
-            .withChild(new HtmlTag("summary").withInnerText("Metadata"))
-            .withChild(new Div().withClass("orch-meta")
-                .withChild(new HtmlTag("span").withInnerText("ID: " + project.id()))
-                .withChild(new HtmlTag("span").withInnerText("Created: " + (project.createdAt() == null ? "—" : project.createdAt().toString())))
-                .withChild(new HtmlTag("span").withInnerText("Updated: " + (project.updatedAt() == null ? "—" : project.updatedAt().toString())))));
-        panel.withChild(new Div().withId("project-settings-delete")
-            .withChild(Button.create("Delete Project").withClass("orch-danger")
-                .withAttribute("hx-get", "/projects/_detail/" + project.id() + "/delete-confirm")
-                .withAttribute("hx-target", "#project-settings-delete").withAttribute("hx-swap", "innerHTML")));
-        return panel;
-    }
-
-    @GetMapping("/projects/_detail/{projectId}/delete-confirm")
-    @ResponseBody
-    public String projectDeleteConfirmation(@PathVariable String projectId, HttpServletResponse response) {
-        try {
-            Project project = projectService.getProject(projectId);
-            return new Div().withId("project-settings-delete").withClass("project-delete-confirm")
-                .withChild(new Paragraph("Delete " + displayValue(project.name()) + "? This removes project metadata and memberships."))
-                .withChild(new Div().withId("project-delete-status"))
-                .withChild(Button.create("Confirm Delete").withClass("orch-danger")
-                    .withAttribute("hx-delete", "/projects/" + project.id())
-                    .withAttribute("hx-target", "#project-delete-status").withAttribute("hx-swap", "innerHTML")
-                    .withAttribute("data-htmx-error-swap", "true"))
-                .render();
-        } catch (IllegalArgumentException e) {
-            response.setStatus(HttpServletResponse.SC_NOT_FOUND);
-            return new Div().withClass("orch-error").withInnerText("Project not found.").render();
-        }
-    }
-
-    @DeleteMapping("/projects/{projectId}")
-    @ResponseBody
-    public String deleteProject(@PathVariable String projectId, HttpServletResponse response) {
-        try {
-            projectService.deleteProject(projectId);
-            return "<div class=\"orch-status\">Project deleted.</div>"
-                + "<div id=\"project-detail-container\" hx-swap-oob=\"innerHTML\"></div>"
-                + projectListOobFragment();
-        } catch (IllegalArgumentException e) {
-            response.setStatus(HttpServletResponse.SC_NOT_FOUND);
-            return new Div().withClass("orch-error").withInnerText(e.getMessage()).render();
-        } catch (IllegalStateException e) {
-            response.setStatus(HttpServletResponse.SC_CONFLICT);
-            return new Div().withClass("orch-error").withInnerText(e.getMessage()).render();
-        } catch (RuntimeException e) {
-            response.setStatus(HttpServletResponse.SC_SERVICE_UNAVAILABLE);
-            return new Div().withClass("orch-error").withInnerText("Project deletion is temporarily unavailable.").render();
-        }
-    }
-
-
-    // ════════════════════════════════════════════════════════════════
+    //  Projects — moved to ProjectConsoleController
     //  Inbox
     // ════════════════════════════════════════════════════════════════
 
@@ -5932,8 +5173,13 @@ public class OrchestrationController {
     @GetMapping("/agents/_detail/{agentId}/queue")
     @ResponseBody
     public String agentQueueTab(@PathVariable String agentId) {
-        List<WorkAssignment> assignments = assignmentService.queueAssignments(agentId);
-        return renderAssignmentList(agentId, "Queue", assignments);
+        AgentScope scope = new AgentScope(agentId);
+        List<WorkAssignment> assignments = assignmentQueryService.listActive(scope, 25);
+        List<AssignmentListEntry> entries = assignments.stream()
+            .map(a -> AssignmentListEntry.from(a, assignmentQueryService.computeAllowedActions(a, scope)))
+            .toList();
+        return renderAssignmentList(agentId, "Queue", entries, assignments.isEmpty() ? null
+            : assignmentQueryService.snapshotCursor(scope, "active", assignments));
     }
 
     @GetMapping("/agents/_detail/{agentId}/profile")
@@ -5961,7 +5207,7 @@ public class OrchestrationController {
             return agentQueueTab(agentId);
         } catch (IllegalArgumentException | IllegalStateException exception) {
             response.setStatus(assignmentLifecycleStatus(exception));
-            return renderAssignmentList(agentId, "Queue", assignmentService.queueAssignments(agentId), exception.getMessage());
+            return agentQueueErrorFragment(agentId, exception.getMessage());
         }
     }
 
@@ -5977,7 +5223,7 @@ public class OrchestrationController {
             return agentQueueTab(agentId);
         } catch (IllegalArgumentException | IllegalStateException exception) {
             response.setStatus(assignmentLifecycleStatus(exception));
-            return renderAssignmentList(agentId, "Queue", assignmentService.queueAssignments(agentId), exception.getMessage());
+            return agentQueueErrorFragment(agentId, exception.getMessage());
         }
     }
 
@@ -5993,7 +5239,7 @@ public class OrchestrationController {
             return agentQueueTab(agentId);
         } catch (IllegalArgumentException | IllegalStateException exception) {
             response.setStatus(assignmentLifecycleStatus(exception));
-            return renderAssignmentList(agentId, "Queue", assignmentService.queueAssignments(agentId), exception.getMessage());
+            return agentQueueErrorFragment(agentId, exception.getMessage());
         }
     }
 
@@ -6010,7 +5256,7 @@ public class OrchestrationController {
             return agentQueueTab(agentId);
         } catch (IllegalArgumentException | IllegalStateException exception) {
             response.setStatus(assignmentLifecycleStatus(exception));
-            return renderAssignmentList(agentId, "Queue", assignmentService.queueAssignments(agentId), exception.getMessage());
+            return agentQueueErrorFragment(agentId, exception.getMessage());
         }
     }
 
@@ -6058,7 +5304,7 @@ public class OrchestrationController {
             return agentQueueTab(agentId);
         } catch (IllegalArgumentException | IllegalStateException exception) {
             response.setStatus(assignmentLifecycleStatus(exception));
-            return renderAssignmentList(agentId, "Queue", assignmentService.queueAssignments(agentId), exception.getMessage());
+            return agentQueueErrorFragment(agentId, exception.getMessage());
         }
     }
 
@@ -6075,7 +5321,7 @@ public class OrchestrationController {
             return agentQueueTab(agentId);
         } catch (IllegalArgumentException | IllegalStateException exception) {
             response.setStatus(assignmentLifecycleStatus(exception));
-            return renderAssignmentList(agentId, "Queue", assignmentService.queueAssignments(agentId), exception.getMessage());
+            return agentQueueErrorFragment(agentId, exception.getMessage());
         }
     }
 
@@ -6085,6 +5331,17 @@ public class OrchestrationController {
             return HttpServletResponse.SC_NOT_FOUND;
         }
         return HttpServletResponse.SC_CONFLICT;
+    }
+
+    private String agentQueueErrorFragment(String agentId, String errorMessage) {
+        AgentScope scope = new AgentScope(agentId);
+        List<WorkAssignment> assignments = assignmentQueryService.listActive(scope, 25);
+        List<AssignmentListEntry> entries = assignments.stream()
+            .map(a -> AssignmentListEntry.from(a, assignmentQueryService.computeAllowedActions(a, scope)))
+            .toList();
+        return renderAssignmentList(agentId, "Queue", entries,
+            assignments.isEmpty() ? null : assignmentQueryService.snapshotCursor(scope, "active", assignments),
+            errorMessage);
     }
 
     @GetMapping("/agents/_detail/{agentId}/inbox")
@@ -7528,6 +6785,107 @@ public class OrchestrationController {
             .withAttribute("hx-trigger", "load")
             .withAttribute("hx-swap", "innerHTML")
             .withChild(loadingPlaceholder()));
+        return panel.render();
+    }
+
+    // ── Redacted AgentScope queue render using AssignmentListEntry DTOs ──
+    private String renderAssignmentList(String agentId, String title,
+                                         List<AssignmentListEntry> entries,
+                                         AssignmentQueryService.CursorSnapshot cursor) {
+        return renderAssignmentList(agentId, title, entries, cursor, null);
+    }
+
+    private String renderAssignmentList(String agentId, String title,
+                                         List<AssignmentListEntry> entries,
+                                         AssignmentQueryService.CursorSnapshot cursor,
+                                         String errorMessage) {
+        Div panel = new Div();
+        panel.withChild(Header.H2(title));
+        if (StringUtils.hasText(errorMessage)) {
+            panel.withChild(new Div().withClass("orch-error").withInnerText(errorMessage));
+        }
+
+        if (entries.isEmpty()) {
+            panel.withChild(new Div().withClass("dashboard-empty").withInnerText("No assignments."));
+            panel.withChild(emptyTranscriptPanel());
+            return panel.render();
+        }
+
+        Table table = Table.create()
+            .withHeaders("Type", "Status", "Priority", "Run Name", "Job", "Project", "Created", "Actions")
+            .withClass("dashboard-table");
+        for (AssignmentListEntry entry : entries) {
+            Div actions = new Div().withClass("orch-actions");
+            List<String> allowed = entry.allowedActions();
+            if (allowed.contains("CANCEL")) {
+                if (entry.status() == OrchestrationStatus.CANCEL_REQUESTED) {
+                    actions.withChild(new HtmlTag("span").withClass("orch-status-chip disabled")
+                        .withInnerText("Canceling"));
+                } else {
+                    actions.withChild(Button.create("Cancel")
+                        .withAttribute("hx-post", "/agents/_detail/" + agentId + "/queue/" + entry.id() + "/cancel")
+                        .withAttribute("hx-confirm", "Cancel this assignment?")
+                        .withAttribute("hx-target", "#agent-tab-panel")
+                        .withAttribute("hx-swap", "innerHTML"));
+                }
+            }
+            if (entry.status() == OrchestrationStatus.QUEUED || entry.status() == OrchestrationStatus.RUNNING) {
+                actions.withChild(Button.create("Pause")
+                    .withAttribute("hx-post", "/agents/_detail/" + agentId + "/queue/" + entry.id() + "/pause")
+                    .withAttribute("hx-target", "#agent-tab-panel")
+                    .withAttribute("hx-swap", "innerHTML"));
+            }
+            if (entry.status() == OrchestrationStatus.WAITING || entry.status() == OrchestrationStatus.PAUSED) {
+                actions.withChild(Button.create("Resume")
+                    .withAttribute("hx-post", "/agents/_detail/" + agentId + "/queue/" + entry.id() + "/resume")
+                    .withAttribute("hx-target", "#agent-tab-panel")
+                    .withAttribute("hx-swap", "innerHTML"));
+            }
+            actions.withChild(Button.create("Diagnostics")
+                .withAttribute("hx-get", "/agents/_detail/" + agentId + "/assignments/" + entry.id() + "/diagnostics")
+                .withAttribute("hx-target", "#assignment-diagnostics-panel")
+                .withAttribute("hx-swap", "innerHTML"));
+            if (entry.status() != null && entry.status().isTerminal()) {
+                actions.withChild(Button.create("Delete")
+                    .withClass("orch-danger")
+                    .withAttribute("hx-delete", "/agents/_detail/" + agentId + "/queue/" + entry.id())
+                    .withAttribute("hx-confirm", "Delete this assignment?")
+                    .withAttribute("hx-target", "#agent-tab-panel")
+                    .withAttribute("hx-swap", "innerHTML"));
+            }
+            if (entry.status() == OrchestrationStatus.RUNNING) {
+                actions.withChild(Button.create("Force Interrupt")
+                    .withClass("orch-danger")
+                    .withAttribute("hx-get", "/agents/_detail/" + agentId + "/assignments/" + entry.id() + "/diagnostics")
+                    .withAttribute("hx-target", "#assignment-diagnostics-panel")
+                    .withAttribute("hx-swap", "innerHTML"));
+            }
+            Component status = statusBadgeHtml(entry.status() != null ? entry.status().name() : "unknown");
+            table.addRow(
+                new HtmlTag("span").withInnerText(entry.assignmentType() != null ? entry.assignmentType().name() : "—"),
+                status,
+                new HtmlTag("span").withInnerText(String.valueOf(entry.priority())),
+                new HtmlTag("span").withInnerText(displayValue(entry.runDisplayName())),
+                new HtmlTag("span").withInnerText(entry.jobId() != null ? entry.jobId() : "—"),
+                new HtmlTag("span").withInnerText(displayValue(entry.projectId())),
+                new HtmlTag("span").withInnerText(entry.createdAt() != null ? formatSince(entry.createdAt()) : "—"),
+                actions
+            );
+        }
+        panel.withChild(table);
+        panel.withChild(new Div().withId("assignment-diagnostics-panel"));
+        // Default transcript: try to find running entry
+        AssignmentListEntry selected = entries.stream()
+            .filter(e -> e.status() == OrchestrationStatus.RUNNING)
+            .findFirst()
+            .orElseGet(() -> entries.stream()
+                .filter(e -> e.status() != null && !e.status().isTerminal())
+                .findFirst()
+                .orElse(null));
+        panel.withChild(selected == null
+            ? emptyTranscriptPanel()
+            : assignmentTranscriptPanel(agentId, assignmentService.transcript(agentId, selected.id())));
+
         return panel.render();
     }
 

@@ -138,6 +138,17 @@ class AssignmentAuthorityFoundationTest {
     }
 
     @Test
+    void priorityCasRejectsNonQueuedAssignment() {
+        var ctx = newCtx();
+        WorkAssignment paused = ctx.repo.insertAssignment(assignment(UUID.randomUUID().toString(), "agent-1", "proj-1",
+            AssignmentType.TASK_RUN, OrchestrationStatus.PAUSED));
+
+        assertThatThrownBy(() -> ctx.repo.updateAssignmentPriority(paused.id(), "proj-1", 42, 0))
+            .isInstanceOf(IllegalStateException.class)
+            .hasMessageContaining("CAS failed");
+    }
+
+    @Test
     void priorityCasRejectsLeasedAssignment() {
         var ctx = newCtx();
         WorkAssignment a = ctx.repo.insertAssignment(assignment(UUID.randomUUID().toString(), "agent-1", "proj-1",

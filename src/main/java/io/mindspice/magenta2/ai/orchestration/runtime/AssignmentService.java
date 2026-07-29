@@ -735,14 +735,26 @@ public class AssignmentService {
 
     public AssignmentTranscript transcript(String agentId, String assignmentId) {
         agentProfileService.get(agentId);
-        WorkAssignment assignment = get(assignmentId);
-        if (!agentId.equals(assignment.agentId())) {
-            throw new IllegalArgumentException("Assignment does not belong to agent: " + assignmentId);
-        }
+        WorkAssignment assignment = requireAgentAssignment(agentId, assignmentId);
         List<String> conversationIds = conversationIds(assignment);
         List<AuditRepository.AuditEvent> auditEvents = auditRepository == null || conversationIds.isEmpty()
             ? List.of()
             : auditRepository.findByConversationIds(conversationIds);
+        return new AssignmentTranscript(assignment, conversationIds, auditEvents);
+    }
+
+    /**
+     * Returns transcript facts linked directly to an assignment by durable
+     * assignment-conversation rows. Project Queue uses this strict reader and
+     * deliberately excludes checkpoint/input/evidence and legacy inference.
+     */
+    public AssignmentTranscript exactLinkTranscript(String agentId, String assignmentId) {
+        agentProfileService.get(agentId);
+        WorkAssignment assignment = requireAgentAssignment(agentId, assignmentId);
+        List<String> conversationIds = repository.findAssignmentConversationIds(assignment.id());
+        List<AuditRepository.AuditEvent> auditEvents = auditRepository == null || conversationIds.isEmpty()
+            ? List.of()
+            : auditRepository.findByConversationIds(conversationIds).stream().limit(12).toList();
         return new AssignmentTranscript(assignment, conversationIds, auditEvents);
     }
 

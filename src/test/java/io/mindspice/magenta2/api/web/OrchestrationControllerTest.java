@@ -43,19 +43,10 @@ class OrchestrationControllerTest {
     }
 
     @Test
-    void projectConsoleRoutesArePresentInSettledTabOrder() {
+    void projectConsoleRoutesHaveMovedToDedicatedController() {
         var routes = allRoutes(OrchestrationController.class);
-        assertThat(routes)
-            .contains("/projects", "/projects/{projectId}", "/projects/_detail/{projectId}")
-            .contains("/projects/_detail/{projectId}/dashboard")
-            .contains("/projects/_detail/{projectId}/members")
-            .contains("/projects/_detail/{projectId}/files")
-            .contains("/projects/_detail/{projectId}/files/list")
-            .contains("/projects/_detail/{projectId}/files/preview")
-            .contains("/projects/_detail/{projectId}/jobs")
-            .contains("/projects/_detail/{projectId}/outputs")
-            .contains("/projects/_detail/{projectId}/settings")
-            .contains("/projects/_detail/{projectId}/delete-confirm");
+        // Project routes are now in ProjectConsoleController; check they are absent here
+        assertThat(routes).noneMatch(r -> r.startsWith("/projects"));
     }
 
     @Test
