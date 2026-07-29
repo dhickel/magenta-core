@@ -15,9 +15,9 @@ For operational UI mutations, returning an error fragment with `200 OK` hides fa
 
 HTMX 1.9 defaults `shouldSwap=false` for `>=400` responses. When a failed mutation returns a useful server-rendered fragment, the browser layer needs a narrow `htmx:beforeSwap` opt-in rather than a JSON/JavaScript transport rewrite. In Magenta this behavior belongs in the active shell/client helper for operational fragments and should remain limited to same-origin non-401/403 responses that have an existing target and known operational fragment markers such as `.orch-error`, `.orch-status-error`, or `.agent-lifecycle-panel`.
 
-Use `400` for validation or user-correctable request errors, `409` when the current lifecycle state conflicts with the requested mutation, `404` for scoped not-found or wrong-owner cases when the existing lifecycle helper maps that way, and `500` for unavailable infrastructure or unexpected service failures.
+Use `400` for validation or user-correctable request errors, `409` when the current lifecycle state conflicts with the requested mutation, `404` for scoped not-found or wrong-owner cases when the existing lifecycle helper maps that way, `503` for a recognized typed infrastructure failure (for example, `DataAccessException`), and `500` for unexpected failures.
 
-Unexpected exceptions that are caught to preserve an HTMX fragment should still be logged at the controller boundary.
+Fragments must use stable safe text rather than exception messages. Do not log or audit raw exception messages or stack traces at this HTTP boundary; record only a non-sensitive classification. `IllegalStateException` is not a conflict classifier.
 
 # Engine Relevance
 

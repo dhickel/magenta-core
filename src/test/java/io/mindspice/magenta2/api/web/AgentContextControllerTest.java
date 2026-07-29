@@ -23,9 +23,16 @@ import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceDirectoryServi
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.springframework.dao.DataAccessResourceFailureException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.mock.web.MockHttpServletResponse;
+import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.setup.MockMvcBuilders;
+
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
@@ -41,15 +48,38 @@ class AgentContextControllerTest {
     private StubAgentProfileService profileService;
     private StubAgentContextService contextService;
     private AgentContextController controller;
+    private MockMvc mockMvc;
 
     @BeforeEach
     void setUp() {
         profileService = new StubAgentProfileService();
         contextService = new StubAgentContextService();
         controller = new AgentContextController(profileService, contextService);
+        mockMvc = MockMvcBuilders.standaloneSetup(controller)
+                .setControllerAdvice(new GlobalExceptionHandler())
+                .build();
     }
 
-    // ── JSON endpoints: 404 for missing agent ──
+    @Test
+    void mockMvcMapsMissingInfrastructureAndUnexpectedJsonOutcomesTruthfully() throws Exception {
+        mockMvc.perform(get("/api/agents/{agentId}/context", MISSING_AGENT_ID))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.reason").value("Agent not found"));
+
+        profileService.setFailure(new DataAccessResourceFailureException("jdbc:/private/root"));
+        mockMvc.perform(get("/api/agents/{agentId}/context", AGENT_ID))
+                .andExpect(status().isServiceUnavailable())
+                .andExpect(jsonPath("$.error").value("service temporarily unavailable"));
+
+        profileService.setFailure(null);
+        profileService.setProfile(AGENT_ID);
+        contextService.setFailSnapshotWith(new IllegalStateException("SQL /private/root"));
+        mockMvc.perform(get("/api/agents/{agentId}/context", AGENT_ID))
+                .andExpect(status().isInternalServerError())
+                .andExpect(jsonPath("$.error").value("Internal server error"));
+    }
+
+    // ── JSON endpoints: 404 for missing agent ─
 
     @Test
     void summaryReturns404ForMissingAgent() {
@@ -186,14 +216,24 @@ class AgentContextControllerTest {
     // ── Fragment endpoint: 409 for conflict ──
 
     @Test
-    void provisionMaterializationReturns409ForConflict() {
+    void provisionMaterializationReturns409ForConflictWithoutExceptionDetail() {
         profileService.setProfile(AGENT_ID);
         contextService.setFailProvisionWith(
-                new AgentContextService.OperationConflictException("already provisioned"));
+                new AgentContextService.OperationConflictException("SQL /private/root already provisioned"));
         MockHttpServletResponse response = new MockHttpServletResponse();
         String fragment = controller.provisionMaterialization(AGENT_ID, "proj", null, response);
         assertThat(response.getStatus()).isEqualTo(409);
-        assertThat(fragment).contains("Conflict");
+        assertThat(fragment).contains("Conflict").doesNotContain("SQL", "/private/root");
+    }
+
+    @Test
+    void contextPanelReturns500ForUnexpectedFailureWithoutExceptionDetail() {
+        profileService.setProfile(AGENT_ID);
+        contextService.setFailSnapshotWith(new IllegalStateException("jdbc:/private/root"));
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        String fragment = controller.contextPanel(AGENT_ID, response);
+        assertThat(response.getStatus()).isEqualTo(500);
+        assertThat(fragment).contains("Error").doesNotContain("jdbc:", "/private/root");
     }
 
     // ── Safe fragments: no sensitive details ──
@@ -213,6 +253,7 @@ class AgentContextControllerTest {
 
     private static final class StubAgentProfileService extends AgentProfileService {
         private String presentId;
+        private RuntimeException failure;
 
         StubAgentProfileService() {
             super(null, null, null, null, null, null, null);
@@ -222,8 +263,13 @@ class AgentContextControllerTest {
             this.presentId = id;
         }
 
+        void setFailure(RuntimeException exception) {
+            this.failure = exception;
+        }
+
         @Override
         public Optional<AgentProfile> find(String id) {
+            if (failure != null) throw failure;
             if (presentId != null && presentId.equals(id)) {
                 return Optional.of(new AgentProfile(
                         id, "Test", AgentProfileStatus.ACTIVE, "test-model",
@@ -234,7 +280,7 @@ class AgentContextControllerTest {
     }
 
     private static class StubAgentContextService extends AgentContextService {
-        private boolean failSnapshot;
+        private RuntimeException failSnapshotWith;
         private boolean failGetDefault;
         private boolean failMaterializations;
         private RuntimeException failProvisionWith;
@@ -246,26 +292,29 @@ class AgentContextControllerTest {
                   mock(WorkspaceDirectoryService.class));
         }
 
-        void setFailSnapshot(boolean fail) { this.failSnapshot = fail; }
+        void setFailSnapshot(boolean fail) {
+            this.failSnapshotWith = fail ? new DataAccessResourceFailureException("jdbc:/private/root") : null;
+        }
+        void setFailSnapshotWith(RuntimeException exception) { this.failSnapshotWith = exception; }
         void setFailGetDefault(boolean fail) { this.failGetDefault = fail; }
         void setFailMaterializations(boolean fail) { this.failMaterializations = fail; }
         void setFailProvisionWith(RuntimeException ex) { this.failProvisionWith = ex; }
 
         @Override
         public ContextSnapshot snapshot(String agentId) {
-            if (failSnapshot) throw new RuntimeException("snapshot unavailable");
+            if (failSnapshotWith != null) throw failSnapshotWith;
             return new ContextSnapshot(null, List.of(), List.of());
         }
 
         @Override
         public ContextLookup<ContextDefault> getDefault(String agentId) {
-            if (failGetDefault) throw new RuntimeException("default unavailable");
+            if (failGetDefault) throw new DataAccessResourceFailureException("jdbc:/private/root");
             return new ContextLookup<>(ContextOutcome.UNAVAILABLE, null);
         }
 
         @Override
         public List<MaterializationRecord> materializations(String agentId) {
-            if (failMaterializations) throw new RuntimeException("materializations unavailable");
+            if (failMaterializations) throw new DataAccessResourceFailureException("jdbc:/private/root");
             return List.of();
         }
 

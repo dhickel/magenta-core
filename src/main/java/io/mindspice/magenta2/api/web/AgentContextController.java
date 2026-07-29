@@ -20,6 +20,7 @@ import io.mindspice.magenta2.ai.orchestration.context.AgentMaterializationReposi
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.dao.DataAccessException;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Controller;
 import org.springframework.util.StringUtils;
@@ -64,13 +65,19 @@ class AgentContextController {
     @GetMapping("/panel")
     @ResponseBody
     public String contextPanel(@PathVariable String agentId, HttpServletResponse response) {
-        Optional<AgentProfile> profile = agentProfileService.find(agentId);
-        if (profile.isEmpty()) return error(response, 404, agentId, "Not Found", "Agent not found.");
         try {
+            if (agentProfileService.find(agentId).isEmpty()) {
+                return error(response, 404, agentId, "Not Found", "Agent not found.");
+            }
             return summaryFragment(agentId, contextService.snapshot(agentId), null);
-        } catch (RuntimeException exception) {
-            log.debug("Context panel unavailable for agent {}", agentId, exception);
+        } catch (DataAccessException exception) {
+            log.debug("Context panel infrastructure failure");
             return error(response, 503, agentId, "Unavailable", "Context data is temporarily unavailable.");
+        } catch (IllegalArgumentException exception) {
+            return error(response, 400, agentId, "Invalid", "Invalid agent context request.");
+        } catch (RuntimeException exception) {
+            log.warn("Context panel failure");
+            return error(response, 500, agentId, "Error", "Context data could not be loaded.");
         }
     }
 
@@ -98,9 +105,10 @@ class AgentContextController {
                                 @RequestParam(required = false) String reason,
                                 @RequestParam(required = false) String operationKey,
                                 HttpServletResponse response) {
-        Optional<AgentProfile> profile = agentProfileService.find(agentId);
-        if (profile.isEmpty()) return error(response, 404, agentId, "Not Found", "Agent not found.");
         try {
+            if (agentProfileService.find(agentId).isEmpty()) {
+                return error(response, 404, agentId, "Not Found", "Agent not found.");
+            }
             SelectionKind kind = SelectionKind.valueOf(selectionKind.toUpperCase());
             MaterializationKey key = kind == SelectionKind.MATERIALIZATION
                     ? MaterializationKey.fromSerialized(agentId, required(materializationKey, "Materialization key")) : null;
@@ -113,28 +121,37 @@ class AgentContextController {
         } catch (AgentContextService.OperationConflictException exception) {
             response.setStatus(409);
             return AgentContextFragments.defaultEditor(encode(agentId), contextService.getDefault(agentId).value(),
-                    contextService.readyMaterializations(agentId), "Conflict: " + exception.getMessage(), true);
+                    contextService.readyMaterializations(agentId), "Conflict with current state.", true);
         } catch (IllegalArgumentException exception) {
             response.setStatus(400);
             return AgentContextFragments.defaultEditor(encode(agentId), contextService.getDefault(agentId).value(),
-                    contextService.readyMaterializations(agentId), "Invalid: " + exception.getMessage(), true);
-        } catch (RuntimeException exception) {
-            log.debug("Default update failed for agent {}", agentId, exception);
+                    contextService.readyMaterializations(agentId), "Invalid request.", true);
+        } catch (DataAccessException exception) {
+            log.debug("Default update infrastructure failure");
             return error(response, 503, agentId, "Unavailable", "Default update is temporarily unavailable.");
+        } catch (RuntimeException exception) {
+            log.warn("Default update failure");
+            return error(response, 500, agentId, "Error", "Default update could not be completed.");
         }
     }
 
     @GetMapping("/defaults/edit")
     @ResponseBody
     public String editDefault(@PathVariable String agentId, HttpServletResponse response) {
-        Optional<AgentProfile> profile = agentProfileService.find(agentId);
-        if (profile.isEmpty()) return error(response, 404, agentId, "Not Found", "Agent not found.");
         try {
+            if (agentProfileService.find(agentId).isEmpty()) {
+                return error(response, 404, agentId, "Not Found", "Agent not found.");
+            }
             return AgentContextFragments.defaultEditor(encode(agentId), contextService.getDefault(agentId).value(),
                     contextService.readyMaterializations(agentId), null, false);
-        } catch (RuntimeException exception) {
-            log.debug("Default editor unavailable for agent {}", agentId, exception);
+        } catch (DataAccessException exception) {
+            log.debug("Default editor infrastructure failure");
             return error(response, 503, agentId, "Unavailable", "Default editor is temporarily unavailable.");
+        } catch (IllegalArgumentException exception) {
+            return error(response, 400, agentId, "Invalid", "Invalid agent context request.");
+        } catch (RuntimeException exception) {
+            log.warn("Default editor failure");
+            return error(response, 500, agentId, "Error", "Default editor could not be loaded.");
         }
     }
 
@@ -158,13 +175,19 @@ class AgentContextController {
     @GetMapping("/materializations/panel")
     @ResponseBody
     public String materializationsPanel(@PathVariable String agentId, HttpServletResponse response) {
-        Optional<AgentProfile> profile = agentProfileService.find(agentId);
-        if (profile.isEmpty()) return error(response, 404, agentId, "Not Found", "Agent not found.");
         try {
+            if (agentProfileService.find(agentId).isEmpty()) {
+                return error(response, 404, agentId, "Not Found", "Agent not found.");
+            }
             return AgentContextFragments.materializationList(encode(agentId), contextService.materializations(agentId), null);
-        } catch (RuntimeException exception) {
-            log.debug("Materialization list unavailable for agent {}", agentId, exception);
+        } catch (DataAccessException exception) {
+            log.debug("Materialization infrastructure failure");
             return error(response, 503, agentId, "Unavailable", "Materialization data is temporarily unavailable.");
+        } catch (IllegalArgumentException exception) {
+            return error(response, 400, agentId, "Invalid", "Invalid agent context request.");
+        } catch (RuntimeException exception) {
+            log.warn("Materialization list failure");
+            return error(response, 500, agentId, "Error", "Materialization data could not be loaded.");
         }
     }
 
@@ -174,23 +197,27 @@ class AgentContextController {
                                            @RequestParam String projectKey,
                                            @RequestParam(required = false) String operationKey,
                                            HttpServletResponse response) {
-        Optional<AgentProfile> profile = agentProfileService.find(agentId);
-        if (profile.isEmpty()) return error(response, 404, agentId, "Not Found", "Agent not found.");
         try {
+            if (agentProfileService.find(agentId).isEmpty()) {
+                return error(response, 404, agentId, "Not Found", "Agent not found.");
+            }
             contextService.provisionProject(agentId, projectKey, operationKey);
             return AgentContextFragments.materializationList(encode(agentId), contextService.materializations(agentId),
                     "Provisioned successfully.");
         } catch (AgentContextService.OperationConflictException exception) {
             response.setStatus(409);
             return AgentContextFragments.materializationList(encode(agentId), contextService.materializations(agentId),
-                    "Conflict: " + exception.getMessage());
+                    "Conflict with current state.");
         } catch (IllegalArgumentException exception) {
             response.setStatus(400);
             return AgentContextFragments.materializationList(encode(agentId), contextService.materializations(agentId),
-                    "Invalid: " + exception.getMessage());
-        } catch (RuntimeException exception) {
-            log.debug("Materialization provision failed for agent {}", agentId, exception);
+                    "Invalid request.");
+        } catch (DataAccessException exception) {
+            log.debug("Materialization provision infrastructure failure");
             return error(response, 503, agentId, "Unavailable", "Provision is temporarily unavailable.");
+        } catch (RuntimeException exception) {
+            log.warn("Materialization provision failure");
+            return error(response, 500, agentId, "Error", "Provision could not be completed.");
         }
     }
 
