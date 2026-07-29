@@ -8,6 +8,7 @@ import io.mindspice.magenta2.ai.chat.repository.ChatMemoryRepository;
 import io.mindspice.magenta2.ai.chat.repository.ChatSessionMetadataRepository;
 import io.mindspice.magenta2.ai.config.user.AiConfig;
 import io.mindspice.magenta2.ai.orchestration.agents.AgentProfileRepository;
+import io.mindspice.magenta2.ai.orchestration.context.AgentMaterializationRepository.MaterializationKey;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.SingleConnectionDataSource;
 /**
@@ -116,5 +117,21 @@ public final class WorkspaceDirectoryServiceTestSupport {
     /** Create a descriptor for tests that need one without directory resolution. */
     public static WorkspaceDescriptor descriptor(WorkspaceKind kind, String key, Path root) {
         return new WorkspaceDescriptor(kind, key, root.toAbsolutePath().normalize());
+    }
+
+    /**
+     * Create a MaterializationLocation for tests. Uses {@code agentRoot} as the
+     * absolute parent of the canonical confined path.
+     */
+    public static MaterializationLocation materializationLocation(
+            WorkspaceDescriptor agentDescriptor,
+            MaterializationKey key,
+            int generation) {
+        Path agentRoot = agentDescriptor.root();
+        Path confined = agentRoot.resolve("projects/" + key.serialized());
+        String relative = "workspace/agent/" + agentDescriptor.key()
+                + "/projects/" + key.serialized() + "/";
+        return new MaterializationLocation(agentDescriptor, key, generation,
+                relative, confined.toAbsolutePath().normalize());
     }
 }

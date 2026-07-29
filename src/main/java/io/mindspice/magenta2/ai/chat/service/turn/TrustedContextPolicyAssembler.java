@@ -71,6 +71,9 @@ public class TrustedContextPolicyAssembler {
         if (binding == null) {
             return TrustedPolicyResult.terminal(ContextOutcome.UNAVAILABLE);
         }
+        if (!hasConsistentAvailableContext(binding, location)) {
+            return TrustedPolicyResult.terminal(ContextOutcome.STALE);
+        }
 
         StringBuilder policy = new StringBuilder();
         policy.append("## Magenta Trusted Context Policy\n\n");
@@ -116,12 +119,32 @@ public class TrustedContextPolicyAssembler {
 
         String policyText = policy.toString();
         if (policyText.length() > POLICY_MAX_CHARS) {
-            policyText = policyText.substring(0, POLICY_MAX_CHARS - 40)
-                    + "\n\n[Trusted policy truncated — maximum length reached]";
+            String truncationSuffix = "\n\n[Trusted policy truncated — maximum length reached]";
+            int maxContent = POLICY_MAX_CHARS - truncationSuffix.length();
+            if (maxContent < 0) {
+                maxContent = 0;
+            }
+            policyText = policyText.substring(0, maxContent) + truncationSuffix;
         }
 
         return TrustedPolicyResult.available(policyText, binding,
                 bindingResolution.outcome(), location, executionDescriptor);
+    }
+
+    private static boolean hasConsistentAvailableContext(ContextBinding binding,
+                                                         MaterializationLocation location) {
+        if (binding.selectionKind() == SelectionKind.PERSONAL) {
+            return location == null;
+        }
+        if (binding.selectionKind() != SelectionKind.MATERIALIZATION || location == null
+                || binding.materializationGeneration() == null) {
+            return false;
+        }
+        return binding.agentId().equals(binding.materializationKey().agentId())
+                && binding.materializationKey().equals(location.materializationKey())
+                && binding.materializationGeneration().intValue() == location.generation()
+                && location.agentDescriptor().kind() == WorkspaceKind.AGENT
+                && binding.agentId().equals(location.agentDescriptor().key());
     }
 
     /**
