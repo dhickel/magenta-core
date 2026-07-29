@@ -60,7 +60,7 @@ Validation stays inside the creation form and preserves submitted values. The br
 
 The Members tab lists assigned members and roles. Use HTMX controls to add a member, choose a role, or remove a member. Membership removal is guarded while the agent has active assignments.
 
-The Files tab is read-only. It selects only current members' exact project materialization records and revalidates membership, source project, lifecycle state, and generation for every read. It cannot expose the rest of an agent workspace or create, edit, move, tag, download, or delete materialization content. Provisioning and lifecycle actions remain on the owning agent's Context tab. Empty `READY`, missing, provisioning, failed, revoked, stale-generation, and unavailable states are shown distinctly.
+The Files tab is read-only. It selects one current member's exact V2 project materialization generation and revalidates membership, source project, lifecycle state, and generation for every read. It cannot expose the rest of an agent workspace or create, edit, move, tag, download, or delete materialization content. Project Settings owns directory-only materialization template revisions; each save creates a new revision for future generations. Provisioning and lifecycle actions remain on the owning agent's Context tab. Empty `READY`, missing, provisioning, failed, revoked, stale-generation, and unavailable states are shown distinctly.
 
 ### Settings And Deletion
 

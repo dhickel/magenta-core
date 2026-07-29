@@ -20,6 +20,9 @@ public final class WorkspacePathLayout {
     public static final String APPS = "apps";
     public static final String REPOS = "repos";
     public static final String PROJECTS = "projects";
+    public static final String MATERIALIZATIONS = "materializations";
+    public static final String V2 = "v2";
+    private static final String GEN_PREFIX = "gen-";
 
     private static final int MAX_COMPONENT_BYTES = 255;
     private static final Pattern TASK_PATH_KEY = Pattern.compile(
@@ -62,9 +65,31 @@ public final class WorkspacePathLayout {
         return agentRoot(agentId).resolve(PROJECTS);
     }
 
-    /** Workspace-relative path to an agent's materialization directory. */
+    /** Workspace-relative path to an agent's materialization directory (legacy V1). */
     public static Path agentMaterializationDir(String agentId, String keySerialized) {
         return agentProjectsDir(agentId).resolve(validateComponent(keySerialized, "materializationKey"));
+    }
+
+    // ── GENERATION_V2 roots (outside legacy projects/ subtree) ──
+
+    /** Workspace-relative root for all V2 materialization generations for an agent. */
+    public static Path agentMaterializationsV2Root(String agentId) {
+        return agentRoot(agentId).resolve(MATERIALIZATIONS).resolve(V2);
+    }
+
+    /**
+     * Workspace-relative path to a specific V2 generation directory.
+     * Layout: {@code workspace/agent/<id>/materializations/v2/<projectKey>/gen-<N>/}
+     */
+    public static Path agentMaterializationGenerationV2Dir(String agentId,
+                                                            String projectKeySerialized,
+                                                            int generation) {
+        if (generation < 1) {
+            throw new IllegalArgumentException("generation must be >= 1");
+        }
+        return agentMaterializationsV2Root(agentId)
+                .resolve(validateComponent(projectKeySerialized, "projectKey"))
+                .resolve(GEN_PREFIX + generation);
     }
 
     /** Workspace-relative reserved task root. */
@@ -119,7 +144,8 @@ public final class WorkspacePathLayout {
         if (OUTPUTS.equals(lower) || TASKS.equals(lower) || SKILLS.equals(lower)
                 || STAGING.equals(lower) || WORKSPACE.equals(lower)
                 || HOME.equals(lower) || SCRIPTS.equals(lower) || APPS.equals(lower)
-                || REPOS.equals(lower) || PROJECTS.equals(lower)) {
+                || REPOS.equals(lower) || PROJECTS.equals(lower)
+                || MATERIALIZATIONS.equals(lower)) {
             throw new IllegalArgumentException(label + " must not use reserved name: " + value);
         }
         requireComponentByteLength(component, label);

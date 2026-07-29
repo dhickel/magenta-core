@@ -300,6 +300,13 @@ public class OutputArtifactRepository {
                 planId);
     }
 
+    public List<RunOutputArtifact> findArtifactsByProjectId(String projectId, int limit) {
+        return jdbcTemplate.query(
+                "select * from run_output_artifacts where project_id = ? order by created_at desc limit ?",
+                (rs, rowNum) -> toArtifact(rs),
+                projectId, Math.max(1, Math.min(limit, 500)));
+    }
+
     public List<RunOutputArtifact> findArtifacts(OutputArtifactQuery query) {
         OutputArtifactQuery effectiveQuery = query == null
                 ? OutputArtifactQuery.of(null, null, null, null, null, null, null, null, null, null, null, null, 50)

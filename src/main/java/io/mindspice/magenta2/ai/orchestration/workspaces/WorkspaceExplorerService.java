@@ -158,6 +158,26 @@ public class WorkspaceExplorerService {
         return inspectRoot(location.confinedPath(), path);
     }
 
+    // ── V2 generation read-only overloads ──
+
+    /** Read-only listing rooted at an exact, generation-verified V2 generation location. */
+    public DirectoryListing list(MaterializationGenerationLocation location, RelativePath path) {
+        Objects.requireNonNull(location, "location");
+        return listRoot(location.confinedPath(), path);
+    }
+
+    /** Read-only preview confined to an exact V2 generation root. */
+    public FilePreview preview(MaterializationGenerationLocation location, RelativePath path) {
+        Objects.requireNonNull(location, "location");
+        return previewRoot(location.confinedPath(), path);
+    }
+
+    /** Read-only inspection confined to an exact V2 generation root. */
+    public Entry inspect(MaterializationGenerationLocation location, RelativePath path) {
+        Objects.requireNonNull(location, "location");
+        return inspectRoot(location.confinedPath(), path);
+    }
+
     public DownloadContent download(WorkspaceDescriptor descriptor, RelativePath path) {
         requireBrowsable(descriptor.kind(), path.value());
         return downloadContent(descriptor, descriptor.root(), path);

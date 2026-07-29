@@ -233,6 +233,10 @@ public final class SchemaMigrationRunner {
     private static final List<String> FOUNDATION_TABLES_V17 = List.copyOf(
             java.util.stream.Stream.concat(FOUNDATION_TABLES_V16.stream(),
                     java.util.stream.Stream.of("job_reassignment_operations")).toList());
+    private static final List<String> FOUNDATION_TABLES_V18 = List.copyOf(
+            java.util.stream.Stream.concat(FOUNDATION_TABLES_V17.stream(),
+                    java.util.stream.Stream.of("project_materialization_templates",
+                            "agent_materialization_generations")).toList());
     private static final Set<String> FOUNDATION_INDEXES_V10 = Set.of(
             "idx_skill_candidate_versions_lookup", "idx_skill_candidate_observations_candidate",
             "idx_skill_candidate_observations_scan", "idx_skill_exact_assignments_target",
@@ -295,6 +299,13 @@ public final class SchemaMigrationRunner {
                             "idx_job_runs_assignment_unique",
                             "idx_job_reassignment_source",
                             "idx_job_reassignment_destination"))
+                    .collect(java.util.stream.Collectors.toSet()));
+    private static final Set<String> FOUNDATION_INDEXES_V18 = java.util.Set.copyOf(
+            java.util.stream.Stream.concat(FOUNDATION_INDEXES_V17.stream(),
+                    java.util.stream.Stream.of(
+                            "idx_project_materialization_templates_project",
+                            "idx_agent_materialization_generations_agent",
+                            "idx_agent_materialization_generations_head"))
                     .collect(java.util.stream.Collectors.toSet()));
 
     private static final Map<String, List<String>> FOUNDATION_COLUMNS = Map.ofEntries(
@@ -426,7 +437,14 @@ public final class SchemaMigrationRunner {
                     "source_assignment_id", "destination_agent_id",
                     "successor_assignment_id", "successor_task_run_id",
                     "lineage_parent_id", "terminal_outcome", "failure_class",
-                    "created_at", "completed_at"))
+                    "created_at", "completed_at")),
+            Map.entry("project_materialization_templates", List.of("id", "project_id",
+                    "revision", "directories_snapshot", "created_at")),
+            Map.entry("agent_materialization_generations", List.of("agent_id", "project_key",
+                    "generation", "root_kind", "root_location", "lifecycle_state",
+                    "lifecycle_version", "template_revision",
+                    "template_directories_snapshot", "failure_detail",
+                    "created_at", "updated_at"))
     );
 
 
@@ -901,7 +919,8 @@ public final class SchemaMigrationRunner {
         if (latestVersion < 1) {
             return;
         }
-        List<String> expectedTables = latestVersion >= 17 ? FOUNDATION_TABLES_V17
+        List<String> expectedTables = latestVersion >= 18 ? FOUNDATION_TABLES_V18
+                : latestVersion >= 17 ? FOUNDATION_TABLES_V17
                 : latestVersion >= 16 ? FOUNDATION_TABLES_V16
                 : latestVersion >= 15 ? FOUNDATION_TABLES_V15
                 : latestVersion >= 14 ? FOUNDATION_TABLES_V14
@@ -1171,6 +1190,10 @@ public final class SchemaMigrationRunner {
                 throw new MigrationException("Missing migration-owned v17 indexes: "
                         + FOUNDATION_INDEXES_V17.stream().filter(index -> !allIndexes.contains(index)).toList());
             }
+            if (latestVersion >= 18 && !allIndexes.containsAll(FOUNDATION_INDEXES_V18)) {
+                throw new MigrationException("Missing migration-owned v18 indexes: "
+                        + FOUNDATION_INDEXES_V18.stream().filter(index -> !allIndexes.contains(index)).toList());
+            }
             List<String> assignments = tableColumns(connection, "work_assignments");
             if (!assignments.containsAll(List.of("source_definition_id", "origin_definition_id", "context_binding_key", "row_version"))
                     || !objectNames(connection, "trigger", "work_assignments_immutable_attribution")
@@ -1206,6 +1229,25 @@ public final class SchemaMigrationRunner {
                     || !reassignmentOps.contains("expected_version integer not null check")
                     || !reassignmentOps.contains("length(source_assignment_id) between 1 and 255")) {
                 throw new MigrationException("job_reassignment_operations is missing required constraints");
+            }
+        }
+        if (latestVersion >= 18) {
+            String templates = normalized(tableSql(connection, "project_materialization_templates"));
+            if (!templates.contains("unique (project_id, revision)")
+                    || !templates.contains("revision integer not null check")
+                    || !templates.contains("foreign key (project_id) references projects")) {
+                throw new MigrationException("project_materialization_templates is missing required constraints");
+            }
+            String generations = normalized(tableSql(connection, "agent_materialization_generations"));
+            if (!generations.contains("primary key (agent_id, project_key, generation)")
+                    || !generations.contains("root_kind in ('generation_v2', 'legacy_v1')")
+                    || !generations.contains("lifecycle_state in ('provisioning', 'ready', 'failed', 'revoked')")
+                    || !generations.contains("check (root_location is not null or lifecycle_state in")
+                    || !generations.contains("check ((root_kind = 'legacy_v1' and root_location is not null)")
+                    || !generations.contains("length(project_key) = 75")
+                    || !generations.contains("substr(project_key, 1, 11) = 'v1-project-'")
+                    || !generations.contains("substr(project_key, 12) not glob '*[^0-9a-f]*'")) {
+                throw new MigrationException("agent_materialization_generations is missing required constraints");
             }
         }
         if (latestVersion >= 6) {

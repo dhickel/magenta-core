@@ -1,6 +1,6 @@
 # Data Model
 
-Primary Magenta SQLite schema is initialized from [`schema.sql`](../../src/main/resources/schema.sql) and evolved by checksum-protected ordered resources 001-017 in [`db/migrations`](../../src/main/resources/db/migrations). Migration-owned structures use `SchemaMigrationRunner`; older unrelated repositories may still add compatibility columns for warm databases. The [001–009 guide](migrations-001-009.md) covers the original immutable foundation; migrations 010-017 are documented in their domain sections below.
+Primary Magenta SQLite schema is initialized from [`schema.sql`](../../src/main/resources/schema.sql) and evolved by checksum-protected ordered resources 001-018 in [`db/migrations`](../../src/main/resources/db/migrations). Migration-owned structures use `SchemaMigrationRunner`; older unrelated repositories may still add compatibility columns for warm databases. The [001–009 guide](migrations-001-009.md) covers the original immutable foundation; migrations 010-018 are documented in their domain sections below.
 
 ## Avatar Personal Data (Removed)
 
@@ -87,6 +87,8 @@ Source package: [`ai/orchestration/runtime`](../../src/main/java/io/mindspice/ma
 - `job_runs`: execution records with job assignment id, workspace type/key/identity, work item run JSON, final/error messages, status, and timestamps.
 - `job_recurrences`: one recurrence per job, with cron expression, timezone, next fire time, enabled flag, and timestamps.
 - `job_reassignment_operations` (migration 017): operation-keyed atomic queued-reassignment state, source/destination identity, expected version, successor and lineage links, terminal outcome, and bounded failure class.
+- `project_materialization_templates` (migration 018): append-only project-owned revisions with a canonical JSON directory snapshot. The unique `(project_id, revision)` sequence preserves historical layouts.
+- `agent_materialization_generations` (migration 018): immutable `(agent_id, project_key, generation)` V2 generation snapshots, their template revision/snapshot, generation root assertion, and lifecycle CAS facts. `GENERATION_V2` roots are under the agent workspace's `materializations/v2/` tree, not a project workspace or the legacy `projects/` subtree.
 
 Compatibility notes:
 

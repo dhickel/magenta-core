@@ -178,7 +178,12 @@ public class AgentContextService {
         operationKey(agentId, projectId, operationKey);
         WorkspaceDescriptor descriptor = workspaceDirectoryService.resolveForRead(WorkspaceKind.AGENT, agentId);
         MaterializationRecord record = materializationService.registerProject(descriptor, projectId);
-        return materializationService.provision(descriptor, record.materializationKey());
+        MaterializationLocation legacyLocation = materializationService.provision(descriptor, record.materializationKey());
+        // Existing binding semantics retain their exact V1 location. A project
+        // template, when present, additionally materializes an isolated V2
+        // Files generation without retargeting that historical binding.
+        materializationService.provisionLatestGenerationIfTemplate(descriptor, record.materializationKey());
+        return legacyLocation;
     }
 
     private ContextDefault requestedDefault(DefaultUpdateRequest request, int version) {

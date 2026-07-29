@@ -16,8 +16,9 @@ import org.springframework.stereotype.Repository;
 import org.springframework.util.StringUtils;
 
 /**
- * Persistence for materialization lifecycle state and operation idempotency.
- * Contains no constructor DDL; migration 010 and fresh schema own the tables.
+ * Persistence for materialization lifecycle state, operation idempotency,
+ * and immutable generation rows. Contains no constructor DDL; migrations
+ * 010, 011, 018 and fresh schema own the tables.
  */
 @Repository
 public class AgentMaterializationRepository {
@@ -313,5 +314,172 @@ public class AgentMaterializationRepository {
         }
         @Override public int hashCode() { return serialized.hashCode(); }
         @Override public String toString() { return serialized; }
+    }
+
+    // ── Immutable generation rows (migration 018) ──
+
+    /** The generation root kind separates V2 roots from legacy-compatible locations. */
+    public enum RootKind {
+        GENERATION_V2,
+        LEGACY_V1
+    }
+
+    /** Lifecycle state for a single immutable generation. */
+    public enum GenerationLifecycleState {
+        PROVISIONING, READY, FAILED, REVOKED
+    }
+
+    /**
+     * Immutable generation row. Identity is {@code (agentId, projectKey, generation)}.
+     * Only {@code lifecycleState} and {@code lifecycleVersion} may change via CAS;
+     * all other fields are immutable after insert.
+     */
+    public record GenerationRecord(
+            String agentId,
+            String projectKey,
+            int generation,
+            RootKind rootKind,
+            String rootLocation,
+            GenerationLifecycleState lifecycleState,
+            int lifecycleVersion,
+            Integer templateRevision,
+            String templateDirectoriesSnapshot,
+            String failureDetail,
+            Instant createdAt,
+            Instant updatedAt) {
+
+        public GenerationRecord {
+            Objects.requireNonNull(agentId, "agentId");
+            Objects.requireNonNull(projectKey, "projectKey");
+            if (agentId.isBlank() || projectKey.isBlank()) {
+                throw new IllegalArgumentException("agentId and projectKey are required");
+            }
+            if (generation < 1) {
+                throw new IllegalArgumentException("generation must be >= 1");
+            }
+            Objects.requireNonNull(rootKind, "rootKind");
+            Objects.requireNonNull(lifecycleState, "lifecycleState");
+            if (lifecycleVersion < 1) {
+                throw new IllegalArgumentException("lifecycleVersion must be >= 1");
+            }
+            Objects.requireNonNull(templateDirectoriesSnapshot, "templateDirectoriesSnapshot");
+            Objects.requireNonNull(createdAt, "createdAt");
+            Objects.requireNonNull(updatedAt, "updatedAt");
+        }
+
+        /** The logical head identity {@code (agentId, projectKey)} selects unique generations. */
+        public String headKey() {
+            return agentId + "/" + projectKey;
+        }
+    }
+
+    /**
+     * Insert a new immutable generation row. Returns true iff inserted.
+     * The compound primary key is {@code (agent_id, project_key, generation)}.
+     */
+    public boolean insertGeneration(GenerationRecord record) {
+        int inserted = jdbcTemplate.update("""
+                insert or ignore into agent_materialization_generations (
+                    agent_id, project_key, generation,
+                    root_kind, root_location, lifecycle_state, lifecycle_version,
+                    template_revision, template_directories_snapshot,
+                    failure_detail, created_at, updated_at
+                ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                record.agentId(), record.projectKey(), record.generation(),
+                record.rootKind().name(), record.rootLocation(),
+                record.lifecycleState().name(), record.lifecycleVersion(),
+                record.templateRevision(), record.templateDirectoriesSnapshot(),
+                record.failureDetail(),
+                record.createdAt().toString(), record.updatedAt().toString());
+        return inserted == 1;
+    }
+
+    /** Find one generation by its exact logical head {@code (agentId, projectKey, generation)}. */
+    public Optional<GenerationRecord> findGeneration(String agentId, String projectKey, int generation) {
+        return jdbcTemplate.query(
+                "select * from agent_materialization_generations"
+                        + " where agent_id = ? and project_key = ? and generation = ?",
+                rs -> rs.next() ? Optional.of(generationFromRow(rs)) : Optional.empty(),
+                agentId, projectKey, generation);
+    }
+
+    /** List all generations for a logical head ordered by generation descending. */
+    public List<GenerationRecord> findGenerationsByHead(String agentId, String projectKey) {
+        return jdbcTemplate.query(
+                "select * from agent_materialization_generations"
+                        + " where agent_id = ? and project_key = ? order by generation desc",
+                (rs, rowNum) -> generationFromRow(rs), agentId, projectKey);
+    }
+
+    /** List all generations for an agent ordered by updated_at descending. */
+    public List<GenerationRecord> findGenerationsByAgent(String agentId) {
+        return jdbcTemplate.query(
+                "select * from agent_materialization_generations"
+                        + " where agent_id = ? order by updated_at desc",
+                (rs, rowNum) -> generationFromRow(rs), agentId);
+    }
+
+    /** Return the latest generation number for a logical head, or 0 if none exist. */
+    public int findLatestGenerationNumber(String agentId, String projectKey) {
+        Integer max = jdbcTemplate.queryForObject(
+                "select max(generation) from agent_materialization_generations"
+                        + " where agent_id = ? and project_key = ?",
+                Integer.class, agentId, projectKey);
+        return max == null ? 0 : max;
+    }
+
+    /**
+     * CAS lifecycle transition on a generation row. Only {@code lifecycleState},
+     * {@code lifecycleVersion}, {@code rootLocation}, and {@code failureDetail}
+     * are mutable. Generation identity fields ({@code agentId}, {@code projectKey},
+     * {@code generation}, {@code rootKind}, {@code templateRevision},
+     * {@code templateDirectoriesSnapshot}) never change.
+     *
+     * @return true if exactly one row was updated
+     */
+    public boolean casTransitionGenerationLifecycle(
+            String agentId, String projectKey, int generation,
+            int expectedLifecycleVersion,
+            GenerationLifecycleState fromState,
+            GenerationLifecycleState toState,
+            String rootLocation,
+            String failureDetail) {
+        int updated = jdbcTemplate.update("""
+                update agent_materialization_generations
+                set lifecycle_state = ?, lifecycle_version = ?,
+                    root_location = ?, failure_detail = ?, updated_at = ?
+                where agent_id = ? and project_key = ? and generation = ?
+                  and lifecycle_version = ? and lifecycle_state = ?
+                """,
+                toState.name(), expectedLifecycleVersion + 1,
+                rootLocation, failureDetail,
+                Instant.now().toString(),
+                agentId, projectKey, generation,
+                expectedLifecycleVersion, fromState.name());
+        return updated == 1;
+    }
+
+    // ── Generation row mapping ──
+
+    private GenerationRecord generationFromRow(ResultSet rs) throws SQLException {
+        return new GenerationRecord(
+                rs.getString("agent_id"),
+                rs.getString("project_key"),
+                rs.getInt("generation"),
+                RootKind.valueOf(rs.getString("root_kind")),
+                rs.getString("root_location"),
+                GenerationLifecycleState.valueOf(rs.getString("lifecycle_state")),
+                rs.getInt("lifecycle_version"),
+                readNullableInteger(rs, "template_revision"),
+                rs.getString("template_directories_snapshot"),
+                rs.getString("failure_detail"),
+                Instant.parse(rs.getString("created_at")),
+                Instant.parse(rs.getString("updated_at")));
+    }
+
+    private Integer readNullableInteger(ResultSet rs, String column) throws SQLException {
+        int value = rs.getInt(column);
+        return rs.wasNull() ? null : value;
     }
 }

@@ -337,6 +337,136 @@ public class WorkspaceDirectoryService {
         return new MaterializationLocation(current, key, generation, relativePath, verified);
     }
 
+    // ── GENERATION_V2 locations (Subphase A / Phase 05) ──
+
+    /**
+     * Provision only the canonical V2 generation root beneath an AGENT
+     * workspace. Revalidates the descriptor, verifies key agreement,
+     * and creates only {@code materializations/v2/<projectKey>/gen-<N>}
+     * using confined mutation primitives.
+     *
+     * @param descriptor  trusted AGENT descriptor
+     * @param projectKey  the materialization key serialized form
+     * @param generation  the immutable generation number (≥ 1)
+     * @return the verified data-root-relative path
+     */
+    public String provisionGenerationV2Root(
+            WorkspaceDescriptor descriptor,
+            String projectKey,
+            int generation) {
+        Objects.requireNonNull(descriptor, "descriptor");
+        Objects.requireNonNull(projectKey, "projectKey");
+        if (projectKey.isBlank()) {
+            throw new IllegalArgumentException("projectKey must not be blank");
+        }
+        if (generation < 1) {
+            throw new IllegalArgumentException("generation must be >= 1");
+        }
+        if (descriptor.kind() != WorkspaceKind.AGENT) {
+            throw new IllegalArgumentException(
+                    "Generation V2 provisioning requires an AGENT descriptor");
+        }
+        validateDescriptor(descriptor);
+        WorkspaceDescriptor current = resolveForWrite(WorkspaceKind.AGENT, descriptor.key());
+
+        Path relative = WorkspacePathLayout.agentMaterializationGenerationV2Dir(
+                current.key(), projectKey, generation);
+        Path confined = confined(relative);
+
+        Path verified = ensureDirectoryChain(confined);
+        return dataRootRelative(verified);
+    }
+
+    /**
+     * Resolve a V2 generation location from a trusted AGENT descriptor,
+     * project key, and generation number. Recomputes the canonical path
+     * from identity and verifies the canonical child is confined and
+     * non-symlink.
+     *
+     * <p>This is the sole production constructor of
+     * {@link MaterializationGenerationLocation}.
+     *
+     * @param descriptor trusted AGENT descriptor
+     * @param projectKey the materialization key serialized form
+     * @param generation the immutable generation number
+     * @return a trusted generation location value
+     */
+    public MaterializationGenerationLocation resolveGenerationV2Location(
+            WorkspaceDescriptor descriptor,
+            String projectKey,
+            int generation) {
+        Objects.requireNonNull(descriptor, "descriptor");
+        Objects.requireNonNull(projectKey, "projectKey");
+        if (projectKey.isBlank()) {
+            throw new IllegalArgumentException("projectKey must not be blank");
+        }
+        if (generation < 1) {
+            throw new IllegalArgumentException("generation must be >= 1");
+        }
+        if (descriptor.kind() != WorkspaceKind.AGENT) {
+            throw new IllegalArgumentException(
+                    "Generation V2 location requires an AGENT descriptor");
+        }
+        validateDescriptor(descriptor);
+        WorkspaceDescriptor current = resolveForRead(WorkspaceKind.AGENT, descriptor.key());
+
+        Path relative = WorkspacePathLayout.agentMaterializationGenerationV2Dir(
+                current.key(), projectKey, generation);
+        Path confined = confined(relative);
+
+        Path verified = verifyRoot(confined);
+        String relativePath = dataRootRelative(verified);
+
+        return new MaterializationGenerationLocation(current, projectKey, generation,
+                relativePath, verified);
+    }
+
+    // ── Generation directory provisioning from template snapshot ──
+
+    /**
+     * Provision every directory from a validated template snapshot beneath
+     * the V2 generation root. Each directory is created with confined
+     * create-only primitives; no symlinks are followed. Idempotent when
+     * a directory already exists.
+     *
+     * <p>The directories list must already be validated by
+     * {@code ProjectMaterializationTemplateService}. This method performs
+     * filesystem confinement checks but does not re-implement the template
+     * validation rules.
+     *
+     * @param location    trusted V2 generation location
+     * @param directories validated list of relative directory paths
+     */
+    public void provisionGenerationDirectories(
+            MaterializationGenerationLocation location,
+            java.util.List<String> directories) {
+        Objects.requireNonNull(location, "location");
+        Objects.requireNonNull(directories, "directories");
+        if (location.agentDescriptor().kind() != WorkspaceKind.AGENT) {
+            throw new IllegalArgumentException(
+                    "Generation directory provisioning requires an AGENT descriptor");
+        }
+        // Re-validate the descriptor for freshness
+        resolveForWrite(WorkspaceKind.AGENT, location.agentDescriptor().key());
+        Path generationRoot = location.confinedPath();
+
+        for (String dir : directories) {
+            Path childPath = generationRoot.resolve(dir).normalize();
+            if (!childPath.startsWith(generationRoot)) {
+                throw new IllegalArgumentException(
+                        "Directory path escapes generation root: " + dir);
+            }
+            if (!childPath.startsWith(dataRoot)) {
+                throw new IllegalArgumentException(
+                        "Directory path escapes data root: " + dir);
+            }
+            // Verify no-symlink on each existing ancestor before creation
+            verifyOrAbsent(childPath);
+            // Create directory chain (idempotent when already present)
+            ensureDirectoryChain(childPath);
+        }
+    }
+
     private void validateMaterializationKey(WorkspaceDescriptor descriptor, MaterializationKey key) {
         if (!descriptor.key().equals(key.agentId()) || !"project".equals(key.sourceKind())) {
             throw new IllegalArgumentException("Materialization key does not match the AGENT descriptor");

@@ -5,7 +5,6 @@ import java.nio.charset.StandardCharsets;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
-import java.util.Objects;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -27,6 +26,8 @@ import io.mindspice.magenta2.ai.orchestration.context.AgentMaterializationReposi
 import io.mindspice.magenta2.ai.orchestration.context.AgentMaterializationService;
 import io.mindspice.magenta2.ai.orchestration.runtime.AssignmentService;
 import io.mindspice.magenta2.ai.orchestration.runtime.JobDefinition;
+import io.mindspice.magenta2.ai.orchestration.runtime.ProjectOutputService;
+import io.mindspice.magenta2.ai.orchestration.runtime.ProjectMaterializationTemplateService;
 import io.mindspice.magenta2.ai.orchestration.runtime.JobRun;
 import io.mindspice.magenta2.ai.orchestration.runtime.JobRunStatus;
 import io.mindspice.magenta2.ai.orchestration.runtime.JobService;
@@ -41,14 +42,12 @@ import io.mindspice.magenta2.ai.orchestration.tasks.WorkTaskService;
 import io.mindspice.magenta2.ai.chat.plan.PlanDefinition;
 import io.mindspice.magenta2.ai.chat.plan.PlanService;
 import io.mindspice.magenta2.ai.chat.plan.PlanStatus;
-import io.mindspice.magenta2.ai.orchestration.workspaces.MaterializationLocation;
 import io.mindspice.magenta2.ai.orchestration.workspaces.OutputArtifactService;
+import io.mindspice.magenta2.ai.orchestration.workspaces.PublicationRecord;
 import io.mindspice.magenta2.ai.orchestration.workspaces.RunOutputArtifact;
-import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceDescriptor;
 import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceDirectoryService;
 import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceExplorerService;
 import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceFileException;
-import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceKind;
 import io.mindspice.magenta2.api.web.ProjectConsoleFragments.ProjectTab;
 import io.mindspice.magenta2.api.web.selector.EntityKind;
 import io.mindspice.magenta2.api.web.selector.EntityLookupService;
@@ -103,6 +102,8 @@ public class ProjectConsoleController {
     private final WorkTaskService workTaskService;
     private final PlanService planService;
     private final ProjectOperationsAccessService projectAccessService;
+    private final ProjectOutputService projectOutputService;
+    private final ProjectMaterializationTemplateService templateService;
 
     public ProjectConsoleController(ProjectService projectService,
                                     JobService jobService,
@@ -118,7 +119,9 @@ public class ProjectConsoleController {
                                     WorkspaceExplorerService workspaceExplorerService,
                                     WorkTaskService workTaskService,
                                     PlanService planService,
-                                    ProjectOperationsAccessService projectAccessService) {
+                                    ProjectOperationsAccessService projectAccessService,
+                                    ProjectOutputService projectOutputService,
+                                    ProjectMaterializationTemplateService templateService) {
         this.projectService = projectService;
         this.jobService = jobService;
         this.agentProfileService = agentProfileService;
@@ -134,6 +137,8 @@ public class ProjectConsoleController {
         this.workTaskService = workTaskService;
         this.planService = planService;
         this.projectAccessService = projectAccessService;
+        this.projectOutputService = projectOutputService;
+        this.templateService = templateService;
         this.dashboardShell = createShell(null);
     }
 
@@ -464,6 +469,8 @@ public class ProjectConsoleController {
     //  Tab: Files (context)
     // ════════════════════════════════════════════════════════════════
 
+    // ── Files tab: authorization + V2 generation read-only view ──
+
     @GetMapping("/projects/_detail/{projectId}/files")
     @ResponseBody
     public String projectFilesTab(@PathVariable String projectId,
@@ -474,39 +481,137 @@ public class ProjectConsoleController {
             return unavailableProjectTab(projectId, "Files", "context", response);
         }
         try {
-            projectService.getProject(projectId);
-            List<ProjectAgentMembership> members = sortedProjectMembers(projectId);
-            Div panel = new Div().withClass("project-files-tab").withChild(Header.H2("Files"))
-                .withChild(new Paragraph("Read-only agent-local project materializations. Lifecycle actions remain on the owning agent Context tab."));
-            if (members.isEmpty()) {
-                return panel.withChild(new Div().withClass("dashboard-empty")
-                    .withInnerText("No project members are available.")).render();
-            }
-            if (agentContextService == null || agentMaterializationService == null) {
+            // Capability gate
+            if (projectAccessService == null || !projectAccessService.isTrustedDeployment()) {
                 response.setStatus(HttpServletResponse.SC_SERVICE_UNAVAILABLE);
-                return panel.withChild(new Div().withClass("orch-error")
-                    .withInnerText("Materialization facts are unavailable.")).render();
+                return filesTabShell(projectId, null,
+                    WorkspaceExplorerFragments.projectMaterializationState(
+                        "Capability disabled",
+                        "Project Files requires trusted deployment capability.", "capability-disabled"));
             }
-            List<MaterializationRecord> records = members.stream()
-                .map(member -> exactProjectMaterialization(member.agentId(), projectId))
-                .filter(Objects::nonNull)
-                .sorted(Comparator.comparing(MaterializationRecord::agentId)).toList();
-            if (records.isEmpty()) {
-                return panel.withChild(new Div().withClass("project-files-state")
-                    .withChild(Header.H3("No materialization record"))
-                    .withChild(new Paragraph("No current member has materialized this project. Use an agent Context tab to provision one."))).render();
-            }
-            MaterializationRecord selected = records.stream()
-                .filter(r -> r.agentId().equals(agentId)).findFirst().orElse(null);
-            if (StringUtils.hasText(agentId) && selected == null) {
+
+            // Project existence and active check
+            try {
+                projectAccessService.requireActiveProject(projectId);
+            } catch (IllegalArgumentException e) {
                 response.setStatus(HttpServletResponse.SC_NOT_FOUND);
-                return panel.withChild(new Div().withClass("orch-error")
-                    .withInnerText("Selected member materialization was not found.")).render();
+                return fragments.errorNotFound("Project not found.");
+            } catch (ProjectAccessDeniedException e) {
+                response.setStatus(HttpServletResponse.SC_CONFLICT);
+                return filesTabShell(projectId, null,
+                    WorkspaceExplorerFragments.projectMaterializationState(
+                        "Project archived",
+                        "File browsing is unavailable for archived projects.", "archived"));
             }
-            if (selected == null) selected = records.get(0);
-            panel.withChild(projectMaterializationSelector(projectId, records, selected.agentId()));
-            panel.withChild(new RawHtml(projectMaterializationContent(projectId, selected, generation, ".", response)));
-            return panel.render();
+
+            if (agentMaterializationService == null) {
+                response.setStatus(HttpServletResponse.SC_SERVICE_UNAVAILABLE);
+                return filesTabShell(projectId, null,
+                    WorkspaceExplorerFragments.projectMaterializationState(
+                        "Service unavailable",
+                        "Materialization facts are unavailable.", "orch-error"));
+            }
+
+            List<ProjectAgentMembership> members = sortedProjectMembers(projectId);
+            if (members.isEmpty()) {
+                return filesTabShell(projectId, null,
+                    WorkspaceExplorerFragments.projectMaterializationState(
+                        "No members", "No project members are available.", "no-members"));
+            }
+
+            // Keep every current member selectable so lifecycle and no-record
+            // outcomes remain truthful rather than being filtered out of view.
+            List<ProjectFilesMemberOption> memberOptions = members.stream()
+                .map(m -> new ProjectFilesMemberOption(m.agentId(),
+                    agentMaterializationService.latestReadyGenerationNumber(m.agentId(), projectId)))
+                .sorted(Comparator.comparing(ProjectFilesMemberOption::agentId,
+                    Comparator.nullsLast(String.CASE_INSENSITIVE_ORDER)))
+                .toList();
+
+            // Determine selected member
+            ProjectFilesMemberOption selected;
+            if (StringUtils.hasText(agentId)) {
+                selected = memberOptions.stream()
+                    .filter(o -> o.agentId().equals(agentId)).findFirst().orElse(null);
+                if (selected == null) {
+                    response.setStatus(HttpServletResponse.SC_NOT_FOUND);
+                    return filesTabShell(projectId, null,
+                        WorkspaceExplorerFragments.projectMaterializationState(
+                            "Member not found",
+                            "Selected member has no ready materialization.", "orch-error"));
+                }
+            } else {
+                selected = memberOptions.get(0);
+            }
+
+            // Authorize and resolve
+            int gen = generation != null ? generation : selected.readyGeneration();
+            if (gen < 0) {
+                response.setStatus(HttpServletResponse.SC_BAD_REQUEST);
+                return filesTabShell(projectId, memberOptions, selected.agentId(),
+                    WorkspaceExplorerFragments.projectMaterializationState(
+                        "Invalid generation", "Generation must be zero or greater.", "orch-error"));
+            }
+            var auth = agentMaterializationService.authorizeProjectFiles(
+                selected.agentId(), projectId, gen);
+            String content = switch (auth) {
+                case AgentMaterializationService.FilesAuthorization.Authorized a -> {
+                    try {
+                        var listing = workspaceExplorerService.list(a.location(),
+                            workspaceExplorerService.normalizeRelativePath("."));
+                        yield WorkspaceExplorerFragments.projectMaterializationShell(
+                            projectId, selected.agentId(), a.generation().generation(), listing);
+                    } catch (WorkspaceFileException e) {
+                        if (e.reason() == WorkspaceFileException.Reason.NOT_FOUND) {
+                            yield WorkspaceExplorerFragments.projectMaterializationState(
+                                "Ready location missing",
+                                "The generation record is READY but its verified directory is unavailable.", "missing");
+                        }
+                        throw e;
+                    }
+                }
+                case AgentMaterializationService.FilesAuthorization.CapabilityDisabled cd ->
+                    WorkspaceExplorerFragments.projectMaterializationState(
+                        "Capability disabled",
+                        "Project Files requires trusted deployment capability.", "capability-disabled");
+                case AgentMaterializationService.FilesAuthorization.ProjectArchived pa ->
+                    WorkspaceExplorerFragments.projectMaterializationState(
+                        "Project archived",
+                        "File browsing is unavailable for archived projects.", "archived");
+                case AgentMaterializationService.FilesAuthorization.NoMember nm ->
+                    WorkspaceExplorerFragments.projectMaterializationState(
+                        "Not a member",
+                        "The selected agent is not a member of this project.", "orch-error");
+                case AgentMaterializationService.FilesAuthorization.NoMaterialization nm2 ->
+                    WorkspaceExplorerFragments.projectMaterializationState(
+                        "No materialization",
+                        "The member has not registered a project materialization.", "no-records");
+                case AgentMaterializationService.FilesAuthorization.NotReady nr -> {
+                    response.setStatus(HttpServletResponse.SC_CONFLICT);
+                    yield WorkspaceExplorerFragments.projectMaterializationState(
+                        "Not ready",
+                        "Materialization state is " + nr.state().name() + ". Continue from the owning agent Context tab.",
+                        nr.state().name().toLowerCase());
+                }
+                case AgentMaterializationService.FilesAuthorization.StaleGeneration sg -> {
+                    response.setStatus(HttpServletResponse.SC_CONFLICT);
+                    yield WorkspaceExplorerFragments.projectMaterializationState(
+                        "Stale generation",
+                        "The selected generation (" + sg.expected() + ") is stale; current ready generation is "
+                            + sg.actual() + ". Refresh the Files tab.", "orch-error");
+                }
+                case AgentMaterializationService.FilesAuthorization.NoReadyGeneration nrg ->
+                    WorkspaceExplorerFragments.projectMaterializationState(
+                        "No ready generation",
+                        "No READY generation exists for this materialization. Continue from the owning agent Context tab.",
+                        "no-records");
+                case AgentMaterializationService.FilesAuthorization.LocationMismatch lm ->
+                    WorkspaceExplorerFragments.projectMaterializationState(
+                        "Location mismatch",
+                        "The resolved generation location does not match the stored record.", "orch-error");
+            };
+
+            return filesTabShell(projectId, memberOptions, selected.agentId(), content);
         } catch (IllegalArgumentException e) {
             response.setStatus(HttpServletResponse.SC_NOT_FOUND);
             return fragments.errorNotFound("Project not found.");
@@ -515,6 +620,44 @@ public class ProjectConsoleController {
             response.setStatus(HttpServletResponse.SC_SERVICE_UNAVAILABLE);
             return fragments.errorUnavailable("Project files are temporarily unavailable.");
         }
+    }
+
+    /** Immutable carrier for the Files tab member selector. */
+    private record ProjectFilesMemberOption(String agentId, int readyGeneration) {}
+
+    /** Render the Files tab outer shell with member selector and content area. */
+    private String filesTabShell(String projectId, List<ProjectFilesMemberOption> options,
+                                 String selectedAgentId, String contentBody) {
+        Div panel = new Div().withClass("project-files-tab")
+            .withChild(Header.H2("Files"))
+            .withChild(new Paragraph("Read-only agent-local project materializations. "
+                + "Lifecycle actions remain on the owning agent Context tab."));
+        if (selectedAgentId == null) {
+            return panel.withChild(new RawHtml(contentBody)).render();
+        }
+        return panel.withChild(filesMemberSelector(projectId, options, selectedAgentId))
+            .withChild(new RawHtml(contentBody)).render();
+    }
+
+    private String filesTabShell(String projectId, String selectedAgentId, String contentBody) {
+        return filesTabShell(projectId, null, selectedAgentId, contentBody);
+    }
+
+    private Component filesMemberSelector(String projectId, List<ProjectFilesMemberOption> options,
+                                           String selectedAgentId) {
+        Div selector = new Div().withClass("project-materialization-selector");
+        for (ProjectFilesMemberOption option : options) {
+            Button button = Button.create(option.agentId() + (option.readyGeneration() > 0
+                    ? " · gen " + option.readyGeneration() : " · not ready"));
+            if (option.agentId().equals(selectedAgentId)) button.withClass("active");
+            button.withAttribute("hx-get", "/projects/_detail/" + e(projectId) + "/files?agentId="
+                    + URLEncoder.encode(option.agentId(), StandardCharsets.UTF_8)
+                    + "&generation=" + option.readyGeneration())
+                .withAttribute("hx-target", "#project-tab-panel").withAttribute("hx-swap", "innerHTML")
+                .withAttribute("data-htmx-error-swap", "true");
+            selector.withChild(button);
+        }
+        return selector;
     }
 
     @GetMapping("/projects/_detail/{projectId}/files/list")
@@ -528,30 +671,88 @@ public class ProjectConsoleController {
             return unavailableProjectTab(projectId, "Files", "context", response);
         }
         try {
-            projectService.getProject(projectId);
+            // Capability and project checks
+            if (projectAccessService == null || !projectAccessService.isTrustedDeployment()) {
+                response.setStatus(HttpServletResponse.SC_SERVICE_UNAVAILABLE);
+                return WorkspaceExplorerFragments.projectMaterializationState(
+                    "Capability disabled",
+                    "Project Files requires trusted deployment capability.", "capability-disabled");
+            }
+            try {
+                projectAccessService.requireActiveProject(projectId);
+            } catch (IllegalArgumentException e) {
+                response.setStatus(HttpServletResponse.SC_NOT_FOUND);
+                return new Div().withClass("orch-error").withInnerText("Project not found.").render();
+            } catch (ProjectAccessDeniedException e) {
+                response.setStatus(HttpServletResponse.SC_CONFLICT);
+                return WorkspaceExplorerFragments.projectMaterializationState(
+                    "Project archived",
+                    "File browsing is unavailable for archived projects.", "archived");
+            }
+
+            // Member check
             if (!projectService.isMember(projectId, agentId)) {
                 response.setStatus(HttpServletResponse.SC_NOT_FOUND);
-                return new Div().withClass("orch-error").withInnerText("Project member not found.").render();
+                return WorkspaceExplorerFragments.projectMaterializationState(
+                    "Not a member",
+                    "The selected agent is not a member of this project.", "orch-error");
             }
-            MaterializationRecord record = exactProjectMaterialization(agentId, projectId);
-            if (record == null) {
-                response.setStatus(HttpServletResponse.SC_NOT_FOUND);
-                return new Div().withClass("orch-error").withInnerText("Materialization record not found.").render();
+
+            // Authorize through the V2 generation model
+            if (agentMaterializationService == null) {
+                response.setStatus(HttpServletResponse.SC_SERVICE_UNAVAILABLE);
+                return new Div().withClass("orch-error").withInnerText("Materialization facts are unavailable.").render();
             }
-            if (record.generation() != generation) {
-                response.setStatus(HttpServletResponse.SC_CONFLICT);
-                return WorkspaceExplorerFragments.projectMaterializationState("Stale generation",
-                    "The selected materialization changed. Refresh the Files tab before reading it.", "orch-error");
-            }
-            if (record.state() != MaterializationState.READY) {
-                response.setStatus(HttpServletResponse.SC_CONFLICT);
-                return WorkspaceExplorerFragments.projectMaterializationState("Materialization unavailable",
-                    "The selected materialization is " + record.state().name() + ".", "orch-error");
-            }
-            MaterializationLocation location = resolveProjectMaterialization(record, generation);
-            WorkspaceExplorerService.DirectoryListing listing = workspaceExplorerService.list(location,
-                workspaceExplorerService.normalizeRelativePath(path));
-            return WorkspaceExplorerFragments.projectMaterializationList(projectId, agentId, generation, listing);
+            var auth = agentMaterializationService.authorizeProjectFiles(agentId, projectId, generation);
+            return switch (auth) {
+                case AgentMaterializationService.FilesAuthorization.Authorized a -> {
+                    try {
+                        var listing = workspaceExplorerService.list(a.location(),
+                            workspaceExplorerService.normalizeRelativePath(path));
+                        yield WorkspaceExplorerFragments.projectMaterializationList(
+                            projectId, agentId, a.generation().generation(), listing);
+                    } catch (WorkspaceFileException e) {
+                        response.setStatus(fileErrorStatus(e));
+                        yield new Div().withClass("orch-error").withInnerText(e.getMessage()).render();
+                    }
+                }
+                case AgentMaterializationService.FilesAuthorization.CapabilityDisabled cd -> {
+                    response.setStatus(HttpServletResponse.SC_SERVICE_UNAVAILABLE);
+                    yield WorkspaceExplorerFragments.projectMaterializationState(
+                        "Capability disabled",
+                        "Project Files requires trusted deployment capability.", "capability-disabled");
+                }
+                case AgentMaterializationService.FilesAuthorization.ProjectArchived pa -> {
+                    response.setStatus(HttpServletResponse.SC_CONFLICT);
+                    yield WorkspaceExplorerFragments.projectMaterializationState(
+                        "Project archived",
+                        "File browsing is unavailable for archived projects.", "archived");
+                }
+                case AgentMaterializationService.FilesAuthorization.NotReady nr -> {
+                    response.setStatus(HttpServletResponse.SC_CONFLICT);
+                    yield WorkspaceExplorerFragments.projectMaterializationState(
+                        "Materialization unavailable",
+                        "The selected materialization is " + nr.state().name() + ".", "orch-error");
+                }
+                case AgentMaterializationService.FilesAuthorization.StaleGeneration sg -> {
+                    response.setStatus(HttpServletResponse.SC_CONFLICT);
+                    yield WorkspaceExplorerFragments.projectMaterializationState(
+                        "Stale generation",
+                        "The selected generation (" + sg.expected() + ") is stale; current ready generation is "
+                            + sg.actual() + ". Refresh the Files tab.", "orch-error");
+                }
+                case AgentMaterializationService.FilesAuthorization.NoMaterialization nm -> {
+                    response.setStatus(HttpServletResponse.SC_NOT_FOUND);
+                    yield WorkspaceExplorerFragments.projectMaterializationState(
+                        "No materialization",
+                        "Materialization record not found.", "orch-error");
+                }
+                default -> {
+                    response.setStatus(HttpServletResponse.SC_NOT_FOUND);
+                    yield new Div().withClass("orch-error")
+                        .withInnerText("Materialization is not available for read.").render();
+                }
+            };
         } catch (WorkspaceFileException e) {
             response.setStatus(fileErrorStatus(e));
             return new Div().withClass("orch-error").withInnerText(e.getMessage()).render();
@@ -572,19 +773,56 @@ public class ProjectConsoleController {
             return unavailableProjectTab(projectId, "Files", "context", response);
         }
         try {
-            projectService.getProject(projectId);
-            if (!projectService.isMember(projectId, agentId))
-                throw new IllegalArgumentException("Project member not found");
-            MaterializationRecord record = exactProjectMaterialization(agentId, projectId);
-            if (record == null) throw new IllegalArgumentException("Materialization not found");
-            MaterializationLocation location = resolveProjectMaterialization(record, generation);
-            WorkspaceExplorerService.FilePreview preview = workspaceExplorerService.preview(location,
-                workspaceExplorerService.normalizeRelativePath(path));
-            return WorkspaceExplorerFragments.projectMaterializationInspector(preview, null);
-        } catch (IllegalArgumentException e) {
+            // Capability and project checks
+            if (projectAccessService == null || !projectAccessService.isTrustedDeployment()) {
+                response.setStatus(HttpServletResponse.SC_SERVICE_UNAVAILABLE);
+                return WorkspaceExplorerFragments.projectMaterializationInspector(null,
+                    "Project Files requires trusted deployment capability.");
+            }
+            try {
+                projectAccessService.requireActiveProject(projectId);
+            } catch (IllegalArgumentException e) {
+                response.setStatus(HttpServletResponse.SC_NOT_FOUND);
+                return WorkspaceExplorerFragments.projectMaterializationInspector(null,
+                    "Project not found.");
+            } catch (ProjectAccessDeniedException e) {
+                response.setStatus(HttpServletResponse.SC_CONFLICT);
+                return WorkspaceExplorerFragments.projectMaterializationInspector(null,
+                    "File browsing is unavailable for archived projects.");
+            }
+
+            // Member check
+            if (!projectService.isMember(projectId, agentId)) {
+                response.setStatus(HttpServletResponse.SC_NOT_FOUND);
+                return WorkspaceExplorerFragments.projectMaterializationInspector(null,
+                    "Project member not found.");
+            }
+
+            // Authorize through the V2 generation model
+            if (agentMaterializationService == null) {
+                response.setStatus(HttpServletResponse.SC_SERVICE_UNAVAILABLE);
+                return WorkspaceExplorerFragments.projectMaterializationInspector(null,
+                    "Materialization facts are unavailable.");
+            }
+            var auth = agentMaterializationService.authorizeProjectFiles(agentId, projectId, generation);
+            if (auth instanceof AgentMaterializationService.FilesAuthorization.Authorized a) {
+                var preview = workspaceExplorerService.preview(a.location(),
+                    workspaceExplorerService.normalizeRelativePath(path));
+                return WorkspaceExplorerFragments.projectMaterializationInspector(preview, null);
+            }
+            if (auth instanceof AgentMaterializationService.FilesAuthorization.StaleGeneration sg) {
+                response.setStatus(HttpServletResponse.SC_CONFLICT);
+                return WorkspaceExplorerFragments.projectMaterializationInspector(null,
+                    "Stale generation. Refresh the Files tab.");
+            }
+            if (auth instanceof AgentMaterializationService.FilesAuthorization.NotReady nr) {
+                response.setStatus(HttpServletResponse.SC_CONFLICT);
+                return WorkspaceExplorerFragments.projectMaterializationInspector(null,
+                    "Materialization is " + nr.state().name() + ".");
+            }
             response.setStatus(HttpServletResponse.SC_NOT_FOUND);
             return WorkspaceExplorerFragments.projectMaterializationInspector(null,
-                "Project member, materialization, or file was not found.");
+                "Materialization is not available for read.");
         } catch (IllegalStateException e) {
             response.setStatus(HttpServletResponse.SC_CONFLICT);
             return new Div().withClass("orch-error").withInnerText(e.getMessage()).render();
@@ -793,6 +1031,10 @@ public class ProjectConsoleController {
     //  Tab: Outputs (work)
     // ════════════════════════════════════════════════════════════════
 
+    // ════════════════════════════════════════════════════════════════
+    //  Tab: Outputs (durable-link resolution)
+    // ════════════════════════════════════════════════════════════════
+
     @GetMapping("/projects/_detail/{projectId}/outputs")
     @ResponseBody
     public String projectOutputsFragment(@PathVariable String projectId, HttpServletResponse response) {
@@ -801,35 +1043,72 @@ public class ProjectConsoleController {
         }
         try {
             projectService.getProject(projectId);
-            List<RunOutputArtifact> artifacts = queryOutputs(projectId, 40);
+            List<ProjectOutputService.ProjectOutputItem> items = projectOutputService.listOutputs(projectId);
             Div panel = new Div().withClass("project-outputs-tab").withChild(Header.H2("Outputs"));
-            if (artifacts.isEmpty()) {
+            panel.withChild(new Paragraph("Published project outputs resolved through durable assignment links. "
+                + "Download and preview require workspace scope.").withClass("orch-muted-note"));
+            if (items.isEmpty()) {
                 return panel.withChild(new Div().withClass("dashboard-empty")
                     .withInnerText("No project-attributed outputs.")).render();
             }
             Div rows = new Div().withClass("project-operational-list");
-            for (RunOutputArtifact artifact : artifacts) {
-                Div row = new Div().withClass("orch-row")
-                    .withChild(new HtmlTag("strong").withInnerText(dv(artifact.outputName())))
-                    .withChild(new HtmlTag("span").withInnerText(outputCompactContext(artifact)));
-                if (StringUtils.hasText(artifact.workspaceType()) && StringUtils.hasText(artifact.workspaceKey())) {
-                    row.withChild(new HtmlTag("a").withClass("button button-secondary small")
-                        .withAttribute("href", "/api/artifacts/" + e(artifact.id()) + "/download?workspaceKind="
-                            + URLEncoder.encode(artifact.workspaceType(), StandardCharsets.UTF_8) + "&workspaceKey="
-                            + URLEncoder.encode(artifact.workspaceKey(), StandardCharsets.UTF_8))
-                        .withInnerText("Download"));
-                } else {
-                    row.withChild(new HtmlTag("span").withClass("orch-chip").withInnerText("Download unavailable"));
-                }
+            for (ProjectOutputService.ProjectOutputItem item : items) {
+                Div row = new Div().withClass("project-output-row")
+                    .withChild(new Div().withClass("project-output-main")
+                        .withChild(new HtmlTag("strong").withInnerText(dv(item.logicalName())))
+                        .withChild(new HtmlTag("span").withClass("orch-chip")
+                            .withInnerText(item.origin()))
+                        .withChild(new HtmlTag("span").withClass("workspace-file-muted")
+                            .withInnerText(outputItemContext(item))))
+                    .withChild(new Div().withClass("project-output-actions")
+                        .withChild(outputActionButton(item, projectId)));
                 rows.withChild(row);
             }
-            return panel.withChild(rows).render();
+            panel.withChild(rows);
+            panel.withChild(new Div().withId("project-output-detail").withClass("project-output-detail-panel"));
+            return panel.render();
         } catch (IllegalArgumentException e) {
             response.setStatus(HttpServletResponse.SC_NOT_FOUND);
             return fragments.errorNotFound("Project not found.");
         } catch (RuntimeException e) {
+            log.warn("Project outputs unavailable for {}", projectId, e);
             response.setStatus(HttpServletResponse.SC_SERVICE_UNAVAILABLE);
-            return fragments.errorUnavailable("Project outputs are unavailable.");
+            return fragments.errorUnavailable("Project outputs are temporarily unavailable.");
+        }
+    }
+
+    @GetMapping("/projects/_detail/{projectId}/outputs/{artifactId}")
+    @ResponseBody
+    public String projectOutputDetail(@PathVariable String projectId,
+                                       @PathVariable String artifactId,
+                                       HttpServletResponse response) {
+        if (!fragments.findTab("outputs").orElseThrow().available()) {
+            return unavailableProjectTab(projectId, "Outputs", "work", response);
+        }
+        try {
+            projectService.getProject(projectId);
+
+            // Try publication first, then legacy
+            var pubAuth = projectOutputService.authorizePublication(projectId, artifactId);
+            if (pubAuth.isPresent()) {
+                var pub = pubAuth.get().publication();
+                return renderPublicationMetadata(pub, projectId);
+            }
+            var legacyAuth = projectOutputService.authorizeLegacyArtifact(projectId, artifactId);
+            if (legacyAuth.isPresent()) {
+                var art = legacyAuth.get().artifact();
+                return renderLegacyMetadata(art, projectId);
+            }
+            response.setStatus(HttpServletResponse.SC_NOT_FOUND);
+            return new Div().withClass("dashboard-empty")
+                .withInnerText("Output not found or not authorized for this project.").render();
+        } catch (IllegalArgumentException e) {
+            response.setStatus(HttpServletResponse.SC_NOT_FOUND);
+            return fragments.errorNotFound("Project not found.");
+        } catch (RuntimeException e) {
+            log.warn("Output detail unavailable for {} / {}", projectId, artifactId, e);
+            response.setStatus(HttpServletResponse.SC_SERVICE_UNAVAILABLE);
+            return fragments.errorUnavailable("Output detail is temporarily unavailable.");
         }
     }
 
@@ -876,6 +1155,39 @@ public class ProjectConsoleController {
         } catch (RuntimeException e) {
             response.setStatus(HttpServletResponse.SC_SERVICE_UNAVAILABLE);
             return projectSettingsFragment(existing, params, "Project settings are temporarily unavailable.");
+        }
+    }
+
+    @PostMapping("/projects/_detail/{projectId}/templates")
+    @ResponseBody
+    public String saveProjectTemplate(@PathVariable String projectId,
+                                      @RequestParam String directories,
+                                      HttpServletResponse response) {
+        try {
+            if (projectAccessService == null || !projectAccessService.isTrustedDeployment()) {
+                response.setStatus(HttpServletResponse.SC_SERVICE_UNAVAILABLE);
+                return projectTemplatePanel(projectId, directories,
+                    "Template changes require trusted deployment capability.").render();
+            }
+            projectAccessService.requireActiveProject(projectId);
+            List<String> paths = java.util.Arrays.asList(directories.split("\\R", -1));
+            if (templateService.findLatestByProjectId(projectId).isPresent()) {
+                templateService.createRevision(projectId, paths);
+            } else {
+                templateService.create(projectId, paths);
+            }
+            return projectTemplatePanel(projectId, "", "Template revision saved.").render();
+        } catch (IllegalArgumentException e) {
+            response.setStatus(HttpServletResponse.SC_BAD_REQUEST);
+            return projectTemplatePanel(projectId, directories, e.getMessage()).render();
+        } catch (ProjectAccessDeniedException e) {
+            response.setStatus(HttpServletResponse.SC_CONFLICT);
+            return projectTemplatePanel(projectId, directories, e.getMessage()).render();
+        } catch (RuntimeException e) {
+            log.warn("Project template save failed for {}", projectId, e);
+            response.setStatus(HttpServletResponse.SC_SERVICE_UNAVAILABLE);
+            return projectTemplatePanel(projectId, directories,
+                "Template save is temporarily unavailable.").render();
         }
     }
 
@@ -1498,8 +1810,11 @@ public class ProjectConsoleController {
     }
 
     private String materializationState(String agentId, String projectId) {
-        if (agentContextService == null) return "Unavailable";
+        if (agentMaterializationService == null) return "Unavailable";
         try {
+            int gen = agentMaterializationService.latestReadyGenerationNumber(agentId, projectId);
+            if (gen > 0) return "READY (gen " + gen + ")";
+            // Fall back to materialization record state for non-READY states
             MaterializationRecord record = exactProjectMaterialization(agentId, projectId);
             return record == null ? "Not provisioned" : record.state().name();
         } catch (RuntimeException e) {
@@ -1508,15 +1823,13 @@ public class ProjectConsoleController {
     }
 
     private String availableMaterializationCount(List<ProjectAgentMembership> members) {
-        if (agentContextService == null || agentMaterializationService == null) return "Unavailable";
+        if (agentMaterializationService == null) return "Unavailable";
         int count = 0;
         try {
             for (ProjectAgentMembership member : members) {
-                MaterializationRecord record = exactProjectMaterialization(member.agentId(), member.projectId());
-                if (record == null || record.state() != MaterializationState.READY) continue;
-                WorkspaceDescriptor descriptor = workspaceDirectoryService.resolveForRead(WorkspaceKind.AGENT, member.agentId());
-                agentMaterializationService.resolveReadyLocation(descriptor, record.materializationKey(), record.generation());
-                count++;
+                int gen = agentMaterializationService.latestReadyGenerationNumber(
+                    member.agentId(), member.projectId());
+                if (gen > 0) count++;
             }
             return String.valueOf(count);
         } catch (RuntimeException e) {
@@ -1560,71 +1873,12 @@ public class ProjectConsoleController {
         return rows;
     }
 
-    private Component projectMaterializationSelector(String projectId, List<MaterializationRecord> records,
-                                                      String selectedAgentId) {
-        Div selector = new Div().withClass("project-materialization-selector");
-        for (MaterializationRecord record : records) {
-            Button button = Button.create(record.agentId() + " · " + record.state().name());
-            if (record.agentId().equals(selectedAgentId)) button.withClass("active");
-            button.withAttribute("hx-get", "/projects/_detail/" + e(projectId) + "/files?agentId="
-                    + URLEncoder.encode(record.agentId(), StandardCharsets.UTF_8)
-                    + "&generation=" + record.generation())
-                .withAttribute("hx-target", "#project-tab-panel").withAttribute("hx-swap", "innerHTML")
-                .withAttribute("data-htmx-error-swap", "true");
-            selector.withChild(button);
-        }
-        return selector;
-    }
-
-    private String projectMaterializationContent(String projectId, MaterializationRecord record,
-                                                 Integer requestedGeneration, String path,
-                                                 HttpServletResponse response) {
-        if (requestedGeneration != null && requestedGeneration != record.generation()) {
-            response.setStatus(HttpServletResponse.SC_CONFLICT);
-            return WorkspaceExplorerFragments.projectMaterializationState("Stale generation",
-                "The selected materialization changed. Refresh the Files tab before reading it.", "orch-error");
-        }
-        return switch (record.state()) {
-            case PROVISIONING -> WorkspaceExplorerFragments.projectMaterializationState("Not provisioned",
-                "Lifecycle state: PROVISIONING. The local container is not ready; continue from the owning agent Context tab.", "provisioning");
-            case FAILED -> WorkspaceExplorerFragments.projectMaterializationState("Failed",
-                "Materialization provisioning failed. Review the owning agent Context tab.", "failed");
-            case REVOKED -> WorkspaceExplorerFragments.projectMaterializationState("Revoked",
-                "This materialization is revoked and cannot be browsed.", "revoked");
-            case READY -> {
-                try {
-                    MaterializationLocation location = resolveProjectMaterialization(record, record.generation());
-                    WorkspaceExplorerService.DirectoryListing listing = workspaceExplorerService.list(location,
-                        workspaceExplorerService.normalizeRelativePath(path));
-                    yield WorkspaceExplorerFragments.projectMaterializationShell(projectId, record.agentId(),
-                        record.generation(), listing);
-                } catch (WorkspaceFileException e) {
-                    if (e.reason() == WorkspaceFileException.Reason.NOT_FOUND) {
-                        yield WorkspaceExplorerFragments.projectMaterializationState("Ready location missing",
-                            "The materialization record is READY but its verified directory is unavailable.", "missing");
-                    }
-                    throw e;
-                } catch (IllegalArgumentException e) {
-                    yield WorkspaceExplorerFragments.projectMaterializationState("Ready location missing",
-                        "The materialization record is READY but its verified directory is unavailable.", "missing");
-                }
-            }
-        };
-    }
-
     private MaterializationRecord exactProjectMaterialization(String agentId, String projectId) {
         if (agentContextService == null) return null;
         return agentContextService.materializations(agentId).stream()
             .filter(record -> "project".equals(record.sourceKind()) && projectId.equals(record.sourceId())
                 && agentId.equals(record.agentId()))
             .findFirst().orElse(null);
-    }
-
-    private MaterializationLocation resolveProjectMaterialization(MaterializationRecord record, int generation) {
-        if (agentMaterializationService == null)
-            throw new IllegalStateException("Materialization authority is unavailable");
-        WorkspaceDescriptor descriptor = workspaceDirectoryService.resolveForRead(WorkspaceKind.AGENT, record.agentId());
-        return agentMaterializationService.resolveReadyLocation(descriptor, record.materializationKey(), generation);
     }
 
     private String projectSettingsFragment(Project project, Map<String, String> values, String message) {
@@ -1657,11 +1911,36 @@ public class ProjectConsoleController {
                 .withChild(new HtmlTag("span").withInnerText("ID: " + project.id()))
                 .withChild(new HtmlTag("span").withInnerText("Created: " + (project.createdAt() == null ? "—" : project.createdAt().toString())))
                 .withChild(new HtmlTag("span").withInnerText("Updated: " + (project.updatedAt() == null ? "—" : project.updatedAt().toString())))));
+        panel.withChild(projectTemplatePanel(project.id(), "", null));
         panel.withChild(new Div().withId("project-settings-delete")
             .withChild(Button.create("Delete Project").withClass("orch-danger")
                 .withAttribute("hx-get", "/projects/_detail/" + project.id() + "/delete-confirm")
                 .withAttribute("hx-target", "#project-settings-delete").withAttribute("hx-swap", "innerHTML")));
         return panel.render();
+    }
+
+    private Component projectTemplatePanel(String projectId, String directories, String message) {
+        Div panel = new Div().withId("project-template-panel").withClass("project-template-panel")
+            .withChild(Header.H3("Materialization Template"))
+            .withChild(new Paragraph("One directory per line. Saving creates an immutable revision for future V2 generations.")
+                .withClass("orch-muted-note"));
+        if (StringUtils.hasText(message)) {
+            panel.withChild(new Div().withClass(message.endsWith("saved.") ? "orch-status" : "orch-error")
+                .withInnerText(message));
+        }
+        String current = directories;
+        if (!StringUtils.hasText(current) && templateService != null) {
+            current = templateService.findLatestByProjectId(projectId)
+                .map(t -> String.join("\n", ProjectMaterializationTemplateService.parseDirectories(
+                    t.directoriesSnapshot())))
+                .orElse("");
+        }
+        Form form = Form.create().withHxPost("/projects/_detail/" + e(projectId) + "/templates");
+        form.withClass("orch-form-stack").withAttribute("data-htmx-error-swap", "true");
+        form.withHxTarget("#project-template-panel").withHxSwap("outerHTML")
+            .withChild(label("Directories", TextArea.create("directories").withRows(5).withValue(current)))
+            .withChild(Button.create("Save New Revision").withClass("orch-primary").withAttribute("type", "submit"));
+        return panel.withChild(form);
     }
 
     private Select agentSelectForMembers(String name, List<ProjectAgentMembership> members, String selected) {
@@ -1722,25 +2001,80 @@ public class ProjectConsoleController {
         }
     }
 
-    private List<RunOutputArtifact> queryOutputs(String projectId, int limit) {
-        return outputArtifactService.query(new io.mindspice.magenta2.ai.orchestration.workspaces.OutputArtifactQuery(
-            null, null, null, null, projectId, null, null, null, null, null, null, null, limit));
+    private String outputItemContext(ProjectOutputService.ProjectOutputItem item) {
+        StringBuilder sb = new StringBuilder();
+        if (item.formattedSize() != null) {
+            sb.append(item.formattedSize());
+        }
+        if (StringUtils.hasText(item.mediaType())) {
+            if (!sb.isEmpty()) sb.append(" · ");
+            sb.append(item.mediaType());
+        }
+        if (StringUtils.hasText(item.runType())) {
+            if (!sb.isEmpty()) sb.append(" · ");
+            sb.append(item.runType());
+        }
+        if (item.createdAt() != null) {
+            if (!sb.isEmpty()) sb.append(" · ");
+            sb.append(formatSince(item.createdAt()));
+        }
+        return sb.toString();
     }
 
-    private String outputCompactContext(RunOutputArtifact artifact) {
-        return java.util.stream.Stream.of(
-                lab("run", artifact.runId()),
-                lab("project", artifact.projectId()),
-                lab("workspace", artifact.workspaceIdentity()),
-                lab("job", artifact.jobId()),
-                lab("assignment", artifact.jobAssignmentId()),
-                lab("job run", artifact.jobRunId()))
-            .filter(StringUtils::hasText)
-            .collect(java.util.stream.Collectors.joining(" / "));
+    private Component outputActionButton(ProjectOutputService.ProjectOutputItem item, String projectId) {
+        // Metadata is always project-scoped. Only the ProjectOutputController
+        // can expose publication bytes after repeating durable-link proof.
+        return Button.create("Detail").withClass("orch-secondary small")
+            .withAttribute("hx-get", "/projects/_detail/" + e(projectId)
+                + "/outputs/" + e(item.artifactId()))
+            .withAttribute("hx-target", "#project-output-detail")
+            .withAttribute("hx-swap", "innerHTML")
+            .withAttribute("data-htmx-error-swap", "true");
     }
 
-    private String lab(String label, String value) {
-        return StringUtils.hasText(value) ? label + ": " + value : null;
+    private String renderPublicationMetadata(PublicationRecord pub, String projectId) {
+        Div panel = new Div().withClass("project-output-detail")
+            .withChild(Header.H3(dv(pub.logicalName())))
+            .withChild(new Div().withClass("orch-meta")
+                .withChild(new HtmlTag("span").withInnerText("ID: " + pub.artifactId()))
+                .withChild(new HtmlTag("span").withInnerText("Origin: TASK_RUN"))
+                .withChild(new HtmlTag("span").withInnerText("State: " + pub.publicationState()))
+                .withChild(new HtmlTag("span").withInnerText("Size: "
+                    + ProjectOutputService.formatSize(pub.verifiedSize())))
+                .withChild(new HtmlTag("span").withInnerText("Media: " + dv(pub.mediaType())))
+                .withChild(new HtmlTag("span").withInnerText("Extension: " + dv(pub.fileExtension())))
+                .withChild(new HtmlTag("span").withInnerText("Task Run: "
+                    + (pub.taskRunId() != null ? pub.taskRunId().substring(0, 8) + "…" : "—")))
+                .withChild(new HtmlTag("span").withInnerText("Workspace: "
+                    + dv(pub.workspaceIdentity())))
+                .withChild(new HtmlTag("span").withInnerText("Published: "
+                    + (pub.publishedAt() != null ? pub.publishedAt().toString() : "—"))))
+            .withChild(new Div().withClass("tool-actions")
+                .withChild(new HtmlTag("a").withClass("button button-secondary")
+                    .withAttribute("href", "/projects/_detail/" + e(projectId)
+                        + "/outputs/" + e(pub.artifactId()) + "/preview")
+                    .withInnerText("Preview"))
+                .withChild(new HtmlTag("a").withClass("button button-secondary")
+                    .withAttribute("href", "/projects/_detail/" + e(projectId)
+                        + "/outputs/" + e(pub.artifactId()) + "/download")
+                    .withInnerText("Download")));
+        return panel.render();
+    }
+
+    private String renderLegacyMetadata(RunOutputArtifact art, String projectId) {
+        Div panel = new Div().withClass("project-output-detail")
+            .withChild(Header.H3(dv(art.outputName())))
+            .withChild(new Div().withClass("orch-meta")
+                .withChild(new HtmlTag("span").withInnerText("ID: " + art.id()))
+                .withChild(new HtmlTag("span").withInnerText("Origin: LEGACY"))
+                .withChild(new HtmlTag("span").withInnerText("Type: " + dv(art.artifactType())))
+                .withChild(new HtmlTag("span").withInnerText("File: " + dv(art.fileName())))
+                .withChild(new HtmlTag("span").withInnerText("Run: " + dv(art.runId())))
+                .withChild(new HtmlTag("span").withInnerText("Workspace: "
+                    + dv(art.workspaceIdentity())))
+                .withChild(new HtmlTag("span").withInnerText("Created: "
+                    + (art.createdAt() != null ? art.createdAt().toString() : "—"))));
+        return panel.render();
     }
 
     // ── Generic widget helpers ──

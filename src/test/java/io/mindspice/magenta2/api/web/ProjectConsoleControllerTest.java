@@ -58,6 +58,8 @@ class ProjectConsoleControllerTest {
         io.mindspice.magenta2.ai.orchestration.runtime.ProjectOperationsAccessService projectAccessService
             = mock(io.mindspice.magenta2.ai.orchestration.runtime.ProjectOperationsAccessService.class);
         when(projectAccessService.isTrustedDeployment()).thenReturn(true);
+        io.mindspice.magenta2.ai.orchestration.runtime.ProjectOutputService projectOutputService
+            = mock(io.mindspice.magenta2.ai.orchestration.runtime.ProjectOutputService.class);
 
         controller = new ProjectConsoleController(
             projectService, mock(JobService.class), agentProfileService,
@@ -65,7 +67,8 @@ class ProjectConsoleControllerTest {
             fragments, entityLookupService, entitySelectorComponents,
             agentContextService, agentMaterializationService,
             workspaceDirectoryService, workspaceExplorerService,
-            workTaskService, planService, projectAccessService);
+            workTaskService, planService, projectAccessService, projectOutputService,
+            mock(io.mindspice.magenta2.ai.orchestration.runtime.ProjectMaterializationTemplateService.class));
     }
 
     @Test
@@ -144,7 +147,9 @@ class ProjectConsoleControllerTest {
             mock(WorkspaceDirectoryService.class), mock(WorkspaceExplorerService.class),
             mock(io.mindspice.magenta2.ai.orchestration.tasks.WorkTaskService.class),
             mock(io.mindspice.magenta2.ai.chat.plan.PlanService.class),
-            mock(io.mindspice.magenta2.ai.orchestration.runtime.ProjectOperationsAccessService.class));
+            mock(io.mindspice.magenta2.ai.orchestration.runtime.ProjectOperationsAccessService.class),
+            mock(io.mindspice.magenta2.ai.orchestration.runtime.ProjectOutputService.class),
+            mock(io.mindspice.magenta2.ai.orchestration.runtime.ProjectMaterializationTemplateService.class));
 
         String html = versioned.updateJobPreferredAgent("project-1", "job-1",
             Map.of("preferredAgentId", "agent-owner", "expectedVersion", "3"), mock(HttpServletResponse.class));
