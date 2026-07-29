@@ -55,22 +55,42 @@ public class ArtifactSearchService {
     private final RootRelativePathService rootRelativePathService;
     private final WorkspaceDirectoryService directoryService;
     private final ConfinedPathMutationService mutations;
+    private final ArtifactExtractionRepository extractionRepo;
     private final boolean ftsAvailable;
 
+    /**
+     * Production constructor: Spring injects the extraction repository.
+     */
+    @org.springframework.beans.factory.annotation.Autowired
     public ArtifactSearchService(JdbcTemplate jdbc,
                                   OutputArtifactRepository artifactRepository,
                                   RootRelativePathService rootRelativePathService,
                                   WorkspaceDirectoryService directoryService,
-                                  ConfinedPathMutationService mutations) {
+                                  ConfinedPathMutationService mutations,
+                                  ArtifactExtractionRepository extractionRepo) {
         this.jdbc = jdbc;
         this.artifactRepository = artifactRepository;
         this.rootRelativePathService = rootRelativePathService;
         this.directoryService = directoryService;
         this.mutations = mutations;
+        this.extractionRepo = extractionRepo;
         this.ftsAvailable = probeFts5();
         if (!ftsAvailable) {
             log.warn("SQLite FTS5 is not available; artifact search is unavailable");
         }
+    }
+
+    /**
+     * Direct-construction signature retained for explicit test compatibility.
+     * New atomicity tests use the Spring-managed repository rather than this path.
+     */
+    public ArtifactSearchService(JdbcTemplate jdbc,
+                                  OutputArtifactRepository artifactRepository,
+                                  RootRelativePathService rootRelativePathService,
+                                  WorkspaceDirectoryService directoryService,
+                                  ConfinedPathMutationService mutations) {
+        this(jdbc, artifactRepository, rootRelativePathService, directoryService, mutations,
+                new ArtifactExtractionRepository(jdbc));
     }
 
     /** Whether FTS5-backed full-text search is available. */
@@ -111,116 +131,59 @@ public class ArtifactSearchService {
 
         String media = record.mediaType();
         if (media == null) return Optional.empty();
+
+        ExtractionRecord result;
         if (!isTextMedia(media)) {
-            return Optional.of(ExtractionRecord.unsupported(artifactId, record.contentSha256(), media));
-        }
-
-        try {
-            Path file = rootRelativePathService.resolve(record.rootRelativePath());
-            if (!Files.exists(file, LinkOption.NOFOLLOW_LINKS)
-                    || !Files.isRegularFile(file, LinkOption.NOFOLLOW_LINKS)) {
-                return Optional.empty();
-            }
-
-            long fileSize = Files.size(file);
-            boolean truncated = fileSize > MAX_EXTRACT_BYTES;
-
-            byte[] bytes;
-            if (truncated) {
-                // Read bounded prefix
-                try (InputStream in = Files.newInputStream(file)) {
-                    bytes = in.readNBytes(MAX_EXTRACT_BYTES);
-                }
-            } else {
-                bytes = Files.readAllBytes(file);
-            }
-
-            // Verify UTF-8
-            String text;
+            result = ExtractionRecord.unsupported(artifactId, record.contentSha256(), media);
+        } else {
             try {
-                text = new String(bytes, StandardCharsets.UTF_8);
+                Path file = rootRelativePathService.resolve(record.rootRelativePath());
+                if (!Files.exists(file, LinkOption.NOFOLLOW_LINKS)
+                        || !Files.isRegularFile(file, LinkOption.NOFOLLOW_LINKS)) {
+                    return Optional.empty();
+                }
+
+                long fileSize = Files.size(file);
+                boolean truncated = fileSize > MAX_EXTRACT_BYTES;
+                byte[] bytes;
+                if (truncated) {
+                    try (InputStream in = Files.newInputStream(file)) {
+                        bytes = in.readNBytes(MAX_EXTRACT_BYTES);
+                    }
+                } else {
+                    bytes = Files.readAllBytes(file);
+                }
+
+                String text = new String(bytes, StandardCharsets.UTF_8);
+                int lineCount = 0;
+                for (int i = 0; i < text.length(); i++) {
+                    if (text.charAt(i) == '\n') lineCount++;
+                }
+                if (!text.isEmpty() && text.charAt(text.length() - 1) != '\n') lineCount++;
+
+                String languageHint = languageHint(media);
+                result = truncated
+                        ? ExtractionRecord.truncated(artifactId, record.contentSha256(), text, bytes.length, lineCount, languageHint)
+                        : ExtractionRecord.extracted(artifactId, record.contentSha256(), text, bytes.length, lineCount, languageHint);
             } catch (Exception e) {
-                return Optional.of(ExtractionRecord.failed(artifactId, record.contentSha256(),
-                        "Invalid UTF-8: " + e.getMessage()));
+                log.warn("Extraction failed for artifact {}: {}", artifactId,
+                        e.getClass().getSimpleName());
+                result = ExtractionRecord.failed(artifactId, record.contentSha256(), "");
             }
-
-            // Count lines
-            int lineCount = 0;
-            for (int i = 0; i < text.length(); i++) {
-                if (text.charAt(i) == '\n') lineCount++;
-            }
-            if (!text.isEmpty() && text.charAt(text.length() - 1) != '\n') lineCount++;
-
-            String languageHint = languageHint(media);
-
-            ExtractionRecord result = truncated
-                    ? ExtractionRecord.truncated(artifactId, record.contentSha256(), text, bytes.length, lineCount, languageHint)
-                    : ExtractionRecord.extracted(artifactId, record.contentSha256(), text, bytes.length, lineCount, languageHint);
-
-            // Persist extraction
-            upsertExtraction(result);
-            return Optional.of(result);
-        } catch (Exception e) {
-            log.warn("Extraction failed for {}: {}", artifactId, e.getMessage());
-            return Optional.of(ExtractionRecord.failed(artifactId, record.contentSha256(), e.getMessage()));
         }
+
+        upsertExtraction(result);
+        return Optional.of(result);
     }
 
     private void upsertExtraction(ExtractionRecord record) {
-        // Check if row exists and get its id for FTS sync
-        Integer existingId = jdbc.queryForObject(
-                "select id from artifact_extraction_documents where artifact_id = ?",
-                Integer.class, record.artifactId());
-
-        if (existingId != null) {
-            // Delete old FTS entry
-            if (ftsAvailable) {
-                try {
-                    jdbc.update("delete from artifact_extraction_fts where rowid = ?", existingId);
-                } catch (Exception e) {
-                    log.warn("Failed to delete FTS entry for rowid {}: {}", existingId, e.getMessage());
-                }
-            }
-            // Update content table
-            jdbc.update("""
-                    update artifact_extraction_documents set
-                        content_sha256 = ?, extracted_text = ?, byte_count = ?,
-                        line_count = ?, language_hint = ?, extraction_state = ?,
-                        extracted_at = ?
-                    where artifact_id = ?
-                    """,
-                    record.contentSha256(),
-                    record.extractedText() != null ? record.extractedText() : "",
-                    record.byteCount(), record.lineCount(), record.languageHint(),
-                    record.extractionState(), record.extractedAt(),
-                    record.artifactId());
-        } else {
-            // Insert content table
-            jdbc.update("""
-                    insert into artifact_extraction_documents(
-                        artifact_id, content_sha256, extracted_text, byte_count,
-                        line_count, language_hint, extraction_state, extracted_at)
-                    values (?, ?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    record.artifactId(), record.contentSha256(),
-                    record.extractedText() != null ? record.extractedText() : "",
-                    record.byteCount(), record.lineCount(), record.languageHint(),
-                    record.extractionState(), record.extractedAt());
-            existingId = jdbc.queryForObject(
-                    "select id from artifact_extraction_documents where artifact_id = ?",
-                    Integer.class, record.artifactId());
-        }
-
-        // Insert into FTS index (programmatic sync)
-        if (ftsAvailable && existingId != null && record.extractedText() != null) {
-            try {
-                jdbc.update("""
-                        insert into artifact_extraction_fts(rowid, extracted_text, language_hint)
-                        values (?, ?, ?)
-                        """, existingId, record.extractedText(), record.languageHint());
-            } catch (Exception e) {
-                log.warn("Failed to insert FTS entry for {}: {}", record.artifactId(), e.getMessage());
-            }
+        try {
+            extractionRepo.synchronizeExtraction(record, ftsAvailable);
+        } catch (Exception e) {
+            log.warn("Extraction persistence failed for artifact {}: {}",
+                    record.artifactId(), e.getClass().getSimpleName());
+            throw new RuntimeException(
+                    "Extraction persistence failed for artifact " + record.artifactId(), e);
         }
     }
 
@@ -252,10 +215,16 @@ public class ArtifactSearchService {
         int processed = 0;
         for (String artifactId : candidates) {
             try {
-                extractText(artifactId, access);
-                processed++;
+                var result = extractText(artifactId, access);
+                if (result.isPresent()) {
+                    var state = result.get().extractionState();
+                    if ("EXTRACTED".equals(state) || "TRUNCATED".equals(state)) {
+                        processed++;
+                    }
+                }
             } catch (Exception e) {
-                log.warn("Backfill extraction failed for {}: {}", artifactId, e.getMessage());
+                log.warn("Backfill extraction failed for {}: {}",
+                        artifactId, e.getClass().getSimpleName());
             }
         }
         return processed;
@@ -270,16 +239,9 @@ public class ArtifactSearchService {
     public int rebuildIndex(ArtifactAccessContext access, int batchSize) {
         if (!ftsAvailable) return 0;
 
-        // Delete extraction documents for this scope
-        jdbc.update("""
-                delete from artifact_extraction_documents
-                where artifact_id in (
-                    select op.artifact_id from output_publications op
-                    where op.workspace_kind = ? and op.workspace_key = ?
-                      and (op.task_run_id = ? or ? is null)
-                )
-                """, access.workspaceKind(), access.workspaceKey(),
-                access.taskRunId(), access.taskRunId());
+        extractionRepo.removeScopedDocuments(
+                access.workspaceKind(), access.workspaceKey(),
+                access.taskRunId(), ftsAvailable);
 
         return backfill(access, batchSize);
     }
