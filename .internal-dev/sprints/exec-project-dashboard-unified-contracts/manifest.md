@@ -7,7 +7,7 @@ Source plan `.internal-dev/plans/20260729-163244-home-dhickel-code-java-magenta-
 ## Stages
 
 - phase-01-authority-and-assignment-foundation.md: wave-01, implementation recorded, validation passed (1 attempt(s))
-- phase-02-project-queue-and-console-seams.md: wave-02, implementation recorded, validation implemented (0 attempt(s))
+- phase-02-project-queue-and-console-seams.md: wave-02, implementation recorded, validation blocked (2 attempt(s))
 - phase-03-lightweight-project-tasks.md: wave-03, implementation not recorded, validation pending (0 attempt(s))
 - phase-04-project-jobs-and-reassignment.md: wave-04, implementation not recorded, validation pending (0 attempt(s))
 - phase-05-materialization-templates-files-outputs.md: wave-05, implementation not recorded, validation pending (0 attempt(s))
@@ -36,8 +36,10 @@ Source plan `.internal-dev/plans/20260729-163244-home-dhickel-code-java-magenta-
 ## Final Validation
 
 - `phase-01-authority-and-assignment-foundation.md` attempt 1: PASS at 2026-07-29T18:19:53.359Z
+- `phase-02-project-queue-and-console-seams.md` attempt 1: BLOCKED at 2026-07-29T19:03:05.820Z
+- `phase-02-project-queue-and-console-seams.md` attempt 2: BLOCKED pending post-repair Playwright evidence at 2026-07-29T19:13:38Z
 Integration validation not recorded.
 
 ## Outcome
 
-Active, revision 3.
+Active, revision 5.

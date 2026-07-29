@@ -45,7 +45,7 @@ public final class ProjectConsoleFragments {
     }
 
     static final List<ProjectTab> TAB_REGISTRY = List.of(
-        new ProjectTab("overview",   "Dashboard",  "dashboard",  false),
+        new ProjectTab("overview",   "Dashboard",  "dashboard",  true),
         new ProjectTab("work",       "Queue",      "queue",      true),
         new ProjectTab("work",       "Tasks",      "tasks",      false),
         new ProjectTab("work",       "Jobs",       "jobs",       false),
@@ -54,7 +54,7 @@ public final class ProjectConsoleFragments {
         new ProjectTab("context",    "Chat",       "chat",       false),
         new ProjectTab("automation", "Schedules",  "schedules",  false),
         new ProjectTab("automation", "Events",     "events",     false),
-        new ProjectTab("admin",      "Members",    "members",    false),
+        new ProjectTab("admin",      "Members",    "members",    true),
         new ProjectTab("admin",      "Settings",   "settings",   false)
     );
 

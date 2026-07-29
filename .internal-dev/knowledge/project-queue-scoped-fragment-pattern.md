@@ -13,6 +13,7 @@ Project Queue scoped fragments and cursor controls
 - Every non-2xx Queue response targeted by HTMX must retain its stable host id and include the shared error marker.
 - Project transcript rendering must use durable assignment-conversation links only; checkpoint, input, evidence, and legacy fallbacks are not valid project Queue linkage.
 - Priority requires both service and SQL predicates for queued, nonterminal, unleased rows with the expected business version.
+- A grouped-tab registry must preserve pre-existing functional project tabs mandated by `web.md` (Dashboard and Members); only genuinely deferred tabs should render the controlled unavailable state.
 
 # Engine Relevance
 

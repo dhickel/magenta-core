@@ -76,7 +76,7 @@ public class ProjectConsoleController {
     private static final Logger log = LoggerFactory.getLogger(ProjectConsoleController.class);
     private static final String PROJECTS_JS = "/js/orchestration/projects.js?v=5";
     private static final String HTMX_ERRORS_JS = "/js/orchestration/htmx-errors.js?v=1";
-    private static final String DASHBOARD_CSS = "/css/orchestration.css?v=13";
+    private static final String DASHBOARD_CSS = "/css/orchestration.css?v=14";
 
     private final ProjectService projectService;
     private final JobService jobService;

@@ -2,7 +2,7 @@
   "version": 2,
   "runId": "exec-project-dashboard-unified-contracts",
   "state": "active",
-  "revision": 3,
+  "revision": 5,
   "source": {
     "projectRoot": "/home/dhickel/Code/Java/Magenta",
     "sourcePlanPath": ".internal-dev/plans/20260729-163244-home-dhickel-code-java-magenta-internal-dev-ha",
@@ -569,7 +569,6 @@
     },
     {
       "phase": "phase-02-project-queue-and-console-seams.md",
-      "validations": [],
       "implementation": {
         "agentModel": {
           "provider": "deepseek",
@@ -650,7 +649,145 @@
           "src/test/java/io/mindspice/magenta2/api/web/OrchestrationControllerTest.java"
         ],
         "timestamp": "2026-07-29T18:43:56.692Z"
-      }
+      },
+      "validations": [
+        {
+          "agentModel": {
+            "provider": "openai-codex",
+            "model": "gpt-5.6-terra",
+            "thinking": "high"
+          },
+          "attempt": 1,
+          "verdict": "BLOCKED",
+          "report": "Validator repaired code extensively (project console controller, fragments, work controller, query service, control service, repository, CSS, JS, tests) and committed. All code criteria PASS. BLOCKED solely because Playwright live UI validation cannot run inside the validator session (no subagent tools). Must run Playwright from root orchestrator.",
+          "changedFiles": [
+            "src/main/java/io/mindspice/magenta2/api/web/ProjectConsoleFragments.java",
+            "src/main/java/io/mindspice/magenta2/api/web/ProjectConsoleController.java",
+            "src/main/java/io/mindspice/magenta2/api/web/ProjectWorkController.java",
+            "src/main/java/io/mindspice/magenta2/api/web/OrchestrationController.java",
+            "src/main/java/io/mindspice/magenta2/ai/orchestration/runtime/AssignmentQueryService.java",
+            "src/main/java/io/mindspice/magenta2/ai/orchestration/runtime/AssignmentControlService.java",
+            "src/main/java/io/mindspice/magenta2/ai/orchestration/runtime/AssignmentService.java",
+            "src/main/java/io/mindspice/magenta2/ai/orchestration/runtime/OrchestrationRuntimeRepository.java",
+            "src/main/resources/static/css/orchestration.css",
+            "src/main/resources/static/js/orchestration/projects.js",
+            "src/test/java/io/mindspice/magenta2/api/web/ProjectConsoleControllerTest.java",
+            "src/test/java/io/mindspice/magenta2/api/web/OrchestrationControllerTest.java",
+            "src/test/java/io/mindspice/magenta2/ai/orchestration/runtime/AssignmentAuthorityFoundationTest.java"
+          ],
+          "changedFileObservations": [
+            {
+              "path": "src/main/java/io/mindspice/magenta2/api/web/ProjectConsoleFragments.java",
+              "status": "present",
+              "digest": "a9d8e86e8dd1b0344cc6008c34dc911758bc51346c77bcacf7c3a4d633b6e11a",
+              "bytes": 10937
+            },
+            {
+              "path": "src/main/java/io/mindspice/magenta2/api/web/ProjectConsoleController.java",
+              "status": "present",
+              "digest": "a62bfd81416a127db9094ef3f3743e8859c0dd0a0176ac97a006b0b6136987a1",
+              "bytes": 66340
+            },
+            {
+              "path": "src/main/java/io/mindspice/magenta2/api/web/ProjectWorkController.java",
+              "status": "present",
+              "digest": "c83212412011d80dc1085040080ca5e6ce681b7cf7475551ac1ed23482dafd73",
+              "bytes": 30016
+            },
+            {
+              "path": "src/main/java/io/mindspice/magenta2/api/web/OrchestrationController.java",
+              "status": "present",
+              "digest": "bf36650f28c9208d2face9e147d0dc8de471d6142bbe0e8f833b2c7f969b8a75",
+              "bytes": 416651
+            },
+            {
+              "path": "src/main/java/io/mindspice/magenta2/ai/orchestration/runtime/AssignmentQueryService.java",
+              "status": "present",
+              "digest": "2068751657a854ccbe015ddc56f39e0c41d1797ff8a26d2a97942235cbd4ad5b",
+              "bytes": 19642
+            },
+            {
+              "path": "src/main/java/io/mindspice/magenta2/ai/orchestration/runtime/AssignmentControlService.java",
+              "status": "present",
+              "digest": "58eb13ddf80c667085ad982c97ec32d798907055bc26bdac4bfaf85b467191db",
+              "bytes": 10069
+            },
+            {
+              "path": "src/main/java/io/mindspice/magenta2/ai/orchestration/runtime/AssignmentService.java",
+              "status": "present",
+              "digest": "ef35105668d322666438f908644dba79c15445d68dab8370d31f47aa8ceb3926",
+              "bytes": 54698
+            },
+            {
+              "path": "src/main/java/io/mindspice/magenta2/ai/orchestration/runtime/OrchestrationRuntimeRepository.java",
+              "status": "present",
+              "digest": "ac9da8c260b447d18672ade640365793b412234f2375d451f26a1de60d911768",
+              "bytes": 80717
+            },
+            {
+              "path": "src/main/resources/static/css/orchestration.css",
+              "status": "present",
+              "digest": "7e2b9e5f37a5a35e7555b2250fec7c94d5497687d5b39f8fe0a24d1295a91efe",
+              "bytes": 80237
+            },
+            {
+              "path": "src/main/resources/static/js/orchestration/projects.js",
+              "status": "present",
+              "digest": "115af88c08e2984442e075f18a4780ab87ba78d77d765ae10a0b65a4ec184c6a",
+              "bytes": 1722
+            },
+            {
+              "path": "src/test/java/io/mindspice/magenta2/api/web/ProjectConsoleControllerTest.java",
+              "status": "present",
+              "digest": "e25165eb37b22c60cf4b722a82e3dbdfb213b1a767beb76536a4b725e5e293de",
+              "bytes": 8733
+            },
+            {
+              "path": "src/test/java/io/mindspice/magenta2/api/web/OrchestrationControllerTest.java",
+              "status": "present",
+              "digest": "d46b4aea2d3059123d0578c6cff2a5daf88ff4d273acae1a6219aa80e2941306",
+              "bytes": 7741
+            },
+            {
+              "path": "src/test/java/io/mindspice/magenta2/ai/orchestration/runtime/AssignmentAuthorityFoundationTest.java",
+              "status": "present",
+              "digest": "1c68a149b73b6cb776b6771ac1ba5204a20aa119ec0084be1e319645d079c00a",
+              "bytes": 18495
+            }
+          ],
+          "outsideDeclaredTargets": [
+            "src/main/java/io/mindspice/magenta2/ai/orchestration/runtime/AssignmentQueryService.java",
+            "src/main/java/io/mindspice/magenta2/ai/orchestration/runtime/AssignmentControlService.java",
+            "src/main/java/io/mindspice/magenta2/ai/orchestration/runtime/AssignmentService.java",
+            "src/main/java/io/mindspice/magenta2/ai/orchestration/runtime/OrchestrationRuntimeRepository.java",
+            "src/test/java/io/mindspice/magenta2/api/web/ProjectConsoleControllerTest.java",
+            "src/test/java/io/mindspice/magenta2/api/web/OrchestrationControllerTest.java",
+            "src/test/java/io/mindspice/magenta2/ai/orchestration/runtime/AssignmentAuthorityFoundationTest.java"
+          ],
+          "timestamp": "2026-07-29T19:03:05.820Z"
+        },
+        {
+          "agentModel": {
+            "provider": "openai-codex",
+            "model": "gpt-5.6-terra",
+            "thinking": "high"
+          },
+          "attempt": 2,
+          "verdict": "BLOCKED",
+          "report": "Second review restored Dashboard and Members to their established functional registry entries, served a static favicon, and repaired the reported project-console CSS issues. Focused controller tests, all 1090 Maven tests, and a bounded live HTTP startup check passed. The fresh required post-repair Playwright desktop/mobile screenshot and console pass could not run through this validator because no subagent workflow is available; the earlier Playwright result is defect evidence, not post-repair proof.",
+          "changedFiles": [
+            "src/main/java/io/mindspice/magenta2/api/web/ProjectConsoleController.java",
+            "src/main/java/io/mindspice/magenta2/api/web/ProjectConsoleFragments.java",
+            "src/main/resources/static/css/orchestration.css",
+            "src/main/resources/static/favicon.ico",
+            "src/test/java/io/mindspice/magenta2/api/web/ProjectConsoleControllerTest.java",
+            ".internal-dev/reviews/2026-07-29-phase-02-project-console-second-review.md",
+            ".internal-dev/changelogs/2026-07-29-phase-02-project-console-regression-repair.md",
+            ".internal-dev/knowledge/project-queue-scoped-fragment-pattern.md"
+          ],
+          "timestamp": "2026-07-29T19:13:38Z"
+        }
+      ]
     },
     {
       "phase": "phase-03-lightweight-project-tasks.md",
@@ -679,5 +816,5 @@
   ],
   "integrationValidations": [],
   "createdAt": "2026-07-29T17:32:58.764Z",
-  "updatedAt": "2026-07-29T18:43:56.692Z"
+  "updatedAt": "2026-07-29T19:13:38Z"
 }

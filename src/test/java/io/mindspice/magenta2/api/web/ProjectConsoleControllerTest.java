@@ -21,6 +21,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -42,6 +43,7 @@ class ProjectConsoleControllerTest {
         ProjectConsoleFragments fragments = new ProjectConsoleFragments();
         EntityLookupService entityLookupService = mock(EntityLookupService.class);
         EntitySelectorComponents entitySelectorComponents = mock(EntitySelectorComponents.class);
+        when(entitySelectorComponents.selector(any(), any())).thenReturn(new io.mindspice.simplypages.components.Div());
         AgentContextService agentContextService = mock(AgentContextService.class);
         AgentMaterializationService agentMaterializationService = mock(AgentMaterializationService.class);
         WorkspaceDirectoryService workspaceDirectoryService = mock(WorkspaceDirectoryService.class);
@@ -83,6 +85,19 @@ class ProjectConsoleControllerTest {
         assertThat(create).contains("Owner Agent").doesNotContain("Legacy Initial Agent", "Git Repo URL", "gitRepoUrl");
         assertThat(settings).contains("Settings", "not yet available")
             .doesNotContain("Git Repo URL", "gitRepoUrl", "legacy.invalid");
+    }
+
+    @Test
+    void dashboardAndMembersRemainFunctionalTabs() {
+        HttpServletResponse response = mock(HttpServletResponse.class);
+
+        String dashboard = controller.projectDashboardTab("project-1", response);
+        String members = controller.projectMembersTab("project-1", response);
+
+        assertThat(dashboard).contains("Project", "Member Agents", "Active Assignments")
+            .doesNotContain("not yet available");
+        assertThat(members).contains("Members", "Add Member", "project-member-add-controls")
+            .doesNotContain("not yet available");
     }
 
     @Test
