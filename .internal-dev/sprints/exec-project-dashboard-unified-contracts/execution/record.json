@@ -2,7 +2,7 @@
   "version": 2,
   "runId": "exec-project-dashboard-unified-contracts",
   "state": "active",
-  "revision": 16,
+  "revision": 18,
   "source": {
     "projectRoot": "/home/dhickel/Code/Java/Magenta",
     "sourcePlanPath": ".internal-dev/plans/20260729-163244-home-dhickel-code-java-magenta-internal-dev-ha",
@@ -997,7 +997,6 @@
     },
     {
       "phase": "phase-06-project-automation-and-events.md",
-      "validations": [],
       "implementation": {
         "agentModel": {
           "provider": "deepseek",
@@ -1009,7 +1008,37 @@
         "changedFileObservations": [],
         "outsideDeclaredTargets": [],
         "timestamp": "2026-07-29T23:00:25.915Z"
-      }
+      },
+      "validations": [
+        {
+          "agentModel": {
+            "provider": "openai-codex",
+            "model": "gpt-5.6-terra",
+            "thinking": "high"
+          },
+          "report": "Phase 06 code repairs done: fresh-schema v19 parity, immutable revision tombstones, attribution spoofing, one-time exclusivity, project event propagation, pure reaction simulation. Tests pass. BLOCKED on Playwright only.",
+          "changedFiles": [],
+          "changedFileObservations": [],
+          "outsideDeclaredTargets": [],
+          "timestamp": "2026-07-29T23:15:31.965Z",
+          "attempt": 1,
+          "verdict": "BLOCKED"
+        },
+        {
+          "agentModel": {
+            "provider": "openai-codex",
+            "model": "gpt-5.6-terra",
+            "thinking": "high"
+          },
+          "attempt": 2,
+          "verdict": "PASS",
+          "report": "Phase 06 PASS. Validator repaired fresh-schema parity, immutable revision tombstones, attribution spoofing, one-time exclusivity, project event propagation, pure reaction simulation. Playwright confirmed Schedules/Events tabs load, no console errors. 1274 tests pass.",
+          "changedFiles": [],
+          "changedFileObservations": [],
+          "outsideDeclaredTargets": [],
+          "timestamp": "2026-07-29T23:16:57.600Z"
+        }
+      ]
     },
     {
       "phase": "phase-07-project-chat.md",
@@ -1022,5 +1051,5 @@
   ],
   "integrationValidations": [],
   "createdAt": "2026-07-29T17:32:58.764Z",
-  "updatedAt": "2026-07-29T23:00:25.915Z"
+  "updatedAt": "2026-07-29T23:16:57.600Z"
 }
