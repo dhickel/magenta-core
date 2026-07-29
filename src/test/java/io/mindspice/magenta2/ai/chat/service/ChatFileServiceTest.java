@@ -10,6 +10,7 @@ import io.mindspice.magenta2.ai.chat.repository.ChatSessionMetadataRepository;
 import io.mindspice.magenta2.ai.orchestration.workspaces.ChatConversationExistenceRepository;
 import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceDirectoryService;
 import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceDirectoryServiceTestSupport;
+import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceFileException;
 import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceResolutionException;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -101,8 +102,8 @@ class ChatFileServiceTest {
         Files.writeString(tempDir.resolve("outside.txt"), "outside");
 
         assertThatThrownBy(() -> service.resolveDownload(CONVERSATION_ID, "../outside.txt"))
-            .isInstanceOf(IllegalArgumentException.class)
-            .hasMessageContaining("escape");
+            .isInstanceOf(WorkspaceFileException.class)
+            .hasMessageContaining("invalid");
     }
 
     @Test
@@ -115,9 +116,11 @@ class ChatFileServiceTest {
 
         assertThat(service.resolveDownload(CONVERSATION_ID, "nested/data.csv")).isEqualTo(expected.toRealPath());
         assertThatThrownBy(() -> service.resolveDownload(CONVERSATION_ID, "nested\\data.csv"))
-            .isInstanceOf(IllegalArgumentException.class);
+            .isInstanceOf(WorkspaceFileException.class);
         assertThatThrownBy(() -> service.resolveDownload(CONVERSATION_ID, "nested"))
-            .isInstanceOf(IllegalArgumentException.class);
+            .isInstanceOf(WorkspaceFileException.class)
+            .extracting(e -> ((WorkspaceFileException) e).reason())
+            .isEqualTo(WorkspaceFileException.Reason.NOT_FOUND);
     }
 
     @Test
@@ -130,7 +133,7 @@ class ChatFileServiceTest {
         assertThat(service.countFiles(CONVERSATION_ID)).isZero();
         assertThat(service.listFiles(CONVERSATION_ID).files()).isEmpty();
         assertThatThrownBy(() -> service.resolveDownload(CONVERSATION_ID, "linked.txt"))
-            .isInstanceOf(IllegalArgumentException.class);
+            .isInstanceOf(WorkspaceFileException.class);
     }
 
     @Test

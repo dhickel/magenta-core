@@ -49,7 +49,8 @@ public class WorkspaceMdResolver {
         Objects.requireNonNull(location, "location");
         return resolveFromRoot(location.confinedPath(),
                 "materialization " + location.materializationKey().serialized(),
-                location.generation());
+                location.generation(),
+                location.agentDescriptor().root());
     }
 
     /**
@@ -77,34 +78,44 @@ public class WorkspaceMdResolver {
             case SCRIPTS -> AgentWorkspaceArea.SCRIPTS;
             case APPS -> AgentWorkspaceArea.APPS;
         };
-        return resolveFromRoot(agentDescriptor.root().resolve(area.directoryName()),
-                "personal area " + area.directoryName(), null);
+        Path personalRoot = agentDescriptor.root().resolve(area.directoryName());
+        return resolveFromRoot(personalRoot,
+                "personal area " + area.directoryName(), null,
+                agentDescriptor.root());
     }
 
     private static WorkspaceMdResult resolveFromRoot(
-            Path searchRoot, String provenanceLabel, Integer generation) {
-        if (Files.notExists(searchRoot, LinkOption.NOFOLLOW_LINKS)) {
+            Path searchRoot, String provenanceLabel, Integer generation,
+            Path authorityBoundary) {
+        Path normalizedAuthority = authorityBoundary.normalize();
+        Path normalizedSearchRoot = searchRoot.normalize();
+        if (!normalizedSearchRoot.startsWith(normalizedAuthority)) {
+            throw new WorkspaceMdException("WORKSPACE.md search root escapes authority boundary");
+        }
+        rejectLinkedComponents(normalizedAuthority, normalizedSearchRoot, provenanceLabel);
+
+        if (Files.notExists(normalizedSearchRoot, LinkOption.NOFOLLOW_LINKS)) {
             return WorkspaceMdResult.absent();
         }
-        if (Files.isSymbolicLink(searchRoot)) {
-            throw new WorkspaceMdException(
-                    "WORKSPACE.md search root is a symbolic link: " + provenanceLabel);
-        }
-        if (!Files.isDirectory(searchRoot, LinkOption.NOFOLLOW_LINKS)) {
+        if (!Files.isDirectory(normalizedSearchRoot, LinkOption.NOFOLLOW_LINKS)) {
             throw new WorkspaceMdException("WORKSPACE.md search root is not a directory");
         }
 
-        Path workspaceMd = searchRoot.resolve(WORKSPACE_MD).normalize();
-        if (!workspaceMd.startsWith(searchRoot)) {
+        Path workspaceMd = normalizedSearchRoot.resolve(WORKSPACE_MD).normalize();
+        if (!workspaceMd.startsWith(normalizedSearchRoot)) {
             throw new WorkspaceMdException(
                     "WORKSPACE.md path escapes root: " + provenanceLabel);
         }
 
         if (!Files.exists(workspaceMd, LinkOption.NOFOLLOW_LINKS)) {
-            return WorkspaceMdResult.absent();
+            if (Files.notExists(workspaceMd, LinkOption.NOFOLLOW_LINKS)) {
+                return WorkspaceMdResult.absent();
+            }
+            throw new WorkspaceMdException(
+                    "Failed to determine whether WORKSPACE.md exists: " + provenanceLabel);
         }
 
-        // Reject links and non-regular files
+        // Reject links and non-regular files.
         if (Files.isSymbolicLink(workspaceMd)) {
             throw new WorkspaceMdException(
                     "WORKSPACE.md is a symbolic link: " + provenanceLabel);
@@ -114,28 +125,31 @@ public class WorkspaceMdResolver {
                     "WORKSPACE.md is not a regular file: " + provenanceLabel);
         }
 
-        // Confinement check via real path
+        // Validate both resolved paths against the selected authority boundary.
         try {
-            Path realSearchRoot = searchRoot.toRealPath(LinkOption.NOFOLLOW_LINKS);
+            Path realAuthority = normalizedAuthority.toRealPath(LinkOption.NOFOLLOW_LINKS);
+            Path realSearchRoot = normalizedSearchRoot.toRealPath(LinkOption.NOFOLLOW_LINKS);
             Path realMd = workspaceMd.toRealPath(LinkOption.NOFOLLOW_LINKS);
-            if (!realMd.startsWith(realSearchRoot)) {
+            if (!realSearchRoot.startsWith(realAuthority) || !realMd.startsWith(realSearchRoot)
+                    || !realMd.startsWith(realAuthority)) {
                 throw new WorkspaceMdException(
-                        "WORKSPACE.md escapes search root: " + provenanceLabel);
+                        "WORKSPACE.md escapes selected authority root: " + provenanceLabel);
             }
         } catch (IOException e) {
             throw new WorkspaceMdException("Failed to resolve WORKSPACE.md real path", e);
         }
 
-        // Read bounded bytes
+        // Read bounded bytes.
         byte[] bytes;
         try {
             long fileSize = Files.size(workspaceMd);
             if (fileSize > MAX_BYTES) {
-                throw new WorkspaceMdException(
-                        "WORKSPACE.md exceeds maximum size (" + MAX_BYTES + " bytes): "
-                                + provenanceLabel);
+                throw exceedsMaximumSize(provenanceLabel);
             }
             bytes = Files.readAllBytes(workspaceMd);
+            if (bytes.length > MAX_BYTES) {
+                throw exceedsMaximumSize(provenanceLabel);
+            }
         } catch (IOException e) {
             throw new WorkspaceMdException("Failed to read WORKSPACE.md", e);
         }
@@ -176,6 +190,28 @@ public class WorkspaceMdResolver {
         }
 
         return WorkspaceMdResult.present(promptContent, label.toString(), truncated);
+    }
+
+    private static void rejectLinkedComponents(Path authorityBoundary, Path searchRoot,
+                                               String provenanceLabel) {
+        Path component = authorityBoundary;
+        while (true) {
+            if (Files.isSymbolicLink(component)) {
+                throw new WorkspaceMdException(
+                        "WORKSPACE.md path component is a symbolic link: " + provenanceLabel);
+            }
+            if (component.equals(searchRoot)) {
+                return;
+            }
+            component = component.resolve(authorityBoundary.relativize(searchRoot)
+                    .subpath(component.getNameCount() - authorityBoundary.getNameCount(),
+                            component.getNameCount() - authorityBoundary.getNameCount() + 1));
+        }
+    }
+
+    private static WorkspaceMdException exceedsMaximumSize(String provenanceLabel) {
+        return new WorkspaceMdException("WORKSPACE.md exceeds maximum size (" + MAX_BYTES + " bytes): "
+                + provenanceLabel);
     }
 
     // ── Result type ──

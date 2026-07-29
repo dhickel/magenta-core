@@ -16,6 +16,7 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
+import java.util.function.Supplier;
 
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
@@ -163,82 +164,96 @@ public class WorkspaceExplorerService {
     }
 
     public FilePreview saveText(WorkspaceDescriptor descriptor, RelativePath path, String content) {
-        requireOrdinaryMutationAllowed(descriptor.kind(), path.value());
-        ensureDescriptorRootForCreate(descriptor);
-        ensurePersonalAreaProvisioned(descriptor, path.value());
-        FilePreview saved = saveText(descriptor, descriptor.root(), path, content);
-        logAction(descriptor, "markdown".equals(saved.kind()) ? WorkspaceFileActionType.SAVE_MARKDOWN : WorkspaceFileActionType.SAVE_TEXT,
-            path.value(), null, "SUCCEEDED", "{\"bytes\":" + saved.size() + "}");
-        return saved;
+        return withHeldMutationKind(descriptor, () -> {
+            requireOrdinaryMutationAllowed(descriptor.kind(), path.value());
+            ensureDescriptorRootForCreate(descriptor);
+            ensurePersonalAreaProvisioned(descriptor, path.value());
+            FilePreview saved = saveText(descriptor, descriptor.root(), path, content);
+            logAction(descriptor, "markdown".equals(saved.kind()) ? WorkspaceFileActionType.SAVE_MARKDOWN : WorkspaceFileActionType.SAVE_TEXT,
+                path.value(), null, "SUCCEEDED", "{\"bytes\":" + saved.size() + "}");
+            return saved;
+        });
     }
 
     public Entry createDirectory(WorkspaceDescriptor descriptor, RelativePath path) {
-        requireOrdinaryMutationAllowed(descriptor.kind(), path.value());
-        ensureDescriptorRootForCreate(descriptor);
-        ensurePersonalAreaProvisioned(descriptor, path.value());
-        requireCreatableParent(descriptor, path);
-        Entry created = createDirectoryRoot(descriptor.root(), path);
-        logAction(descriptor, WorkspaceFileActionType.CREATE_FOLDER, created.path(), null, "SUCCEEDED", "{}");
-        return decorate(descriptor, created);
+        return withHeldMutationKind(descriptor, () -> {
+            requireOrdinaryMutationAllowed(descriptor.kind(), path.value());
+            ensureDescriptorRootForCreate(descriptor);
+            ensurePersonalAreaProvisioned(descriptor, path.value());
+            requireCreatableParent(descriptor, path);
+            Entry created = createDirectoryRoot(descriptor.root(), path);
+            logAction(descriptor, WorkspaceFileActionType.CREATE_FOLDER, created.path(), null, "SUCCEEDED", "{}");
+            return decorate(descriptor, created);
+        });
     }
 
     public Entry createTextFile(WorkspaceDescriptor descriptor, RelativePath parent, String fileName) {
-        String childPath = childValue(parent, fileName.trim());
-        requireFileName(fileName, ".txt", "text");
-        requireOrdinaryMutationAllowed(descriptor.kind(), childPath);
-        ensureDescriptorRootForCreate(descriptor);
-        ensurePersonalAreaProvisioned(descriptor, childPath);
-        requireCreatableParent(descriptor, new RelativePath(childPath));
-        Entry created = createTextFileRoot(descriptor.root(), parent, fileName);
-        logAction(descriptor, WorkspaceFileActionType.CREATE_TEXT_FILE, created.path(), null, "SUCCEEDED", "{}");
-        return decorate(descriptor, created);
+        return withHeldMutationKind(descriptor, () -> {
+            String childPath = childValue(parent, fileName.trim());
+            requireFileName(fileName, ".txt", "text");
+            requireOrdinaryMutationAllowed(descriptor.kind(), childPath);
+            ensureDescriptorRootForCreate(descriptor);
+            ensurePersonalAreaProvisioned(descriptor, childPath);
+            requireCreatableParent(descriptor, new RelativePath(childPath));
+            Entry created = createTextFileRoot(descriptor.root(), parent, fileName);
+            logAction(descriptor, WorkspaceFileActionType.CREATE_TEXT_FILE, created.path(), null, "SUCCEEDED", "{}");
+            return decorate(descriptor, created);
+        });
     }
 
     public Entry createMarkdownFile(WorkspaceDescriptor descriptor, RelativePath parent, String fileName) {
-        String childPath = childValue(parent, fileName.trim());
-        requireFileName(fileName, ".md", "markdown");
-        requireOrdinaryMutationAllowed(descriptor.kind(), childPath);
-        ensureDescriptorRootForCreate(descriptor);
-        ensurePersonalAreaProvisioned(descriptor, childPath);
-        requireCreatableParent(descriptor, new RelativePath(childPath));
-        Entry created = createMarkdownFileRoot(descriptor.root(), parent, fileName);
-        logAction(descriptor, WorkspaceFileActionType.CREATE_MARKDOWN_FILE, created.path(), null, "SUCCEEDED", "{}");
-        return decorate(descriptor, created);
+        return withHeldMutationKind(descriptor, () -> {
+            String childPath = childValue(parent, fileName.trim());
+            requireFileName(fileName, ".md", "markdown");
+            requireOrdinaryMutationAllowed(descriptor.kind(), childPath);
+            ensureDescriptorRootForCreate(descriptor);
+            ensurePersonalAreaProvisioned(descriptor, childPath);
+            requireCreatableParent(descriptor, new RelativePath(childPath));
+            Entry created = createMarkdownFileRoot(descriptor.root(), parent, fileName);
+            logAction(descriptor, WorkspaceFileActionType.CREATE_MARKDOWN_FILE, created.path(), null, "SUCCEEDED", "{}");
+            return decorate(descriptor, created);
+        });
     }
 
     @Transactional
     public Entry rename(WorkspaceDescriptor descriptor, RelativePath source, String newName) {
-        String targetRel = computeRenameTarget(source.value(), newName);
-        reauthorizeSourceAndTarget(descriptor, source.value(), targetRel);
-        Entry renamed = renameRoot(descriptor.root(), source, newName);
-        metadataService.onMove(descriptor, source.value(), renamed.path());
-        logAction(descriptor, WorkspaceFileActionType.RENAME, source.value(), renamed.path(), "SUCCEEDED", "{}");
-        return decorate(descriptor, renamed);
+        return withHeldMutationKind(descriptor, () -> {
+            String targetRel = computeRenameTarget(source.value(), newName);
+            reauthorizeSourceAndTarget(descriptor, source.value(), targetRel);
+            Entry renamed = renameRoot(descriptor.root(), source, newName);
+            metadataService.onMove(descriptor, source.value(), renamed.path());
+            logAction(descriptor, WorkspaceFileActionType.RENAME, source.value(), renamed.path(), "SUCCEEDED", "{}");
+            return decorate(descriptor, renamed);
+        });
     }
 
     @Transactional
     public Entry move(WorkspaceDescriptor descriptor, RelativePath source, RelativePath destination, String newName) {
-        String targetName = StringUtils.hasText(newName) ? newName.trim() : Path.of(source.value()).getFileName().toString();
-        String destPath = ".".equals(destination.value()) ? targetName : destination.value() + "/" + targetName;
-        reauthorizeSourceAndTarget(descriptor, source.value(), destPath);
-        Entry moved = moveRoot(descriptor.root(), source, destination, newName);
-        metadataService.onMove(descriptor, source.value(), moved.path());
-        logAction(descriptor, WorkspaceFileActionType.MOVE, source.value(), moved.path(), "SUCCEEDED", "{}");
-        return decorate(descriptor, moved);
+        return withHeldMutationKind(descriptor, () -> {
+            String targetName = StringUtils.hasText(newName) ? newName.trim() : Path.of(source.value()).getFileName().toString();
+            String destPath = ".".equals(destination.value()) ? targetName : destination.value() + "/" + targetName;
+            reauthorizeSourceAndTarget(descriptor, source.value(), destPath);
+            Entry moved = moveRoot(descriptor.root(), source, destination, newName);
+            metadataService.onMove(descriptor, source.value(), moved.path());
+            logAction(descriptor, WorkspaceFileActionType.MOVE, source.value(), moved.path(), "SUCCEEDED", "{}");
+            return decorate(descriptor, moved);
+        });
     }
 
     @Transactional
     public Entry copy(WorkspaceDescriptor descriptor, RelativePath source, RelativePath destination, String newName) {
-        if (".".equals(source.value())) {
-            throw new WorkspaceFileException(WorkspaceFileException.Reason.INVALID, "workspace root cannot be copied");
-        }
-        String targetName = StringUtils.hasText(newName) ? newName.trim() : Path.of(source.value()).getFileName().toString();
-        String destPath = ".".equals(destination.value()) ? targetName : destination.value() + "/" + targetName;
-        reauthorizeSourceAndTarget(descriptor, source.value(), destPath);
-        Entry copied = copyRoot(descriptor.root(), source, destination, newName);
-        metadataService.onCopy(descriptor, source.value(), copied.path());
-        logAction(descriptor, WorkspaceFileActionType.COPY, source.value(), copied.path(), "SUCCEEDED", "{}");
-        return decorate(descriptor, copied);
+        return withHeldMutationKind(descriptor, () -> {
+            if (".".equals(source.value())) {
+                throw new WorkspaceFileException(WorkspaceFileException.Reason.INVALID, "workspace root cannot be copied");
+            }
+            String targetName = StringUtils.hasText(newName) ? newName.trim() : Path.of(source.value()).getFileName().toString();
+            String destPath = ".".equals(destination.value()) ? targetName : destination.value() + "/" + targetName;
+            reauthorizeSourceAndTarget(descriptor, source.value(), destPath);
+            Entry copied = copyRoot(descriptor.root(), source, destination, newName);
+            metadataService.onCopy(descriptor, source.value(), copied.path());
+            logAction(descriptor, WorkspaceFileActionType.COPY, source.value(), copied.path(), "SUCCEEDED", "{}");
+            return decorate(descriptor, copied);
+        });
     }
 
     public DeletePreflight deletePreflight(WorkspaceDescriptor descriptor, RelativePath path, DeleteStep step) {
@@ -248,19 +263,21 @@ public class WorkspaceExplorerService {
 
     @Transactional
     public DeleteResult delete(WorkspaceDescriptor descriptor, RelativePath path, DeleteStep step) {
-        requireOrdinaryMutationAllowed(descriptor.kind(), path.value());
-        DeletePreflight preflight = deletePreflightRoot(descriptor.root(), path, step);
-        if (!preflight.executable()) {
-            throw new WorkspaceFileException(WorkspaceFileException.Reason.INVALID,
-                "delete confirmation step is required: " + preflight.requiredStep());
-        }
-        DeleteResult result = deleteRoot(descriptor.root(), path, step);
-        metadataService.onDelete(descriptor, path.value());
-        WorkspaceFileActionType actionType = step == DeleteStep.DIRECTORY_RECURSIVE_CONFIRM
-            ? WorkspaceFileActionType.DELETE_DIRECTORY : WorkspaceFileActionType.DELETE_FILE;
-        logAction(descriptor, actionType, path.value(), null, "SUCCEEDED",
-            "{\"deletedCount\":" + result.deletedCount() + "}");
-        return result;
+        return withHeldMutationKind(descriptor, () -> {
+            requireOrdinaryMutationAllowed(descriptor.kind(), path.value());
+            DeletePreflight preflight = deletePreflightRoot(descriptor.root(), path, step);
+            if (!preflight.executable()) {
+                throw new WorkspaceFileException(WorkspaceFileException.Reason.INVALID,
+                    "delete confirmation step is required: " + preflight.requiredStep());
+            }
+            DeleteResult result = deleteRoot(descriptor.root(), path, step);
+            metadataService.onDelete(descriptor, path.value());
+            WorkspaceFileActionType actionType = step == DeleteStep.DIRECTORY_RECURSIVE_CONFIRM
+                ? WorkspaceFileActionType.DELETE_DIRECTORY : WorkspaceFileActionType.DELETE_FILE;
+            logAction(descriptor, actionType, path.value(), null, "SUCCEEDED",
+                "{\"deletedCount\":" + result.deletedCount() + "}");
+            return result;
+        });
     }
 
     public Entry inspect(WorkspaceDescriptor descriptor, RelativePath path) {
@@ -857,9 +874,6 @@ public class WorkspaceExplorerService {
     }
 
     private void requireOrdinaryMutationAllowed(WorkspaceKind kind, String relativePath) {
-        if (kind != null) {
-            heldMutationKind.set(kind);
-        }
         ReservedWorkspacePathPolicy.Classification c;
         try {
             c = kind != null
@@ -875,6 +889,18 @@ public class WorkspaceExplorerService {
             throw new WorkspaceFileException(WorkspaceFileException.Reason.INVALID,
                     protectedTreeMessage(c));
         }
+    }
+
+    /**
+     * Install the descriptor kind for one operation and remove it on every
+     * exit path. The body receives the held kind; validation helpers are pure.
+     */
+    private <T> T withHeldMutationKind(WorkspaceDescriptor descriptor, Supplier<T> body) {
+        WorkspaceKind kind = Objects.requireNonNull(descriptor, "descriptor").kind();
+        Objects.requireNonNull(body, "body");
+        heldMutationKind.set(Objects.requireNonNull(kind, "workspace kind"));
+        try { return body.get(); }
+        finally { heldMutationKind.remove(); }
     }
 
     /** Reauthorize the exact held relative target immediately before its primitive. */
@@ -897,7 +923,6 @@ public class WorkspaceExplorerService {
     private void reauthorizeSourceAndTarget(WorkspaceDescriptor descriptor,
                                             String sourceRel, String targetRel) {
         WorkspaceKind kind = descriptor.kind();
-        heldMutationKind.set(kind);
         // Source: check existent path is mutable
         if (".".equals(sourceRel)) {
             throw new WorkspaceFileException(WorkspaceFileException.Reason.INVALID,

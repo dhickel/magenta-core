@@ -75,7 +75,7 @@ class ChatFileControllerTest {
         var response = controller.download(CONVERSATION_ID, "../outside.txt");
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
-        assertThat(response.getBody().toString()).contains("escape");
+        assertThat(response.getBody().toString()).contains("Invalid chat file request");
     }
 
     private ChatFileController controller(List<String> conversationIds) throws Exception {

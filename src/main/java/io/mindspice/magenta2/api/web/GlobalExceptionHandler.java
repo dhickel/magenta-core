@@ -1,7 +1,5 @@
 package io.mindspice.magenta2.api.web;
 
-import java.io.PrintWriter;
-import java.io.StringWriter;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -9,10 +7,13 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 import io.mindspice.magenta2.ai.chat.service.AuditService;
+import io.mindspice.magenta2.ai.orchestration.context.AgentContextService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.dao.DataAccessException;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.HttpStatusCode;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.validation.BindException;
@@ -49,8 +50,8 @@ public class GlobalExceptionHandler {
         List<Map<String, String>> fieldErrors = exception.getBindingResult().getFieldErrors().stream()
             .map(this::fieldErrorEntry)
             .toList();
-        log.warn("Validation error: {}", fieldErrors, exception);
-        recordIfConversation("http_validation", exception.getMessage(), stackTrace(exception));
+        log.warn("HTTP validation error");
+        recordIfConversation("http_validation", "validation failed");
         return ResponseEntity.status(HttpStatus.BAD_REQUEST)
             .body(Map.of("error", "validation failed", "fieldErrors", fieldErrors));
     }
@@ -60,11 +61,11 @@ public class GlobalExceptionHandler {
         List<Map<String, String>> violations = exception.getConstraintViolations().stream()
             .map(violation -> Map.of(
                 "field", violation.getPropertyPath().toString(),
-                "message", violation.getMessage()
+                "message", "invalid value"
             ))
             .toList();
-        log.warn("Constraint violation: {}", violations, exception);
-        recordIfConversation("http_validation", exception.getMessage(), stackTrace(exception));
+        log.warn("HTTP constraint violation");
+        recordIfConversation("http_validation", "validation failed");
         return ResponseEntity.status(HttpStatus.BAD_REQUEST)
             .body(Map.of("error", "validation failed", "fieldErrors", violations));
     }
@@ -74,52 +75,76 @@ public class GlobalExceptionHandler {
         List<Map<String, String>> fieldErrors = exception.getBindingResult().getFieldErrors().stream()
             .map(this::fieldErrorEntry)
             .toList();
-        log.warn("Bind error: {}", fieldErrors, exception);
-        recordIfConversation("http_validation", exception.getMessage(), stackTrace(exception));
+        log.warn("HTTP bind error");
+        recordIfConversation("http_validation", "validation failed");
         return ResponseEntity.status(HttpStatus.BAD_REQUEST)
             .body(Map.of("error", "validation failed", "fieldErrors", fieldErrors));
     }
 
     @ExceptionHandler(HttpMessageNotReadableException.class)
     public ResponseEntity<Map<String, Object>> handleHttpMessageNotReadable(HttpMessageNotReadableException exception) {
-        log.warn("Malformed request body: {}", exception.getMostSpecificCause().getMessage(), exception);
-        recordIfConversation("http_validation",
-            exception.getMostSpecificCause().getMessage(), stackTrace(exception));
+        log.warn("Malformed HTTP request body");
+        recordIfConversation("http_validation", "malformed request body");
         return ResponseEntity.status(HttpStatus.BAD_REQUEST)
-            .body(Map.of("error", "malformed request body: " + exception.getMostSpecificCause().getMessage()));
+            .body(Map.of("error", "malformed request body"));
     }
 
     @ExceptionHandler(IllegalArgumentException.class)
     public ResponseEntity<Map<String, Object>> handleIllegalArgument(IllegalArgumentException exception) {
-        log.warn("Illegal argument: {}", exception.getMessage(), exception);
-        recordIfConversation("http_validation", exception.getMessage(), stackTrace(exception));
+        log.warn("Invalid HTTP request");
+        recordIfConversation("http_validation", "invalid request");
         return ResponseEntity.status(HttpStatus.BAD_REQUEST)
-            .body(Map.of("error", exception.getMessage()));
+            .body(Map.of("error", "invalid request"));
     }
 
-    @ExceptionHandler(IllegalStateException.class)
-    public ResponseEntity<Map<String, Object>> handleIllegalState(IllegalStateException exception) {
-        log.warn("Illegal state: {}", exception.getMessage(), exception);
-        recordIfConversation("http_illegal_state", exception.getMessage(), stackTrace(exception));
+    @ExceptionHandler(AgentContextService.OperationConflictException.class)
+    public ResponseEntity<Map<String, Object>> handleOperationConflict(
+            AgentContextService.OperationConflictException exception) {
+        log.warn("HTTP operation conflict");
+        recordIfConversation("http_conflict", "operation conflict");
         return ResponseEntity.status(HttpStatus.CONFLICT)
-            .body(Map.of("error", exception.getMessage()));
+            .body(Map.of("error", "operation conflicts with current state"));
+    }
+
+    @ExceptionHandler(DataAccessException.class)
+    public ResponseEntity<Map<String, Object>> handleDataAccess(DataAccessException exception) {
+        log.warn("HTTP infrastructure failure type={}", exception.getClass().getSimpleName());
+        recordIfConversation("http_unavailable", "service temporarily unavailable");
+        return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
+            .body(Map.of("error", "service temporarily unavailable"));
     }
 
     @ExceptionHandler(ResponseStatusException.class)
     public ResponseEntity<Map<String, Object>> handleResponseStatus(ResponseStatusException exception) {
-        log.warn("Response status error: {} — {}", exception.getStatusCode(), exception.getReason(), exception);
-        recordIfConversation("http_response_status",
-            exception.getReason() != null ? exception.getReason() : exception.getMessage(), stackTrace(exception));
+        log.warn("HTTP response status={}", exception.getStatusCode());
+        String message = safeStatusMessage(exception.getStatusCode());
+        recordIfConversation("http_response_status", message);
         return ResponseEntity.status(exception.getStatusCode())
-            .body(Map.of("error", exception.getReason()));
+            .body(Map.of("error", message));
     }
 
-    private void recordIfConversation(String errorType, String errorMessage, String stackTrace) {
+    @ExceptionHandler(Exception.class)
+    public ResponseEntity<Map<String, Object>> handleGeneric(Exception exception) {
+        log.error("Unhandled HTTP exception type={}", exception.getClass().getSimpleName());
+        recordIfConversation("http_internal_error", "internal server error");
+        return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+            .body(Map.of("error", "Internal server error"));
+    }
+
+    private void recordIfConversation(String errorType, String errorMessage) {
         if (auditService == null) return;
         String conversationId = conversationIdFromRequest();
         if (conversationId != null) {
-            auditService.recordError(conversationId, errorType, errorMessage, stackTrace, null);
+            auditService.recordError(conversationId, errorType, errorMessage, null, null);
         }
+    }
+
+    private static String safeStatusMessage(HttpStatusCode status) {
+        if (status.isSameCodeAs(HttpStatus.BAD_REQUEST)) return "invalid request";
+        if (status.isSameCodeAs(HttpStatus.NOT_FOUND)) return "resource not found";
+        if (status.isSameCodeAs(HttpStatus.CONFLICT)) return "request conflicts with current state";
+        if (status.isSameCodeAs(HttpStatus.SERVICE_UNAVAILABLE)) return "service temporarily unavailable";
+        return "request could not be completed";
     }
 
     private String conversationIdFromRequest() {
@@ -130,26 +155,20 @@ public class GlobalExceptionHandler {
                 Matcher matcher = CONVERSATION_ID_PATTERN.matcher(path);
                 if (matcher.find()) {
                     String candidate = matcher.group(2);
-                    UUID.fromString(candidate); // validates format
+                    UUID.fromString(candidate);
                     return candidate;
                 }
             }
         } catch (Exception ignored) {
-            log.debug("Failed to extract conversation ID from request", ignored);
+            log.debug("Failed to extract conversation ID from request");
         }
         return null;
-    }
-
-    private static String stackTrace(Throwable throwable) {
-        StringWriter sw = new StringWriter();
-        throwable.printStackTrace(new PrintWriter(sw));
-        return sw.toString();
     }
 
     private Map<String, String> fieldErrorEntry(FieldError fieldError) {
         return Map.of(
             "field", fieldError.getField(),
-            "message", fieldError.getDefaultMessage() == null ? "invalid value" : fieldError.getDefaultMessage()
+            "message", "invalid value"
         );
     }
 }

@@ -2,9 +2,11 @@ package io.mindspice.magenta2.api.web;
 
 import java.util.Map;
 
+import io.mindspice.magenta2.ai.orchestration.context.AgentContextService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.core.MethodParameter;
+import org.springframework.dao.DataAccessResourceFailureException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
@@ -89,12 +91,12 @@ class GlobalExceptionHandlerTest {
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
         assertThat(response.getBody()).isNotNull();
-        assertThat((String) response.getBody().get("error")).contains("malformed request body");
+        assertThat(response.getBody().get("error")).isEqualTo("malformed request body");
     }
 
     @Test
     void illegalArgumentReturns400() {
-        IllegalArgumentException exception = new IllegalArgumentException("invalid argument value");
+        IllegalArgumentException exception = new IllegalArgumentException("jdbc:/private/root invalid argument value");
 
         @SuppressWarnings("unchecked")
         ResponseEntity<Map<String, Object>> response =
@@ -102,25 +104,40 @@ class GlobalExceptionHandlerTest {
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
         assertThat(response.getBody()).isNotNull();
-        assertThat(response.getBody().get("error")).isEqualTo("invalid argument value");
+        assertThat(response.getBody().get("error")).isEqualTo("invalid request");
     }
 
     @Test
-    void illegalStateReturns409() {
-        IllegalStateException exception = new IllegalStateException("resource conflict");
+    void operationConflictReturns409() {
+        AgentContextService.OperationConflictException exception =
+                new AgentContextService.OperationConflictException("SQL /private/root version conflict");
 
         @SuppressWarnings("unchecked")
         ResponseEntity<Map<String, Object>> response =
-                handler.handleIllegalState(exception);
+                handler.handleOperationConflict(exception);
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
         assertThat(response.getBody()).isNotNull();
-        assertThat(response.getBody().get("error")).isEqualTo("resource conflict");
+        assertThat(response.getBody().get("error"))
+                .isEqualTo("operation conflicts with current state");
     }
 
     @Test
-    void responseStatusExceptionPassesThroughStatusCode() {
-        ResponseStatusException exception = new ResponseStatusException(HttpStatus.NOT_FOUND, "not found");
+    void genericExceptionReturns500WithSafeMessage() {
+        IllegalStateException exception = new IllegalStateException("jdbc:/private/root internal detail");
+
+        @SuppressWarnings("unchecked")
+        ResponseEntity<Map<String, Object>> response =
+                handler.handleGeneric(exception);
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.INTERNAL_SERVER_ERROR);
+        assertThat(response.getBody()).isNotNull();
+        assertThat(response.getBody().get("error")).isEqualTo("Internal server error");
+    }
+
+    @Test
+    void responseStatusExceptionPreservesStatusWithoutUsingReason() {
+        ResponseStatusException exception = new ResponseStatusException(HttpStatus.NOT_FOUND, "jdbc:/private/root not found");
 
         @SuppressWarnings("unchecked")
         ResponseEntity<Map<String, Object>> response =
@@ -128,6 +145,28 @@ class GlobalExceptionHandlerTest {
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
         assertThat(response.getBody()).isNotNull();
-        assertThat(response.getBody().get("error")).isEqualTo("not found");
+        assertThat(response.getBody().get("error")).isEqualTo("resource not found");
+    }
+
+    @Test
+    void nullReasonResponseStatusExceptionReturnsSafeFallback() {
+        ResponseStatusException exception = new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE);
+
+        @SuppressWarnings("unchecked")
+        ResponseEntity<Map<String, Object>> response =
+                handler.handleResponseStatus(exception);
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.SERVICE_UNAVAILABLE);
+        assertThat(response.getBody()).isNotNull();
+        assertThat(response.getBody().get("error")).isEqualTo("service temporarily unavailable");
+    }
+
+    @Test
+    void dataAccessFailureReturns503WithoutSensitiveDetail() {
+        ResponseEntity<Map<String, Object>> response = handler.handleDataAccess(
+                new DataAccessResourceFailureException("jdbc:/private/root SQL failure"));
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.SERVICE_UNAVAILABLE);
+        assertThat(response.getBody()).containsEntry("error", "service temporarily unavailable");
     }
 }
