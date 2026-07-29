@@ -2,6 +2,7 @@ package io.mindspice.magenta2.api.web;
 
 import java.util.Map;
 
+import io.mindspice.magenta2.ai.orchestration.context.AgentContextService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.core.MethodParameter;
@@ -106,16 +107,30 @@ class GlobalExceptionHandlerTest {
     }
 
     @Test
-    void illegalStateReturns409() {
-        IllegalStateException exception = new IllegalStateException("resource conflict");
+    void operationConflictReturns409() {
+        AgentContextService.OperationConflictException exception =
+                new AgentContextService.OperationConflictException("version conflict");
 
         @SuppressWarnings("unchecked")
         ResponseEntity<Map<String, Object>> response =
-                handler.handleIllegalState(exception);
+                handler.handleOperationConflict(exception);
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
         assertThat(response.getBody()).isNotNull();
-        assertThat(response.getBody().get("error")).isEqualTo("resource conflict");
+        assertThat(response.getBody().get("error")).isEqualTo("version conflict");
+    }
+
+    @Test
+    void genericExceptionReturns500WithSafeMessage() {
+        IllegalStateException exception = new IllegalStateException("some internal detail");
+
+        @SuppressWarnings("unchecked")
+        ResponseEntity<Map<String, Object>> response =
+                handler.handleGeneric(exception);
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.INTERNAL_SERVER_ERROR);
+        assertThat(response.getBody()).isNotNull();
+        assertThat(response.getBody().get("error")).isEqualTo("Internal server error");
     }
 
     @Test
@@ -129,5 +144,18 @@ class GlobalExceptionHandlerTest {
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
         assertThat(response.getBody()).isNotNull();
         assertThat(response.getBody().get("error")).isEqualTo("not found");
+    }
+
+    @Test
+    void nullReasonResponseStatusExceptionReturnsSafeFallback() {
+        ResponseStatusException exception = new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE);
+
+        @SuppressWarnings("unchecked")
+        ResponseEntity<Map<String, Object>> response =
+                handler.handleResponseStatus(exception);
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.SERVICE_UNAVAILABLE);
+        assertThat(response.getBody()).isNotNull();
+        assertThat(response.getBody().get("error")).isEqualTo("Unexpected error");
     }
 }

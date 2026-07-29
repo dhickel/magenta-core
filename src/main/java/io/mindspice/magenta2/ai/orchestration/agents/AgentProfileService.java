@@ -1,6 +1,7 @@
 package io.mindspice.magenta2.ai.orchestration.agents;
 
 import java.util.List;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 
@@ -57,6 +58,11 @@ public class AgentProfileService {
     public AgentProfile get(String id) {
         requireAgentId(id);
         return repository.findById(id).orElseThrow(() -> new IllegalStateException("Agent profile not found: " + id));
+    }
+
+    public Optional<AgentProfile> find(String id) {
+        requireAgentId(id);
+        return repository.findById(id);
     }
 
     public AgentProfile defaultAgent(String defaultAgentId, String defaultAgentName) {

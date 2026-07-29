@@ -9,6 +9,8 @@ import java.util.UUID;
 import io.mindspice.magenta2.ai.chat.model.ChatFileListing;
 import io.mindspice.magenta2.ai.chat.service.ChatFileService;
 import io.mindspice.magenta2.ai.chat.service.ChatService;
+import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceFileException;
+import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceResolutionException;
 import org.springframework.core.io.InputStreamResource;
 import org.springframework.http.ContentDisposition;
 import org.springframework.http.HttpHeaders;
@@ -47,13 +49,13 @@ public class ChatFileController {
         @PathVariable String conversationId,
         @RequestParam("path") String relativePath
     ) {
-        requireExistingConversation(conversationId);
         try {
+            requireExistingConversation(conversationId);
             Path path = chatFileService.resolveDownload(conversationId, relativePath);
             long size = Files.size(path);
             if (size > MAX_CONTENT_BYTES) {
-                return ResponseEntity.status(HttpStatus.BAD_REQUEST)
-                    .body(Map.of("error", "Chat file too large: " + size + " bytes"));
+                return ResponseEntity.status(HttpStatus.PAYLOAD_TOO_LARGE)
+                    .body(Map.of("error", "Chat file too large"));
             }
 
             String fileName = path.getFileName().toString();
@@ -64,12 +66,32 @@ public class ChatFileController {
                 .contentType(resolveMediaType(fileName))
                 .contentLength(size)
                 .body(resource);
-        } catch (IllegalArgumentException e) {
-            return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(Map.of("error", e.getMessage()));
+        } catch (WorkspaceFileException e) {
+            return ResponseEntity.status(fileStatus(e)).body(Map.of("error", fileError(e)));
+        } catch (WorkspaceResolutionException e) {
+            HttpStatus status = e.reason() == WorkspaceResolutionException.Reason.NOT_FOUND
+                    ? HttpStatus.NOT_FOUND : HttpStatus.CONFLICT;
+            return ResponseEntity.status(status).body(Map.of("error", "Chat file is unavailable"));
         } catch (IOException e) {
-            return ResponseEntity.status(HttpStatus.NOT_FOUND)
-                .body(Map.of("error", "Failed to read chat file: " + e.getMessage()));
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                .body(Map.of("error", "Failed to read chat file"));
         }
+    }
+
+    private static HttpStatus fileStatus(WorkspaceFileException exception) {
+        return switch (exception.reason()) {
+            case INVALID -> HttpStatus.BAD_REQUEST;
+            case NOT_FOUND -> HttpStatus.NOT_FOUND;
+            case CONFLICT -> HttpStatus.CONFLICT;
+        };
+    }
+
+    private static String fileError(WorkspaceFileException exception) {
+        return switch (exception.reason()) {
+            case INVALID -> "Invalid chat file request";
+            case NOT_FOUND -> "Chat file not found";
+            case CONFLICT -> "Chat file request conflicts with current state";
+        };
     }
 
     private void requireExistingConversation(String conversationId) {

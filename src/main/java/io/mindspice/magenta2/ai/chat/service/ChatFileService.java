@@ -4,7 +4,9 @@ import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
+import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
+import java.nio.file.attribute.BasicFileAttributes;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
@@ -14,6 +16,7 @@ import io.mindspice.magenta2.ai.chat.model.ChatFileListing;
 import io.mindspice.magenta2.ai.chat.model.ChatFileSummary;
 import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceDescriptor;
 import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceDirectoryService;
+import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceFileException;
 import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceKind;
 import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceResolutionException;
 import org.springframework.stereotype.Service;
@@ -31,7 +34,12 @@ public class ChatFileService {
 
     public int countFiles(String conversationId) {
         var descriptor = resolveChat(conversationId);
-        Path root = existingRoot(descriptor);
+        Path root;
+        try {
+            root = existingRoot(descriptor);
+        } catch (IOException e) {
+            throw new IllegalStateException("Failed to access chat files", e);
+        }
         if (root == null) {
             return 0;
         }
@@ -47,7 +55,12 @@ public class ChatFileService {
 
     public ChatFileListing listFiles(String conversationId) {
         var descriptor = resolveChat(conversationId);
-        Path root = existingRoot(descriptor);
+        Path root;
+        try {
+            root = existingRoot(descriptor);
+        } catch (IOException e) {
+            throw new IllegalStateException("Failed to access chat files", e);
+        }
         if (root == null) {
             return new ChatFileListing(conversationId, 0, false, List.of());
         }
@@ -73,22 +86,40 @@ public class ChatFileService {
 
     public Path resolveDownload(String conversationId, String relativePath) throws IOException {
         if (!StringUtils.hasText(relativePath)) {
-            throw new IllegalArgumentException("file path is required");
+            throw new WorkspaceFileException(WorkspaceFileException.Reason.INVALID, "file path is required");
         }
         var descriptor = resolveChat(conversationId);
         Path root = existingRoot(descriptor);
         if (root == null) {
-            throw new IllegalArgumentException("chat file not found");
+            throw new WorkspaceFileException(WorkspaceFileException.Reason.NOT_FOUND, "chat file not found");
         }
-        Path target = workspaceDirectoryService.confinedRelative(descriptor, relativePath);
-        if (!Files.exists(target, LinkOption.NOFOLLOW_LINKS)) {
-            throw new IllegalArgumentException("chat file not found");
+        Path target;
+        try {
+            target = workspaceDirectoryService.confinedRelative(descriptor, relativePath);
+        } catch (IllegalArgumentException e) {
+            if (e.getCause() instanceof IOException ioFailure) {
+                throw new IOException("failed to resolve chat file", ioFailure);
+            }
+            throw new WorkspaceFileException(WorkspaceFileException.Reason.INVALID, "invalid file path");
         }
-        Path real = target.toRealPath(LinkOption.NOFOLLOW_LINKS);
-        if (!real.startsWith(root) || !Files.isRegularFile(real, LinkOption.NOFOLLOW_LINKS)) {
-            throw new IllegalArgumentException("chat file not found");
+        BasicFileAttributes attributes;
+        try {
+            attributes = Files.readAttributes(target, BasicFileAttributes.class, LinkOption.NOFOLLOW_LINKS);
+        } catch (NoSuchFileException e) {
+            throw new WorkspaceFileException(WorkspaceFileException.Reason.NOT_FOUND, "chat file not found");
         }
-        return real;
+        if (!attributes.isRegularFile()) {
+            throw new WorkspaceFileException(WorkspaceFileException.Reason.NOT_FOUND, "chat file not found");
+        }
+        try {
+            Path real = target.toRealPath(LinkOption.NOFOLLOW_LINKS);
+            if (!real.startsWith(root)) {
+                throw new WorkspaceFileException(WorkspaceFileException.Reason.INVALID, "invalid file path");
+            }
+            return real;
+        } catch (NoSuchFileException e) {
+            throw new WorkspaceFileException(WorkspaceFileException.Reason.NOT_FOUND, "chat file not found");
+        }
     }
 
     private WorkspaceDescriptor resolveChat(String conversationId) {
@@ -100,11 +131,17 @@ public class ChatFileService {
         return workspaceDirectoryService.resolveForRead(WorkspaceKind.CHAT, conversationId);
     }
 
-    private Path existingRoot(WorkspaceDescriptor descriptor) {
-        if (!Files.exists(descriptor.root(), LinkOption.NOFOLLOW_LINKS)) {
+    private Path existingRoot(WorkspaceDescriptor descriptor) throws IOException {
+        BasicFileAttributes attributes;
+        try {
+            attributes = Files.readAttributes(descriptor.root(), BasicFileAttributes.class, LinkOption.NOFOLLOW_LINKS);
+        } catch (NoSuchFileException e) {
             return null;
         }
-        return workspaceDirectoryService.confinedRelative(descriptor, ".");
+        if (!attributes.isDirectory()) {
+            throw new IOException("chat workspace root is not a directory");
+        }
+        return descriptor.root().toRealPath();
     }
 
     private ChatFileSummary summarize(Path root, Path path) {

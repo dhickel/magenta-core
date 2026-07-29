@@ -5,7 +5,9 @@ import java.nio.charset.StandardCharsets;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
+import io.mindspice.magenta2.ai.orchestration.agents.AgentProfile;
 import io.mindspice.magenta2.ai.orchestration.agents.AgentProfileService;
 import io.mindspice.magenta2.ai.orchestration.context.AgentContextRepository.ContextBinding;
 import io.mindspice.magenta2.ai.orchestration.context.AgentContextRepository.ContextDefault;
@@ -48,7 +50,8 @@ class AgentContextController {
     @GetMapping(produces = "application/json")
     @ResponseBody
     public ResponseEntity<Map<String, Object>> summary(@PathVariable String agentId) {
-        if (!agentExists(agentId)) return notFound();
+        Optional<AgentProfile> profile = agentProfileService.find(agentId);
+        if (profile.isEmpty()) return notFound();
         ContextSnapshot snapshot = contextService.snapshot(agentId);
         Map<String, Object> response = new LinkedHashMap<>();
         response.put("agentId", agentId);
@@ -61,7 +64,8 @@ class AgentContextController {
     @GetMapping("/panel")
     @ResponseBody
     public String contextPanel(@PathVariable String agentId, HttpServletResponse response) {
-        if (!agentExists(agentId)) return error(response, 404, agentId, "Not Found", "Agent not found.");
+        Optional<AgentProfile> profile = agentProfileService.find(agentId);
+        if (profile.isEmpty()) return error(response, 404, agentId, "Not Found", "Agent not found.");
         try {
             return summaryFragment(agentId, contextService.snapshot(agentId), null);
         } catch (RuntimeException exception) {
@@ -73,7 +77,8 @@ class AgentContextController {
     @GetMapping(path = "/defaults", produces = "application/json")
     @ResponseBody
     public ResponseEntity<Map<String, Object>> getDefault(@PathVariable String agentId) {
-        if (!agentExists(agentId)) return notFound();
+        Optional<AgentProfile> profile = agentProfileService.find(agentId);
+        if (profile.isEmpty()) return notFound();
         ContextDefault defaultRecord = contextService.getDefault(agentId).value();
         Map<String, Object> response = new LinkedHashMap<>();
         response.put("agentId", agentId);
@@ -93,7 +98,8 @@ class AgentContextController {
                                 @RequestParam(required = false) String reason,
                                 @RequestParam(required = false) String operationKey,
                                 HttpServletResponse response) {
-        if (!agentExists(agentId)) return error(response, 404, agentId, "Not Found", "Agent not found.");
+        Optional<AgentProfile> profile = agentProfileService.find(agentId);
+        if (profile.isEmpty()) return error(response, 404, agentId, "Not Found", "Agent not found.");
         try {
             SelectionKind kind = SelectionKind.valueOf(selectionKind.toUpperCase());
             MaterializationKey key = kind == SelectionKind.MATERIALIZATION
@@ -121,7 +127,8 @@ class AgentContextController {
     @GetMapping("/defaults/edit")
     @ResponseBody
     public String editDefault(@PathVariable String agentId, HttpServletResponse response) {
-        if (!agentExists(agentId)) return error(response, 404, agentId, "Not Found", "Agent not found.");
+        Optional<AgentProfile> profile = agentProfileService.find(agentId);
+        if (profile.isEmpty()) return error(response, 404, agentId, "Not Found", "Agent not found.");
         try {
             return AgentContextFragments.defaultEditor(encode(agentId), contextService.getDefault(agentId).value(),
                     contextService.readyMaterializations(agentId), null, false);
@@ -134,7 +141,8 @@ class AgentContextController {
     @GetMapping(path = "/materializations", produces = "application/json")
     @ResponseBody
     public ResponseEntity<Map<String, Object>> listMaterializations(@PathVariable String agentId) {
-        if (!agentExists(agentId)) return notFound();
+        Optional<AgentProfile> profile = agentProfileService.find(agentId);
+        if (profile.isEmpty()) return notFound();
         List<Map<String, Object>> records = contextService.materializations(agentId).stream().map(record -> {
             Map<String, Object> payload = new LinkedHashMap<>();
             payload.put("key", record.materializationKey().serialized());
@@ -150,7 +158,8 @@ class AgentContextController {
     @GetMapping("/materializations/panel")
     @ResponseBody
     public String materializationsPanel(@PathVariable String agentId, HttpServletResponse response) {
-        if (!agentExists(agentId)) return error(response, 404, agentId, "Not Found", "Agent not found.");
+        Optional<AgentProfile> profile = agentProfileService.find(agentId);
+        if (profile.isEmpty()) return error(response, 404, agentId, "Not Found", "Agent not found.");
         try {
             return AgentContextFragments.materializationList(encode(agentId), contextService.materializations(agentId), null);
         } catch (RuntimeException exception) {
@@ -165,12 +174,13 @@ class AgentContextController {
                                            @RequestParam String projectKey,
                                            @RequestParam(required = false) String operationKey,
                                            HttpServletResponse response) {
-        if (!agentExists(agentId)) return error(response, 404, agentId, "Not Found", "Agent not found.");
+        Optional<AgentProfile> profile = agentProfileService.find(agentId);
+        if (profile.isEmpty()) return error(response, 404, agentId, "Not Found", "Agent not found.");
         try {
             contextService.provisionProject(agentId, projectKey, operationKey);
             return AgentContextFragments.materializationList(encode(agentId), contextService.materializations(agentId),
                     "Provisioned successfully.");
-        } catch (IllegalStateException exception) {
+        } catch (AgentContextService.OperationConflictException exception) {
             response.setStatus(409);
             return AgentContextFragments.materializationList(encode(agentId), contextService.materializations(agentId),
                     "Conflict: " + exception.getMessage());
@@ -187,7 +197,8 @@ class AgentContextController {
     @GetMapping(path = "/bindings", produces = "application/json")
     @ResponseBody
     public ResponseEntity<Map<String, Object>> listBindings(@PathVariable String agentId) {
-        if (!agentExists(agentId)) return notFound();
+        Optional<AgentProfile> profile = agentProfileService.find(agentId);
+        if (profile.isEmpty()) return notFound();
         List<Map<String, Object>> bindings = contextService.listBindings(agentId).stream()
                 .map(AgentContextController::bindingPayload).toList();
         return ResponseEntity.ok(Map.of("agentId", agentId, "bindings", bindings));
@@ -196,15 +207,6 @@ class AgentContextController {
     private String summaryFragment(String agentId, ContextSnapshot snapshot, String message) {
         return AgentContextFragments.contextSummary(encode(agentId), snapshot.defaultRecord(), snapshot.bindings(),
                 snapshot.materializations(), message);
-    }
-
-    private boolean agentExists(String agentId) {
-        try {
-            agentProfileService.get(agentId);
-            return true;
-        } catch (RuntimeException exception) {
-            return false;
-        }
     }
 
     private static Map<String, Object> defaultPayload(ContextDefault record) {

@@ -9,6 +9,7 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 import io.mindspice.magenta2.ai.chat.service.AuditService;
+import io.mindspice.magenta2.ai.orchestration.context.AgentContextService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -97,21 +98,31 @@ public class GlobalExceptionHandler {
             .body(Map.of("error", exception.getMessage()));
     }
 
-    @ExceptionHandler(IllegalStateException.class)
-    public ResponseEntity<Map<String, Object>> handleIllegalState(IllegalStateException exception) {
-        log.warn("Illegal state: {}", exception.getMessage(), exception);
-        recordIfConversation("http_illegal_state", exception.getMessage(), stackTrace(exception));
+    @ExceptionHandler(AgentContextService.OperationConflictException.class)
+    public ResponseEntity<Map<String, Object>> handleOperationConflict(
+            AgentContextService.OperationConflictException exception) {
+        log.warn("Operation conflict: {}", exception.getMessage(), exception);
+        recordIfConversation("http_conflict", exception.getMessage(), stackTrace(exception));
         return ResponseEntity.status(HttpStatus.CONFLICT)
             .body(Map.of("error", exception.getMessage()));
     }
 
     @ExceptionHandler(ResponseStatusException.class)
     public ResponseEntity<Map<String, Object>> handleResponseStatus(ResponseStatusException exception) {
-        log.warn("Response status error: {} — {}", exception.getStatusCode(), exception.getReason(), exception);
-        recordIfConversation("http_response_status",
-            exception.getReason() != null ? exception.getReason() : exception.getMessage(), stackTrace(exception));
+        String reason = exception.getReason() != null ? exception.getReason() : "Unexpected error";
+        log.warn("Response status error: {} — {}", exception.getStatusCode(), reason, exception);
+        recordIfConversation("http_response_status", reason, stackTrace(exception));
         return ResponseEntity.status(exception.getStatusCode())
-            .body(Map.of("error", exception.getReason()));
+            .body(Map.of("error", reason));
+    }
+
+    @ExceptionHandler(Exception.class)
+    public ResponseEntity<Map<String, Object>> handleGeneric(Exception exception) {
+        log.error("Unhandled exception", exception);
+        recordIfConversation("http_internal_error",
+            exception.getMessage() != null ? exception.getMessage() : "Internal error", stackTrace(exception));
+        return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+            .body(Map.of("error", "Internal server error"));
     }
 
     private void recordIfConversation(String errorType, String errorMessage, String stackTrace) {
