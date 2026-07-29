@@ -164,7 +164,7 @@ class ProjectRepositoryTest {
 
     private Project project(String id, String name, String ownerAgentId) {
         return new Project(id, name, "Description", ownerAgentId, null,
-            null, null, null, Instant.now(), Instant.now());
+            null, null, null, false, Instant.now(), Instant.now());
     }
 
     private ProjectRepository repository() {

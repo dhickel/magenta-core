@@ -1,0 +1,42 @@
+# Execution Record exec-project-dashboard-unified-contracts
+
+## Directive
+
+Source plan `.internal-dev/plans/20260729-163244-home-dhickel-code-java-magenta-internal-dev-ha` is authoritative. Planning was performed externally by sprint-planner run `20260729-163244-home-dhickel-code-java-magenta-internal-dev-ha`; this version-2 record contains execution evidence only.
+
+## Stages
+
+- phase-01-authority-and-assignment-foundation.md: wave-01, implementation recorded, validation passed (1 attempt(s))
+- phase-02-project-queue-and-console-seams.md: wave-02, implementation not recorded, validation pending (0 attempt(s))
+- phase-03-lightweight-project-tasks.md: wave-03, implementation not recorded, validation pending (0 attempt(s))
+- phase-04-project-jobs-and-reassignment.md: wave-04, implementation not recorded, validation pending (0 attempt(s))
+- phase-05-materialization-templates-files-outputs.md: wave-05, implementation not recorded, validation pending (0 attempt(s))
+- phase-06-project-automation-and-events.md: wave-06, implementation not recorded, validation pending (0 attempt(s))
+- phase-07-project-chat.md: wave-07, implementation not recorded, validation pending (0 attempt(s))
+- phase-08-console-integration-and-closeout.md: wave-08, implementation not recorded, validation pending (0 attempt(s))
+
+## Artifacts
+
+- `concepts.md` — sha256 `be1344ee86d3a2ce410e274f8d219d179b31638e38bd8adfff08172d414b2800`, 17840 bytes
+- `orchestration.md` — sha256 `ce8bc836f84c40271532b15ea75cf12a55d006ef5f22947911fe9ba2e9b7db83`, 9173 bytes
+- `phase-01-authority-and-assignment-foundation.md` — sha256 `2a0c1b78540163e456ccf5ac8c0e1893a9f8d35785ffadd7fc0f671d46afa9bd`, 16044 bytes
+- `phase-02-project-queue-and-console-seams.md` — sha256 `268a07406da3e0b6bbc940c3fb38a99fc51b4a466dda0a1e8276c6db0d328a70`, 14757 bytes
+- `phase-03-lightweight-project-tasks.md` — sha256 `e905490f6c394ae891e9dee673076f231f29c30e2aad2658230a15af007602ee`, 14583 bytes
+- `phase-04-project-jobs-and-reassignment.md` — sha256 `2b6611c91850617fe73862f437ebe2f14faa2cff3c5422fffbdca660d54ebeb2`, 9720 bytes
+- `phase-05-materialization-templates-files-outputs.md` — sha256 `092d7d693d9819715ccff1ba843b3148fabe7bd72531f6c69822a6c5c803c498`, 16359 bytes
+- `phase-06-project-automation-and-events.md` — sha256 `45acce324ac67bc13e0e537ee4fe2583558e704488d68aeeefb0a3543a17caad`, 11588 bytes
+- `phase-07-project-chat.md` — sha256 `63aaa642273919d1e6c899f24f7066e3d7f04f5e0982fee5725e67884be4c497`, 15382 bytes
+- `phase-08-console-integration-and-closeout.md` — sha256 `56191036ba0b554a7b57dcda53b299380a9c83b3ac7ca61ec43d9fe044af6cf2`, 15759 bytes
+
+## Implementation Evidence
+
+- `phase-01-authority-and-assignment-foundation.md`: 2026-07-29T17:59:49.203Z, 19 changed-file observation(s), 6 outside declared targets
+
+## Final Validation
+
+- `phase-01-authority-and-assignment-foundation.md` attempt 1: PASS at 2026-07-29T18:19:53.359Z
+Integration validation not recorded.
+
+## Outcome
+
+Active, revision 2.

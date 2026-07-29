@@ -125,6 +125,6 @@ class SettingsPrecedenceTest {
 
     private Project project(String model) {
         return new Project("p1", "n", "d", "a1", null,
-            null, model, null, null, null);
+            null, model, null, false, null, null);
     }
 }

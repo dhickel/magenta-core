@@ -223,6 +223,9 @@ public final class SchemaMigrationRunner {
     private static final List<String> FOUNDATION_TABLES_V13 = List.copyOf(
             java.util.stream.Stream.concat(FOUNDATION_TABLES_V12.stream(),
                     java.util.stream.Stream.of("system_chat_action_proposals")).toList());
+    private static final List<String> FOUNDATION_TABLES_V14 = List.copyOf(
+            java.util.stream.Stream.concat(FOUNDATION_TABLES_V13.stream(),
+                    java.util.stream.Stream.of("assignment_query_snapshots", "assignment_control_operations")).toList());
     private static final Set<String> FOUNDATION_INDEXES_V10 = Set.of(
             "idx_skill_candidate_versions_lookup", "idx_skill_candidate_observations_candidate",
             "idx_skill_candidate_observations_scan", "idx_skill_exact_assignments_target",
@@ -260,6 +263,15 @@ public final class SchemaMigrationRunner {
             java.util.stream.Stream.concat(FOUNDATION_INDEXES_V12.stream(),
                     java.util.stream.Stream.of("idx_system_chat_proposals_conversation",
                             "idx_system_chat_proposals_agent"))
+                    .collect(java.util.stream.Collectors.toSet()));
+    private static final Set<String> FOUNDATION_INDEXES_V14 = java.util.Set.copyOf(
+            java.util.stream.Stream.concat(FOUNDATION_INDEXES_V13.stream(),
+                    java.util.stream.Stream.of(
+                            "idx_work_assignments_agent_active",
+                            "idx_work_assignments_project_active",
+                            "idx_work_assignments_project_history",
+                            "idx_assignment_query_snapshots_expiry",
+                            "idx_assignment_control_ops_assignment"))
                     .collect(java.util.stream.Collectors.toSet()));
 
     private static final Map<String, List<String>> FOUNDATION_COLUMNS = Map.ofEntries(
@@ -371,7 +383,14 @@ public final class SchemaMigrationRunner {
                     "target_kind", "target_id", "action", "expected_state_or_revision",
                     "canonical_payload_digest", "operation_key", "proposal_state",
                     "confirmation_operation_key", "linked_operation_id", "confirmed_at",
-                    "audit_facts_json", "created_at", "updated_at"))
+                    "audit_facts_json", "created_at", "updated_at")),
+            Map.entry("assignment_query_snapshots", List.of("snapshot_id", "scope_digest", "request_digest",
+                    "member_ids", "expires_at", "created_at")),
+            Map.entry("assignment_control_operations", List.of("operation_key", "operation_type",
+                    "assignment_id", "actor", "scope", "action", "resource",
+                    "expected_revision", "new_priority", "reason",
+                    "request_digest", "operation_state", "result_detail",
+                    "created_at", "completed_at"))
     );
 
 
@@ -448,12 +467,16 @@ public final class SchemaMigrationRunner {
                         continue;
                     }
                     log.info("Applying migration {} (version {})", resource.name(), resource.version());
+                    ensureV14Columns(connection, resource.version());
                     ScriptUtils.executeSqlScript(connection, new EncodedResource(
                             new ByteArrayResource(resource.bytes(), resource.name()), StandardCharsets.UTF_8));
+                    ensureV14ImmutableAttributionTrigger(connection, resource.version());
                     validateOwnedSchema(connection, resource.version());
                     insertApplied(connection, resource);
                 }
-                validateOwnedSchema(connection, resources.isEmpty() ? 0 : resources.get(resources.size() - 1).version());
+                int latestVersion = resources.isEmpty() ? 0 : resources.get(resources.size() - 1).version();
+                ensureV14ImmutableAttributionTrigger(connection, latestVersion);
+                validateOwnedSchema(connection, latestVersion);
                 statement.execute("commit");
             } catch (Throwable failure) {
                 try {
@@ -703,11 +726,55 @@ public final class SchemaMigrationRunner {
         }
     }
 
+    private void ensureV14Columns(Connection connection, int version) throws SQLException {
+        if (version != 14) {
+            return;
+        }
+        Set<String> assignments = new HashSet<>(tableColumns(connection, "work_assignments"));
+        Set<String> projects = new HashSet<>(tableColumns(connection, "projects"));
+        try (Statement statement = connection.createStatement()) {
+            if (!assignments.contains("source_definition_id")) {
+                statement.execute("alter table work_assignments add column source_definition_id text");
+            }
+            if (!assignments.contains("context_binding_key")) {
+                statement.execute("alter table work_assignments add column context_binding_key text check (context_binding_key is null or length(context_binding_key) between 1 and 255)");
+            }
+            if (!assignments.contains("row_version")) {
+                statement.execute("alter table work_assignments add column row_version integer not null default 0 check (row_version >= 0)");
+            }
+            if (!projects.contains("archived")) {
+                statement.execute("alter table projects add column archived integer not null default 0 check (archived in (0, 1))");
+            }
+        }
+    }
+
+    private void ensureV14ImmutableAttributionTrigger(Connection connection, int latestVersion) throws SQLException {
+        if (latestVersion < 14 || !tableColumns(connection, "work_assignments").contains("row_version")) {
+            return;
+        }
+        try (Statement statement = connection.createStatement()) {
+            statement.execute("""
+                create trigger if not exists work_assignments_immutable_attribution
+                before update of agent_id, job_id, job_item_id, assignment_type, model_override,
+                    workspace_type, workspace_key, workspace_identity, project_id,
+                    source_definition_id, context_binding_key on work_assignments
+                when old.agent_id is not new.agent_id or old.job_id is not new.job_id
+                  or old.job_item_id is not new.job_item_id or old.assignment_type is not new.assignment_type
+                  or old.model_override is not new.model_override or old.workspace_type is not new.workspace_type
+                  or old.workspace_key is not new.workspace_key or old.workspace_identity is not new.workspace_identity
+                  or old.project_id is not new.project_id or old.source_definition_id is not new.source_definition_id
+                  or old.context_binding_key is not new.context_binding_key
+                begin select raise(abort, 'work_assignment immutable attribution'); end
+                """);
+        }
+    }
+
     private void validateOwnedSchema(Connection connection, int latestVersion) throws SQLException {
         if (latestVersion < 1) {
             return;
         }
-        List<String> expectedTables = latestVersion >= 13 ? FOUNDATION_TABLES_V13
+        List<String> expectedTables = latestVersion >= 14 ? FOUNDATION_TABLES_V14
+                : latestVersion >= 13 ? FOUNDATION_TABLES_V13
                 : latestVersion >= 12 ? FOUNDATION_TABLES_V12
                 : latestVersion >= 11 ? FOUNDATION_TABLES_V11
                 : latestVersion >= 10 ? FOUNDATION_TABLES_V10
@@ -958,6 +1025,36 @@ public final class SchemaMigrationRunner {
                     || !proposals.contains("proposal_state text not null check")
                     || !proposals.contains("length(canonical_payload_digest) = 64")) {
                 throw new MigrationException("system_chat_action_proposals is missing required constraints");
+            }
+        }
+        if (latestVersion >= 14) {
+            if (!allIndexes.containsAll(FOUNDATION_INDEXES_V14)) {
+                throw new MigrationException("Missing migration-owned v14 indexes: "
+                        + FOUNDATION_INDEXES_V14.stream().filter(index -> !allIndexes.contains(index)).toList());
+            }
+            List<String> assignments = tableColumns(connection, "work_assignments");
+            if (!assignments.containsAll(List.of("source_definition_id", "context_binding_key", "row_version"))
+                    || !objectNames(connection, "trigger", "work_assignments_immutable_attribution")
+                        .contains("work_assignments_immutable_attribution")) {
+                throw new MigrationException("work_assignments is missing v14 immutable attribution protection");
+            }
+            if (!tableColumns(connection, "projects").contains("archived")) {
+                throw new MigrationException("projects is missing v14 archive state");
+            }
+            String snapshots = normalized(tableSql(connection, "assignment_query_snapshots"));
+            if (!snapshots.contains("snapshot_id text primary key")
+                    || !snapshots.contains("length(scope_digest) = 64")
+                    || !snapshots.contains("length(request_digest) = 64")) {
+                throw new MigrationException("assignment_query_snapshots is missing authenticated snapshot constraints");
+            }
+            String controlOps = normalized(tableSql(connection, "assignment_control_operations"));
+            if (!controlOps.contains("primary key (operation_type, operation_key)")
+                    || !controlOps.contains("operation_type in (")
+                    || !controlOps.contains("'priority_cas', 'request_cancel', 'force_cancel'")
+                    || !controlOps.contains("operation_state text not null check")
+                    || !controlOps.contains("'reserved', 'completed', 'conflict', 'stale'")
+                    || !controlOps.contains("length(request_digest) = 64")) {
+                throw new MigrationException("assignment_control_operations is missing required constraints");
             }
         }
         if (latestVersion >= 6) {

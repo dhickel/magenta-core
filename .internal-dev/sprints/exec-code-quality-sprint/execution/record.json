@@ -1,0 +1,327 @@
+{
+  "version": 2,
+  "runId": "exec-code-quality-sprint",
+  "state": "active",
+  "revision": 0,
+  "source": {
+    "projectRoot": "/home/dhickel/Code/Java/Magenta",
+    "sourcePlanPath": ".internal-dev/plans/20260729-021446-home-dhickel-code-java-magenta-internal-dev-ha",
+    "sourcePlanningRunId": "20260729-021446-home-dhickel-code-java-magenta-internal-dev-ha",
+    "aggregateDigest": "f586b798e195be506328b13115f59666e6b2556232f53fea710625d9b7f6dd6a",
+    "files": [
+      {
+        "path": "concepts.md",
+        "sha256": "39c34b85f3b2cf43cb62d29e0037dcf826298fee41f9302c5c8f0a50033359d8",
+        "bytes": 14743
+      },
+      {
+        "path": "orchestration.md",
+        "sha256": "7b1da17c249a8dca8ab53855bf9cdabacc23a20fdfb32a4ceb5c1da063e3223a",
+        "bytes": 11047
+      },
+      {
+        "path": "phase-01-workspace-mutation-scope.md",
+        "sha256": "d069e6ae68bdfefbd6b7d4c5caf2a20e98884cea5d95406214f29eb8c13980d3",
+        "bytes": 8777
+      },
+      {
+        "path": "phase-02-system-chat-transaction-seam.md",
+        "sha256": "0204eac5887599f58fd3810088cd40d77784764a9dcdf86d4686eb42743f954d",
+        "bytes": 9790
+      },
+      {
+        "path": "phase-03-atomic-artifact-extraction.md",
+        "sha256": "0aaa36019ec36faa0f8bfc402ff33d3d4037334eab25b7d90cdf9c75b1f71746",
+        "bytes": 10404
+      },
+      {
+        "path": "phase-04-truthful-http-errors.md",
+        "sha256": "2be8749dcfff4db595ee5636e0a348c5f534baef424374b49b7302e181fbebb5",
+        "bytes": 8677
+      },
+      {
+        "path": "phase-05-artifact-api-cutover.md",
+        "sha256": "5db4de303b9a400590c459fc2907a317d09ad0ee77adde625a1c8b367f630046",
+        "bytes": 10840
+      },
+      {
+        "path": "phase-06-execution-wiring-and-observability.md",
+        "sha256": "d9104497267961c1cff88b555e045035593262bf5068de8e9584faad44014db7",
+        "bytes": 14880
+      },
+      {
+        "path": "phase-07-chat-web-wiring-and-observability.md",
+        "sha256": "4752a0423359fbb3f6212f3bdd015792a3ae1b0326b3ee7734aca93dd50be81f",
+        "bytes": 14141
+      },
+      {
+        "path": "phase-08-plan-completion-regressions.md",
+        "sha256": "f816afbf8afe75fa7273cdcc8f11aa18c3d6ef6deac96b167deb5ce4879380a0",
+        "bytes": 9707
+      },
+      {
+        "path": "phase-09-trusted-context-boundaries.md",
+        "sha256": "939f963ae6fcaa56bb32a75b92a3422be97e7756fd1c3b526df5850ce9b9a4de",
+        "bytes": 8256
+      },
+      {
+        "path": "phase-10-integration-closeout.md",
+        "sha256": "3c72542da62efa5871c9b6daff942338b07472b0d43810a8deb4c401674a6b81",
+        "bytes": 10114
+      }
+    ]
+  },
+  "frozen": {
+    "scopeSize": "large",
+    "phases": [
+      "phase-01-workspace-mutation-scope.md",
+      "phase-02-system-chat-transaction-seam.md",
+      "phase-03-atomic-artifact-extraction.md",
+      "phase-04-truthful-http-errors.md",
+      "phase-05-artifact-api-cutover.md",
+      "phase-06-execution-wiring-and-observability.md",
+      "phase-07-chat-web-wiring-and-observability.md",
+      "phase-08-plan-completion-regressions.md",
+      "phase-09-trusted-context-boundaries.md",
+      "phase-10-integration-closeout.md"
+    ],
+    "dependencies": {
+      "phase-01-workspace-mutation-scope.md": [],
+      "phase-02-system-chat-transaction-seam.md": [],
+      "phase-03-atomic-artifact-extraction.md": [],
+      "phase-04-truthful-http-errors.md": [],
+      "phase-05-artifact-api-cutover.md": [
+        "phase-03-atomic-artifact-extraction.md"
+      ],
+      "phase-06-execution-wiring-and-observability.md": [
+        "phase-04-truthful-http-errors.md",
+        "phase-05-artifact-api-cutover.md"
+      ],
+      "phase-07-chat-web-wiring-and-observability.md": [
+        "phase-02-system-chat-transaction-seam.md",
+        "phase-04-truthful-http-errors.md",
+        "phase-05-artifact-api-cutover.md",
+        "phase-06-execution-wiring-and-observability.md"
+      ],
+      "phase-08-plan-completion-regressions.md": [
+        "phase-07-chat-web-wiring-and-observability.md"
+      ],
+      "phase-09-trusted-context-boundaries.md": [],
+      "phase-10-integration-closeout.md": [
+        "phase-01-workspace-mutation-scope.md",
+        "phase-02-system-chat-transaction-seam.md",
+        "phase-03-atomic-artifact-extraction.md",
+        "phase-04-truthful-http-errors.md",
+        "phase-05-artifact-api-cutover.md",
+        "phase-06-execution-wiring-and-observability.md",
+        "phase-07-chat-web-wiring-and-observability.md",
+        "phase-08-plan-completion-regressions.md",
+        "phase-09-trusted-context-boundaries.md"
+      ]
+    },
+    "waves": {
+      "phase-01-workspace-mutation-scope.md": 1,
+      "phase-02-system-chat-transaction-seam.md": 1,
+      "phase-03-atomic-artifact-extraction.md": 1,
+      "phase-04-truthful-http-errors.md": 1,
+      "phase-05-artifact-api-cutover.md": 2,
+      "phase-06-execution-wiring-and-observability.md": 3,
+      "phase-07-chat-web-wiring-and-observability.md": 4,
+      "phase-08-plan-completion-regressions.md": 5,
+      "phase-09-trusted-context-boundaries.md": 1,
+      "phase-10-integration-closeout.md": 6
+    },
+    "goals": {
+      "phase-01-workspace-mutation-scope.md": "isolate mutation authorization state to one operation",
+      "phase-02-system-chat-transaction-seam.md": "commit preparation before transaction-free inference",
+      "phase-03-atomic-artifact-extraction.md": "synchronize extraction documents and FTS atomically",
+      "phase-04-truthful-http-errors.md": "map absence, validation, conflicts, bounds, and failures truthfully",
+      "phase-05-artifact-api-cutover.md": "remove production dependence on deprecated artifact methods",
+      "phase-06-execution-wiring-and-observability.md": "require execution collaborators and make workflow-runner tests deterministic",
+      "phase-07-chat-web-wiring-and-observability.md": "require active chat/web hosts and make agent-job tests deterministic",
+      "phase-08-plan-completion-regressions.md": "prove and wire fail-closed clean-context completion validation",
+      "phase-09-trusted-context-boundaries.md": "prove terminal trusted-context and guidance-confinement boundaries",
+      "phase-10-integration-closeout.md": "integrate evidence and complete durable closeout"
+    },
+    "targets": {
+      "phase-01-workspace-mutation-scope.md": [
+        "src/main/java/io/mindspice/magenta2/ai/orchestration/workspaces/WorkspaceExplorerService.java",
+        "src/test/java/io/mindspice/magenta2/ai/orchestration/workspaces/WorkspaceExplorerServiceTest.java",
+        "src/test/java/io/mindspice/magenta2/ai/orchestration/workspaces/ReservedTreeExplorerAdversarialTest.java"
+      ],
+      "phase-02-system-chat-transaction-seam.md": [
+        "src/main/java/io/mindspice/magenta2/ai/chat/system/SystemChatService.java",
+        "src/main/java/io/mindspice/magenta2/ai/chat/system/SystemChatProfilePreparationService.java",
+        "src/test/java/io/mindspice/magenta2/ai/chat/system/SystemChatServiceTest.java",
+        "src/test/java/io/mindspice/magenta2/ai/chat/system/SystemChatTransactionIntegrationTest.java"
+      ],
+      "phase-03-atomic-artifact-extraction.md": [
+        "src/main/java/io/mindspice/magenta2/ai/orchestration/workspaces/ArtifactSearchService.java",
+        "src/main/java/io/mindspice/magenta2/ai/orchestration/workspaces/ArtifactExtractionRepository.java",
+        "src/test/java/io/mindspice/magenta2/ai/orchestration/workspaces/ArtifactAccessSearchRetentionTest.java"
+      ],
+      "phase-04-truthful-http-errors.md": [
+        "src/main/java/io/mindspice/magenta2/ai/orchestration/agents/AgentProfileService.java",
+        "src/main/java/io/mindspice/magenta2/ai/chat/service/ChatFileService.java",
+        "src/main/java/io/mindspice/magenta2/api/web/AgentContextController.java",
+        "src/main/java/io/mindspice/magenta2/api/web/ChatFileController.java",
+        "src/main/java/io/mindspice/magenta2/api/web/GlobalExceptionHandler.java",
+        "src/test/java/io/mindspice/magenta2/api/web/AgentContextControllerTest.java",
+        "src/test/java/io/mindspice/magenta2/api/web/ChatFileControllerTest.java",
+        "src/test/java/io/mindspice/magenta2/api/web/GlobalExceptionHandlerTest.java"
+      ],
+      "phase-05-artifact-api-cutover.md": [
+        "src/main/java/io/mindspice/magenta2/ai/orchestration/workspaces/LegacyOutputArtifactReadService.java",
+        "src/main/java/io/mindspice/magenta2/ai/orchestration/workspaces/OutputArtifactRepository.java",
+        "src/main/java/io/mindspice/magenta2/ai/orchestration/workspaces/OutputArtifactService.java",
+        "src/main/java/io/mindspice/magenta2/ai/orchestration/workspaces/AgentWorkspaceStatusService.java",
+        "src/main/java/io/mindspice/magenta2/ai/orchestration/runtime/JobService.java",
+        "src/main/java/io/mindspice/magenta2/ai/orchestration/runtime/OrchestrationRunnerService.java",
+        "src/main/java/io/mindspice/magenta2/ai/chat/tool/orchestration/AgentOperationalToolService.java",
+        "src/main/java/io/mindspice/magenta2/api/web/DashboardController.java",
+        "src/main/java/io/mindspice/magenta2/api/web/JobController.java",
+        "src/main/java/io/mindspice/magenta2/api/web/OrchestrationController.java",
+        "src/test/java/io/mindspice/magenta2/ai/orchestration/workspaces/LegacyOutputArtifactReadServiceTest.java",
+        "src/test/java/io/mindspice/magenta2/ai/orchestration/runtime/JobServiceTest.java",
+        "src/test/java/io/mindspice/magenta2/ai/orchestration/runtime/OrchestrationRunnerLifecycleIntegrationTest.java",
+        "src/test/java/io/mindspice/magenta2/ai/chat/tool/orchestration/AgentOperationalToolServiceTest.java",
+        "src/test/java/io/mindspice/magenta2/api/web/OrchestrationControllerTest.java"
+      ],
+      "phase-06-execution-wiring-and-observability.md": [
+        ".internal-dev/plans/code-quality-sprint/implementation-inventory.md",
+        "src/main/java/io/mindspice/magenta2/core/config/RequiredProductionWiringConfiguration.java",
+        "src/main/java/io/mindspice/magenta2/ai/orchestration/agents/AgentProfileService.java",
+        "src/main/java/io/mindspice/magenta2/ai/orchestration/runtime/AssignmentService.java",
+        "src/main/java/io/mindspice/magenta2/ai/orchestration/runtime/ProjectService.java",
+        "src/main/java/io/mindspice/magenta2/ai/orchestration/runtime/TaskRunLifecycleService.java",
+        "src/main/java/io/mindspice/magenta2/ai/orchestration/runtime/JobService.java",
+        "src/main/java/io/mindspice/magenta2/ai/orchestration/runtime/OrchestrationRunnerService.java",
+        "src/main/java/io/mindspice/magenta2/ai/orchestration/workflow/WorkflowRunner.java",
+        "src/main/java/io/mindspice/magenta2/ai/orchestration/workflow/WorkflowRepository.java",
+        "src/main/java/io/mindspice/magenta2/ai/orchestration/workspaces/OutputArtifactService.java",
+        "src/main/java/io/mindspice/magenta2/ai/orchestration/workspaces/ArtifactReconciliationService.java",
+        "src/test/java/io/mindspice/magenta2/RequiredProductionWiringTest.java",
+        "src/test/java/io/mindspice/magenta2/ai/orchestration/workflow/WorkflowRepositoryTest.java",
+        "src/test/java/io/mindspice/magenta2/ai/orchestration/runtime/OrchestrationRunnerLifecycleIntegrationTest.java",
+        "src/test/java/io/mindspice/magenta2/ai/orchestration/workflow/WorkflowRunnerTest.java"
+      ],
+      "phase-07-chat-web-wiring-and-observability.md": [
+        ".internal-dev/plans/code-quality-sprint/implementation-inventory.md",
+        "src/main/java/io/mindspice/magenta2/core/config/RequiredProductionWiringConfiguration.java",
+        "src/main/java/io/mindspice/magenta2/ai/skills/AgentSkillCatalogService.java",
+        "src/main/java/io/mindspice/magenta2/ai/agent/job/AgentJobService.java",
+        "src/main/java/io/mindspice/magenta2/ai/chat/config/ChatBeanConfig.java",
+        "src/main/java/io/mindspice/magenta2/ai/chat/service/AuditService.java",
+        "src/main/java/io/mindspice/magenta2/ai/chat/service/ChatModelRouter.java",
+        "src/main/java/io/mindspice/magenta2/ai/chat/service/ChatService.java",
+        "src/main/java/io/mindspice/magenta2/ai/chat/service/ContextManagementAdvisor.java",
+        "src/main/java/io/mindspice/magenta2/ai/chat/service/RequestResolver.java",
+        "src/main/java/io/mindspice/magenta2/ai/chat/task/TaskService.java",
+        "src/main/java/io/mindspice/magenta2/ai/chat/plan/PlanCompletionService.java",
+        "src/main/java/io/mindspice/magenta2/ai/chat/plan/PlanService.java",
+        "src/main/java/io/mindspice/magenta2/ai/chat/plan/SavedPlanChatService.java",
+        "src/main/java/io/mindspice/magenta2/ai/chat/tool/InteractionQuestionTools.java",
+        "src/main/java/io/mindspice/magenta2/ai/chat/tool/file/AgentFileToolService.java",
+        "src/main/java/io/mindspice/magenta2/ai/chat/tool/plan/PlanSaveTools.java",
+        "src/main/java/io/mindspice/magenta2/ai/chat/tool/shell/AgentShellToolService.java",
+        "src/main/java/io/mindspice/magenta2/ai/chat/system/SystemChatBoundedReadService.java",
+        "src/main/java/io/mindspice/magenta2/ai/chat/system/SystemChatActionProposalService.java",
+        "src/main/java/io/mindspice/magenta2/api/web/ChatController.java",
+        "src/main/java/io/mindspice/magenta2/api/web/DashboardController.java",
+        "src/main/java/io/mindspice/magenta2/api/web/GlobalExceptionHandler.java",
+        "src/main/java/io/mindspice/magenta2/api/web/OrchestrationController.java",
+        "src/main/java/io/mindspice/magenta2/api/web/PlanController.java",
+        "src/main/java/io/mindspice/magenta2/api/web/ScheduleReactionFragments.java",
+        "src/main/java/io/mindspice/magenta2/api/web/SystemChatController.java",
+        "src/test/java/io/mindspice/magenta2/RequiredProductionWiringTest.java",
+        "src/test/java/io/mindspice/magenta2/api/web/OrchestrationControllerTest.java",
+        "src/test/java/io/mindspice/magenta2/api/web/SystemChatControllerTest.java",
+        "src/test/java/io/mindspice/magenta2/ai/orchestration/runtime/ScheduleReactionFeatureParitySpringTest.java",
+        "src/test/java/io/mindspice/magenta2/ai/agent/job/AgentJobServiceTest.java"
+      ],
+      "phase-08-plan-completion-regressions.md": [
+        "src/main/java/io/mindspice/magenta2/ai/chat/plan/PlanCompletionService.java",
+        "src/main/java/io/mindspice/magenta2/ai/chat/plan/PlanCompletionValidator.java",
+        "src/test/java/io/mindspice/magenta2/ai/chat/plan/PlanCompletionServiceTest.java"
+      ],
+      "phase-09-trusted-context-boundaries.md": [
+        "src/main/java/io/mindspice/magenta2/ai/chat/service/turn/TrustedContextPolicyAssembler.java",
+        "src/main/java/io/mindspice/magenta2/ai/orchestration/workspaces/WorkspaceMdResolver.java",
+        "src/test/java/io/mindspice/magenta2/ai/chat/service/turn/TrustedContextPolicyAssemblerTest.java",
+        "src/test/java/io/mindspice/magenta2/ai/orchestration/workspaces/WorkspaceMdResolverTest.java"
+      ],
+      "phase-10-integration-closeout.md": [
+        "docs/end-user/chat.md",
+        "docs/technical/api-reference.md",
+        "docs/technical/services.md",
+        "docs/technical/workspaces-tools-outputs.md",
+        "docs/api/artifacts.md",
+        ".internal-dev/specifications/architecture.md",
+        ".internal-dev/specifications/service-graph.md",
+        ".internal-dev/specifications/services.md",
+        ".internal-dev/specifications/api.md",
+        ".internal-dev/specifications/decisions.md",
+        ".internal-dev/knowledge/code-quality-correctness-boundaries.md",
+        ".internal-dev/knowledge/plan-completion-validator-boundary.md",
+        ".internal-dev/changelogs/2026-07-29-code-quality-sprint.md",
+        ".internal-dev/plans/code-quality-sprint/implementation-inventory.md",
+        ".internal-dev/plans/.archive/code-quality-sprint/implementation-inventory.md"
+      ]
+    },
+    "implementationModel": {
+      "provider": "deepseek",
+      "model": "deepseek-v4-pro",
+      "thinking": "max"
+    },
+    "validationModel": {
+      "provider": "openai-codex",
+      "model": "gpt-5.6-terra",
+      "thinking": "high"
+    }
+  },
+  "phases": [
+    {
+      "phase": "phase-01-workspace-mutation-scope.md",
+      "validations": []
+    },
+    {
+      "phase": "phase-02-system-chat-transaction-seam.md",
+      "validations": []
+    },
+    {
+      "phase": "phase-03-atomic-artifact-extraction.md",
+      "validations": []
+    },
+    {
+      "phase": "phase-04-truthful-http-errors.md",
+      "validations": []
+    },
+    {
+      "phase": "phase-05-artifact-api-cutover.md",
+      "validations": []
+    },
+    {
+      "phase": "phase-06-execution-wiring-and-observability.md",
+      "validations": []
+    },
+    {
+      "phase": "phase-07-chat-web-wiring-and-observability.md",
+      "validations": []
+    },
+    {
+      "phase": "phase-08-plan-completion-regressions.md",
+      "validations": []
+    },
+    {
+      "phase": "phase-09-trusted-context-boundaries.md",
+      "validations": []
+    },
+    {
+      "phase": "phase-10-integration-closeout.md",
+      "validations": []
+    }
+  ],
+  "integrationValidations": [],
+  "createdAt": "2026-07-29T03:12:13.122Z",
+  "updatedAt": "2026-07-29T03:12:13.122Z"
+}

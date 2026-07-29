@@ -45,7 +45,7 @@ class ProjectConsoleControllerTest {
         AgentProfileService agentProfileService = mock(AgentProfileService.class);
         when(agentProfileService.list()).thenReturn(List.of());
         project = new Project("project-1", "Alpha", "Project description", "agent-owner",
-            "https://legacy.invalid/repo.git", "CODING_CENTRIC", null, null,
+            "https://legacy.invalid/repo.git", "CODING_CENTRIC", null, null, false,
             Instant.parse("2026-07-28T00:00:00Z"), Instant.parse("2026-07-28T01:00:00Z"));
         when(projectService.getProject("project-1")).thenReturn(project);
 

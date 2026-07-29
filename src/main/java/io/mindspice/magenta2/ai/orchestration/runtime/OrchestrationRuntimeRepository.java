@@ -125,66 +125,23 @@ public class OrchestrationRuntimeRepository {
         );
     }
 
-    WorkAssignment saveAssignment(WorkAssignment assignment) {
+    /** Updates submission/lifecycle facts only while an assignment is unleased. */
+    Optional<WorkAssignment> updateUnleasedAssignment(
+            WorkAssignment assignment, OrchestrationStatus expectedStatus) {
         Instant now = Instant.now();
-        Instant createdAt = assignment.createdAt() == null ? now : assignment.createdAt();
-        Instant updatedAt = now;
-        Optional<WorkAssignment> existing = findAssignment(assignment.id());
-        Instant lastProgressAt = progressTimestamp(existing.orElse(null), assignment, now, createdAt);
-        Instant lastHeartbeatAt = assignment.lastHeartbeatAt() != null
-            ? assignment.lastHeartbeatAt()
-            : existing.map(WorkAssignment::lastHeartbeatAt).orElse(null);
-        jdbcTemplate.update(
+        int updated = jdbcTemplate.update(
             """
-                insert into work_assignments (
-                    id, agent_id, job_id, job_item_id, assignment_type, priority, status, model_override,
-                    run_display_name, workspace_type, workspace_key, workspace_identity, project_id,
-                    current_item_index, checkpoint_json, input_json, output_json, evidence_json,
-                    error_text, lease_owner, lease_expires_at, lease_fence,
-                    last_progress_at, last_heartbeat_at,
-                    created_at, updated_at, started_at, completed_at
-                )
-                values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                on conflict(id) do update set
-                    agent_id = excluded.agent_id,
-                    job_id = excluded.job_id,
-                    job_item_id = excluded.job_item_id,
-                    assignment_type = excluded.assignment_type,
-                    priority = excluded.priority,
-                    status = excluded.status,
-                    model_override = excluded.model_override,
-                    run_display_name = excluded.run_display_name,
-                    workspace_type = excluded.workspace_type,
-                    workspace_key = excluded.workspace_key,
-                    workspace_identity = excluded.workspace_identity,
-                    project_id = excluded.project_id,
-                    current_item_index = excluded.current_item_index,
-                    checkpoint_json = excluded.checkpoint_json,
-                    input_json = excluded.input_json,
-                    output_json = excluded.output_json,
-                    evidence_json = excluded.evidence_json,
-                    error_text = excluded.error_text,
-                    lease_owner = excluded.lease_owner,
-                    lease_expires_at = excluded.lease_expires_at,
-                    last_progress_at = excluded.last_progress_at,
-                    last_heartbeat_at = excluded.last_heartbeat_at,
-                    updated_at = excluded.updated_at,
-                    started_at = excluded.started_at,
-                    completed_at = excluded.completed_at
+                update work_assignments
+                set status = ?, current_item_index = ?, checkpoint_json = ?, output_json = ?,
+                    evidence_json = ?, error_text = ?, completed_at = ?,
+                    last_progress_at = ?, updated_at = ?
+                where id = ? and status = ? and (lease_owner is null or lease_owner = '')
                 """,
-            assignment.id(), assignment.agentId(), assignment.jobId(), assignment.jobItemId(),
-            assignment.assignmentType().name(), assignment.priority(), assignment.status().name(),
-            assignment.modelOverride(), assignment.runDisplayName(),
-            assignment.workspaceType(), assignment.workspaceKey(), assignment.workspaceIdentity(),
-            assignment.projectId(), assignment.currentItemIndex(),
-            jsonOrNull(assignment.checkpoint()), jsonOrNull(assignment.input()), jsonOrNull(assignment.output()),
-            jsonOrNull(assignment.evidence()), assignment.errorText(), assignment.leaseOwner(),
-            instant(assignment.leaseExpiresAt()), assignment.leaseFence(),
-            instant(lastProgressAt), instant(lastHeartbeatAt),
-            createdAt.toString(), updatedAt.toString(),
-            instant(assignment.startedAt()), instant(assignment.completedAt())
-        );
-        return findAssignment(assignment.id()).orElseThrow();
+            assignment.status().name(), assignment.currentItemIndex(), jsonOrNull(assignment.checkpoint()),
+            jsonOrNull(assignment.output()), jsonOrNull(assignment.evidence()), assignment.errorText(),
+            instant(assignment.completedAt()), now.toString(), now.toString(),
+            assignment.id(), expectedStatus.name());
+        return updated == 1 ? findAssignment(assignment.id()) : Optional.empty();
     }
 
     Optional<WorkAssignment> saveAssignmentIfLeaseOwner(WorkAssignment assignment, String leaseOwner) {
@@ -201,41 +158,16 @@ public class OrchestrationRuntimeRepository {
         int updated = jdbcTemplate.update(
             """
                 update work_assignments set
-                    agent_id = ?,
-                    job_id = ?,
-                    job_item_id = ?,
-                    assignment_type = ?,
-                    priority = ?,
-                    status = ?,
-                    model_override = ?,
-                    run_display_name = ?,
-                    workspace_type = ?,
-                    workspace_key = ?,
-                    workspace_identity = ?,
-                    project_id = ?,
-                    current_item_index = ?,
-                    checkpoint_json = ?,
-                    input_json = ?,
-                    output_json = ?,
-                    evidence_json = ?,
-                    error_text = ?,
-                    lease_owner = ?,
-                    lease_expires_at = ?,
-                    last_progress_at = ?,
-                    last_heartbeat_at = ?,
-                    updated_at = ?,
-                    started_at = ?,
-                    completed_at = ?
+                    status = ?, current_item_index = ?, checkpoint_json = ?,
+                    output_json = ?, evidence_json = ?, error_text = ?,
+                    lease_expires_at = ?, last_progress_at = ?, last_heartbeat_at = ?,
+                    updated_at = ?, completed_at = ?
                 where id = ? and status in (?, ?) and lease_owner = ? and lease_fence = ?
                 """,
-            assignment.agentId(), assignment.jobId(), assignment.jobItemId(), assignment.assignmentType().name(),
-            assignment.priority(), assignment.status().name(), assignment.modelOverride(), assignment.runDisplayName(),
-            assignment.workspaceType(), assignment.workspaceKey(), assignment.workspaceIdentity(),
-            assignment.projectId(), assignment.currentItemIndex(), jsonOrNull(assignment.checkpoint()),
-            jsonOrNull(assignment.input()), jsonOrNull(assignment.output()), jsonOrNull(assignment.evidence()),
-            assignment.errorText(), assignment.leaseOwner(), instant(assignment.leaseExpiresAt()),
-            instant(lastProgressAt), instant(lastHeartbeatAt), now.toString(), instant(assignment.startedAt()),
-            instant(assignment.completedAt()), assignment.id(), OrchestrationStatus.RUNNING.name(),
+            assignment.status().name(), assignment.currentItemIndex(), jsonOrNull(assignment.checkpoint()),
+            jsonOrNull(assignment.output()), jsonOrNull(assignment.evidence()), assignment.errorText(),
+            instant(assignment.leaseExpiresAt()), instant(lastProgressAt), instant(lastHeartbeatAt),
+            now.toString(), instant(assignment.completedAt()), assignment.id(), OrchestrationStatus.RUNNING.name(),
             OrchestrationStatus.CANCEL_REQUESTED.name(), leaseOwner, assignment.leaseFence()
         );
         return updated == 1 ? findAssignment(assignment.id()) : Optional.empty();
@@ -980,7 +912,10 @@ public class OrchestrationRuntimeRepository {
             AssignmentType.valueOf(rs.getString("assignment_type")), rs.getString("run_display_name"), rs.getInt("priority"),
             OrchestrationStatus.valueOf(rs.getString("status")), rs.getString("model_override"),
             getNullable(rs, "workspace_type"), getNullable(rs, "workspace_key"), getNullable(rs, "workspace_identity"),
-            rs.getString("project_id"), rs.getInt("current_item_index"), map(rs.getString("checkpoint_json")),
+            rs.getString("project_id"),
+            getNullable(rs, "source_definition_id"), getNullable(rs, "context_binding_key"),
+            readRowVersion(rs),
+            rs.getInt("current_item_index"), map(rs.getString("checkpoint_json")),
             map(rs.getString("input_json")), map(rs.getString("output_json")), map(rs.getString("evidence_json")),
             rs.getString("error_text"), rs.getString("lease_owner"), instantValue(rs.getString("lease_expires_at")),
             readLeaseFence(rs),
@@ -988,6 +923,14 @@ public class OrchestrationRuntimeRepository {
             instantValue(rs.getString("started_at")), instantValue(rs.getString("completed_at")),
             instantValue(rs.getString("last_progress_at")), instantValue(rs.getString("last_heartbeat_at"))
         );
+    }
+
+    private int readRowVersion(ResultSet rs) {
+        try {
+            return rs.getInt("row_version");
+        } catch (SQLException e) {
+            return 0;
+        }
     }
 
     private long readLeaseFence(ResultSet rs) {
@@ -1239,7 +1182,61 @@ public class OrchestrationRuntimeRepository {
         if (!assignmentColumns.contains("lease_fence")) {
             jdbcTemplate.execute("alter table work_assignments add column lease_fence integer not null default 0");
         }
+        if (!assignmentColumns.contains("source_definition_id")) {
+            jdbcTemplate.execute("alter table work_assignments add column source_definition_id text");
+        }
+        if (!assignmentColumns.contains("context_binding_key")) {
+            jdbcTemplate.execute("alter table work_assignments add column context_binding_key text check (context_binding_key is null or length(context_binding_key) between 1 and 255)");
+        }
+        if (!assignmentColumns.contains("row_version")) {
+            jdbcTemplate.execute("alter table work_assignments add column row_version integer not null default 0 check (row_version >= 0)");
+            // Backfill: set row_version = 1 for rows that already have a lease_fence
+            jdbcTemplate.update("update work_assignments set row_version = 1 where row_version = 0 and lease_fence > 0 and lease_owner is not null");
+        }
         backfillAssignmentWorkspaceIdentity();
+        // Repository-only test compatibility; production shape is owned by migration 014.
+        jdbcTemplate.execute("""
+            create table if not exists assignment_query_snapshots (
+                snapshot_id text primary key,
+                scope_digest text not null,
+                request_digest text not null,
+                member_ids text not null,
+                expires_at text not null,
+                created_at text not null
+            )
+            """);
+        jdbcTemplate.execute("""
+            create index if not exists idx_assignment_query_snapshots_expiry
+                on assignment_query_snapshots (expires_at)
+            """);
+        // Phase 01: assignment_control_operations table
+        jdbcTemplate.execute("""
+            create table if not exists assignment_control_operations (
+                operation_key    text not null check (length(operation_key) between 1 and 255),
+                operation_type   text not null check (operation_type in (
+                    'PRIORITY_CAS', 'REQUEST_CANCEL', 'FORCE_CANCEL')),
+                assignment_id    text not null check (length(assignment_id) between 1 and 255),
+                actor            text not null check (length(actor) between 1 and 128),
+                scope            text not null check (length(scope) between 1 and 64),
+                action           text not null check (length(action) between 1 and 64),
+                resource         text not null check (length(resource) between 1 and 255),
+                expected_revision integer,
+                new_priority     integer,
+                reason           text check (reason is null or length(reason) <= 4096),
+                request_digest   text not null check (
+                    length(request_digest) = 64 and request_digest not glob '*[^0-9a-f]*'),
+                operation_state  text not null check (operation_state in (
+                    'RESERVED', 'COMPLETED', 'CONFLICT', 'STALE')),
+                result_detail    text check (result_detail is null or length(result_detail) <= 4096),
+                created_at       text not null,
+                completed_at     text,
+                primary key (operation_type, operation_key)
+            )
+            """);
+        jdbcTemplate.execute("""
+            create index if not exists idx_assignment_control_ops_assignment
+                on assignment_control_operations (assignment_id, created_at desc)
+            """);
         jdbcTemplate.execute("""
             create index if not exists idx_work_assignments_queue
                 on work_assignments(status, priority, created_at)
@@ -1573,6 +1570,255 @@ public class OrchestrationRuntimeRepository {
                 + " where assignment_id = ? order by created_at desc limit 1",
             rs -> rs.next() ? Optional.of(rs.getString(1)) : Optional.empty(),
             assignmentId
+        );
+    }
+
+    // ── Phase 01: Scoped query methods (with limit clamping) ──
+
+    public List<WorkAssignment> findActiveAssignmentsForAgent(String agentId, int limit) {
+        return jdbcTemplate.query(
+            """
+                select * from work_assignments
+                where agent_id = ?
+                  and status not in (?, ?, ?, ?)
+                order by priority desc, created_at asc
+                limit ?
+                """,
+            (rs, rowNum) -> toAssignment(rs),
+            agentId,
+            OrchestrationStatus.CANCELLED.name(),
+            OrchestrationStatus.FAILED.name(),
+            OrchestrationStatus.COMPLETED.name(),
+            OrchestrationStatus.NEEDS_REVIEW.name(),
+            Math.clamp(limit, 1, 100)
+        );
+    }
+
+    public List<WorkAssignment> findActiveAssignmentsForProject(String projectId, int limit) {
+        return jdbcTemplate.query(
+            """
+                select * from work_assignments
+                where project_id = ?
+                  and status not in (?, ?, ?, ?)
+                order by priority desc, created_at asc
+                limit ?
+                """,
+            (rs, rowNum) -> toAssignment(rs),
+            projectId,
+            OrchestrationStatus.CANCELLED.name(),
+            OrchestrationStatus.FAILED.name(),
+            OrchestrationStatus.COMPLETED.name(),
+            OrchestrationStatus.NEEDS_REVIEW.name(),
+            Math.clamp(limit, 1, 100)
+        );
+    }
+
+    public List<WorkAssignment> findTerminalAssignmentsForAgent(String agentId, int limit) {
+        return jdbcTemplate.query(
+            """
+                select * from work_assignments
+                where agent_id = ?
+                  and status in (?, ?, ?, ?)
+                order by coalesce(completed_at, updated_at, created_at) desc
+                limit ?
+                """,
+            (rs, rowNum) -> toAssignment(rs),
+            agentId,
+            OrchestrationStatus.CANCELLED.name(),
+            OrchestrationStatus.FAILED.name(),
+            OrchestrationStatus.COMPLETED.name(),
+            OrchestrationStatus.NEEDS_REVIEW.name(),
+            Math.clamp(limit, 1, 100)
+        );
+    }
+
+    public List<WorkAssignment> findTerminalAssignmentsForProject(String projectId, int limit) {
+        return jdbcTemplate.query(
+            """
+                select * from work_assignments
+                where project_id = ?
+                  and status in (?, ?, ?, ?)
+                order by coalesce(completed_at, updated_at, created_at) desc
+                limit ?
+                """,
+            (rs, rowNum) -> toAssignment(rs),
+            projectId,
+            OrchestrationStatus.CANCELLED.name(),
+            OrchestrationStatus.FAILED.name(),
+            OrchestrationStatus.COMPLETED.name(),
+            OrchestrationStatus.NEEDS_REVIEW.name(),
+            Math.clamp(limit, 1, 100)
+        );
+    }
+
+    // ── Phase 01: Insert-only assignment creation ──
+
+    /**
+     * Insert a new assignment. Fails on id conflict — creation is insert-only.
+     */
+    @Transactional
+    public WorkAssignment insertAssignment(WorkAssignment assignment) {
+        Instant now = Instant.now();
+        Instant createdAt = assignment.createdAt() == null ? now : assignment.createdAt();
+        int inserted = jdbcTemplate.update(
+            """
+                insert into work_assignments (
+                    id, agent_id, job_id, job_item_id, assignment_type, priority, status, model_override,
+                    run_display_name, workspace_type, workspace_key, workspace_identity, project_id,
+                    source_definition_id, context_binding_key, row_version,
+                    current_item_index, checkpoint_json, input_json, output_json, evidence_json,
+                    error_text, lease_owner, lease_expires_at, lease_fence,
+                    last_progress_at, last_heartbeat_at,
+                    created_at, updated_at, started_at, completed_at
+                )
+                values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+            assignment.id(), assignment.agentId(), assignment.jobId(), assignment.jobItemId(),
+            assignment.assignmentType().name(), assignment.priority(), assignment.status().name(),
+            assignment.modelOverride(), assignment.runDisplayName(),
+            assignment.workspaceType(), assignment.workspaceKey(), assignment.workspaceIdentity(),
+            assignment.projectId(), assignment.sourceDefinitionId(), assignment.contextBindingKey(),
+            assignment.rowVersion(),
+            assignment.currentItemIndex(),
+            jsonOrNull(assignment.checkpoint()), jsonOrNull(assignment.input()), jsonOrNull(assignment.output()),
+            jsonOrNull(assignment.evidence()), assignment.errorText(), assignment.leaseOwner(),
+            instant(assignment.leaseExpiresAt()), assignment.leaseFence(),
+            instant(assignment.lastProgressAt()), instant(assignment.lastHeartbeatAt()),
+            createdAt.toString(), createdAt.toString(),
+            instant(assignment.startedAt()), instant(assignment.completedAt())
+        );
+        if (inserted != 1) {
+            throw new IllegalStateException("Assignment insert failed — id already exists: " + assignment.id());
+        }
+        return findAssignment(assignment.id()).orElseThrow();
+    }
+
+    // ── Phase 01: CAS-priority update ──
+
+    /**
+     * Atomically update priority with rowVersion CAS. Only succeeds when
+     * the assignment is queued/non-terminal, has no active lease, and the
+     * caller's expected rowVersion matches.
+     */
+    public WorkAssignment updateAssignmentPriority(String assignmentId, String projectId, int newPriority,
+                                                     int expectedRowVersion) {
+        int updated = jdbcTemplate.update(
+            """
+                update work_assignments
+                set priority = ?, row_version = row_version + 1, updated_at = ?
+                where id = ? and project_id = ?
+                  and row_version = ?
+                  and status not in (?, ?, ?, ?)
+                  and (lease_owner is null or lease_owner = '')
+                """,
+            newPriority, Instant.now().toString(),
+            assignmentId, projectId, expectedRowVersion,
+            OrchestrationStatus.CANCELLED.name(), OrchestrationStatus.FAILED.name(),
+            OrchestrationStatus.COMPLETED.name(), OrchestrationStatus.NEEDS_REVIEW.name()
+        );
+        if (updated != 1) {
+            throw new IllegalStateException(
+                "Priority CAS failed for " + assignmentId + " at rowVersion " + expectedRowVersion);
+        }
+        return findAssignment(assignmentId).orElseThrow();
+    }
+
+    // ── Phase 01: Persisted query snapshots ──
+
+    public record AssignmentQuerySnapshot(
+        String snapshotId, String scopeDigest, String requestDigest,
+        String memberIds, Instant expiresAt
+    ) { }
+
+    public void insertAssignmentQuerySnapshot(String snapshotId, String scopeDigest,
+                                               String requestDigest, String memberIds, Instant expiresAt) {
+        jdbcTemplate.update("""
+                insert into assignment_query_snapshots
+                    (snapshot_id, scope_digest, request_digest, member_ids, expires_at, created_at)
+                values (?, ?, ?, ?, ?, ?)
+                """, snapshotId, scopeDigest, requestDigest, memberIds,
+            expiresAt.toString(), Instant.now().toString());
+    }
+
+    public Optional<AssignmentQuerySnapshot> findAssignmentQuerySnapshot(String snapshotId) {
+        return jdbcTemplate.query("""
+                select snapshot_id, scope_digest, request_digest, member_ids, expires_at
+                from assignment_query_snapshots where snapshot_id = ?
+                """, rs -> rs.next() ? Optional.of(new AssignmentQuerySnapshot(
+                    rs.getString(1), rs.getString(2), rs.getString(3), rs.getString(4),
+                    instantValue(rs.getString(5)))) : Optional.empty(), snapshotId);
+    }
+
+    public int deleteExpiredAssignmentQuerySnapshots(Instant now) {
+        return jdbcTemplate.update("delete from assignment_query_snapshots where expires_at <= ?", now.toString());
+    }
+
+    // ── Phase 01: Control operation records ──
+
+    public record ControlOperationRecord(
+        String operationKey, String operationType, String assignmentId,
+        String actor, String scope, String action, String resource,
+        Integer expectedRevision, Integer newPriority, String reason,
+        String requestDigest, String operationState, String resultDetail,
+        Instant createdAt, Instant completedAt
+    ) {}
+
+    public void insertControlOperation(String operationKey, String operationType,
+                                        String assignmentId, String actor, String scope,
+                                        String action, String resource,
+                                        Integer expectedRevision, Integer newPriority,
+                                        String reason, String requestDigest,
+                                        String operationState, String resultDetail) {
+        jdbcTemplate.update(
+            """
+                insert into assignment_control_operations (
+                    operation_key, operation_type, assignment_id, actor, scope, action, resource,
+                    expected_revision, new_priority, reason,
+                    request_digest, operation_state, result_detail,
+                    created_at, completed_at
+                )
+                values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+            operationKey, operationType, assignmentId, actor, scope, action, resource,
+            expectedRevision, newPriority, reason,
+            requestDigest, operationState, resultDetail,
+            Instant.now().toString(), null
+        );
+    }
+
+    public Optional<ControlOperationRecord> findControlOperation(String operationType, String operationKey) {
+        if (!tableExists("assignment_control_operations")) return Optional.empty();
+        return jdbcTemplate.query(
+            "select * from assignment_control_operations where operation_type = ? and operation_key = ?",
+            rs -> rs.next() ? Optional.of(toControlOp(rs)) : Optional.empty(),
+            operationType, operationKey
+        );
+    }
+
+    public void completeControlOperation(String operationKey, String operationType,
+                                          String operationState, String resultDetail) {
+        jdbcTemplate.update(
+            """
+                update assignment_control_operations
+                set operation_state = ?, result_detail = ?, completed_at = ?
+                where operation_type = ? and operation_key = ?
+                """,
+            operationState, resultDetail, Instant.now().toString(),
+            operationType, operationKey
+        );
+    }
+
+    private ControlOperationRecord toControlOp(ResultSet rs) throws SQLException {
+        return new ControlOperationRecord(
+            rs.getString("operation_key"), rs.getString("operation_type"),
+            rs.getString("assignment_id"), rs.getString("actor"),
+            rs.getString("scope"), rs.getString("action"), rs.getString("resource"),
+            rs.getObject("expected_revision") != null ? rs.getInt("expected_revision") : null,
+            rs.getObject("new_priority") != null ? rs.getInt("new_priority") : null,
+            rs.getString("reason"), rs.getString("request_digest"),
+            rs.getString("operation_state"), rs.getString("result_detail"),
+            instantValue(rs.getString("created_at")),
+            instantValue(rs.getString("completed_at"))
         );
     }
 }

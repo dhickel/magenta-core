@@ -24,12 +24,20 @@ class ProjectServiceTest {
 
     private ProjectService projectService;
     private ProjectRepository projectRepository;
+    private OrchestrationRuntimeRepository runtimeRepository;
+    private ProjectOperationsAccessService accessService;
 
     @BeforeEach
     void setUp() throws IOException {
         Files.createDirectories(tempDir.resolve("projects"));
-        projectRepository = repository();
-        projectService = new ProjectService(projectRepository, mock(io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceDirectoryService.class));
+        JdbcTemplate jdbc = jdbcTemplate();
+        projectRepository = new ProjectRepository(jdbc, new ObjectMapper());
+        runtimeRepository = new OrchestrationRuntimeRepository(jdbc, new ObjectMapper());
+        accessService = new ProjectOperationsAccessService(projectRepository, runtimeRepository, null);
+        accessService.enableTrustedDeployment();
+        projectService = new ProjectService(projectRepository,
+            mock(io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceDirectoryService.class),
+            runtimeRepository, null, accessService, null);
     }
 
     @Test
@@ -76,9 +84,11 @@ class ProjectServiceTest {
         JdbcTemplate jdbc = jdbcTemplate();
         ProjectRepository projects = new ProjectRepository(jdbc, new ObjectMapper());
         OrchestrationRuntimeRepository runtime = new OrchestrationRuntimeRepository(jdbc, new ObjectMapper());
-        ProjectService service = new ProjectService(projects, mock(io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceDirectoryService.class), runtime, null);
+        ProjectOperationsAccessService access = new ProjectOperationsAccessService(projects, runtime, null);
+        access.enableTrustedDeployment();
+        ProjectService service = new ProjectService(projects, mock(io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceDirectoryService.class), runtime, null, access, null);
         Project project = service.createProject("Active", "desc", "agent-active", null);
-        runtime.saveAssignment(new WorkAssignment(
+        runtime.insertAssignment(new WorkAssignment(
             "assignment-active", "agent-active", null, null, AssignmentType.REPORT, 1,
             OrchestrationStatus.RUNNING, null, null, "ws-1", "ws-1", project.id(),
             0, Map.of(), Map.of("projectId", project.id()), Map.of(), Map.of(),
@@ -89,8 +99,8 @@ class ProjectServiceTest {
             .isInstanceOf(IllegalStateException.class)
             .hasMessageContaining("active assignments");
         assertThatThrownBy(() -> service.removeAgent(project.id(), "agent-active"))
-            .isInstanceOf(IllegalStateException.class)
-            .hasMessageContaining("active assignments");
+            .isInstanceOf(ProjectOperationsAccessService.ProjectAccessDeniedException.class)
+            .hasMessageContaining("active assignment");
     }
 
     @Test

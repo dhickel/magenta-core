@@ -1,0 +1,602 @@
+{
+  "version": 2,
+  "runId": "exec-project-dashboard-unified-contracts",
+  "state": "active",
+  "revision": 2,
+  "source": {
+    "projectRoot": "/home/dhickel/Code/Java/Magenta",
+    "sourcePlanPath": ".internal-dev/plans/20260729-163244-home-dhickel-code-java-magenta-internal-dev-ha",
+    "sourcePlanningRunId": "20260729-163244-home-dhickel-code-java-magenta-internal-dev-ha",
+    "aggregateDigest": "6b7523fe23e551798e9319e08553df4bd2b0e64966fd1dd1818a0280dc54ab6a",
+    "files": [
+      {
+        "path": "concepts.md",
+        "sha256": "be1344ee86d3a2ce410e274f8d219d179b31638e38bd8adfff08172d414b2800",
+        "bytes": 17840
+      },
+      {
+        "path": "orchestration.md",
+        "sha256": "ce8bc836f84c40271532b15ea75cf12a55d006ef5f22947911fe9ba2e9b7db83",
+        "bytes": 9173
+      },
+      {
+        "path": "phase-01-authority-and-assignment-foundation.md",
+        "sha256": "2a0c1b78540163e456ccf5ac8c0e1893a9f8d35785ffadd7fc0f671d46afa9bd",
+        "bytes": 16044
+      },
+      {
+        "path": "phase-02-project-queue-and-console-seams.md",
+        "sha256": "268a07406da3e0b6bbc940c3fb38a99fc51b4a466dda0a1e8276c6db0d328a70",
+        "bytes": 14757
+      },
+      {
+        "path": "phase-03-lightweight-project-tasks.md",
+        "sha256": "e905490f6c394ae891e9dee673076f231f29c30e2aad2658230a15af007602ee",
+        "bytes": 14583
+      },
+      {
+        "path": "phase-04-project-jobs-and-reassignment.md",
+        "sha256": "2b6611c91850617fe73862f437ebe2f14faa2cff3c5422fffbdca660d54ebeb2",
+        "bytes": 9720
+      },
+      {
+        "path": "phase-05-materialization-templates-files-outputs.md",
+        "sha256": "092d7d693d9819715ccff1ba843b3148fabe7bd72531f6c69822a6c5c803c498",
+        "bytes": 16359
+      },
+      {
+        "path": "phase-06-project-automation-and-events.md",
+        "sha256": "45acce324ac67bc13e0e537ee4fe2583558e704488d68aeeefb0a3543a17caad",
+        "bytes": 11588
+      },
+      {
+        "path": "phase-07-project-chat.md",
+        "sha256": "63aaa642273919d1e6c899f24f7066e3d7f04f5e0982fee5725e67884be4c497",
+        "bytes": 15382
+      },
+      {
+        "path": "phase-08-console-integration-and-closeout.md",
+        "sha256": "56191036ba0b554a7b57dcda53b299380a9c83b3ac7ca61ec43d9fe044af6cf2",
+        "bytes": 15759
+      }
+    ]
+  },
+  "frozen": {
+    "scopeSize": "large",
+    "phases": [
+      "phase-01-authority-and-assignment-foundation.md",
+      "phase-02-project-queue-and-console-seams.md",
+      "phase-03-lightweight-project-tasks.md",
+      "phase-04-project-jobs-and-reassignment.md",
+      "phase-05-materialization-templates-files-outputs.md",
+      "phase-06-project-automation-and-events.md",
+      "phase-07-project-chat.md",
+      "phase-08-console-integration-and-closeout.md"
+    ],
+    "dependencies": {
+      "phase-01-authority-and-assignment-foundation.md": [],
+      "phase-02-project-queue-and-console-seams.md": [
+        "phase-01-authority-and-assignment-foundation.md"
+      ],
+      "phase-03-lightweight-project-tasks.md": [
+        "phase-02-project-queue-and-console-seams.md"
+      ],
+      "phase-04-project-jobs-and-reassignment.md": [
+        "phase-03-lightweight-project-tasks.md"
+      ],
+      "phase-05-materialization-templates-files-outputs.md": [
+        "phase-04-project-jobs-and-reassignment.md"
+      ],
+      "phase-06-project-automation-and-events.md": [
+        "phase-05-materialization-templates-files-outputs.md"
+      ],
+      "phase-07-project-chat.md": [
+        "phase-06-project-automation-and-events.md"
+      ],
+      "phase-08-console-integration-and-closeout.md": [
+        "phase-07-project-chat.md"
+      ]
+    },
+    "waves": {
+      "phase-01-authority-and-assignment-foundation.md": 1,
+      "phase-02-project-queue-and-console-seams.md": 2,
+      "phase-03-lightweight-project-tasks.md": 3,
+      "phase-04-project-jobs-and-reassignment.md": 4,
+      "phase-05-materialization-templates-files-outputs.md": 5,
+      "phase-06-project-automation-and-events.md": 6,
+      "phase-07-project-chat.md": 7,
+      "phase-08-console-integration-and-closeout.md": 8
+    },
+    "goals": {
+      "phase-01-authority-and-assignment-foundation.md": "establish singular assignment authority, gated project safety, stable scoped pagination, and idempotent controls",
+      "phase-02-project-queue-and-console-seams.md": "deliver the grouped shell and Queue proof over the shared projection",
+      "phase-03-lightweight-project-tasks.md": "add lightweight Tasks with explicit Plan promotion and canonical assignment attempts",
+      "phase-04-project-jobs-and-reassignment.md": "establish Job field authority and atomic queued reassignment; dependency is migration/shared-console sequencing, not Work Task behavior",
+      "phase-05-materialization-templates-files-outputs.md": "deliver immutable template generations, read-only Files, and durable-link Outputs without publication replacement",
+      "phase-06-project-automation-and-events.md": "repair revision heads and add project-scoped automation/events",
+      "phase-07-project-chat.md": "add immutable-generation restricted project chat over existing chat memory",
+      "phase-08-console-integration-and-closeout.md": "audit and integrate passed domains without creating new authority"
+    },
+    "targets": {
+      "phase-01-authority-and-assignment-foundation.md": [
+        "src/main/java/io/mindspice/magenta2/ai/orchestration/runtime/WorkAssignment.java",
+        "src/main/java/io/mindspice/magenta2/ai/orchestration/runtime/AssignmentRequest.java",
+        "src/main/java/io/mindspice/magenta2/ai/orchestration/runtime/OrchestrationRuntimeRepository.java",
+        "src/main/java/io/mindspice/magenta2/ai/orchestration/runtime/AssignmentService.java",
+        "src/main/java/io/mindspice/magenta2/ai/orchestration/runtime/AssignmentQueryService.java",
+        "src/main/java/io/mindspice/magenta2/ai/orchestration/runtime/AssignmentControlService.java",
+        "src/main/java/io/mindspice/magenta2/ai/orchestration/runtime/ProjectOperationsAccessService.java",
+        "src/main/java/io/mindspice/magenta2/ai/orchestration/runtime/Project.java",
+        "src/main/java/io/mindspice/magenta2/ai/orchestration/runtime/ProjectRepository.java",
+        "src/main/java/io/mindspice/magenta2/ai/orchestration/runtime/ProjectService.java",
+        "src/main/java/io/mindspice/magenta2/api/web/ProjectController.java",
+        "src/main/resources/db/migrations/014-project-assignment-authority.sql",
+        "src/main/resources/schema.sql"
+      ],
+      "phase-02-project-queue-and-console-seams.md": [
+        "src/main/java/io/mindspice/magenta2/api/web/OrchestrationController.java",
+        "src/main/java/io/mindspice/magenta2/api/web/ProjectConsoleController.java",
+        "src/main/java/io/mindspice/magenta2/api/web/ProjectConsoleFragments.java",
+        "src/main/java/io/mindspice/magenta2/api/web/ProjectWorkController.java",
+        "src/main/resources/static/css/orchestration.css",
+        "src/main/resources/static/js/orchestration/projects.js"
+      ],
+      "phase-03-lightweight-project-tasks.md": [
+        "src/main/java/io/mindspice/magenta2/ai/orchestration/tasks/WorkTaskDefinition.java",
+        "src/main/java/io/mindspice/magenta2/ai/orchestration/tasks/WorkTaskAttempt.java",
+        "src/main/java/io/mindspice/magenta2/ai/orchestration/tasks/WorkTaskRepository.java",
+        "src/main/java/io/mindspice/magenta2/ai/orchestration/tasks/WorkTaskService.java",
+        "src/main/java/io/mindspice/magenta2/api/web/WorkTaskController.java",
+        "src/main/java/io/mindspice/magenta2/api/web/WorkTaskFragments.java",
+        "src/main/java/io/mindspice/magenta2/api/web/ProjectConsoleController.java",
+        "src/main/resources/db/migrations/015-lightweight-work-tasks.sql",
+        "src/main/resources/schema.sql"
+      ],
+      "phase-04-project-jobs-and-reassignment.md": [
+        "src/main/java/io/mindspice/magenta2/ai/orchestration/runtime/JobDefinition.java",
+        "src/main/java/io/mindspice/magenta2/ai/orchestration/runtime/JobRun.java",
+        "src/main/java/io/mindspice/magenta2/ai/orchestration/runtime/JobRepository.java",
+        "src/main/java/io/mindspice/magenta2/ai/orchestration/runtime/JobService.java",
+        "src/main/java/io/mindspice/magenta2/ai/orchestration/runtime/JobReassignmentService.java",
+        "src/main/java/io/mindspice/magenta2/ai/orchestration/runtime/AssignmentService.java",
+        "src/main/java/io/mindspice/magenta2/ai/orchestration/runtime/TaskRunLifecycleService.java",
+        "src/main/java/io/mindspice/magenta2/ai/orchestration/runtime/OrchestrationRunnerService.java",
+        "src/main/java/io/mindspice/magenta2/api/web/ProjectConsoleController.java",
+        "src/main/resources/db/migrations/016-job-reassignment-operations.sql",
+        "src/main/resources/schema.sql"
+      ],
+      "phase-05-materialization-templates-files-outputs.md": [
+        "src/main/java/io/mindspice/magenta2/ai/orchestration/runtime/ProjectMaterializationTemplate.java",
+        "src/main/java/io/mindspice/magenta2/ai/orchestration/runtime/ProjectMaterializationTemplateService.java",
+        "src/main/java/io/mindspice/magenta2/ai/orchestration/runtime/ProjectOutputService.java",
+        "src/main/java/io/mindspice/magenta2/ai/orchestration/context/AgentMaterializationRepository.java",
+        "src/main/java/io/mindspice/magenta2/ai/orchestration/context/AgentMaterializationService.java",
+        "src/main/java/io/mindspice/magenta2/ai/orchestration/workspaces/WorkspacePathLayout.java",
+        "src/main/java/io/mindspice/magenta2/ai/orchestration/workspaces/WorkspaceDirectoryService.java",
+        "src/main/java/io/mindspice/magenta2/api/web/ProjectConsoleController.java",
+        "src/main/java/io/mindspice/magenta2/api/web/ProjectOutputController.java",
+        "src/main/resources/db/migrations/017-project-materialization-generations.sql",
+        "src/main/resources/schema.sql"
+      ],
+      "phase-06-project-automation-and-events.md": [
+        "src/main/java/io/mindspice/magenta2/ai/orchestration/runtime/AgentSchedule.java",
+        "src/main/java/io/mindspice/magenta2/ai/orchestration/runtime/AgentEventReaction.java",
+        "src/main/java/io/mindspice/magenta2/ai/orchestration/runtime/OrchestrationEvent.java",
+        "src/main/java/io/mindspice/magenta2/ai/orchestration/runtime/ScheduleService.java",
+        "src/main/java/io/mindspice/magenta2/ai/orchestration/runtime/EventReactionService.java",
+        "src/main/java/io/mindspice/magenta2/ai/orchestration/runtime/OrchestrationEventService.java",
+        "src/main/java/io/mindspice/magenta2/api/web/AgentOrchestrationController.java",
+        "src/main/java/io/mindspice/magenta2/api/web/ProjectAutomationController.java",
+        "src/main/java/io/mindspice/magenta2/api/web/ProjectAutomationFragments.java",
+        "src/main/resources/db/migrations/018-project-automation-events.sql",
+        "src/main/resources/schema.sql"
+      ],
+      "phase-07-project-chat.md": [
+        "src/main/java/io/mindspice/magenta2/ai/chat/model/ChatSessionOrigin.java",
+        "src/main/java/io/mindspice/magenta2/ai/chat/repository/ChatSessionMetadataRepository.java",
+        "src/main/java/io/mindspice/magenta2/ai/chat/project/ProjectChatProfile.java",
+        "src/main/java/io/mindspice/magenta2/ai/chat/project/ProjectChatProfilePreparationService.java",
+        "src/main/java/io/mindspice/magenta2/ai/chat/project/ProjectChatToolRegistry.java",
+        "src/main/java/io/mindspice/magenta2/ai/chat/project/ProjectChatService.java",
+        "src/main/java/io/mindspice/magenta2/ai/chat/system/SystemChatActionProposalService.java",
+        "src/main/java/io/mindspice/magenta2/api/web/ProjectChatController.java",
+        "src/main/java/io/mindspice/magenta2/api/web/ProjectChatFragments.java",
+        "src/main/resources/static/js/orchestration/project-chat.js",
+        "src/main/resources/db/migrations/019-project-chat.sql",
+        "src/main/resources/schema.sql"
+      ],
+      "phase-08-console-integration-and-closeout.md": [
+        "src/main/java/io/mindspice/magenta2/api/web/ProjectConsoleController.java",
+        "src/main/java/io/mindspice/magenta2/api/web/ProjectConsoleFragments.java",
+        "src/main/java/io/mindspice/magenta2/api/web/AppNavigation.java",
+        "src/main/resources/static/css/orchestration.css",
+        "src/main/resources/static/js/orchestration/projects.js",
+        "docs/end-user/projects-and-workspaces.md",
+        "docs/end-user/plans-and-tasks.md",
+        "docs/end-user/jobs.md",
+        "docs/end-user/schedules-and-reactions.md",
+        "docs/end-user/chat.md",
+        "docs/technical/architecture.md",
+        "docs/technical/data-model.md",
+        "docs/technical/services.md",
+        "docs/technical/security.md",
+        "docs/technical/frontend-htmx.md",
+        "docs/technical/api-reference.md",
+        "docs/api/schedules-reactions.md",
+        ".internal-dev/specifications/architecture.md",
+        ".internal-dev/specifications/service-graph.md",
+        ".internal-dev/specifications/services.md",
+        ".internal-dev/specifications/api.md",
+        ".internal-dev/specifications/web.md",
+        ".internal-dev/specifications/simplypages.md",
+        ".internal-dev/specifications/decisions.md"
+      ]
+    },
+    "implementationModel": {
+      "provider": "deepseek",
+      "model": "deepseek-v4-pro",
+      "thinking": "max"
+    },
+    "validationModel": {
+      "provider": "openai-codex",
+      "model": "gpt-5.6-terra",
+      "thinking": "high"
+    }
+  },
+  "phases": [
+    {
+      "phase": "phase-01-authority-and-assignment-foundation.md",
+      "implementation": {
+        "agentModel": {
+          "provider": "deepseek",
+          "model": "deepseek-v4-pro",
+          "thinking": "max"
+        },
+        "report": "Implementation complete. 91 turns, 25min. 6 new files (AssignmentControlService, AssignmentQueryService, ProjectOperationsAccessService, migration 014, test file), 14 modified files. 1084 tests pass (24 new + 1060 existing). All criteria met: singular assignment authority, insert-only creation, field-level writer boundaries, gated project safety, scoped pagination with cursor snapshots, idempotent controls with priority CAS, secret-minimized DTOs, AgentJob excluded from project APIs, migration integrity proven. No blockers.",
+        "changedFiles": [
+          "src/main/java/io/mindspice/magenta2/ai/orchestration/runtime/AssignmentControlService.java",
+          "src/main/java/io/mindspice/magenta2/ai/orchestration/runtime/AssignmentQueryService.java",
+          "src/main/java/io/mindspice/magenta2/ai/orchestration/runtime/ProjectOperationsAccessService.java",
+          "src/main/resources/db/migrations/014-project-assignment-authority.sql",
+          "src/test/java/io/mindspice/magenta2/ai/orchestration/runtime/AssignmentAuthorityFoundationTest.java",
+          "src/main/java/io/mindspice/magenta2/ai/orchestration/runtime/AssignmentRequest.java",
+          "src/main/java/io/mindspice/magenta2/ai/orchestration/runtime/AssignmentService.java",
+          "src/main/java/io/mindspice/magenta2/ai/orchestration/runtime/OrchestrationRuntimeRepository.java",
+          "src/main/java/io/mindspice/magenta2/ai/orchestration/runtime/Project.java",
+          "src/main/java/io/mindspice/magenta2/ai/orchestration/runtime/ProjectRepository.java",
+          "src/main/java/io/mindspice/magenta2/ai/orchestration/runtime/ProjectService.java",
+          "src/main/java/io/mindspice/magenta2/ai/orchestration/runtime/WorkAssignment.java",
+          "src/main/java/io/mindspice/magenta2/api/web/ProjectController.java",
+          "src/main/java/io/mindspice/magenta2/core/persistence/SchemaMigrationRunner.java",
+          "src/main/resources/schema.sql",
+          "src/test/java/io/mindspice/magenta2/ai/orchestration/runtime/ProjectRepositoryTest.java",
+          "src/test/java/io/mindspice/magenta2/ai/orchestration/runtime/ProjectServiceTest.java",
+          "src/test/java/io/mindspice/magenta2/ai/orchestration/runtime/SettingsPrecedenceTest.java",
+          "src/test/java/io/mindspice/magenta2/api/web/ProjectConsoleControllerTest.java"
+        ],
+        "changedFileObservations": [
+          {
+            "path": "src/main/java/io/mindspice/magenta2/ai/orchestration/runtime/AssignmentControlService.java",
+            "status": "present",
+            "digest": "4e0d6a2d2bff147b0925205fba6e178c9c7c4b00dfbed97dc520b177d00194e2",
+            "bytes": 8538
+          },
+          {
+            "path": "src/main/java/io/mindspice/magenta2/ai/orchestration/runtime/AssignmentQueryService.java",
+            "status": "present",
+            "digest": "b634eaa33777649750a3cea9ab2cfaa7cad0168effe3f6fd2934ca8232d982ca",
+            "bytes": 14906
+          },
+          {
+            "path": "src/main/java/io/mindspice/magenta2/ai/orchestration/runtime/ProjectOperationsAccessService.java",
+            "status": "present",
+            "digest": "2cd2f8c2daf340250c7c00ede404603adb41fd73c394f7544e6858bf6eaece3b",
+            "bytes": 6542
+          },
+          {
+            "path": "src/main/resources/db/migrations/014-project-assignment-authority.sql",
+            "status": "present",
+            "digest": "a6eb8475c97fd9102186d2ca64c5606042ee62101244f136809cbe357cab563f",
+            "bytes": 2869
+          },
+          {
+            "path": "src/test/java/io/mindspice/magenta2/ai/orchestration/runtime/AssignmentAuthorityFoundationTest.java",
+            "status": "present",
+            "digest": "454186927dee402a25cd7f8d3ea10e7950076e2c7a50052d74bcf7861ce6a454",
+            "bytes": 18560
+          },
+          {
+            "path": "src/main/java/io/mindspice/magenta2/ai/orchestration/runtime/AssignmentRequest.java",
+            "status": "present",
+            "digest": "5de38fd45486e324110d681ceda4b6cf2b5bd7d9702708a80fb87ad2773fc5e6",
+            "bytes": 3392
+          },
+          {
+            "path": "src/main/java/io/mindspice/magenta2/ai/orchestration/runtime/AssignmentService.java",
+            "status": "present",
+            "digest": "663af937df92417585b954bb13591e3c72a64c7d92145abbca9323ed6f55df5d",
+            "bytes": 52449
+          },
+          {
+            "path": "src/main/java/io/mindspice/magenta2/ai/orchestration/runtime/OrchestrationRuntimeRepository.java",
+            "status": "present",
+            "digest": "fabb533236ac6b95c7c47e0639954b716968053495b5279c2956af00067ec591",
+            "bytes": 82643
+          },
+          {
+            "path": "src/main/java/io/mindspice/magenta2/ai/orchestration/runtime/Project.java",
+            "status": "present",
+            "digest": "7e6f25e1b2ccef6c0b3dca97615d432a982b9a31e4abd1a371652f5ab2859fcf",
+            "bytes": 618
+          },
+          {
+            "path": "src/main/java/io/mindspice/magenta2/ai/orchestration/runtime/ProjectRepository.java",
+            "status": "present",
+            "digest": "93b7a207def5cce7db63d8f470375b8d6c1c63b713a919baf632d244bfdd7453",
+            "bytes": 14619
+          },
+          {
+            "path": "src/main/java/io/mindspice/magenta2/ai/orchestration/runtime/ProjectService.java",
+            "status": "present",
+            "digest": "2587e46b67b250ec77a0e1f85585651a159b0dfe837df99390a8f50a5027986f",
+            "bytes": 11502
+          },
+          {
+            "path": "src/main/java/io/mindspice/magenta2/ai/orchestration/runtime/WorkAssignment.java",
+            "status": "present",
+            "digest": "de9692454a85d18ef8abb3e12107c2558e701cf084a7c8036c07f9d021938b26",
+            "bytes": 11200
+          },
+          {
+            "path": "src/main/java/io/mindspice/magenta2/api/web/ProjectController.java",
+            "status": "present",
+            "digest": "54020d9d2d2d206a96c3d2bd0a72369f4da1cd1badba171ef799eee2d098af1e",
+            "bytes": 8781
+          },
+          {
+            "path": "src/main/java/io/mindspice/magenta2/core/persistence/SchemaMigrationRunner.java",
+            "status": "present",
+            "digest": "abc49289d7973b01ab2244abe853baacab6491aa2d189a8e1ec1a336d557b2e6",
+            "bytes": 74473
+          },
+          {
+            "path": "src/main/resources/schema.sql",
+            "status": "present",
+            "digest": "fc4ed65f42bce74b7dee4e60b383faaba98d1c5efea4a3818797275d273ba44a",
+            "bytes": 79627
+          },
+          {
+            "path": "src/test/java/io/mindspice/magenta2/ai/orchestration/runtime/ProjectRepositoryTest.java",
+            "status": "present",
+            "digest": "3de52070d3c674cb4cdd880fd3e857e43dee288bbda3900d91f54b0d28708558",
+            "bytes": 6769
+          },
+          {
+            "path": "src/test/java/io/mindspice/magenta2/ai/orchestration/runtime/ProjectServiceTest.java",
+            "status": "present",
+            "digest": "c2962d48923fa9a71e495d3ca2b71c9cd1eb5acf370fff1601f6f11afa92a925",
+            "bytes": 5983
+          },
+          {
+            "path": "src/test/java/io/mindspice/magenta2/ai/orchestration/runtime/SettingsPrecedenceTest.java",
+            "status": "present",
+            "digest": "829c2c020c470d0f3b7f6ea6679c2a5bb2e46b12ea161bddde5d332e55c7f804",
+            "bytes": 3789
+          },
+          {
+            "path": "src/test/java/io/mindspice/magenta2/api/web/ProjectConsoleControllerTest.java",
+            "status": "present",
+            "digest": "31778efe4dcdfb3b80fbbb1d9ff6463a8d36a80209cb22f1e57d6ae636f6ce12",
+            "bytes": 5474
+          }
+        ],
+        "outsideDeclaredTargets": [
+          "src/test/java/io/mindspice/magenta2/ai/orchestration/runtime/AssignmentAuthorityFoundationTest.java",
+          "src/main/java/io/mindspice/magenta2/core/persistence/SchemaMigrationRunner.java",
+          "src/test/java/io/mindspice/magenta2/ai/orchestration/runtime/ProjectRepositoryTest.java",
+          "src/test/java/io/mindspice/magenta2/ai/orchestration/runtime/ProjectServiceTest.java",
+          "src/test/java/io/mindspice/magenta2/ai/orchestration/runtime/SettingsPrecedenceTest.java",
+          "src/test/java/io/mindspice/magenta2/api/web/ProjectConsoleControllerTest.java"
+        ],
+        "timestamp": "2026-07-29T17:59:49.203Z"
+      },
+      "validations": [
+        {
+          "agentModel": {
+            "provider": "openai-codex",
+            "model": "gpt-5.6-terra",
+            "thinking": "high"
+          },
+          "attempt": 1,
+          "verdict": "PASS",
+          "report": "Validator inspected and edited repository state. Found and fixed: whole-row assignment upsert replaced with insert-only/narrow methods, migration-014 warm-schema duplicate handling, cursor scope/membership validation, project-control error mapping. All fixes applied. 1084 tests pass. Bounded startup successful. git diff --check clean. All criteria met: singular authority, immutable attribution, insert-only creation, field-level writer boundaries, gated project safety, scoped pagination with cursor snapshots, idempotent controls, secret-minimized DTOs, AgentJob exclusion, project attribution capture, migration integrity. Remaining risks: none.",
+          "changedFiles": [
+            "src/main/java/io/mindspice/magenta2/ai/orchestration/runtime/AssignmentControlService.java",
+            "src/main/java/io/mindspice/magenta2/ai/orchestration/runtime/AssignmentQueryService.java",
+            "src/main/java/io/mindspice/magenta2/ai/orchestration/runtime/ProjectOperationsAccessService.java",
+            "src/main/resources/db/migrations/014-project-assignment-authority.sql",
+            "src/test/java/io/mindspice/magenta2/ai/orchestration/runtime/AssignmentAuthorityFoundationTest.java",
+            "src/main/java/io/mindspice/magenta2/ai/orchestration/runtime/AssignmentRequest.java",
+            "src/main/java/io/mindspice/magenta2/ai/orchestration/runtime/AssignmentService.java",
+            "src/main/java/io/mindspice/magenta2/ai/orchestration/runtime/OrchestrationRuntimeRepository.java",
+            "src/main/java/io/mindspice/magenta2/ai/orchestration/runtime/Project.java",
+            "src/main/java/io/mindspice/magenta2/ai/orchestration/runtime/ProjectRepository.java",
+            "src/main/java/io/mindspice/magenta2/ai/orchestration/runtime/ProjectService.java",
+            "src/main/java/io/mindspice/magenta2/ai/orchestration/runtime/WorkAssignment.java",
+            "src/main/java/io/mindspice/magenta2/api/web/ProjectController.java",
+            "src/main/java/io/mindspice/magenta2/core/persistence/SchemaMigrationRunner.java",
+            "src/main/resources/schema.sql",
+            "src/test/java/io/mindspice/magenta2/ai/orchestration/runtime/OrchestrationRuntimeFencingTest.java",
+            "src/test/java/io/mindspice/magenta2/ai/orchestration/runtime/ProjectRepositoryTest.java",
+            "src/test/java/io/mindspice/magenta2/ai/orchestration/runtime/ProjectServiceTest.java",
+            "src/test/java/io/mindspice/magenta2/ai/orchestration/runtime/SettingsPrecedenceTest.java",
+            "src/test/java/io/mindspice/magenta2/api/web/ProjectConsoleControllerTest.java"
+          ],
+          "changedFileObservations": [
+            {
+              "path": "src/main/java/io/mindspice/magenta2/ai/orchestration/runtime/AssignmentControlService.java",
+              "status": "present",
+              "digest": "1bf2a3d68c482420c9669efc5c80655f6e3f5d134ddbabc5a3364b752440d706",
+              "bytes": 10186
+            },
+            {
+              "path": "src/main/java/io/mindspice/magenta2/ai/orchestration/runtime/AssignmentQueryService.java",
+              "status": "present",
+              "digest": "5b439eb0f42c8bad441cc45aa5d10ffb3459dc35626bbef6b13b7a53bb4dc918",
+              "bytes": 17471
+            },
+            {
+              "path": "src/main/java/io/mindspice/magenta2/ai/orchestration/runtime/ProjectOperationsAccessService.java",
+              "status": "present",
+              "digest": "16ef1f4f2d2f8c0283c1bab5bd364ef96022f764a8ac97e6097aebea52d016af",
+              "bytes": 6913
+            },
+            {
+              "path": "src/main/resources/db/migrations/014-project-assignment-authority.sql",
+              "status": "present",
+              "digest": "67f98ad2bb010a5db876e2a347e4a50382b3b96f3aa4dbef48f2d2e87d9bf60d",
+              "bytes": 3589
+            },
+            {
+              "path": "src/test/java/io/mindspice/magenta2/ai/orchestration/runtime/AssignmentAuthorityFoundationTest.java",
+              "status": "present",
+              "digest": "6af08abf679de15ba387b66155a8a0da047a52a76b46fa1d8c2650c359457bdc",
+              "bytes": 18009
+            },
+            {
+              "path": "src/main/java/io/mindspice/magenta2/ai/orchestration/runtime/AssignmentRequest.java",
+              "status": "present",
+              "digest": "5de38fd45486e324110d681ceda4b6cf2b5bd7d9702708a80fb87ad2773fc5e6",
+              "bytes": 3392
+            },
+            {
+              "path": "src/main/java/io/mindspice/magenta2/ai/orchestration/runtime/AssignmentService.java",
+              "status": "present",
+              "digest": "6eebc6248231e3c744fac400d70eeedb701ab4ff41ab81c0b965f3f3203de28c",
+              "bytes": 53955
+            },
+            {
+              "path": "src/main/java/io/mindspice/magenta2/ai/orchestration/runtime/OrchestrationRuntimeRepository.java",
+              "status": "present",
+              "digest": "957b4967fc45a65b8494be4bcf39c933322e38154482b6fd869d4761fe26064b",
+              "bytes": 80874
+            },
+            {
+              "path": "src/main/java/io/mindspice/magenta2/ai/orchestration/runtime/Project.java",
+              "status": "present",
+              "digest": "7e6f25e1b2ccef6c0b3dca97615d432a982b9a31e4abd1a371652f5ab2859fcf",
+              "bytes": 618
+            },
+            {
+              "path": "src/main/java/io/mindspice/magenta2/ai/orchestration/runtime/ProjectRepository.java",
+              "status": "present",
+              "digest": "93b7a207def5cce7db63d8f470375b8d6c1c63b713a919baf632d244bfdd7453",
+              "bytes": 14619
+            },
+            {
+              "path": "src/main/java/io/mindspice/magenta2/ai/orchestration/runtime/ProjectService.java",
+              "status": "present",
+              "digest": "4f92cd902679c340a5cc889dae3beb4c31cfbec4c6d0ac7c551d0a36430c8d94",
+              "bytes": 11219
+            },
+            {
+              "path": "src/main/java/io/mindspice/magenta2/ai/orchestration/runtime/WorkAssignment.java",
+              "status": "present",
+              "digest": "de9692454a85d18ef8abb3e12107c2558e701cf084a7c8036c07f9d021938b26",
+              "bytes": 11200
+            },
+            {
+              "path": "src/main/java/io/mindspice/magenta2/api/web/ProjectController.java",
+              "status": "present",
+              "digest": "99f23a78a95261eec5b7cf70b847fb8f2889a5671524f8d26b110976ad0e90bf",
+              "bytes": 8971
+            },
+            {
+              "path": "src/main/java/io/mindspice/magenta2/core/persistence/SchemaMigrationRunner.java",
+              "status": "present",
+              "digest": "21b63b8774df154fb9471defd8a5924e51326dc589c32f360e37d77ccf97416b",
+              "bytes": 78894
+            },
+            {
+              "path": "src/main/resources/schema.sql",
+              "status": "present",
+              "digest": "752a6ffe5d10869c06ff114f894170b227bfeb3199a2cee07abe4adc9e60ccc2",
+              "bytes": 79600
+            },
+            {
+              "path": "src/test/java/io/mindspice/magenta2/ai/orchestration/runtime/OrchestrationRuntimeFencingTest.java",
+              "status": "present",
+              "digest": "96272f3a37d49a59926093a66041cc99d044e84ac84b926acc353a85f4abdde4",
+              "bytes": 4576
+            },
+            {
+              "path": "src/test/java/io/mindspice/magenta2/ai/orchestration/runtime/ProjectRepositoryTest.java",
+              "status": "present",
+              "digest": "3de52070d3c674cb4cdd880fd3e857e43dee288bbda3900d91f54b0d28708558",
+              "bytes": 6769
+            },
+            {
+              "path": "src/test/java/io/mindspice/magenta2/ai/orchestration/runtime/ProjectServiceTest.java",
+              "status": "present",
+              "digest": "7eba3c9680e41b558db78cd11978acd3668da40850862e3e132755f007c39a08",
+              "bytes": 6687
+            },
+            {
+              "path": "src/test/java/io/mindspice/magenta2/ai/orchestration/runtime/SettingsPrecedenceTest.java",
+              "status": "present",
+              "digest": "829c2c020c470d0f3b7f6ea6679c2a5bb2e46b12ea161bddde5d332e55c7f804",
+              "bytes": 3789
+            },
+            {
+              "path": "src/test/java/io/mindspice/magenta2/api/web/ProjectConsoleControllerTest.java",
+              "status": "present",
+              "digest": "31778efe4dcdfb3b80fbbb1d9ff6463a8d36a80209cb22f1e57d6ae636f6ce12",
+              "bytes": 5474
+            }
+          ],
+          "outsideDeclaredTargets": [
+            "src/test/java/io/mindspice/magenta2/ai/orchestration/runtime/AssignmentAuthorityFoundationTest.java",
+            "src/main/java/io/mindspice/magenta2/core/persistence/SchemaMigrationRunner.java",
+            "src/test/java/io/mindspice/magenta2/ai/orchestration/runtime/OrchestrationRuntimeFencingTest.java",
+            "src/test/java/io/mindspice/magenta2/ai/orchestration/runtime/ProjectRepositoryTest.java",
+            "src/test/java/io/mindspice/magenta2/ai/orchestration/runtime/ProjectServiceTest.java",
+            "src/test/java/io/mindspice/magenta2/ai/orchestration/runtime/SettingsPrecedenceTest.java",
+            "src/test/java/io/mindspice/magenta2/api/web/ProjectConsoleControllerTest.java"
+          ],
+          "timestamp": "2026-07-29T18:19:53.359Z"
+        }
+      ]
+    },
+    {
+      "phase": "phase-02-project-queue-and-console-seams.md",
+      "validations": []
+    },
+    {
+      "phase": "phase-03-lightweight-project-tasks.md",
+      "validations": []
+    },
+    {
+      "phase": "phase-04-project-jobs-and-reassignment.md",
+      "validations": []
+    },
+    {
+      "phase": "phase-05-materialization-templates-files-outputs.md",
+      "validations": []
+    },
+    {
+      "phase": "phase-06-project-automation-and-events.md",
+      "validations": []
+    },
+    {
+      "phase": "phase-07-project-chat.md",
+      "validations": []
+    },
+    {
+      "phase": "phase-08-console-integration-and-closeout.md",
+      "validations": []
+    }
+  ],
+  "integrationValidations": [],
+  "createdAt": "2026-07-29T17:32:58.764Z",
+  "updatedAt": "2026-07-29T18:19:53.359Z"
+}

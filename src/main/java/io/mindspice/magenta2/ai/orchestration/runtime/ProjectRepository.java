@@ -60,9 +60,9 @@ public class ProjectRepository {
                 insert into projects (
                     id, name, description, owner_agent_id, git_repo_url,
                     prompt_profile, model, settings_override_json,
-                    created_at, updated_at
+                    archived, created_at, updated_at
                 )
-                values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 on conflict(id) do update set
                     name = excluded.name,
                     description = excluded.description,
@@ -77,9 +77,22 @@ public class ProjectRepository {
             project.ownerAgentId(), project.gitRepoUrl(),
             project.promptProfile(), project.model(),
             project.settingsOverrideJson(),
+            project.archived() ? 1 : 0,
             createdAt.toString(), updatedAt.toString()
         );
         return findById(project.id()).orElseThrow();
+    }
+
+    public void archive(String id) {
+        jdbcTemplate.update(
+            "update projects set archived = 1, updated_at = ? where id = ? and archived = 0",
+            Instant.now().toString(), id);
+    }
+
+    public void restore(String id) {
+        jdbcTemplate.update(
+            "update projects set archived = 0, updated_at = ? where id = ? and archived = 1",
+            Instant.now().toString(), id);
     }
 
     public void delete(String id) {
@@ -199,9 +212,18 @@ public class ProjectRepository {
             rs.getString("prompt_profile"),
             rs.getString("model"),
             rs.getString("settings_override_json"),
+            readArchived(rs),
             Instant.parse(rs.getString("created_at")),
             Instant.parse(rs.getString("updated_at"))
         );
+    }
+
+    private boolean readArchived(ResultSet rs) {
+        try {
+            return rs.getInt("archived") == 1;
+        } catch (SQLException e) {
+            return false;
+        }
     }
 
     private ProjectAgentMembership membershipFromRow(ResultSet rs) throws SQLException {
@@ -244,9 +266,20 @@ public class ProjectRepository {
                 prompt_profile text,
                 model text,
                 settings_override_json text,
+                archived integer not null default 0 check (archived in (0, 1)),
                 created_at text not null,
                 updated_at text not null
             )
+            """);
+        // Add archived column if missing on existing databases
+        java.util.List<String> columns = jdbcTemplate.queryForList(
+            "select name from pragma_table_info('projects')", String.class);
+        if (!columns.contains("archived")) {
+            jdbcTemplate.execute("alter table projects add column archived integer not null default 0 check (archived in (0, 1))");
+        }
+        jdbcTemplate.execute("""
+            create index if not exists idx_projects_archived
+                on projects (archived, updated_at desc)
             """);
     }
 
@@ -299,10 +332,10 @@ public class ProjectRepository {
             jdbcTemplate.execute("""
                 insert into projects (
                     id, name, description, owner_agent_id, git_repo_url,
-                    prompt_profile, model, settings_override_json, created_at, updated_at
+                    prompt_profile, model, settings_override_json, archived, created_at, updated_at
                 )
                 select id, name, description, owner_agent_id, git_repo_url,
-                    prompt_profile, model, settings_override_json, created_at, updated_at
+                    prompt_profile, model, settings_override_json, 0, created_at, updated_at
                 from projects_owner_migration
                 """);
             jdbcTemplate.execute("drop table projects_owner_migration");

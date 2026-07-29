@@ -25,7 +25,7 @@ class OrchestrationRuntimeFencingTest {
         }
         repository = new OrchestrationRuntimeRepository(
                 new org.springframework.jdbc.core.JdbcTemplate(dataSource), new ObjectMapper());
-        repository.saveAssignment(queuedAssignment("assignment-1"));
+        repository.insertAssignment(queuedAssignment("assignment-1"));
     }
 
     @Test

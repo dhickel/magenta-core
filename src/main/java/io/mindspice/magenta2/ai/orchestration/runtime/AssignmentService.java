@@ -48,6 +48,7 @@ public class AssignmentService {
     private final WorkspaceDirectoryService workspaceDirectoryService;
     private final TaskRunLifecycleService taskRunLifecycleService;
     private final AgentContextService agentContextService;
+    private final ProjectOperationsAccessService projectAccessService;
     private volatile Consumer<String> localInterruptHandler = ignored -> { };
 
     public AssignmentService(
@@ -56,7 +57,7 @@ public class AssignmentService {
         RuntimeSettingsService runtimeSettingsService,
         JobService jobService
     ) {
-        this(repository, agentProfileService, runtimeSettingsService, jobService, null, null, null, null, null, null);
+        this(repository, agentProfileService, runtimeSettingsService, jobService, null, null, null, null, null, null, null);
     }
 
     public AssignmentService(
@@ -70,7 +71,7 @@ public class AssignmentService {
         WorkspaceDirectoryService workspaceDirectoryService
     ) {
         this(repository, agentProfileService, runtimeSettingsService, jobService, auditRepository,
-            planService, workflowService, workspaceDirectoryService, null, null);
+            planService, workflowService, workspaceDirectoryService, null, null, null);
     }
 
     @Autowired
@@ -84,7 +85,8 @@ public class AssignmentService {
         @Autowired(required = false) WorkflowService workflowService,
         @Autowired(required = false) WorkspaceDirectoryService workspaceDirectoryService,
         @Autowired(required = false) TaskRunLifecycleService taskRunLifecycleService,
-        @Autowired(required = false) AgentContextService agentContextService
+        @Autowired(required = false) AgentContextService agentContextService,
+        @Autowired(required = false) ProjectOperationsAccessService projectAccessService
     ) {
         this.repository = repository;
         this.agentProfileService = agentProfileService;
@@ -96,6 +98,7 @@ public class AssignmentService {
         this.workspaceDirectoryService = workspaceDirectoryService;
         this.taskRunLifecycleService = taskRunLifecycleService;
         this.agentContextService = agentContextService;
+        this.projectAccessService = projectAccessService;
     }
 
     @Transactional
@@ -120,7 +123,25 @@ public class AssignmentService {
             jobService.getDefinition(request.jobId());
         }
         Map<String, Object> input = inputWithProjectContext(request);
-        String projectId = normalize(firstText(request.projectId(), text(input.get("projectId"))));
+        String projectId = normalize(request.projectId());
+        String inputProjectId = normalize(text(input.get("projectId")));
+        if (StringUtils.hasText(inputProjectId) && !java.util.Objects.equals(projectId, inputProjectId)) {
+            throw new IllegalArgumentException("Contradictory projectId in assignment input");
+        }
+        // Project identity is typed submission attribution, never an input-map authority.
+        // Keep a matching transport value for compatibility, but it is not read
+        // when attribution is persisted or later evaluated.
+        if (projectId != null) {
+            input.put("projectId", projectId);
+        }
+
+        // Project safety gate: require active project and eligible executor for project-attributed submission
+        if (StringUtils.hasText(projectId)) {
+            if (projectAccessService == null) {
+                throw new IllegalStateException("Project access capability is unavailable");
+            }
+            projectAccessService.requireEligibleSubmission(projectId, request.agentId());
+        }
 
         // Resolve workspace selection: type/key both absent or both present
         ResolvedSelection selection = resolveWorkspaceSelection(
@@ -153,6 +174,11 @@ public class AssignmentService {
         }
 
         String bindingKey = "assignment:" + assignmentId;
+        if (StringUtils.hasText(request.contextBindingKey())
+                && !bindingKey.equals(request.contextBindingKey().trim())) {
+            throw new IllegalArgumentException("contextBindingKey is server-derived and cannot be selected by the caller");
+        }
+        String sourceDefinitionId = sourceDefinitionId(request, input);
         // The capture and owner-link are mandatory. This transaction rolls back the
         // operation reservation if either one cannot be persisted.
         agentContextService.captureDefaultOrPersonalHome(request.agentId(), bindingKey,
@@ -160,12 +186,13 @@ public class AssignmentService {
         agentContextService.linkOwner("ASSIGNMENT", assignmentId, bindingKey,
             "assignment-owner-link:" + operationKey);
 
-        WorkAssignment assignment = repository.saveAssignment(new WorkAssignment(
+        WorkAssignment assignment = repository.insertAssignment(new WorkAssignment(
             assignmentId, request.agentId(), normalize(request.jobId()), normalize(request.jobItemId()),
             request.assignmentType(), normalize(request.runDisplayName()), request.priority() == null ? 0 : request.priority(),
             OrchestrationStatus.QUEUED, normalize(request.modelOverride()), selection.workspaceType(),
-            selection.workspaceKey(), selection.workspaceIdentity(), projectId, 0, Map.of(), input, Map.of(), Map.of(),
-            null, null, null, null, null, null, null, null, null
+            selection.workspaceKey(), selection.workspaceIdentity(), projectId,
+            sourceDefinitionId, bindingKey, 0, 0, Map.of(), input, Map.of(), Map.of(),
+            null, null, null, 0L, null, null, null, null, null, null
         ));
         WorkAssignment reserved = reserveLifecycleAtSubmission(assignment, operationKey, bindingKey);
         String taskRunId = text(reserved.checkpoint().get("taskRunId"));
@@ -240,9 +267,10 @@ public class AssignmentService {
     private WorkAssignment reserveLifecycleAtSubmission(WorkAssignment assignment, String operationKey, String bindingKey) {
         if (!isTaskRunAssignment(assignment.assignmentType())) {
             Map<String, Object> checkpoint = Map.of("contextBindingKey", bindingKey);
-            return repository.saveAssignment(copy(assignment, assignment.status(), assignment.currentItemIndex(), checkpoint,
-                assignment.output(), assignment.evidence(), assignment.errorText(), assignment.leaseOwner(),
-                assignment.leaseExpiresAt(), assignment.completedAt()));
+            return repository.updateUnleasedAssignment(copy(assignment, assignment.status(), assignment.currentItemIndex(), checkpoint,
+                assignment.output(), assignment.evidence(), assignment.errorText(), null,
+                null, assignment.completedAt()), assignment.status()).orElseThrow(() ->
+                    new IllegalStateException("Assignment changed before lifecycle reservation"));
         }
         if (taskRunLifecycleService == null) {
             throw new IllegalStateException("Task-run lifecycle service is unavailable");
@@ -277,9 +305,10 @@ public class AssignmentService {
         checkpoint.put("lifecycleInputDigest", inputDigest);
         checkpoint.put("attemptNumber", lifecycle.attemptNumber());
         checkpoint.put("contextBindingKey", bindingKey); // compatibility only; runner verifies owner links.
-        return repository.saveAssignment(copy(assignment, assignment.status(), assignment.currentItemIndex(),
+        return repository.updateUnleasedAssignment(copy(assignment, assignment.status(), assignment.currentItemIndex(),
             checkpoint, assignment.output(), assignment.evidence(), assignment.errorText(),
-            assignment.leaseOwner(), assignment.leaseExpiresAt(), assignment.completedAt()));
+            null, null, assignment.completedAt()), assignment.status()).orElseThrow(() ->
+                new IllegalStateException("Assignment changed before lifecycle reservation"));
     }
 
     private String submissionIntentDigest(AssignmentRequest request, String projectId,
@@ -290,6 +319,24 @@ public class AssignmentService {
             request.agentId(), request.assignmentType().name(), String.valueOf(normalize(request.jobId())),
             String.valueOf(normalize(request.jobItemId())), String.valueOf(projectId), selection.workspaceType(),
             selection.workspaceKey(), canonicalInput)));
+    }
+
+    private String sourceDefinitionId(AssignmentRequest request, Map<String, Object> input) {
+        String supplied = normalize(request.sourceDefinitionId());
+        if (!isTaskRunAssignment(request.assignmentType())) {
+            return supplied;
+        }
+        String derived = switch (request.assignmentType()) {
+            case TASK_RUN -> requireSourceId(input, "taskId", "planId");
+            case WORKFLOW_RUN -> requireSourceId(input, "workflowId");
+            case JOB_RUN -> StringUtils.hasText(request.jobId())
+                ? request.jobId().trim() : requireSourceId(input, "jobId");
+            default -> throw new IllegalArgumentException("Assignment has no source definition");
+        };
+        if (supplied != null && !supplied.equals(derived)) {
+            throw new IllegalArgumentException("sourceDefinitionId conflicts with the typed executable source");
+        }
+        return derived;
     }
 
     private boolean isTaskRunAssignment(AssignmentType type) {
@@ -535,10 +582,11 @@ public class AssignmentService {
             throw new IllegalStateException("Only terminal or interrupted assignments can be retried or replayed");
         }
         String newAssignmentId = UUID.randomUUID().toString();
-        WorkAssignment child = repository.saveAssignment(new WorkAssignment(
+        WorkAssignment child = repository.insertAssignment(new WorkAssignment(
             newAssignmentId, source.agentId(), source.jobId(), source.jobItemId(), source.assignmentType(),
             source.runDisplayName(), source.priority(), OrchestrationStatus.QUEUED, source.modelOverride(),
             source.workspaceType(), source.workspaceKey(), source.workspaceIdentity(), source.projectId(),
+            source.sourceDefinitionId(), "assignment:" + newAssignmentId, 0,
             0, Map.of(), source.input(), Map.of(), Map.of(), null, null, null, 0L,
             null, null, null, null, null, null));
 
@@ -571,8 +619,9 @@ public class AssignmentService {
         checkpoint.put("lineageMode", mode.name());
         checkpoint.put("contextBindingKey", newBindingKey);
         linkTaskRunBinding(lifecycle.taskRunId(), newAssignmentId, newBindingKey);
-        return repository.saveAssignment(copy(child, child.status(), 0, checkpoint, Map.of(), Map.of(),
-            null, null, null, null));
+        return repository.updateUnleasedAssignment(copy(child, child.status(), 0, checkpoint, Map.of(), Map.of(),
+            null, null, null, null), child.status()).orElseThrow(() ->
+                new IllegalStateException("Lineage assignment changed before reservation"));
     }
 
     /**
@@ -706,12 +755,6 @@ public class AssignmentService {
         return runtimeSettingsService.resolveModel(key, null);
     }
 
-    // Private: all external mutation must go through fenced paths or
-    // public lifecycle methods that validate state transitions.
-    private WorkAssignment save(WorkAssignment assignment) {
-        return repository.saveAssignment(assignment);
-    }
-
     WorkAssignment saveIfLeaseOwner(WorkAssignment assignment, String leaseOwner) {
         return repository.saveAssignmentIfLeaseOwner(assignment, leaseOwner)
             .orElseThrow(() -> new StaleAssignmentLeaseException(
@@ -754,7 +797,7 @@ public class AssignmentService {
 
     WorkAssignment saveStatus(WorkAssignment assignment, OrchestrationStatus status) {
         Instant completedAt = isTerminal(status) ? Instant.now() : assignment.completedAt();
-        return repository.saveAssignment(copy(
+        return repository.updateUnleasedAssignment(copy(
             assignment,
             status,
             assignment.currentItemIndex(),
@@ -765,7 +808,8 @@ public class AssignmentService {
             null,
             null,
             completedAt
-        ));
+        ), assignment.status()).orElseThrow(() ->
+            new IllegalStateException("Assignment changed before lifecycle transition"));
     }
 
     WorkAssignment copy(
@@ -785,6 +829,7 @@ public class AssignmentService {
             assignment.assignmentType(), assignment.runDisplayName(), assignment.priority(), status,
             assignment.modelOverride(), assignment.workspaceType(), assignment.workspaceKey(),
             assignment.workspaceIdentity(), assignment.projectId(),
+            assignment.sourceDefinitionId(), assignment.contextBindingKey(), assignment.rowVersion(),
             currentItemIndex, checkpoint == null ? Map.of() : checkpoint, assignment.input(),
             output == null ? Map.of() : output, evidence == null ? Map.of() : evidence, errorText,
             leaseOwner, leaseExpiresAt, assignment.leaseFence(),
@@ -979,12 +1024,7 @@ public class AssignmentService {
     }
 
     private Map<String, Object> inputWithProjectContext(AssignmentRequest request) {
-        Map<String, Object> input = request.input() == null ? Map.of() : request.input();
-        String projectId = firstText(request.projectId(), text(input.get("projectId")));
-        if (!StringUtils.hasText(projectId)) return input;
-        Map<String, Object> merged = new LinkedHashMap<>(input);
-        merged.put("projectId", projectId.trim());
-        return merged;
+        return new LinkedHashMap<>(request.input() == null ? Map.of() : request.input());
     }
 
     public record LinkedRunStatus(String type, String id, String parentId, String status, String errorText) {}

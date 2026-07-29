@@ -5,6 +5,7 @@ import java.util.List;
 import io.mindspice.magenta2.ai.orchestration.runtime.Project;
 import io.mindspice.magenta2.ai.orchestration.runtime.ProjectAgentMembership;
 import io.mindspice.magenta2.ai.orchestration.runtime.ProjectEvent;
+import io.mindspice.magenta2.ai.orchestration.runtime.ProjectOperationsAccessService.ProjectAccessDeniedException;
 import io.mindspice.magenta2.ai.orchestration.runtime.ProjectService;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -106,7 +107,7 @@ public class ProjectController {
             projectService.removeAgent(projectId, agentId);
         } catch (IllegalArgumentException e) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, e.getMessage());
-        } catch (IllegalStateException e) {
+        } catch (ProjectAccessDeniedException | IllegalStateException e) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, e.getMessage());
         }
     }
@@ -119,6 +120,32 @@ public class ProjectController {
     public Object network(@PathVariable String projectId) {
         var members = projectService.listMembers(projectId);
         return new NetworkResponse(projectId, members);
+    }
+
+    // ════════════════════════════════════════════════════════════════
+    //  Archive / Restore
+    // ════════════════════════════════════════════════════════════════
+
+    @PostMapping("/api/projects/{projectId}/archive")
+    public void archive(@PathVariable String projectId) {
+        try {
+            projectService.archiveProject(projectId);
+        } catch (IllegalArgumentException e) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, e.getMessage());
+        } catch (ProjectAccessDeniedException e) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, e.getMessage());
+        }
+    }
+
+    @PostMapping("/api/projects/{projectId}/restore")
+    public void restore(@PathVariable String projectId) {
+        try {
+            projectService.restoreProject(projectId);
+        } catch (IllegalArgumentException e) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, e.getMessage());
+        } catch (ProjectAccessDeniedException | IllegalStateException e) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, e.getMessage());
+        }
     }
 
     // ════════════════════════════════════════════════════════════════

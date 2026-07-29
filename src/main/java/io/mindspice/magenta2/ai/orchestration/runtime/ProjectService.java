@@ -24,21 +24,27 @@ public class ProjectService {
     private final WorkspaceDirectoryService workspaceDirectoryService;
     private final OrchestrationRuntimeRepository runtimeRepository;
     private final JobRepository jobRepository;
+    private final ProjectOperationsAccessService accessService;
+    private final AssignmentQueryService queryService;
 
     public ProjectService(ProjectRepository projectRepository,
                           WorkspaceDirectoryService workspaceDirectoryService) {
-        this(projectRepository, workspaceDirectoryService, null, null);
+        this(projectRepository, workspaceDirectoryService, null, null, null, null);
     }
 
     @Autowired
     public ProjectService(ProjectRepository projectRepository,
                           WorkspaceDirectoryService workspaceDirectoryService,
                           OrchestrationRuntimeRepository runtimeRepository,
-                          @Autowired(required = false) JobRepository jobRepository) {
+                          @Autowired(required = false) JobRepository jobRepository,
+                          @Autowired(required = false) ProjectOperationsAccessService accessService,
+                          @Autowired(required = false) AssignmentQueryService queryService) {
         this.projectRepository = projectRepository;
         this.workspaceDirectoryService = workspaceDirectoryService;
         this.runtimeRepository = runtimeRepository;
         this.jobRepository = jobRepository;
+        this.accessService = accessService;
+        this.queryService = queryService;
     }
 
     // ════════════════════════════════════════════════════════════════
@@ -69,7 +75,7 @@ public class ProjectService {
 
         Project project = new Project(
             id, name.trim(), normalize(description), legacyOwnerAgentId,
-            normalize(gitRepoUrl), null, null, null, now, now
+            normalize(gitRepoUrl), null, null, null, false, now, now
         );
         Project saved = projectRepository.save(project);
 
@@ -94,6 +100,7 @@ public class ProjectService {
             promptProfile != null ? normalize(promptProfile) : existing.promptProfile(),
             model != null ? normalize(model) : existing.model(),
             settingsOverrideJson != null ? settingsOverrideJson : existing.settingsOverrideJson(),
+            existing.archived(),
             existing.createdAt(),
             Instant.now()
         ));
@@ -115,7 +122,11 @@ public class ProjectService {
 
     private ProjectAgentMembership addAgent(String projectId, String agentId,
                                              String role, Instant joinedAt) {
-        getProject(projectId);
+        if (accessService != null) {
+            accessService.requireActiveProject(projectId);
+        } else {
+            getProject(projectId);
+        }
         if (!StringUtils.hasText(agentId)) {
             throw new IllegalArgumentException("Agent ID is required");
         }
@@ -127,9 +138,7 @@ public class ProjectService {
     }
 
     public void removeAgent(String projectId, String agentId) {
-        getProject(projectId);
-        requireProjectMembershipRemovalAllowed(projectId, agentId);
-        projectRepository.deleteMembership(projectId, agentId);
+        requireAccessService().removeMember(projectId, agentId);
     }
 
     public List<ProjectAgentMembership> listMembers(String projectId) {
@@ -171,6 +180,18 @@ public class ProjectService {
     }
 
     // ════════════════════════════════════════════════════════════════
+    //  Project Archive / Restore
+    // ════════════════════════════════════════════════════════════════
+
+    public void archiveProject(String projectId) {
+        requireAccessService().archiveProject(projectId);
+    }
+
+    public void restoreProject(String projectId) {
+        requireAccessService().restoreProject(projectId);
+    }
+
+    // ════════════════════════════════════════════════════════════════
     //  Project Events
     // ════════════════════════════════════════════════════════════════
 
@@ -203,6 +224,13 @@ public class ProjectService {
     }
 
     // ── Helpers ──
+
+    private ProjectOperationsAccessService requireAccessService() {
+        if (accessService == null) {
+            throw new IllegalStateException("Project operations access service is unavailable");
+        }
+        return accessService;
+    }
 
     private String normalize(String value) {
         return StringUtils.hasText(value) ? value.trim() : null;
