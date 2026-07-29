@@ -10,7 +10,7 @@ Source plan `.internal-dev/plans/20260729-163244-home-dhickel-code-java-magenta-
 - phase-02-project-queue-and-console-seams.md: wave-02, implementation recorded, validation passed (3 attempt(s))
 - phase-03-lightweight-project-tasks.md: wave-03, implementation recorded, validation passed (2 attempt(s))
 - phase-04-project-jobs-and-reassignment.md: wave-04, implementation recorded, validation passed (2 attempt(s))
-- phase-05-materialization-templates-files-outputs.md: wave-05, implementation recorded, validation implemented (0 attempt(s))
+- phase-05-materialization-templates-files-outputs.md: wave-05, implementation recorded, validation passed (2 attempt(s))
 - phase-06-project-automation-and-events.md: wave-06, implementation not recorded, validation pending (0 attempt(s))
 - phase-07-project-chat.md: wave-07, implementation not recorded, validation pending (0 attempt(s))
 - phase-08-console-integration-and-closeout.md: wave-08, implementation not recorded, validation pending (0 attempt(s))
@@ -46,8 +46,10 @@ Source plan `.internal-dev/plans/20260729-163244-home-dhickel-code-java-magenta-
 - `phase-03-lightweight-project-tasks.md` attempt 2: PASS at 2026-07-29T20:49:20.477Z
 - `phase-04-project-jobs-and-reassignment.md` attempt 1: BLOCKED at 2026-07-29T21:13:49.311Z
 - `phase-04-project-jobs-and-reassignment.md` attempt 2: PASS at 2026-07-29T21:30:11.647Z
+- `phase-05-materialization-templates-files-outputs.md` attempt 1: BLOCKED at 2026-07-29T22:26:09.633Z
+- `phase-05-materialization-templates-files-outputs.md` attempt 2: PASS at 2026-07-29T22:34:26.147Z
 Integration validation not recorded.
 
 ## Outcome
 
-Active, revision 13.
+Active, revision 15.
