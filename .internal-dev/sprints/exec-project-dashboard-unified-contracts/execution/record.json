@@ -2,7 +2,7 @@
   "version": 2,
   "runId": "exec-project-dashboard-unified-contracts",
   "state": "active",
-  "revision": 5,
+  "revision": 9,
   "source": {
     "projectRoot": "/home/dhickel/Code/Java/Magenta",
     "sourcePlanPath": ".internal-dev/plans/20260729-163244-home-dhickel-code-java-magenta-internal-dev-ha",
@@ -657,8 +657,6 @@
             "model": "gpt-5.6-terra",
             "thinking": "high"
           },
-          "attempt": 1,
-          "verdict": "BLOCKED",
           "report": "Validator repaired code extensively (project console controller, fragments, work controller, query service, control service, repository, CSS, JS, tests) and committed. All code criteria PASS. BLOCKED solely because Playwright live UI validation cannot run inside the validator session (no subagent tools). Must run Playwright from root orchestrator.",
           "changedFiles": [
             "src/main/java/io/mindspice/magenta2/api/web/ProjectConsoleFragments.java",
@@ -764,7 +762,9 @@
             "src/test/java/io/mindspice/magenta2/api/web/OrchestrationControllerTest.java",
             "src/test/java/io/mindspice/magenta2/ai/orchestration/runtime/AssignmentAuthorityFoundationTest.java"
           ],
-          "timestamp": "2026-07-29T19:03:05.820Z"
+          "timestamp": "2026-07-29T19:03:05.820Z",
+          "attempt": 1,
+          "verdict": "BLOCKED"
         },
         {
           "agentModel": {
@@ -772,8 +772,6 @@
             "model": "gpt-5.6-terra",
             "thinking": "high"
           },
-          "attempt": 2,
-          "verdict": "BLOCKED",
           "report": "Second review restored Dashboard and Members to their established functional registry entries, served a static favicon, and repaired the reported project-console CSS issues. Focused controller tests, all 1090 Maven tests, and a bounded live HTTP startup check passed. The fresh required post-repair Playwright desktop/mobile screenshot and console pass could not run through this validator because no subagent workflow is available; the earlier Playwright result is defect evidence, not post-repair proof.",
           "changedFiles": [
             "src/main/java/io/mindspice/magenta2/api/web/ProjectConsoleController.java",
@@ -785,13 +783,127 @@
             ".internal-dev/changelogs/2026-07-29-phase-02-project-console-regression-repair.md",
             ".internal-dev/knowledge/project-queue-scoped-fragment-pattern.md"
           ],
-          "timestamp": "2026-07-29T19:13:38Z"
+          "changedFileObservations": [
+            {
+              "path": "src/main/java/io/mindspice/magenta2/api/web/ProjectConsoleController.java",
+              "status": "present",
+              "digest": "01fbe5162714760e20e336b8f4708a1b0786c96565ede28aea16b2826df6fef1",
+              "bytes": 66340
+            },
+            {
+              "path": "src/main/java/io/mindspice/magenta2/api/web/ProjectConsoleFragments.java",
+              "status": "present",
+              "digest": "c632914fbd9b6e271ca35225589ec40f3c12055c4c133b7eed3771bd9388edf9",
+              "bytes": 10935
+            },
+            {
+              "path": "src/main/resources/static/css/orchestration.css",
+              "status": "present",
+              "digest": "3ab9869da8df2ccfc493246891c008b1dce87377656a890066f91a93ce10b162",
+              "bytes": 80647
+            },
+            {
+              "path": "src/main/resources/static/favicon.ico",
+              "status": "present",
+              "digest": "b921337c8497f50282e39cfa0ba58d3462121021f4cc15c3f542d46e51b1edfe",
+              "bytes": 1150
+            },
+            {
+              "path": "src/test/java/io/mindspice/magenta2/api/web/ProjectConsoleControllerTest.java",
+              "status": "present",
+              "digest": "6d05adac016fb59c9c0c8bae981e0b17881985c5fd3cca46734431a382305b56",
+              "bytes": 9488
+            },
+            {
+              "path": ".internal-dev/reviews/2026-07-29-phase-02-project-console-second-review.md",
+              "status": "present",
+              "digest": "cc189fc78388e62dca96ce188ce75f5dedeceac3b585bbf631ff926fa9a1c45d",
+              "bytes": 1687
+            },
+            {
+              "path": ".internal-dev/changelogs/2026-07-29-phase-02-project-console-regression-repair.md",
+              "status": "present",
+              "digest": "c3fa31186760a982cb89f1aff38b18b3a89899089dbaca0d44df1b3a1a7fd798",
+              "bytes": 1315
+            },
+            {
+              "path": ".internal-dev/knowledge/project-queue-scoped-fragment-pattern.md",
+              "status": "present",
+              "digest": "e6faf142b397d8164c1a8ea691852250dbf29859624a894eddcfdbaabd902c31",
+              "bytes": 1326
+            }
+          ],
+          "outsideDeclaredTargets": [
+            "src/main/resources/static/favicon.ico",
+            "src/test/java/io/mindspice/magenta2/api/web/ProjectConsoleControllerTest.java",
+            ".internal-dev/reviews/2026-07-29-phase-02-project-console-second-review.md",
+            ".internal-dev/changelogs/2026-07-29-phase-02-project-console-regression-repair.md",
+            ".internal-dev/knowledge/project-queue-scoped-fragment-pattern.md"
+          ],
+          "timestamp": "2026-07-29T19:13:38Z",
+          "attempt": 2,
+          "verdict": "BLOCKED"
+        },
+        {
+          "agentModel": {
+            "provider": "openai-codex",
+            "model": "gpt-5.6-terra",
+            "thinking": "high"
+          },
+          "report": "Phase 02 PASS after 2 validator attempts plus Playwright evidence. Attempt 1 repaired code (BLOCKED for missing Playwright). Playwright found Dashboard/Members regression (GitHub #42) and favicon 500 (#43). Attempt 2 restored Dashboard/Members, added favicon, fixed CSS. Post-repair Playwright confirmed all functional, no console errors. 1090 tests pass. Bounded startup verified.",
+          "changedFiles": [],
+          "changedFileObservations": [],
+          "outsideDeclaredTargets": [],
+          "timestamp": "2026-07-29T19:26:57.065Z",
+          "attempt": 3,
+          "verdict": "PASS"
         }
       ]
     },
     {
       "phase": "phase-03-lightweight-project-tasks.md",
-      "validations": []
+      "implementation": {
+        "agentModel": {
+          "provider": "deepseek",
+          "model": "deepseek-v4-pro",
+          "thinking": "max"
+        },
+        "report": "Phase 03 implementation complete across 4 sequential subphases (A-D). Subphase A: Definition/persistence (WorkTaskDefinition, WorkTaskAttempt, WorkTaskRepository, WorkTaskService, migration 015). Subphase B: Guarded commands + Plan promotion with operation-key idempotency. Subphase C: Submit/retry through canonical assignment authority + WorkTaskController REST API + WORK_TASK AssignmentType wiring. Subphase D: Project console Tasks tab (11 project-scoped endpoints, WorkTaskFragments, SimplyPages-only UI, HTMX-first). 1157 tests pass. Bounded startup verified.",
+        "changedFiles": [],
+        "changedFileObservations": [],
+        "outsideDeclaredTargets": [],
+        "timestamp": "2026-07-29T20:10:56.930Z"
+      },
+      "validations": [
+        {
+          "agentModel": {
+            "provider": "openai-codex",
+            "model": "gpt-5.6-terra",
+            "thinking": "high"
+          },
+          "report": "Phase 03 attempt 1 BLOCKED. Validator made extensive repairs: replaced WORK_TASK executable type with canonical PLAN source + WORK_TASK origin, added origin persistence, restored migration 015 checksums, added corrective migration 016, fixed independent Task/Plan edits, required operation keys, trusted-deployment gating, HTMX host handling. 1157 tests pass. BLOCKED solely on missing Playwright validation. NOTE: migration 016 now occupies Phase 04's planned slot — Phase 04 migration must renumber.",
+          "changedFiles": [],
+          "changedFileObservations": [],
+          "outsideDeclaredTargets": [],
+          "timestamp": "2026-07-29T20:36:43.498Z",
+          "attempt": 1,
+          "verdict": "BLOCKED"
+        },
+        {
+          "agentModel": {
+            "provider": "openai-codex",
+            "model": "gpt-5.6-terra",
+            "thinking": "high"
+          },
+          "attempt": 2,
+          "verdict": "PASS",
+          "report": "Phase 03 PASS after 2 validator attempts plus Playwright. V1 reworked execution model (WORK_TASK source → PLAN source), added migration 016, fixed Task/Plan independence. V2 fixed startup failure, added 3 tests. 1160 tests pass. Playwright confirmed Tasks tab renders, controlled unavailable state by design, no errors. Migration 016 consumed Phase 04 slot — Phase 04 must renumber.",
+          "changedFiles": [],
+          "changedFileObservations": [],
+          "outsideDeclaredTargets": [],
+          "timestamp": "2026-07-29T20:49:20.477Z"
+        }
+      ]
     },
     {
       "phase": "phase-04-project-jobs-and-reassignment.md",
@@ -816,5 +928,5 @@
   ],
   "integrationValidations": [],
   "createdAt": "2026-07-29T17:32:58.764Z",
-  "updatedAt": "2026-07-29T19:13:38Z"
+  "updatedAt": "2026-07-29T20:49:20.477Z"
 }
