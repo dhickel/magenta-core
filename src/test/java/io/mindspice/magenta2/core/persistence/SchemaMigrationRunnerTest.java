@@ -200,6 +200,21 @@ class SchemaMigrationRunnerTest {
     }
 
     @Test
+    void freshSchemaIncludesV16WorkTaskIntegrityRepair() throws Exception {
+        try (SingleConnectionDataSource dataSource = memoryDataSource()) {
+            SchemaMigrationRunner runner = run(dataSource, migrationsThrough016());
+            JdbcTemplate jdbc = new JdbcTemplate(dataSource);
+
+            assertEquals(16, runner.appliedMigrations().size());
+            assertTrue(tableExists(jdbc, "work_task_definitions"));
+            assertTrue(jdbc.queryForObject("""
+                    select count(*) from sqlite_master
+                    where type = 'trigger' and name = 'work_task_promoted_plan_delete_guard'
+                    """, Integer.class) == 1);
+        }
+    }
+
+    @Test
     void persistedLocationsRejectChatAbsoluteOrNonCanonicalPathsAndOperationKeyDigestConflicts() throws Exception {
         try (SingleConnectionDataSource dataSource = memoryDataSource()) {
             run(dataSource, migrations());
@@ -473,6 +488,15 @@ class SchemaMigrationRunnerTest {
         all[through010.length] = materializationKeyConstraints();
         all[through010.length + 1] = assignmentBindingOperations();
         all[through010.length + 2] = systemChatProposals();
+        return all;
+    }
+
+    private static Resource[] migrationsThrough016() {
+        Resource[] through013 = allMigrations();
+        Resource[] all = java.util.Arrays.copyOf(through013, through013.length + 3);
+        all[through013.length] = new ClassPathResource("db/migrations/014-project-assignment-authority.sql");
+        all[through013.length + 1] = new ClassPathResource("db/migrations/015-lightweight-work-tasks.sql");
+        all[through013.length + 2] = new ClassPathResource("db/migrations/016-lightweight-work-task-integrity.sql");
         return all;
     }
 

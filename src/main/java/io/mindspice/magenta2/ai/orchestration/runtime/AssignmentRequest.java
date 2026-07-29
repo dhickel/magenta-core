@@ -24,8 +24,9 @@ public record AssignmentRequest(
     String workspaceKey,
     Map<String, Object> input,
     String operationKey,
-    // ── Phase 01: typed source and context binding ──
+    // ── Immutable executable source, submission origin, and context binding ──
     String sourceDefinitionId,
+    String originDefinitionId,
     String contextBindingKey
 ) {
     /** 12-arg: all fields except sourceDefinitionId and contextBindingKey. */
@@ -44,7 +45,7 @@ public record AssignmentRequest(
         String operationKey
     ) {
         this(agentId, jobId, jobItemId, assignmentType, runDisplayName, priority, modelOverride,
-            projectId, workspaceType, workspaceKey, input, operationKey, null, null);
+            projectId, workspaceType, workspaceKey, input, operationKey, null, null, null);
     }
 
     public AssignmentRequest(
@@ -61,7 +62,7 @@ public record AssignmentRequest(
         Map<String, Object> input
     ) {
         this(agentId, jobId, jobItemId, assignmentType, runDisplayName, priority, modelOverride,
-            projectId, workspaceType, workspaceKey, input, null, null, null);
+            projectId, workspaceType, workspaceKey, input, null, null, null, null);
     }
     public AssignmentRequest(
         String agentId,
@@ -73,7 +74,7 @@ public record AssignmentRequest(
         String projectId,
         Map<String, Object> input
     ) {
-        this(agentId, jobId, jobItemId, assignmentType, null, priority, modelOverride, projectId, null, null, input, null, null, null);
+        this(agentId, jobId, jobItemId, assignmentType, null, priority, modelOverride, projectId, null, null, input, null, null, null, null);
     }
 
     public AssignmentRequest(
@@ -85,7 +86,7 @@ public record AssignmentRequest(
         String modelOverride,
         Map<String, Object> input
     ) {
-        this(agentId, jobId, jobItemId, assignmentType, null, priority, modelOverride, null, null, null, input, null, null, null);
+        this(agentId, jobId, jobItemId, assignmentType, null, priority, modelOverride, null, null, null, input, null, null, null, null);
     }
 
     public AssignmentRequest(
@@ -101,6 +102,6 @@ public record AssignmentRequest(
         Map<String, Object> input
     ) {
         this(agentId, jobId, jobItemId, assignmentType, null, priority, modelOverride, projectId,
-            workspaceType, workspaceKey, input, null, null, null);
+            workspaceType, workspaceKey, input, null, null, null, null);
     }
 }

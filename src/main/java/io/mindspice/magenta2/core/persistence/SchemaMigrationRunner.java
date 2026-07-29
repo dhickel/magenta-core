@@ -226,6 +226,10 @@ public final class SchemaMigrationRunner {
     private static final List<String> FOUNDATION_TABLES_V14 = List.copyOf(
             java.util.stream.Stream.concat(FOUNDATION_TABLES_V13.stream(),
                     java.util.stream.Stream.of("assignment_query_snapshots", "assignment_control_operations")).toList());
+    private static final List<String> FOUNDATION_TABLES_V15 = List.copyOf(
+            java.util.stream.Stream.concat(FOUNDATION_TABLES_V14.stream(),
+                    java.util.stream.Stream.of("work_task_definitions", "work_task_attempts", "work_task_operations")).toList());
+    private static final List<String> FOUNDATION_TABLES_V16 = FOUNDATION_TABLES_V15;
     private static final Set<String> FOUNDATION_INDEXES_V10 = Set.of(
             "idx_skill_candidate_versions_lookup", "idx_skill_candidate_observations_candidate",
             "idx_skill_candidate_observations_scan", "idx_skill_exact_assignments_target",
@@ -272,6 +276,14 @@ public final class SchemaMigrationRunner {
                             "idx_work_assignments_project_history",
                             "idx_assignment_query_snapshots_expiry",
                             "idx_assignment_control_ops_assignment"))
+                    .collect(java.util.stream.Collectors.toSet()));
+    private static final Set<String> FOUNDATION_INDEXES_V15 = java.util.Set.copyOf(
+            java.util.stream.Stream.concat(FOUNDATION_INDEXES_V14.stream(),
+                    java.util.stream.Stream.of(
+                            "idx_work_task_defs_project",
+                            "idx_work_task_defs_promoted_plan",
+                            "idx_work_task_attempts_task",
+                            "idx_work_assignments_task_origin_active"))
                     .collect(java.util.stream.Collectors.toSet()));
 
     private static final Map<String, List<String>> FOUNDATION_COLUMNS = Map.ofEntries(
@@ -390,7 +402,14 @@ public final class SchemaMigrationRunner {
                     "assignment_id", "actor", "scope", "action", "resource",
                     "expected_revision", "new_priority", "reason",
                     "request_digest", "operation_state", "result_detail",
-                    "created_at", "completed_at"))
+                    "created_at", "completed_at")),
+            Map.entry("work_task_definitions", List.of("id", "title", "description",
+                    "project_id", "pin", "default_priority", "preferred_agent_id",
+                    "promoted_plan_id", "definition_version", "created_at", "updated_at")),
+            Map.entry("work_task_attempts", List.of("id", "task_id", "assignment_id",
+                    "attempt_order", "predecessor_attempt_id", "created_at")),
+            Map.entry("work_task_operations", List.of("operation_type", "operation_key",
+                    "request_digest", "operation_state", "task_id", "result_json", "created_at"))
     );
 
 
@@ -468,6 +487,8 @@ public final class SchemaMigrationRunner {
                     }
                     log.info("Applying migration {} (version {})", resource.name(), resource.version());
                     ensureV14Columns(connection, resource.version());
+                    ensureV15Columns(connection, resource.version());
+                    ensureV16WorkTaskIntegrity(connection, resource.version());
                     ScriptUtils.executeSqlScript(connection, new EncodedResource(
                             new ByteArrayResource(resource.bytes(), resource.name()), StandardCharsets.UTF_8));
                     ensureV14ImmutableAttributionTrigger(connection, resource.version());
@@ -475,6 +496,9 @@ public final class SchemaMigrationRunner {
                     insertApplied(connection, resource);
                 }
                 int latestVersion = resources.isEmpty() ? 0 : resources.get(resources.size() - 1).version();
+                // Fresh schema is marked as already migrated, so corrective trigger bodies
+                // that cannot pass through ScriptUtils must also be installed here.
+                ensureV16WorkTaskIntegrity(connection, latestVersion);
                 ensureV14ImmutableAttributionTrigger(connection, latestVersion);
                 validateOwnedSchema(connection, latestVersion);
                 statement.execute("commit");
@@ -748,24 +772,94 @@ public final class SchemaMigrationRunner {
         }
     }
 
+    private void ensureV15Columns(Connection connection, int version) throws SQLException {
+        if (version != 15) {
+            return;
+        }
+        if (!tableColumns(connection, "work_assignments").contains("origin_definition_id")) {
+            try (Statement statement = connection.createStatement()) {
+                statement.execute("alter table work_assignments add column origin_definition_id text");
+            }
+        }
+    }
+
+    /** SQLite-safe corrective shape for a migration 015 checksum that is already durable. */
+    private void ensureV16WorkTaskIntegrity(Connection connection, int version) throws SQLException {
+        if (version != 16) {
+            return;
+        }
+        Set<String> assignments = new HashSet<>(tableColumns(connection, "work_assignments"));
+        Set<String> definitions = new HashSet<>(tableColumns(connection, "work_task_definitions"));
+        try (Statement statement = connection.createStatement()) {
+            if (!assignments.contains("origin_definition_id")) {
+                statement.execute("alter table work_assignments add column origin_definition_id text");
+            }
+            if (!definitions.contains("designated_attempt_id")) {
+                statement.execute("alter table work_task_definitions add column designated_attempt_id text");
+            }
+            String operations = normalized(tableSql(connection, "work_task_operations"));
+            if (!operations.contains("'bind'") || !operations.contains("'retry'")) {
+                statement.execute("""
+                    create table work_task_operations_v16 (
+                        operation_type text not null check (operation_type in
+                            ('CREATE', 'EDIT', 'BIND', 'PROMOTE', 'SUBMIT', 'RETRY')),
+                        operation_key text not null check (length(operation_key) between 1 and 255),
+                        request_digest text not null check (length(request_digest) = 64
+                            and request_digest not glob '*[^0-9a-f]*'),
+                        operation_state text not null check (operation_state in ('RESERVED', 'COMPLETED')),
+                        task_id text,
+                        result_json text,
+                        created_at text not null,
+                        primary key (operation_type, operation_key),
+                        foreign key (task_id) references work_task_definitions(id) on delete set null
+                    )
+                    """);
+                statement.execute("""
+                    insert into work_task_operations_v16 (
+                        operation_type, operation_key, request_digest, operation_state,
+                        task_id, result_json, created_at
+                    ) select operation_type, operation_key, request_digest, operation_state,
+                        task_id, result_json, created_at from work_task_operations
+                    """);
+                statement.execute("drop table work_task_operations");
+                statement.execute("alter table work_task_operations_v16 rename to work_task_operations");
+            }
+            statement.execute("""
+                create trigger if not exists work_task_promoted_plan_delete_guard
+                before delete on plan_definitions
+                when exists (select 1 from work_task_definitions where promoted_plan_id = old.id)
+                begin
+                    select raise(abort, 'promoted work task plan link is immutable');
+                end
+                """);
+        }
+    }
+
     private void ensureV14ImmutableAttributionTrigger(Connection connection, int latestVersion) throws SQLException {
         if (latestVersion < 14 || !tableColumns(connection, "work_assignments").contains("row_version")) {
             return;
         }
         try (Statement statement = connection.createStatement()) {
+            if (latestVersion >= 15) {
+                statement.execute("drop trigger if exists work_assignments_immutable_attribution");
+            }
+            boolean hasOrigin = tableColumns(connection, "work_assignments").contains("origin_definition_id");
+            String originColumn = hasOrigin ? ", origin_definition_id" : "";
+            String originPredicate = hasOrigin
+                ? " or old.origin_definition_id is not new.origin_definition_id" : "";
             statement.execute("""
                 create trigger if not exists work_assignments_immutable_attribution
                 before update of agent_id, job_id, job_item_id, assignment_type, model_override,
                     workspace_type, workspace_key, workspace_identity, project_id,
-                    source_definition_id, context_binding_key on work_assignments
+                    source_definition_id%s, context_binding_key on work_assignments
                 when old.agent_id is not new.agent_id or old.job_id is not new.job_id
                   or old.job_item_id is not new.job_item_id or old.assignment_type is not new.assignment_type
                   or old.model_override is not new.model_override or old.workspace_type is not new.workspace_type
                   or old.workspace_key is not new.workspace_key or old.workspace_identity is not new.workspace_identity
-                  or old.project_id is not new.project_id or old.source_definition_id is not new.source_definition_id
+                  or old.project_id is not new.project_id or old.source_definition_id is not new.source_definition_id%s
                   or old.context_binding_key is not new.context_binding_key
                 begin select raise(abort, 'work_assignment immutable attribution'); end
-                """);
+                """.formatted(originColumn, originPredicate));
         }
     }
 
@@ -773,7 +867,9 @@ public final class SchemaMigrationRunner {
         if (latestVersion < 1) {
             return;
         }
-        List<String> expectedTables = latestVersion >= 14 ? FOUNDATION_TABLES_V14
+        List<String> expectedTables = latestVersion >= 16 ? FOUNDATION_TABLES_V16
+                : latestVersion >= 15 ? FOUNDATION_TABLES_V15
+                : latestVersion >= 14 ? FOUNDATION_TABLES_V14
                 : latestVersion >= 13 ? FOUNDATION_TABLES_V13
                 : latestVersion >= 12 ? FOUNDATION_TABLES_V12
                 : latestVersion >= 11 ? FOUNDATION_TABLES_V11
@@ -1032,8 +1128,12 @@ public final class SchemaMigrationRunner {
                 throw new MigrationException("Missing migration-owned v14 indexes: "
                         + FOUNDATION_INDEXES_V14.stream().filter(index -> !allIndexes.contains(index)).toList());
             }
+            if (latestVersion >= 15 && !allIndexes.containsAll(FOUNDATION_INDEXES_V15)) {
+                throw new MigrationException("Missing migration-owned v15 indexes: "
+                        + FOUNDATION_INDEXES_V15.stream().filter(index -> !allIndexes.contains(index)).toList());
+            }
             List<String> assignments = tableColumns(connection, "work_assignments");
-            if (!assignments.containsAll(List.of("source_definition_id", "context_binding_key", "row_version"))
+            if (!assignments.containsAll(List.of("source_definition_id", "origin_definition_id", "context_binding_key", "row_version"))
                     || !objectNames(connection, "trigger", "work_assignments_immutable_attribution")
                         .contains("work_assignments_immutable_attribution")) {
                 throw new MigrationException("work_assignments is missing v14 immutable attribution protection");
@@ -1153,6 +1253,46 @@ public final class SchemaMigrationRunner {
                     || !overlays.contains("references skill_candidate_versions(id)")
                     || !legacy.contains("unique (agent_id, logical_key)")) {
                 throw new MigrationException("scoped skill tables are missing required constraints");
+            }
+        }
+        if (latestVersion >= 15) {
+            if (!allIndexes.containsAll(FOUNDATION_INDEXES_V15)) {
+                throw new MigrationException("Missing migration-owned v15 indexes: "
+                        + FOUNDATION_INDEXES_V15.stream().filter(index -> !allIndexes.contains(index)).toList());
+            }
+            String taskDefs = normalized(tableSql(connection, "work_task_definitions"));
+            String taskAttempts = normalized(tableSql(connection, "work_task_attempts"));
+            String taskOps = normalized(tableSql(connection, "work_task_operations"));
+            if (!taskDefs.contains("pin in (0, 1)")
+                    || !taskDefs.contains("definition_version >= 1")
+                    || !taskDefs.contains("foreign key (project_id) references projects")
+                    || !taskDefs.contains("foreign key (promoted_plan_id) references plan_definitions")) {
+                throw new MigrationException("work_task_definitions is missing required constraints");
+            }
+            if (!taskAttempts.contains("unique (task_id, attempt_order)")
+                    || !taskAttempts.contains("assignment_id text not null unique")
+                    || !taskAttempts.contains("check (attempt_order >= 1)")
+                    || !taskAttempts.contains("foreign key (task_id) references work_task_definitions")
+                    || !taskAttempts.contains("foreign key (assignment_id) references work_assignments")) {
+                throw new MigrationException("work_task_attempts is missing required constraints");
+            }
+            if (!taskOps.contains("operation_type in")
+                    || !taskOps.contains("'create'") || !taskOps.contains("'edit'")
+                    || !taskOps.contains("'promote'") || !taskOps.contains("'submit'")
+                    || !taskOps.contains("operation_state in ('reserved', 'completed')")
+                    || !taskOps.contains("primary key (operation_type, operation_key)")
+                    || !taskOps.contains("length(request_digest) = 64")) {
+                throw new MigrationException("work_task_operations is missing required constraints");
+            }
+        }
+        if (latestVersion >= 16) {
+            List<String> assignments = tableColumns(connection, "work_assignments");
+            if (!assignments.contains("origin_definition_id")
+                    || !tableColumns(connection, "work_task_definitions").contains("designated_attempt_id")
+                    || !normalized(tableSql(connection, "work_task_operations")).contains("'retry'")
+                    || !objectNames(connection, "trigger", "work_task_promoted_plan_delete_guard")
+                        .contains("work_task_promoted_plan_delete_guard")) {
+                throw new MigrationException("work-task integrity repair is incomplete");
             }
         }
     }

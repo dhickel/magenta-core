@@ -28,8 +28,9 @@ public record WorkAssignment(
     String workspaceKey,
     String workspaceIdentity,
     String projectId,
-    // ── Immutable attribution added in Phase 01 ──
+    // ── Immutable executable source and submission origin ──
     String sourceDefinitionId,
+    String originDefinitionId,
     String contextBindingKey,
     // ── Business CAS version ──
     int rowVersion,
@@ -60,7 +61,7 @@ public record WorkAssignment(
         OrchestrationStatus status, String modelOverride,
         String workspaceType, String workspaceKey, String workspaceIdentity,
         String projectId,
-        String sourceDefinitionId, String contextBindingKey, int rowVersion,
+        String sourceDefinitionId, String originDefinitionId, String contextBindingKey, int rowVersion,
         int currentItemIndex,
         Map<String, Object> checkpoint, Map<String, Object> input,
         Map<String, Object> output, Map<String, Object> evidence,
@@ -84,6 +85,7 @@ public record WorkAssignment(
         this.workspaceIdentity = workspaceIdentity;
         this.projectId = projectId;
         this.sourceDefinitionId = sourceDefinitionId;
+        this.originDefinitionId = originDefinitionId;
         this.contextBindingKey = contextBindingKey;
         this.rowVersion = rowVersion;
         this.currentItemIndex = currentItemIndex;
@@ -101,6 +103,26 @@ public record WorkAssignment(
         this.completedAt = completedAt;
         this.lastProgressAt = lastProgressAt;
         this.lastHeartbeatAt = lastHeartbeatAt;
+    }
+
+    /** Compatibility constructor retained for callers compiled before submission origins. */
+    public WorkAssignment(
+        String id, String agentId, String jobId, String jobItemId,
+        AssignmentType assignmentType, String runDisplayName, int priority,
+        OrchestrationStatus status, String modelOverride,
+        String workspaceType, String workspaceKey, String workspaceIdentity,
+        String projectId, String sourceDefinitionId, String contextBindingKey, int rowVersion,
+        int currentItemIndex, Map<String, Object> checkpoint, Map<String, Object> input,
+        Map<String, Object> output, Map<String, Object> evidence, String errorText,
+        String leaseOwner, Instant leaseExpiresAt, long leaseFence,
+        Instant createdAt, Instant updatedAt, Instant startedAt, Instant completedAt,
+        Instant lastProgressAt, Instant lastHeartbeatAt
+    ) {
+        this(id, agentId, jobId, jobItemId, assignmentType, runDisplayName, priority, status,
+            modelOverride, workspaceType, workspaceKey, workspaceIdentity, projectId,
+            sourceDefinitionId, null, contextBindingKey, rowVersion, currentItemIndex, checkpoint, input,
+            output, evidence, errorText, leaseOwner, leaseExpiresAt, leaseFence, createdAt, updatedAt,
+            startedAt, completedAt, lastProgressAt, lastHeartbeatAt);
     }
 
     // ── Compatibility constructors used by existing callers. ──
@@ -126,7 +148,7 @@ public record WorkAssignment(
     ) {
         this(id, agentId, jobId, jobItemId, assignmentType, runDisplayName, priority, status, modelOverride,
             workspaceType, workspaceKey, workspaceIdentity, projectId,
-            null, null, 0,
+            null, null, null, 0,
             currentItemIndex, checkpoint, input, output, evidence, errorText,
             leaseOwner, leaseExpiresAt, leaseFence,
             createdAt, updatedAt, startedAt, completedAt,

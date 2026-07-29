@@ -48,13 +48,22 @@ class ProjectConsoleControllerTest {
         AgentMaterializationService agentMaterializationService = mock(AgentMaterializationService.class);
         WorkspaceDirectoryService workspaceDirectoryService = mock(WorkspaceDirectoryService.class);
         WorkspaceExplorerService workspaceExplorerService = mock(WorkspaceExplorerService.class);
+        io.mindspice.magenta2.ai.orchestration.tasks.WorkTaskService workTaskService
+            = mock(io.mindspice.magenta2.ai.orchestration.tasks.WorkTaskService.class);
+        when(workTaskService.listByProject(any())).thenReturn(java.util.List.of());
+        io.mindspice.magenta2.ai.chat.plan.PlanService planService
+            = mock(io.mindspice.magenta2.ai.chat.plan.PlanService.class);
+        io.mindspice.magenta2.ai.orchestration.runtime.ProjectOperationsAccessService projectAccessService
+            = mock(io.mindspice.magenta2.ai.orchestration.runtime.ProjectOperationsAccessService.class);
+        when(projectAccessService.isTrustedDeployment()).thenReturn(true);
 
         controller = new ProjectConsoleController(
             projectService, mock(JobService.class), agentProfileService,
             mock(AssignmentService.class), mock(OutputArtifactService.class),
             fragments, entityLookupService, entitySelectorComponents,
             agentContextService, agentMaterializationService,
-            workspaceDirectoryService, workspaceExplorerService);
+            workspaceDirectoryService, workspaceExplorerService,
+            workTaskService, planService, projectAccessService);
     }
 
     @Test
@@ -83,7 +92,7 @@ class ProjectConsoleControllerTest {
         String settings = controller.projectSettingsTab("project-1", mock(HttpServletResponse.class));
 
         assertThat(create).contains("Owner Agent").doesNotContain("Legacy Initial Agent", "Git Repo URL", "gitRepoUrl");
-        assertThat(settings).contains("Settings", "not yet available")
+        assertThat(settings).contains("Settings")
             .doesNotContain("Git Repo URL", "gitRepoUrl", "legacy.invalid");
     }
 
@@ -152,13 +161,13 @@ class ProjectConsoleControllerTest {
         String schedules = controller.projectSchedulesTab("project-1", mock(HttpServletResponse.class));
         String events = controller.projectEventsTab("project-1", mock(HttpServletResponse.class));
 
-        assertThat(tasks).contains("Tasks").contains("not yet available");
+        assertThat(tasks).contains("Tasks");
         assertThat(chat).contains("Chat").contains("not yet available");
         assertThat(schedules).contains("Schedules").contains("not yet available");
         assertThat(events).contains("Events").contains("not yet available");
 
         // Unavailable tabs must not expose any speculative API
-        for (String html : List.of(tasks, chat, schedules, events)) {
+        for (String html : List.of(chat, schedules, events)) {
             assertThat(html).doesNotContain("hx-get", "hx-post", "hx-put", "hx-delete");
         }
     }

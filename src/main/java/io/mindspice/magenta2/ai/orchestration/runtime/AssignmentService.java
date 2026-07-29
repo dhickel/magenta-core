@@ -191,7 +191,7 @@ public class AssignmentService {
             request.assignmentType(), normalize(request.runDisplayName()), request.priority() == null ? 0 : request.priority(),
             OrchestrationStatus.QUEUED, normalize(request.modelOverride()), selection.workspaceType(),
             selection.workspaceKey(), selection.workspaceIdentity(), projectId,
-            sourceDefinitionId, bindingKey, 0, 0, Map.of(), input, Map.of(), Map.of(),
+            sourceDefinitionId, originDefinitionId(request), bindingKey, 0, 0, Map.of(), input, Map.of(), Map.of(),
             null, null, null, 0L, null, null, null, null, null, null
         ));
         WorkAssignment reserved = reserveLifecycleAtSubmission(assignment, operationKey, bindingKey);
@@ -218,6 +218,7 @@ public class AssignmentService {
                 || !java.util.Objects.equals(existing.jobId(), normalize(request.jobId()))
                 || !java.util.Objects.equals(existing.jobItemId(), normalize(request.jobItemId()))
                 || !java.util.Objects.equals(existing.projectId(), projectId)
+                || !java.util.Objects.equals(existing.originDefinitionId(), originDefinitionId(request))
                 || !java.util.Objects.equals(existing.workspaceType(), selection.workspaceType())
                 || !java.util.Objects.equals(existing.workspaceKey(), selection.workspaceKey())
                 || !java.util.Objects.equals(existing.input(), input)) {
@@ -327,7 +328,7 @@ public class AssignmentService {
             return supplied;
         }
         String derived = switch (request.assignmentType()) {
-            case TASK_RUN -> requireSourceId(input, "taskId", "planId");
+            case TASK_RUN -> "PLAN/" + requireSourceId(input, "taskId", "planId");
             case WORKFLOW_RUN -> requireSourceId(input, "workflowId");
             case JOB_RUN -> StringUtils.hasText(request.jobId())
                 ? request.jobId().trim() : requireSourceId(input, "jobId");
@@ -339,8 +340,13 @@ public class AssignmentService {
         return derived;
     }
 
+    private String originDefinitionId(AssignmentRequest request) {
+        return normalize(request.originDefinitionId());
+    }
+
     private boolean isTaskRunAssignment(AssignmentType type) {
-        return type == AssignmentType.TASK_RUN || type == AssignmentType.WORKFLOW_RUN || type == AssignmentType.JOB_RUN;
+        return type == AssignmentType.TASK_RUN || type == AssignmentType.WORKFLOW_RUN
+            || type == AssignmentType.JOB_RUN;
     }
 
     private TaskSourceKind sourceKind(AssignmentType type) {
@@ -586,7 +592,7 @@ public class AssignmentService {
             newAssignmentId, source.agentId(), source.jobId(), source.jobItemId(), source.assignmentType(),
             source.runDisplayName(), source.priority(), OrchestrationStatus.QUEUED, source.modelOverride(),
             source.workspaceType(), source.workspaceKey(), source.workspaceIdentity(), source.projectId(),
-            source.sourceDefinitionId(), "assignment:" + newAssignmentId, 0,
+            source.sourceDefinitionId(), source.originDefinitionId(), "assignment:" + newAssignmentId, 0,
             0, Map.of(), source.input(), Map.of(), Map.of(), null, null, null, 0L,
             null, null, null, null, null, null));
 
@@ -841,8 +847,8 @@ public class AssignmentService {
             assignment.assignmentType(), assignment.runDisplayName(), assignment.priority(), status,
             assignment.modelOverride(), assignment.workspaceType(), assignment.workspaceKey(),
             assignment.workspaceIdentity(), assignment.projectId(),
-            assignment.sourceDefinitionId(), assignment.contextBindingKey(), assignment.rowVersion(),
-            currentItemIndex, checkpoint == null ? Map.of() : checkpoint, assignment.input(),
+            assignment.sourceDefinitionId(), assignment.originDefinitionId(), assignment.contextBindingKey(),
+            assignment.rowVersion(), currentItemIndex, checkpoint == null ? Map.of() : checkpoint, assignment.input(),
             output == null ? Map.of() : output, evidence == null ? Map.of() : evidence, errorText,
             leaseOwner, leaseExpiresAt, assignment.leaseFence(),
             assignment.createdAt(), assignment.updatedAt(), assignment.startedAt(),

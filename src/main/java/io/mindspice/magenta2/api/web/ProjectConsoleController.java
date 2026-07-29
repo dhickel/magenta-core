@@ -30,8 +30,15 @@ import io.mindspice.magenta2.ai.orchestration.runtime.JobDefinition;
 import io.mindspice.magenta2.ai.orchestration.runtime.JobService;
 import io.mindspice.magenta2.ai.orchestration.runtime.Project;
 import io.mindspice.magenta2.ai.orchestration.runtime.ProjectAgentMembership;
+import io.mindspice.magenta2.ai.orchestration.runtime.ProjectOperationsAccessService;
 import io.mindspice.magenta2.ai.orchestration.runtime.ProjectOperationsAccessService.ProjectAccessDeniedException;
 import io.mindspice.magenta2.ai.orchestration.runtime.ProjectService;
+import io.mindspice.magenta2.ai.orchestration.tasks.WorkTaskAttempt;
+import io.mindspice.magenta2.ai.orchestration.tasks.WorkTaskDefinition;
+import io.mindspice.magenta2.ai.orchestration.tasks.WorkTaskService;
+import io.mindspice.magenta2.ai.chat.plan.PlanDefinition;
+import io.mindspice.magenta2.ai.chat.plan.PlanService;
+import io.mindspice.magenta2.ai.chat.plan.PlanStatus;
 import io.mindspice.magenta2.ai.orchestration.workspaces.MaterializationLocation;
 import io.mindspice.magenta2.ai.orchestration.workspaces.OutputArtifactService;
 import io.mindspice.magenta2.ai.orchestration.workspaces.RunOutputArtifact;
@@ -91,6 +98,9 @@ public class ProjectConsoleController {
     private final AgentMaterializationService agentMaterializationService;
     private final WorkspaceDirectoryService workspaceDirectoryService;
     private final WorkspaceExplorerService workspaceExplorerService;
+    private final WorkTaskService workTaskService;
+    private final PlanService planService;
+    private final ProjectOperationsAccessService projectAccessService;
 
     public ProjectConsoleController(ProjectService projectService,
                                     JobService jobService,
@@ -103,7 +113,10 @@ public class ProjectConsoleController {
                                     AgentContextService agentContextService,
                                     AgentMaterializationService agentMaterializationService,
                                     WorkspaceDirectoryService workspaceDirectoryService,
-                                    WorkspaceExplorerService workspaceExplorerService) {
+                                    WorkspaceExplorerService workspaceExplorerService,
+                                    WorkTaskService workTaskService,
+                                    PlanService planService,
+                                    ProjectOperationsAccessService projectAccessService) {
         this.projectService = projectService;
         this.jobService = jobService;
         this.agentProfileService = agentProfileService;
@@ -116,6 +129,9 @@ public class ProjectConsoleController {
         this.agentMaterializationService = agentMaterializationService;
         this.workspaceDirectoryService = workspaceDirectoryService;
         this.workspaceExplorerService = workspaceExplorerService;
+        this.workTaskService = workTaskService;
+        this.planService = planService;
+        this.projectAccessService = projectAccessService;
         this.dashboardShell = createShell(null);
     }
 
@@ -734,14 +750,500 @@ public class ProjectConsoleController {
     }
 
     // ════════════════════════════════════════════════════════════════
-    //  Unavailable tabs (new grouped shell — future phases)
+    //  Tab: Tasks (work)
     // ════════════════════════════════════════════════════════════════
 
     @GetMapping("/projects/_detail/{projectId}/tasks")
     @ResponseBody
     public String projectTasksTab(@PathVariable String projectId, HttpServletResponse response) {
-        return unavailableProjectTab(projectId, "Tasks", "work", response);
+        if (!fragments.findTab("tasks").orElseThrow().available()) {
+            return unavailableProjectTab(projectId, "Tasks", "work", response);
+        }
+        try {
+            Project project = projectService.getProject(projectId);
+            if (projectAccessService == null || !projectAccessService.isTrustedDeployment()) {
+                return WorkTaskFragments.errorUnavailable(
+                    "Task controls are unavailable until trusted deployment capability is enabled.").render();
+            }
+            List<WorkTaskDefinition> tasks = workTaskService.listByProject(projectId);
+            List<WorkTaskFragments.WorkTaskRow> rows = tasks.stream()
+                .map(t -> taskToRow(t, project.archived()))
+                .toList();
+            List<WorkTaskFragments.AgentOption> agentOptions = buildAgentOptions(projectId);
+            Div panel = new Div().withClass("project-tasks-tab");
+            panel.withChild(WorkTaskFragments.taskListPanel(projectId, rows, agentOptions));
+            panel.withChild(WorkTaskFragments.editorHost());
+            panel.withChild(WorkTaskFragments.submitHost());
+            panel.withChild(WorkTaskFragments.detailHost());
+            return panel.render();
+        } catch (IllegalArgumentException e) {
+            response.setStatus(HttpServletResponse.SC_NOT_FOUND);
+            return fragments.errorNotFound("Project not found.");
+        } catch (RuntimeException e) {
+            log.warn("Project tasks unavailable for {}", projectId, e);
+            response.setStatus(HttpServletResponse.SC_SERVICE_UNAVAILABLE);
+            return fragments.errorUnavailable("Project tasks are temporarily unavailable.");
+        }
     }
+
+    // ── Task editor (create) ──
+
+    @GetMapping("/projects/_detail/{projectId}/tasks/_editor/_new")
+    @ResponseBody
+    public String taskCreateForm(@PathVariable String projectId, HttpServletResponse response) {
+        try {
+            projectService.getProject(projectId);
+            List<WorkTaskFragments.AgentOption> agentOptions = buildAgentOptions(projectId);
+            return WorkTaskFragments.createForm(projectId, Map.of(), null, agentOptions).render();
+        } catch (IllegalArgumentException e) {
+            response.setStatus(HttpServletResponse.SC_NOT_FOUND);
+            return fragments.errorNotFound("Project not found.");
+        }
+    }
+
+    @GetMapping("/projects/_detail/{projectId}/tasks/_editor/_cancel")
+    @ResponseBody
+    public String taskEditorCancel(@PathVariable String projectId,
+                                   @RequestParam(defaultValue = "editor") String host) {
+        return "submit".equals(host)
+            ? WorkTaskFragments.submitHost().render()
+            : WorkTaskFragments.editorHost().render();
+    }
+
+    @PostMapping("/projects/_detail/{projectId}/tasks/_editor")
+    @ResponseBody
+    public String createTask(@PathVariable String projectId,
+                              @RequestParam Map<String, String> params,
+                              HttpServletResponse response) {
+        try {
+            projectService.getProject(projectId);
+            String title = params.getOrDefault("title", "").trim();
+            String description = params.get("description");
+            int priority = parseIntOrDefault(params.get("defaultPriority"), 0);
+            boolean pin = "true".equals(params.get("pin"));
+            String preferredAgentId = cleanNullable(params.get("preferredAgentId"));
+
+            workTaskService.createOperation(requireOperationKey(params), title, description, projectId,
+                pin, priority, preferredAgentId);
+
+            // Re-render the task list with OOB swap
+            List<WorkTaskDefinition> tasks = workTaskService.listByProject(projectId);
+            Project project = projectService.getProject(projectId);
+            List<WorkTaskFragments.WorkTaskRow> rows = tasks.stream()
+                .map(t -> taskToRow(t, project.archived()))
+                .toList();
+            return WorkTaskFragments.editorHost().render()
+                + WorkTaskFragments.taskList(projectId, rows).render()
+                + WorkTaskFragments.statusMessage("Task created.", false).render();
+        } catch (IllegalArgumentException e) {
+            response.setStatus(HttpServletResponse.SC_BAD_REQUEST);
+            List<WorkTaskFragments.AgentOption> agentOptions = buildAgentOptions(projectId);
+            return WorkTaskFragments.createForm(projectId, params, e.getMessage(), agentOptions).render();
+        } catch (ProjectAccessDeniedException e) {
+            response.setStatus(HttpServletResponse.SC_SERVICE_UNAVAILABLE);
+            List<WorkTaskFragments.AgentOption> agentOptions = buildAgentOptions(projectId);
+            return WorkTaskFragments.createForm(projectId, params, e.getMessage(), agentOptions).render();
+        } catch (RuntimeException e) {
+            log.warn("Task creation failed for project {}", projectId, e);
+            response.setStatus(HttpServletResponse.SC_SERVICE_UNAVAILABLE);
+            List<WorkTaskFragments.AgentOption> agentOptions = buildAgentOptions(projectId);
+            return WorkTaskFragments.createForm(projectId, params,
+                "Task creation is temporarily unavailable.", agentOptions).render();
+        }
+    }
+
+    // ── Task detail ──
+
+    @GetMapping("/projects/_detail/{projectId}/tasks/{taskId}")
+    @ResponseBody
+    public String taskDetail(@PathVariable String projectId, @PathVariable String taskId,
+                              HttpServletResponse response) {
+        try {
+            Project project = projectService.getProject(projectId);
+            WorkTaskDefinition task = validateProjectTask(taskId, projectId);
+            List<WorkTaskAttempt> attempts = workTaskService.listAttempts(taskId);
+            List<WorkTaskFragments.AttemptDisplay> displays = attempts.stream()
+                .map(a -> attemptToDisplay(a))
+                .toList();
+            boolean planAvailable = task.promotedPlanId() != null
+                && planService != null && isPlanExecutable(task.promotedPlanId());
+            return WorkTaskFragments.taskDetail(projectId, task, attempts, displays,
+                project.archived(), planAvailable).render();
+        } catch (IllegalArgumentException e) {
+            response.setStatus(HttpServletResponse.SC_NOT_FOUND);
+            return WorkTaskFragments.errorNotFound(e.getMessage()).render();
+        } catch (RuntimeException e) {
+            log.warn("Task detail unavailable for {} / {}", projectId, taskId, e);
+            response.setStatus(HttpServletResponse.SC_SERVICE_UNAVAILABLE);
+            return WorkTaskFragments.errorUnavailable("Task detail is temporarily unavailable.").render();
+        }
+    }
+
+    // ── Task edit ──
+
+    @GetMapping("/projects/_detail/{projectId}/tasks/{taskId}/edit")
+    @ResponseBody
+    public String taskEditForm(@PathVariable String projectId, @PathVariable String taskId,
+                                HttpServletResponse response) {
+        try {
+            projectService.getProject(projectId);
+            WorkTaskDefinition task = validateProjectTask(taskId, projectId);
+            List<WorkTaskFragments.AgentOption> agentOptions = buildAgentOptions(projectId);
+            return WorkTaskFragments.editForm(projectId, task, Map.of(), null, agentOptions).render();
+        } catch (IllegalArgumentException e) {
+            response.setStatus(HttpServletResponse.SC_NOT_FOUND);
+            return WorkTaskFragments.errorNotFound(e.getMessage()).render();
+        }
+    }
+
+    @PutMapping("/projects/_detail/{projectId}/tasks/{taskId}")
+    @ResponseBody
+    public String updateTask(@PathVariable String projectId, @PathVariable String taskId,
+                              @RequestParam Map<String, String> params,
+                              HttpServletResponse response) {
+        try {
+            projectService.getProject(projectId);
+            int expectedVersion = parseIntOrDefault(params.get("expectedVersion"), 0);
+            String title = cleanNullable(params.get("title"));
+            String description = params.get("description");
+            Integer priority = params.containsKey("defaultPriority")
+                ? parseIntOrDefault(params.get("defaultPriority"), 0) : null;
+            Boolean pin = params.containsKey("pin") ? "true".equals(params.get("pin")) : null;
+            String preferredAgentId = params.containsKey("preferredAgentId")
+                ? cleanNullable(params.get("preferredAgentId")) : null;
+
+            workTaskService.editOperation(requireOperationKey(params), taskId, expectedVersion,
+                title, description, priority, pin, preferredAgentId);
+
+            List<WorkTaskDefinition> tasks = workTaskService.listByProject(projectId);
+            Project project = projectService.getProject(projectId);
+            List<WorkTaskFragments.WorkTaskRow> rows = tasks.stream()
+                .map(t -> taskToRow(t, project.archived()))
+                .toList();
+            return WorkTaskFragments.editorHost().render()
+                + WorkTaskFragments.taskList(projectId, rows).render()
+                + WorkTaskFragments.statusMessage("Task saved.", false).render();
+        } catch (IllegalStateException e) {
+            String msg = e.getMessage() == null ? "" : e.getMessage();
+            int status = msg.contains("version mismatch") || msg.contains("promoted")
+                ? HttpServletResponse.SC_CONFLICT : HttpServletResponse.SC_BAD_REQUEST;
+            response.setStatus(status);
+            return editErrorFragment(projectId, taskId, params, e.getMessage());
+        } catch (IllegalArgumentException e) {
+            response.setStatus(HttpServletResponse.SC_BAD_REQUEST);
+            return editErrorFragment(projectId, taskId, params, e.getMessage());
+        } catch (ProjectAccessDeniedException e) {
+            response.setStatus(HttpServletResponse.SC_SERVICE_UNAVAILABLE);
+            return editErrorFragment(projectId, taskId, params, e.getMessage());
+        } catch (RuntimeException e) {
+            log.warn("Task edit failed for {} / {}", projectId, taskId, e);
+            response.setStatus(HttpServletResponse.SC_SERVICE_UNAVAILABLE);
+            return editErrorFragment(projectId, taskId, params,
+                "Task editing is temporarily unavailable.");
+        }
+    }
+
+    private String editErrorFragment(String projectId, String taskId,
+                                      Map<String, String> params, String error) {
+        try {
+            WorkTaskDefinition task = workTaskService.getById(taskId);
+            List<WorkTaskFragments.AgentOption> agentOptions = buildAgentOptions(projectId);
+            return WorkTaskFragments.editForm(projectId, task, params, error, agentOptions).render();
+        } catch (RuntimeException ex) {
+            return WorkTaskFragments.errorBadRequest(error).render();
+        }
+    }
+
+    // ── Task promote ──
+
+    @PostMapping("/projects/_detail/{projectId}/tasks/{taskId}/promote")
+    @ResponseBody
+    public String promoteTask(@PathVariable String projectId, @PathVariable String taskId,
+                               @RequestParam int expectedVersion,
+                               @RequestParam(required = false) String operationKey,
+                               HttpServletResponse response) {
+        try {
+            projectService.getProject(projectId);
+            validateProjectTask(taskId, projectId);
+            workTaskService.promoteOperation(requireOperationKey(operationKey), taskId, expectedVersion);
+
+            // Re-render detail
+            WorkTaskDefinition task = workTaskService.getById(taskId);
+            Project project = projectService.getProject(projectId);
+            List<WorkTaskAttempt> attempts = workTaskService.listAttempts(taskId);
+            List<WorkTaskFragments.AttemptDisplay> displays = attempts.stream()
+                .map(a -> attemptToDisplay(a))
+                .toList();
+            boolean planAvailable = isPlanExecutable(task.promotedPlanId());
+            return WorkTaskFragments.taskDetail(projectId, task, attempts, displays,
+                project.archived(), planAvailable).render()
+                + WorkTaskFragments.statusMessage("Task promoted to Plan.", false).render();
+        } catch (IllegalStateException e) {
+            String msg = e.getMessage() == null ? "" : e.getMessage();
+            int status = msg.contains("already been promoted") || msg.contains("version mismatch")
+                || msg.contains("contradictory")
+                ? HttpServletResponse.SC_CONFLICT : HttpServletResponse.SC_BAD_REQUEST;
+            response.setStatus(status);
+            return renderTaskDetailSafely(projectId, taskId)
+                + WorkTaskFragments.statusMessage(e.getMessage(), true).render();
+        } catch (IllegalArgumentException e) {
+            response.setStatus(HttpServletResponse.SC_BAD_REQUEST);
+            return WorkTaskFragments.errorBadRequest(e.getMessage()).render();
+        } catch (ProjectAccessDeniedException e) {
+            response.setStatus(HttpServletResponse.SC_SERVICE_UNAVAILABLE);
+            return WorkTaskFragments.errorUnavailable(e.getMessage()).render();
+        } catch (RuntimeException e) {
+            log.warn("Task promote failed for {} / {}", projectId, taskId, e);
+            response.setStatus(HttpServletResponse.SC_SERVICE_UNAVAILABLE);
+            return renderTaskDetailSafely(projectId, taskId)
+                + WorkTaskFragments.statusMessage("Promotion is temporarily unavailable.", true).render();
+        }
+    }
+
+    // ── Task submit ──
+
+    @GetMapping("/projects/_detail/{projectId}/tasks/{taskId}/submit")
+    @ResponseBody
+    public String taskSubmitForm(@PathVariable String projectId, @PathVariable String taskId,
+                                  HttpServletResponse response) {
+        try {
+            projectService.getProject(projectId);
+            WorkTaskDefinition task = validateProjectTask(taskId, projectId);
+            if (task.promotedPlanId() == null) {
+                response.setStatus(HttpServletResponse.SC_BAD_REQUEST);
+                return WorkTaskFragments.errorBadRequest("Task must be promoted before submission.").render();
+            }
+            List<WorkTaskFragments.AgentOption> agentOptions = buildAgentOptions(projectId);
+            return WorkTaskFragments.submitForm(projectId, task, agentOptions, Map.of(), null).render();
+        } catch (IllegalArgumentException e) {
+            response.setStatus(HttpServletResponse.SC_NOT_FOUND);
+            return WorkTaskFragments.errorNotFound(e.getMessage()).render();
+        }
+    }
+
+    @PostMapping("/projects/_detail/{projectId}/tasks/{taskId}/submit")
+    @ResponseBody
+    public String submitTask(@PathVariable String projectId, @PathVariable String taskId,
+                              @RequestParam Map<String, String> params,
+                              HttpServletResponse response) {
+        try {
+            projectService.getProject(projectId);
+            WorkTaskDefinition task = validateProjectTask(taskId, projectId);
+            String agentId = params.getOrDefault("agentId", "").trim();
+            String runDisplayName = cleanNullable(params.get("runDisplayName"));
+            String workspaceType = cleanNullable(params.get("workspaceType"));
+            String workspaceKey = cleanNullable(params.get("workspaceKey"));
+            String operationKey = cleanNullable(params.get("operationKey"));
+
+            workTaskService.submitOperation(requireOperationKey(operationKey), taskId, agentId,
+                runDisplayName, workspaceType, workspaceKey);
+
+            // Re-render detail
+            WorkTaskDefinition updated = workTaskService.getById(taskId);
+            Project project = projectService.getProject(projectId);
+            List<WorkTaskAttempt> attempts = workTaskService.listAttempts(taskId);
+            List<WorkTaskFragments.AttemptDisplay> displays = attempts.stream()
+                .map(a -> attemptToDisplay(a))
+                .toList();
+            boolean planAvailable = isPlanExecutable(task.promotedPlanId());
+            return WorkTaskFragments.submitHost().render()
+                + WorkTaskFragments.taskDetail(projectId, updated, attempts, displays,
+                    project.archived(), planAvailable)
+                    .withAttribute("hx-swap-oob", "outerHTML").render()
+                + WorkTaskFragments.statusMessage("Task submitted for execution.", false).render();
+        } catch (IllegalStateException e) {
+            String msg = e.getMessage() == null ? "" : e.getMessage();
+            int status = msg.contains("not promoted") ? HttpServletResponse.SC_BAD_REQUEST
+                : msg.contains("already has an active assignment") ? HttpServletResponse.SC_CONFLICT
+                : HttpServletResponse.SC_BAD_REQUEST;
+            response.setStatus(status);
+            return WorkTaskFragments.submitHost().render()
+                + renderTaskDetailOob(projectId, taskId)
+                + WorkTaskFragments.statusMessage(e.getMessage(), true).render();
+        } catch (IllegalArgumentException e) {
+            response.setStatus(HttpServletResponse.SC_BAD_REQUEST);
+            try {
+                WorkTaskDefinition task = workTaskService.getById(taskId);
+                var opts = buildAgentOptions(projectId);
+                return WorkTaskFragments.submitForm(projectId, task, opts, params, e.getMessage()).render();
+            } catch (RuntimeException ex) {
+                return WorkTaskFragments.errorBadRequest(e.getMessage()).render();
+            }
+        } catch (ProjectAccessDeniedException e) {
+            response.setStatus(HttpServletResponse.SC_SERVICE_UNAVAILABLE);
+            return WorkTaskFragments.errorUnavailable(e.getMessage()).render();
+        } catch (RuntimeException e) {
+            log.warn("Task submit failed for {} / {}", projectId, taskId, e);
+            response.setStatus(HttpServletResponse.SC_SERVICE_UNAVAILABLE);
+            return WorkTaskFragments.submitHost().render()
+                + renderTaskDetailOob(projectId, taskId)
+                + WorkTaskFragments.statusMessage("Submission is temporarily unavailable.", true).render();
+        }
+    }
+
+    // ── Task retry ──
+
+    @PostMapping("/projects/_detail/{projectId}/tasks/{taskId}/retry")
+    @ResponseBody
+    public String retryTask(@PathVariable String projectId, @PathVariable String taskId,
+                             @RequestParam(required = false) String operationKey,
+                             HttpServletResponse response) {
+        try {
+            projectService.getProject(projectId);
+            validateProjectTask(taskId, projectId);
+            workTaskService.retryOperation(requireOperationKey(operationKey), taskId);
+
+            WorkTaskDefinition task = workTaskService.getById(taskId);
+            Project project = projectService.getProject(projectId);
+            List<WorkTaskAttempt> attempts = workTaskService.listAttempts(taskId);
+            List<WorkTaskFragments.AttemptDisplay> displays = attempts.stream()
+                .map(a -> attemptToDisplay(a))
+                .toList();
+            boolean planAvailable = isPlanExecutable(task.promotedPlanId());
+            return WorkTaskFragments.taskDetail(projectId, task, attempts, displays,
+                project.archived(), planAvailable).render()
+                + WorkTaskFragments.statusMessage("Retry submitted.", false).render();
+        } catch (IllegalStateException e) {
+            String msg = e.getMessage() == null ? "" : e.getMessage();
+            int status = msg.contains("No attempts exist") ? HttpServletResponse.SC_NOT_FOUND
+                : msg.contains("not terminal") ? HttpServletResponse.SC_CONFLICT
+                : HttpServletResponse.SC_BAD_REQUEST;
+            response.setStatus(status);
+            return renderTaskDetailSafely(projectId, taskId)
+                + WorkTaskFragments.statusMessage(e.getMessage(), true).render();
+        } catch (IllegalArgumentException e) {
+            response.setStatus(HttpServletResponse.SC_BAD_REQUEST);
+            return renderTaskDetailSafely(projectId, taskId)
+                + WorkTaskFragments.statusMessage(e.getMessage(), true).render();
+        } catch (ProjectAccessDeniedException e) {
+            response.setStatus(HttpServletResponse.SC_SERVICE_UNAVAILABLE);
+            return WorkTaskFragments.errorUnavailable(e.getMessage()).render();
+        } catch (RuntimeException e) {
+            log.warn("Task retry failed for {} / {}", projectId, taskId, e);
+            response.setStatus(HttpServletResponse.SC_SERVICE_UNAVAILABLE);
+            return renderTaskDetailSafely(projectId, taskId)
+                + WorkTaskFragments.statusMessage("Retry is temporarily unavailable.", true).render();
+        }
+    }
+
+    // ── Task helper methods ──
+
+    private WorkTaskDefinition validateProjectTask(String taskId, String projectId) {
+        WorkTaskDefinition task = workTaskService.getById(taskId);
+        if (task.projectId() == null || !task.projectId().equals(projectId)) {
+            throw new IllegalArgumentException("Task " + taskId + " is not in project " + projectId);
+        }
+        return task;
+    }
+
+    private WorkTaskFragments.WorkTaskRow taskToRow(WorkTaskDefinition t, boolean archived) {
+        String status = null;
+        try {
+            List<WorkTaskAttempt> attempts = workTaskService.listAttempts(t.id());
+            if (t.designatedAttemptId() != null) {
+                WorkTaskAttempt designated = attempts.stream()
+                    .filter(attempt -> t.designatedAttemptId().equals(attempt.id()))
+                    .findFirst().orElse(null);
+                try {
+                    var assignment = designated == null ? null : assignmentService.get(designated.assignmentId());
+                    if (assignment == null) return new WorkTaskFragments.WorkTaskRow(
+                        t.id(), t.title(), t.description(), t.projectId(), t.pin(),
+                        t.defaultPriority(), t.preferredAgentId(), t.promotedPlanId(),
+                        t.definitionVersion(), null, archived, t.updatedAt());
+                    status = assignment.status() == null ? null : assignment.status().name();
+                } catch (RuntimeException ignored) {}
+            }
+        } catch (RuntimeException ignored) {}
+        return new WorkTaskFragments.WorkTaskRow(
+            t.id(), t.title(), t.description(), t.projectId(), t.pin(),
+            t.defaultPriority(), t.preferredAgentId(), t.promotedPlanId(),
+            t.definitionVersion(), status, archived, t.updatedAt());
+    }
+
+    private WorkTaskFragments.AttemptDisplay attemptToDisplay(WorkTaskAttempt a) {
+        String assignmentStatus = null;
+        try {
+            var assignment = assignmentService.get(a.assignmentId());
+            assignmentStatus = assignment.status() == null ? null : assignment.status().name();
+        } catch (RuntimeException ignored) {}
+        return new WorkTaskFragments.AttemptDisplay(
+            a.assignmentId(), a.attemptOrder(), assignmentStatus);
+    }
+
+    private boolean isPlanExecutable(String planId) {
+        if (planService == null || planId == null) return false;
+        try {
+            PlanDefinition plan = planService.getTask(planId);
+            return plan.status() == PlanStatus.APPROVED;
+        } catch (RuntimeException ignored) {
+            return false;
+        }
+    }
+
+    private List<WorkTaskFragments.AgentOption> buildAgentOptions(String projectId) {
+        return projectService.listMembers(projectId).stream()
+            .map(m -> new WorkTaskFragments.AgentOption(m.agentId(), m.agentId()))
+            .toList();
+    }
+
+    private String renderTaskDetailOob(String projectId, String taskId) {
+        try {
+            WorkTaskDefinition task = workTaskService.getById(taskId);
+            Project project = projectService.getProject(projectId);
+            List<WorkTaskAttempt> attempts = workTaskService.listAttempts(taskId);
+            List<WorkTaskFragments.AttemptDisplay> displays = attempts.stream()
+                .map(this::attemptToDisplay).toList();
+            return WorkTaskFragments.taskDetail(projectId, task, attempts, displays,
+                project.archived(), isPlanExecutable(task.promotedPlanId()))
+                .withAttribute("hx-swap-oob", "outerHTML").render();
+        } catch (RuntimeException ex) {
+            return "";
+        }
+    }
+
+    private String renderTaskDetailSafely(String projectId, String taskId) {
+        try {
+            WorkTaskDefinition task = workTaskService.getById(taskId);
+            Project project = projectService.getProject(projectId);
+            List<WorkTaskAttempt> attempts = workTaskService.listAttempts(taskId);
+            List<WorkTaskFragments.AttemptDisplay> displays = attempts.stream()
+                .map(a -> attemptToDisplay(a))
+                .toList();
+            boolean planAvailable = isPlanExecutable(task.promotedPlanId());
+            return WorkTaskFragments.taskDetail(projectId, task, attempts, displays,
+                project.archived(), planAvailable).render();
+        } catch (RuntimeException ex) {
+            return WorkTaskFragments.errorUnavailable("Unable to render task detail.").render();
+        }
+    }
+
+    private String requireOperationKey(Map<String, String> params) {
+        return requireOperationKey(params.get("operationKey"));
+    }
+
+    private String requireOperationKey(String operationKey) {
+        if (!StringUtils.hasText(operationKey)) {
+            throw new IllegalArgumentException("operationKey is required");
+        }
+        return operationKey.trim();
+    }
+
+    private String cleanNullable(String value) {
+        return StringUtils.hasText(value) ? value.trim() : null;
+    }
+
+    private int parseIntOrDefault(String value, int defaultValue) {
+        if (value == null) return defaultValue;
+        try {
+            return Integer.parseInt(value.trim());
+        } catch (NumberFormatException e) {
+            return defaultValue;
+        }
+    }
+
+    // ════════════════════════════════════════════════════════════════
+    //  Unavailable tabs (future phases)
+    // ════════════════════════════════════════════════════════════════
 
     @GetMapping("/projects/_detail/{projectId}/chat")
     @ResponseBody

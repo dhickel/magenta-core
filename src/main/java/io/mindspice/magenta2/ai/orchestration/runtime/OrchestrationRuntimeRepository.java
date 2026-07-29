@@ -913,8 +913,8 @@ public class OrchestrationRuntimeRepository {
             OrchestrationStatus.valueOf(rs.getString("status")), rs.getString("model_override"),
             getNullable(rs, "workspace_type"), getNullable(rs, "workspace_key"), getNullable(rs, "workspace_identity"),
             rs.getString("project_id"),
-            getNullable(rs, "source_definition_id"), getNullable(rs, "context_binding_key"),
-            readRowVersion(rs),
+            getNullable(rs, "source_definition_id"), getNullable(rs, "origin_definition_id"),
+            getNullable(rs, "context_binding_key"), readRowVersion(rs),
             rs.getInt("current_item_index"), map(rs.getString("checkpoint_json")),
             map(rs.getString("input_json")), map(rs.getString("output_json")), map(rs.getString("evidence_json")),
             rs.getString("error_text"), rs.getString("lease_owner"), instantValue(rs.getString("lease_expires_at")),
@@ -1184,6 +1184,9 @@ public class OrchestrationRuntimeRepository {
         }
         if (!assignmentColumns.contains("source_definition_id")) {
             jdbcTemplate.execute("alter table work_assignments add column source_definition_id text");
+        }
+        if (!assignmentColumns.contains("origin_definition_id")) {
+            jdbcTemplate.execute("alter table work_assignments add column origin_definition_id text");
         }
         if (!assignmentColumns.contains("context_binding_key")) {
             jdbcTemplate.execute("alter table work_assignments add column context_binding_key text check (context_binding_key is null or length(context_binding_key) between 1 and 255)");
@@ -1665,20 +1668,20 @@ public class OrchestrationRuntimeRepository {
                 insert into work_assignments (
                     id, agent_id, job_id, job_item_id, assignment_type, priority, status, model_override,
                     run_display_name, workspace_type, workspace_key, workspace_identity, project_id,
-                    source_definition_id, context_binding_key, row_version,
+                    source_definition_id, origin_definition_id, context_binding_key, row_version,
                     current_item_index, checkpoint_json, input_json, output_json, evidence_json,
                     error_text, lease_owner, lease_expires_at, lease_fence,
                     last_progress_at, last_heartbeat_at,
                     created_at, updated_at, started_at, completed_at
                 )
-                values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
             assignment.id(), assignment.agentId(), assignment.jobId(), assignment.jobItemId(),
             assignment.assignmentType().name(), assignment.priority(), assignment.status().name(),
             assignment.modelOverride(), assignment.runDisplayName(),
             assignment.workspaceType(), assignment.workspaceKey(), assignment.workspaceIdentity(),
-            assignment.projectId(), assignment.sourceDefinitionId(), assignment.contextBindingKey(),
-            assignment.rowVersion(),
+            assignment.projectId(), assignment.sourceDefinitionId(), assignment.originDefinitionId(),
+            assignment.contextBindingKey(), assignment.rowVersion(),
             assignment.currentItemIndex(),
             jsonOrNull(assignment.checkpoint()), jsonOrNull(assignment.input()), jsonOrNull(assignment.output()),
             jsonOrNull(assignment.evidence()), assignment.errorText(), assignment.leaseOwner(),
