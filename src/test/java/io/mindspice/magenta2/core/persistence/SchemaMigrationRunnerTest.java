@@ -200,12 +200,12 @@ class SchemaMigrationRunnerTest {
     }
 
     @Test
-    void freshSchemaIncludesV16WorkTaskIntegrityRepair() throws Exception {
+    void freshSchemaIncludesV16WorkTaskIntegrityRepairWithLaterMigrations() throws Exception {
         try (SingleConnectionDataSource dataSource = memoryDataSource()) {
-            SchemaMigrationRunner runner = run(dataSource, migrationsThrough016());
+            SchemaMigrationRunner runner = run(dataSource, migrationsThrough017());
             JdbcTemplate jdbc = new JdbcTemplate(dataSource);
 
-            assertEquals(16, runner.appliedMigrations().size());
+            assertEquals(17, runner.appliedMigrations().size());
             assertTrue(tableExists(jdbc, "work_task_definitions"));
             assertTrue(jdbc.queryForObject("""
                     select count(*) from sqlite_master
@@ -491,12 +491,13 @@ class SchemaMigrationRunnerTest {
         return all;
     }
 
-    private static Resource[] migrationsThrough016() {
+    private static Resource[] migrationsThrough017() {
         Resource[] through013 = allMigrations();
-        Resource[] all = java.util.Arrays.copyOf(through013, through013.length + 3);
+        Resource[] all = java.util.Arrays.copyOf(through013, through013.length + 4);
         all[through013.length] = new ClassPathResource("db/migrations/014-project-assignment-authority.sql");
         all[through013.length + 1] = new ClassPathResource("db/migrations/015-lightweight-work-tasks.sql");
         all[through013.length + 2] = new ClassPathResource("db/migrations/016-lightweight-work-task-integrity.sql");
+        all[through013.length + 3] = new ClassPathResource("db/migrations/017-job-reassignment-operations.sql");
         return all;
     }
 

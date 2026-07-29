@@ -1,6 +1,6 @@
 # Data Model
 
-Primary Magenta SQLite schema is initialized from [`schema.sql`](../../src/main/resources/schema.sql) and evolved by checksum-protected ordered resources 001-013 in [`db/migrations`](../../src/main/resources/db/migrations). Migration-owned structures use `SchemaMigrationRunner`; older unrelated repositories may still add compatibility columns for warm databases. The [001–009 guide](migrations-001-009.md) covers the original immutable foundation; migrations 010-013 are documented below.
+Primary Magenta SQLite schema is initialized from [`schema.sql`](../../src/main/resources/schema.sql) and evolved by checksum-protected ordered resources 001-017 in [`db/migrations`](../../src/main/resources/db/migrations). Migration-owned structures use `SchemaMigrationRunner`; older unrelated repositories may still add compatibility columns for warm databases. The [001–009 guide](migrations-001-009.md) covers the original immutable foundation; migrations 010-017 are documented in their domain sections below.
 
 ## Avatar Personal Data (Removed)
 
@@ -30,6 +30,7 @@ Source package: [`ai/chat/plan`](../../src/main/java/io/mindspice/magenta2/ai/ch
 
 - `plan_definitions`: unified saved plan/task definitions. It stores kind, status, title, summary, goal, notes, deliverables, inputs, outputs, assumptions, steps, validation criteria, execution evidence, validation feedback, prompt/work profile, planning/execution model, settings overrides, planning task text, pending questions/index, plan start order, final message, conversation id, and timestamps.
 - `plan_runs`: execution history for saved definitions. It snapshots the full definition, input/output values, workspace type/key/identity, evidence, validation feedback, deliverable evidence, final/error messages, status, and timestamps.
+- `work_task_definitions`, `work_task_attempts`, and `work_task_operations` (migrations 015-016): lightweight project task definitions, append-only assignment attempts, designated-attempt state, promotion links, and operation-keyed outcomes. The promoted-Plan delete guard is installed by runner reconciliation because its SQLite trigger body cannot be processed safely by the generic SQL script splitter.
 
 Important invariants:
 
@@ -61,7 +62,7 @@ Source packages: [`ai/orchestration/agents`](../../src/main/java/io/mindspice/ma
 
 - `agent_profiles`: durable agent profiles with name, status, default model, system prompt, approved tools JSON, shell allowlist JSON, direct-line flag, and timestamps.
 - `orchestration_jobs` and `orchestration_job_items`: runtime orchestration job records with typed workspace selection.
-- `work_assignments`: durable assignment queue. Fields include agent id, job/job item ids, assignment type, priority, status, model override, project attribution, workspace type/key/identity, current item index, checkpoint/input/output/evidence JSON, error, queue lease owner/expires, progress/heartbeat timestamps, and lifecycle timestamps.
+- `work_assignments`: durable assignment queue. Fields include agent id, job/job item ids, assignment type, priority, status, model override, project attribution, immutable source/origin definition ids, context binding key, row version, workspace type/key/identity, current item index, checkpoint/input/output/evidence JSON, error, queue lease owner/expires, progress/heartbeat timestamps, and lifecycle timestamps. Migration 014 owns assignment authority, archive state, scoped query snapshots, and control-operation persistence.
 - `assignment_conversation_links`: durable mapping from assignment ids to chat conversation ids so transcripts remain visible even if checkpoint output is incomplete.
 - `agent_inbox_messages`: runtime direct-line agent/operator inbox messages with read/handled flags.
 - `schedule_definitions`, `scheduler_claims`, `schedule_firings`, and `schedule_firing_attempts`: revisioned schedule state, fenced poller ownership, deterministic due-slot identity, and append-only enqueue/recovery audit.
@@ -85,6 +86,7 @@ Source package: [`ai/orchestration/runtime`](../../src/main/java/io/mindspice/ma
 - `job_definitions`: user-facing jobs with owner agent, project attribution, workspace type/key/identity, status, title, summary, ordered `items_json`, prompt profile, model, settings override JSON, and timestamps.
 - `job_runs`: execution records with job assignment id, workspace type/key/identity, work item run JSON, final/error messages, status, and timestamps.
 - `job_recurrences`: one recurrence per job, with cron expression, timezone, next fire time, enabled flag, and timestamps.
+- `job_reassignment_operations` (migration 017): operation-keyed atomic queued-reassignment state, source/destination identity, expected version, successor and lineage links, terminal outcome, and bounded failure class.
 
 Compatibility notes:
 

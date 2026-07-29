@@ -20,7 +20,7 @@ Never edit an applied resource. Add the next contiguous resource and update `sch
 
 ## Fresh Databases
 
-For an empty database, the runner initializes from `schema.sql` and verifies/applies the ordered history according to its fresh-start contract. The fresh schema must remain structurally equivalent to the migration-owned end state. FTS5 support is runtime-capability dependent; lack of FTS5 must expose search as unavailable rather than weakening scoped search.
+For an empty database, the runner initializes from `schema.sql` and verifies/applies the ordered history according to its fresh-start contract. The fresh schema must remain structurally equivalent to the migration-owned end state. Runner reconciliation required for SQLite objects that Spring's SQL splitter cannot install, such as trigger bodies, remains active for every target version at or beyond the introducing migration and runs before final integrity validation. FTS5 support is runtime-capability dependent; lack of FTS5 must expose search as unavailable rather than weakening scoped search.
 
 ## Existing Databases
 

@@ -813,9 +813,13 @@ public final class SchemaMigrationRunner {
         }
     }
 
-    /** SQLite-safe corrective shape for a migration 015 checksum that is already durable. */
-    private void ensureV16WorkTaskIntegrity(Connection connection, int version) throws SQLException {
-        if (version != 16) {
+    /**
+     * SQLite-safe corrective shape for a migration 015 checksum that is already durable.
+     * This remains required for every target at or beyond 016 because fresh initialization
+     * marks migrations applied without executing their trigger-bearing repair path.
+     */
+    private void ensureV16WorkTaskIntegrity(Connection connection, int targetVersion) throws SQLException {
+        if (targetVersion < 16) {
             return;
         }
         Set<String> assignments = new HashSet<>(tableColumns(connection, "work_assignments"));
