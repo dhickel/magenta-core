@@ -2,7 +2,7 @@
   "version": 2,
   "runId": "exec-project-dashboard-unified-contracts",
   "state": "active",
-  "revision": 10,
+  "revision": 12,
   "source": {
     "projectRoot": "/home/dhickel/Code/Java/Magenta",
     "sourcePlanPath": ".internal-dev/plans/20260729-163244-home-dhickel-code-java-magenta-internal-dev-ha",
@@ -907,7 +907,6 @@
     },
     {
       "phase": "phase-04-project-jobs-and-reassignment.md",
-      "validations": [],
       "implementation": {
         "agentModel": {
           "provider": "deepseek",
@@ -919,7 +918,37 @@
         "changedFileObservations": [],
         "outsideDeclaredTargets": [],
         "timestamp": "2026-07-29T21:02:15.436Z"
-      }
+      },
+      "validations": [
+        {
+          "agentModel": {
+            "provider": "openai-codex",
+            "model": "gpt-5.6-terra",
+            "thinking": "high"
+          },
+          "report": "Phase 04 attempt 1 BLOCKED. Validator fixed critical rollback bug (successor creation failure could leave revoked source), fixed reassignment workspace/context recapture, warm migration 017 duplicate column, added reassignment rollback/replay/digest conflict/fencing/uniqueness tests, removed fallback agent selection. Tests pass. BLOCKED on Playwright only.",
+          "changedFiles": [],
+          "changedFileObservations": [],
+          "outsideDeclaredTargets": [],
+          "timestamp": "2026-07-29T21:13:49.311Z",
+          "attempt": 1,
+          "verdict": "BLOCKED"
+        },
+        {
+          "agentModel": {
+            "provider": "openai-codex",
+            "model": "gpt-5.6-terra",
+            "thinking": "high"
+          },
+          "attempt": 2,
+          "verdict": "PASS",
+          "report": "Phase 04 PASS. Validator fixed critical rollback bug, reassignment workspace/context, warm migration 017. Senior fixed persistent fresh-startup migration gate bug (reconciliation gate changed from ==16 to >=16). Playwright confirmed: Jobs tab loads, Dashboard/Queue/Tasks all functional, no console errors, no leaked data. 1167 tests pass.",
+          "changedFiles": [],
+          "changedFileObservations": [],
+          "outsideDeclaredTargets": [],
+          "timestamp": "2026-07-29T21:30:11.647Z"
+        }
+      ]
     },
     {
       "phase": "phase-05-materialization-templates-files-outputs.md",
@@ -940,5 +969,5 @@
   ],
   "integrationValidations": [],
   "createdAt": "2026-07-29T17:32:58.764Z",
-  "updatedAt": "2026-07-29T21:02:15.436Z"
+  "updatedAt": "2026-07-29T21:30:11.647Z"
 }
