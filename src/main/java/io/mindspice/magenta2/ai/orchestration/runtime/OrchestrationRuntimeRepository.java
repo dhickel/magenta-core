@@ -979,7 +979,8 @@ public class OrchestrationRuntimeRepository {
     private OrchestrationEvent toEvent(ResultSet rs) throws SQLException {
         return new OrchestrationEvent(
             rs.getString("id"), EventType.valueOf(rs.getString("event_type")), rs.getString("source_type"),
-            rs.getString("source_id"), map(rs.getString("payload_json")), instantValue(rs.getString("created_at")),
+            rs.getString("source_id"), rs.getString("project_id"),
+            map(rs.getString("payload_json")), instantValue(rs.getString("created_at")),
             instantValue(rs.getString("handled_at"))
         );
     }

@@ -52,8 +52,8 @@ public final class ProjectConsoleFragments {
         new ProjectTab("work",       "Outputs",    "outputs",    true),
         new ProjectTab("context",    "Files",      "files",      true),
         new ProjectTab("context",    "Chat",       "chat",       false),
-        new ProjectTab("automation", "Schedules",  "schedules",  false),
-        new ProjectTab("automation", "Events",     "events",     false),
+        new ProjectTab("automation", "Schedules",  "schedules",  true),
+        new ProjectTab("automation", "Events",     "events",     true),
         new ProjectTab("admin",      "Members",    "members",    true),
         new ProjectTab("admin",      "Settings",   "settings",   true)
     );

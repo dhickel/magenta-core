@@ -15,6 +15,7 @@ Checksum-protected migration repair sequencing.
 - A discovered defect in an applied migration requires a later additive/rebuild corrective migration. Keep the original bytes exactly stable.
 - SQLite trigger bodies must be installed through the migration runner rather than Spring's generic SQL script splitter, which treats trigger-body semicolons as statement boundaries.
 - If a planned future phase reserved the corrective migration number, record and resolve that sequencing conflict before that phase begins.
+- When `schema.sql` already declares a later additive SQLite column, put the idempotent `PRAGMA table_info`/`ALTER TABLE` guard in `SchemaMigrationRunner` before the migration script. The SQL resource can then create dependent indexes without failing when Spring initialized the fresh schema before the runner. Migration 019 project-event attribution uses this pattern.
 
 # Engine Relevance
 

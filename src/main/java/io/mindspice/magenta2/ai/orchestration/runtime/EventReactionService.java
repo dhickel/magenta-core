@@ -26,7 +26,16 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 /**
  * Fenced event-reaction service with revision-qualified definitions,
  * causation chains, deduplication, loop detection, depth/rate limits,
- * suppression audit, and a side-effect-free simulation evaluator.
+ * project-trust matching, suppression audit, and a side-effect-free
+ * simulation evaluator.
+ *
+ * <p>Revision heads: {@code current_revision = 1} identifies the sole active
+ * revision. Updates advance the head pointer atomically.</p>
+ *
+ * <p>Project trust: reactions match only events bearing the same trusted
+ * {@code project_id}. Non-project reactions (project_id=null) match any
+ * non-project event. Project-scoped reactions never match a project-less
+ * event or an event from a different project.</p>
  */
 @Service
 public class EventReactionService {
@@ -38,16 +47,19 @@ public class EventReactionService {
     private final JdbcTemplate jdbc;
     private final ObjectMapper objectMapper;
     private final AssignmentService assignmentService;
+    private final ProjectService projectService;
     private final Clock clock;
     private final boolean reactionsEnabled;
 
     public EventReactionService(JdbcTemplate jdbc, ObjectMapper objectMapper,
                                 AssignmentService assignmentService,
+                                ProjectService projectService,
                                 Clock clock,
                                 @org.springframework.beans.factory.annotation.Value("${magenta.features.reactions-enabled:false}") boolean reactionsEnabled) {
         this.jdbc = jdbc;
         this.objectMapper = objectMapper.findAndRegisterModules();
         this.assignmentService = assignmentService;
+        this.projectService = projectService;
         this.clock = clock;
         this.reactionsEnabled = reactionsEnabled;
     }
@@ -57,16 +69,23 @@ public class EventReactionService {
     public List<ReactionDefinition> definitions(String agentId) {
         return jdbc.query("""
                 select * from reaction_definitions
-                where agent_id = ? and deleted = 0
+                where agent_id = ? and deleted = 0 and current_revision = 1
                 order by created_at desc
                 """, (rs, row) -> definitionFromRow(rs), agentId);
+    }
+
+    public List<ReactionDefinition> definitionsByProject(String projectId) {
+        return jdbc.query("""
+                select * from reaction_definitions
+                where project_id = ? and deleted = 0 and current_revision = 1
+                order by created_at desc
+                """, (rs, row) -> definitionFromRow(rs), projectId);
     }
 
     public ReactionDefinition definition(String agentId, String reactionId) {
         ReactionDefinition def = jdbc.query("""
                 select * from reaction_definitions
-                where id = ? and deleted = 0
-                order by revision desc limit 1
+                where id = ? and deleted = 0 and current_revision = 1
                 """, rs -> rs.next() ? definitionFromRow(rs) : null, reactionId);
         if (def == null || !agentId.equals(def.agentId())) {
             throw new IllegalStateException("reaction not found");
@@ -87,6 +106,9 @@ public class EventReactionService {
 
     @Transactional
     public ReactionDefinition save(String agentId, ReactionDefinition input) {
+        if (StringUtils.hasText(input.projectId())) {
+            throw new IllegalArgumentException("projectId is server-derived; use the project-scoped operation");
+        }
         if (input.eventType() == null) throw new IllegalArgumentException("eventType is required");
         if (input.actionType() == null) throw new IllegalArgumentException("actionType is required");
 
@@ -100,15 +122,28 @@ public class EventReactionService {
         String filterJson = jsonOrNull(input.filter());
         Instant now = clock.instant();
 
+        // Advance revision head
+        if (nextRevision > 1) {
+            jdbc.update("""
+                    update reaction_definitions set current_revision = 0
+                    where id = ? and current_revision = 1
+                    """, id);
+        }
+
         jdbc.update("""
                 insert into reaction_definitions (
-                    id, agent_id, revision, event_type, filter_json, action_type,
-                    assignment_template_json, enabled, deleted, created_at, updated_at
-                ) values (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
+                    id, agent_id, revision, current_revision,
+                    event_type, filter_json, action_type,
+                    assignment_template_json, enabled, deleted,
+                    project_id, created_at, updated_at
+                ) values (?, ?, ?, 1, ?, ?, ?, ?, ?, 0, ?, ?, ?)
                 """,
-                id, agentId, nextRevision, input.eventType().name(), filterJson,
+                id, agentId, nextRevision,
+                input.eventType().name(), filterJson,
                 input.actionType().name(), assignmentJson,
-                input.enabled() ? 1 : 0, now.toString(), now.toString());
+                input.enabled() ? 1 : 0,
+                input.projectId(),
+                now.toString(), now.toString());
 
         return definitionByRevision(agentId, id, nextRevision);
     }
@@ -116,26 +151,10 @@ public class EventReactionService {
     @Transactional
     public ReactionDefinition update(String agentId, String reactionId, ReactionDefinition input) {
         ReactionDefinition current = definition(agentId, reactionId);
-        int nextRevision = current.revision() + 1;
-        String assignmentJson = jsonOrThrow(input.assignmentTemplate());
-        String filterJson = jsonOrNull(input.filter());
-        Instant now = clock.instant();
-
-        jdbc.update("""
-                insert into reaction_definitions (
-                    id, agent_id, revision, event_type, filter_json, action_type,
-                    assignment_template_json, enabled, deleted, created_at, updated_at
-                ) values (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
-                """,
-                reactionId, agentId, nextRevision,
-                input.eventType() != null ? input.eventType().name() : current.eventType().name(),
-                filterJson,
-                input.actionType() != null ? input.actionType().name() : current.actionType().name(),
-                assignmentJson,
-                input.enabled() ? 1 : 0,
-                current.createdAt().toString(), now.toString());
-
-        return definitionByRevision(agentId, reactionId, nextRevision);
+        if (input.projectId() != null && !input.projectId().equals(current.projectId())) {
+            throw new IllegalArgumentException("projectId is immutable");
+        }
+        return appendRevision(agentId, current, input, current.projectId(), false);
     }
 
     @Transactional
@@ -146,17 +165,14 @@ public class EventReactionService {
                 reactionId, agentId, current.revision(),
                 current.eventType(), current.filter(), current.actionType(),
                 current.assignmentTemplate(), enabled, false,
+                current.projectId(),
                 current.createdAt(), current.updatedAt()));
     }
 
     @Transactional
     public void softDelete(String agentId, String reactionId) {
         ReactionDefinition current = definition(agentId, reactionId);
-        Instant now = clock.instant();
-        jdbc.update("""
-                update reaction_definitions set deleted = 1, updated_at = ?
-                where id = ? and agent_id = ?
-                """, now.toString(), reactionId, agentId);
+        appendRevision(agentId, current, current, current.projectId(), true);
     }
 
     @Transactional
@@ -164,7 +180,146 @@ public class EventReactionService {
         softDelete(agentId, reactionId);
     }
 
-    // ── Reaction Dispatch (called by OrchestrationEventService) ──
+    private ReactionDefinition appendRevision(String agentId, ReactionDefinition current,
+                                              ReactionDefinition input, String projectId,
+                                              boolean tombstone) {
+        ReactionDefinition effective = new ReactionDefinition(
+                current.id(), agentId, current.revision() + 1,
+                input.eventType() != null ? input.eventType() : current.eventType(),
+                input.filter() != null ? input.filter() : current.filter(),
+                input.actionType() != null ? input.actionType() : current.actionType(),
+                input.assignmentTemplate() != null ? input.assignmentTemplate() : current.assignmentTemplate(),
+                tombstone ? false : input.enabled(), tombstone, projectId,
+                current.createdAt(), clock.instant());
+        if (effective.eventType() == null || effective.actionType() == null) {
+            throw new IllegalArgumentException("eventType and actionType are required");
+        }
+        int cleared = jdbc.update("""
+                update reaction_definitions set current_revision = 0
+                where id = ? and revision = ? and current_revision = 1
+                """, current.id(), current.revision());
+        if (cleared != 1) {
+            throw new IllegalStateException("reaction revision conflict");
+        }
+        jdbc.update("""
+                insert into reaction_definitions (
+                    id, agent_id, revision, current_revision, event_type, filter_json, action_type,
+                    assignment_template_json, enabled, deleted, project_id, created_at, updated_at
+                ) values (?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, effective.id(), effective.agentId(), effective.revision(),
+                effective.eventType().name(), jsonOrNull(effective.filter()), effective.actionType().name(),
+                jsonOrThrow(effective.assignmentTemplate()), effective.enabled() ? 1 : 0,
+                effective.deleted() ? 1 : 0, effective.projectId(),
+                effective.createdAt().toString(), effective.updatedAt().toString());
+        return effective;
+    }
+
+    // ── Project-scoped save ──
+
+    @Transactional
+    public ReactionDefinition saveForProject(String projectId, String executingAgentId,
+                                              ReactionDefinition input) {
+        requireActiveProject(projectId);
+        requireProjectMember(projectId, executingAgentId);
+
+        if (input.eventType() == null) throw new IllegalArgumentException("eventType is required");
+        if (input.actionType() == null) throw new IllegalArgumentException("actionType is required");
+        if (StringUtils.hasText(input.id())) {
+            throw new IllegalArgumentException("reaction id is server-generated on create");
+        }
+
+        String id = UUID.randomUUID().toString();
+        int nextRevision;
+        Integer currentRev = jdbc.queryForObject(
+                "select max(revision) from reaction_definitions where id = ?", Integer.class, id);
+        nextRevision = currentRev == null || currentRev == 0 ? 1 : currentRev + 1;
+
+        String assignmentJson = jsonOrThrow(input.assignmentTemplate());
+        String filterJson = jsonOrNull(input.filter());
+        Instant now = clock.instant();
+
+        if (nextRevision > 1) {
+            jdbc.update("""
+                    update reaction_definitions set current_revision = 0
+                    where id = ? and current_revision = 1
+                    """, id);
+        }
+
+        jdbc.update("""
+                insert into reaction_definitions (
+                    id, agent_id, revision, current_revision,
+                    event_type, filter_json, action_type,
+                    assignment_template_json, enabled, deleted,
+                    project_id, created_at, updated_at
+                ) values (?, ?, ?, 1, ?, ?, ?, ?, ?, 0, ?, ?, ?)
+                """,
+                id, executingAgentId, nextRevision,
+                input.eventType().name(), filterJson,
+                input.actionType().name(), assignmentJson,
+                input.enabled() ? 1 : 0,
+                projectId,
+                now.toString(), now.toString());
+
+        return definitionByRevision(executingAgentId, id, nextRevision);
+    }
+
+    @Transactional
+    public ReactionDefinition updateForProject(String projectId, String executingAgentId,
+                                                String reactionId, ReactionDefinition input) {
+        requireActiveProject(projectId);
+        requireProjectMember(projectId, executingAgentId);
+        ReactionDefinition current = definition(executingAgentId, reactionId);
+        if (!projectId.equals(current.projectId())) {
+            throw new IllegalStateException("reaction is not in this project");
+        }
+        return appendRevision(executingAgentId, current, input, projectId, false);
+    }
+
+    @Transactional
+    public ReactionDefinition enableForProject(String projectId, String executingAgentId,
+                                                String reactionId, boolean enabled) {
+        requireActiveProject(projectId);
+        requireProjectMember(projectId, executingAgentId);
+
+        ReactionDefinition current = definition(executingAgentId, reactionId);
+        if (!projectId.equals(current.projectId())) {
+            throw new IllegalStateException("reaction is not in this project");
+        }
+        if (current.enabled() == enabled) return current;
+        return updateForProject(projectId, executingAgentId, reactionId, new ReactionDefinition(
+                reactionId, executingAgentId, current.revision(),
+                current.eventType(), current.filter(), current.actionType(),
+                current.assignmentTemplate(), enabled, false,
+                projectId,
+                current.createdAt(), current.updatedAt()));
+    }
+
+    @Transactional
+    public void deleteForProject(String projectId, String executingAgentId, String reactionId) {
+        requireActiveProject(projectId);
+        requireProjectMember(projectId, executingAgentId);
+        ReactionDefinition current = definition(executingAgentId, reactionId);
+        if (!projectId.equals(current.projectId())) {
+            throw new IllegalStateException("reaction is not in this project");
+        }
+        softDelete(executingAgentId, reactionId);
+    }
+
+    // ── Project trust matching ──
+
+    /**
+     * Returns true if the reaction can react to the given event based on
+     * project-id trust. Null matches null; identical non-null values match;
+     * any mismatch is rejected (spoofing prevention).
+     */
+    static boolean projectTrustMatches(String reactionProjectId, String eventProjectId) {
+        if (reactionProjectId == null && eventProjectId == null) return true;
+        if (reactionProjectId != null && eventProjectId != null
+                && reactionProjectId.equals(eventProjectId)) return true;
+        return false;
+    }
+
+    // ── Reaction Dispatch ──
 
     @Transactional
     public List<ReactionDispatch> dispatch(OrchestrationEvent event) {
@@ -173,12 +328,27 @@ public class EventReactionService {
         List<ReactionDispatch> results = new ArrayList<>();
         Instant now = clock.instant();
 
+        // Query enabled current-revision reactions matching event type
         List<ReactionDefinition> enabled = jdbc.query("""
                 select * from reaction_definitions
-                where enabled = 1 and deleted = 0 and event_type = ?
+                where enabled = 1 and deleted = 0 and current_revision = 1
+                  and event_type = ?
                 """, (rs, row) -> definitionFromRow(rs), event.eventType().name());
 
         for (ReactionDefinition reaction : enabled) {
+            // Project trust gate: reaction must match event's project_id.
+            if (!projectTrustMatches(reaction.projectId(), event.projectId())) {
+                continue;
+            }
+            if (StringUtils.hasText(reaction.projectId())) {
+                try {
+                    requireActiveProject(reaction.projectId());
+                    requireProjectMember(reaction.projectId(), reaction.agentId());
+                } catch (RuntimeException ineligible) {
+                    log.info("Skipping ineligible project reaction {}: {}", reaction.id(), ineligible.getMessage());
+                    continue;
+                }
+            }
             try {
                 ReactionDispatch result = dispatchForReaction(reaction, event, now);
                 if (result != null) results.add(result);
@@ -193,16 +363,11 @@ public class EventReactionService {
 
     private ReactionDispatch dispatchForReaction(ReactionDefinition reaction,
                                                   OrchestrationEvent event, Instant now) {
-        // Check filter match
         if (!matchesFilter(reaction.filter(), event.payload())) return null;
 
-        // Build causation identifiers
         String rootEventId = event.id();
         int depth = 1;
-        String parentEventId = null;
-        String parentDispatchId = null;
 
-        // Check if this reaction is already in the causation chain
         String dedupeKey = reaction.id() + ":" + reaction.revision() + ":" + event.id();
 
         Integer existingDispatch = jdbc.queryForObject("""
@@ -211,7 +376,6 @@ public class EventReactionService {
                 """, Integer.class, reaction.id(), reaction.revision(), event.id());
 
         if (existingDispatch != null && existingDispatch > 0) {
-            // Duplicate — return the existing dispatch
             return jdbc.query("""
                     select * from reaction_dispatches
                     where reaction_id = ? and revision = ? and source_event_id = ?
@@ -219,8 +383,7 @@ public class EventReactionService {
                     reaction.id(), reaction.revision(), event.id());
         }
 
-        // Check for loop: reaction_id already present in causation
-        // (Simplified: check if any dispatch for root_event matches this reaction)
+        // Loop check
         Integer loopCheck = jdbc.queryForObject("""
                 select count(*) from reaction_dispatches
                 where root_event_id = ? and reaction_id = ?
@@ -231,13 +394,12 @@ public class EventReactionService {
                     "SUPPRESSED_LOOP", "Reaction already in causation chain");
         }
 
-        // Check depth
         if (depth > MAX_CAUSATION_DEPTH) {
             return createSuppressedDispatch(reaction, event, now, dedupeKey,
                     "SUPPRESSED_DEPTH", "Causation depth exceeds " + MAX_CAUSATION_DEPTH);
         }
 
-        // Check rate limit
+        // Rate limit
         Instant windowStart = now.minus(RATE_WINDOW);
         Integer rateCount = jdbc.queryForObject("""
                 select count(*) from reaction_dispatches
@@ -250,16 +412,16 @@ public class EventReactionService {
                     + " dispatches per " + RATE_WINDOW.toSeconds() + "s");
         }
 
-        // Create dispatch record
+        // Create dispatch
         String dispatchId = UUID.randomUUID().toString();
         String operationKey = reaction.id() + ":" + reaction.revision() + ":" + event.id();
         String templateJson = jsonOrThrow(reaction.assignmentTemplate());
         String requestDigest = ScheduleService.sha256(operationKey + templateJson);
 
-        // Parse template and build assignment request
         Map<String, Object> template = parseJson(templateJson);
-        AssignmentRequest request = AssignmentTemplateParser.reactionRequest(
-                reaction.agentId(), template);
+        AssignmentRequest request = AssignmentTemplateParser.automationRequest(
+                reaction.agentId(), null, reaction.projectId(), operationKey, template,
+                AssignmentType.REPORT);
         String assignmentId = UUID.randomUUID().toString();
 
         try {
@@ -280,7 +442,7 @@ public class EventReactionService {
                     """,
                     dispatchId, reaction.id(), reaction.revision(), event.id(),
                     operationKey, requestDigest, templateJson,
-                    rootEventId, parentEventId, parentDispatchId,
+                    rootEventId, null, null,
                     depth, dedupeKey,
                     assignmentId, taskRunId, taskRunId, assignmentId,
                     now.toString(), now.toString());
@@ -290,7 +452,6 @@ public class EventReactionService {
                     """, rs -> rs.next() ? dispatchFromRow(rs) : null, dispatchId);
 
         } catch (Exception e) {
-            // Record failed dispatch
             jdbc.update("""
                     insert into reaction_dispatches (
                         dispatch_id, reaction_id, revision, source_event_id,
@@ -298,12 +459,12 @@ public class EventReactionService {
                         root_event_id, parent_event_id, parent_dispatch_id,
                         depth, dedupe_key, dispatch_state, suppression_reason,
                         created_at, updated_at
-                    ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'SUPPRESSED_RATE', ?, ?, ?)
+                    ) values (?, ?, ?, ?, ?, ?, ?, ?, null, null, 1, ?, 'SUPPRESSED_RATE', ?, ?, ?)
                     """,
                     dispatchId, reaction.id(), reaction.revision(), event.id(),
                     operationKey, requestDigest, templateJson,
-                    rootEventId, parentEventId, parentDispatchId,
-                    depth, dedupeKey, "ENQUEUE_FAILED: " + e.getClass().getSimpleName(),
+                    rootEventId, dedupeKey,
+                    "ENQUEUE_FAILED: " + e.getClass().getSimpleName(),
                     now.toString(), now.toString());
 
             return jdbc.query("""
@@ -353,36 +514,27 @@ public class EventReactionService {
 
         boolean matches = matchesFilter(request.filter(), request.eventPayload());
 
-        // Check loop
-        boolean loopDetected = false;
-        if (StringUtils.hasText(request.existingReactionId()) && StringUtils.hasText(request.rootEventId())) {
-            Integer loopCheck = jdbc.queryForObject("""
-                    select count(*) from reaction_dispatches
-                    where root_event_id = ? and reaction_id = ?
-                    """, Integer.class, request.rootEventId(), request.existingReactionId());
-            loopDetected = loopCheck != null && loopCheck > 0;
+        // Project trust check
+        boolean projectMismatch = false;
+        if (request.reactionProjectId() != null || request.eventProjectId() != null) {
+            projectMismatch = !projectTrustMatches(request.reactionProjectId(), request.eventProjectId());
         }
 
-        // Check depth
+        // Simulation accepts only the immutable request snapshot. It deliberately
+        // does not query dispatch state: persistence-backed loop/rate evaluation
+        // belongs to dispatch(), while this preview remains side-effect free.
+        boolean loopDetected = false;
         boolean depthExceeded = request.causationDepth() != null
                 && request.causationDepth() > MAX_CAUSATION_DEPTH;
-
-        // Check rate
         boolean rateExceeded = false;
         int recentCount = 0;
-        if (StringUtils.hasText(request.existingReactionId())) {
-            Instant windowStart = (request.clockInstant() != null
-                    ? request.clockInstant() : clock.instant()).minus(RATE_WINDOW);
-            Integer count = jdbc.queryForObject("""
-                    select count(*) from reaction_dispatches
-                    where reaction_id = ? and created_at >= ?
-                    """, Integer.class, request.existingReactionId(), windowStart.toString());
-            recentCount = count == null ? 0 : count;
-            rateExceeded = recentCount >= MAX_DISPATCHES_PER_WINDOW;
-        }
 
         String state = "OK";
         List<String> suppressionReasons = new ArrayList<>();
+        if (projectMismatch) {
+            suppressionReasons.add("PROJECT_MISMATCH");
+            state = "PROJECT_MISMATCH";
+        }
         if (!matches && request.filter() != null && !request.filter().isEmpty()) {
             suppressionReasons.add("FILTER_NO_MATCH");
             state = "NO_MATCH";
@@ -391,7 +543,8 @@ public class EventReactionService {
         if (depthExceeded) suppressionReasons.add("DEPTH_EXCEEDED");
         if (rateExceeded) suppressionReasons.add("RATE_EXCEEDED");
 
-        boolean wouldDispatch = matches && !loopDetected && !depthExceeded && !rateExceeded;
+        boolean wouldDispatch = matches && !loopDetected && !depthExceeded
+                && !rateExceeded && !projectMismatch;
 
         return new ReactionSimulation(
                 request.eventType(),
@@ -401,7 +554,22 @@ public class EventReactionService {
                 wouldDispatch ? "Would enqueue assignment" : null);
     }
 
-    // ── Backward-compatible wrappers (delegate to new API) ──
+    // ── Project helpers ──
+
+    private void requireActiveProject(String projectId) {
+        Project project = projectService.getProject(projectId);
+        if (project.archived()) {
+            throw new IllegalStateException("Project is archived");
+        }
+    }
+
+    private void requireProjectMember(String projectId, String agentId) {
+        if (!projectService.isMember(projectId, agentId)) {
+            throw new IllegalStateException("Agent is not a member of this project");
+        }
+    }
+
+    // ── Backward-compatible wrappers ──
 
     public List<AgentEventReaction> reactions(String agentId) {
         return definitions(agentId).stream().map(this::toLegacyReaction).toList();
@@ -413,7 +581,6 @@ public class EventReactionService {
 
     @Transactional
     public AgentEventReaction save(String agentId, AgentEventReaction reaction) {
-        // Validate template through existing parser
         AssignmentTemplateParser.reactionRequest(agentId,
                 reaction.assignmentTemplate() == null ? Map.of() : reaction.assignmentTemplate());
         ReactionDefinition def = save(agentId, new ReactionDefinition(
@@ -421,7 +588,9 @@ public class EventReactionService {
                 reaction.filter() == null ? Map.of() : reaction.filter(),
                 reaction.actionType() != null ? reaction.actionType() : ReactionActionType.ENQUEUE_ASSIGNMENT,
                 reaction.assignmentTemplate() != null ? reaction.assignmentTemplate() : Map.of(),
-                reaction.enabled(), false, null, null));
+                reaction.enabled(), false,
+                reaction.projectId(),
+                null, null));
         return toLegacyReaction(def);
     }
 
@@ -435,7 +604,8 @@ public class EventReactionService {
     private AgentEventReaction toLegacyReaction(ReactionDefinition def) {
         return new AgentEventReaction(def.id(), def.agentId(), def.eventType(),
                 def.filter(), def.actionType(), def.assignmentTemplate(),
-                def.enabled(), def.createdAt(), def.updatedAt());
+                def.enabled(), def.projectId(),
+                def.createdAt(), def.updatedAt());
     }
 
     // ── Dispatch Audit ──
@@ -480,6 +650,10 @@ public class EventReactionService {
         return true;
     }
 
+    private static String coalesce(String preferred, String fallback) {
+        return StringUtils.hasText(preferred) ? preferred : fallback;
+    }
+
     private String jsonOrThrow(Map<String, Object> map) {
         try {
             return objectMapper.writeValueAsString(map == null ? Map.of() : map);
@@ -516,6 +690,7 @@ public class EventReactionService {
                 ReactionActionType.valueOf(rs.getString("action_type")),
                 parseJson(rs.getString("assignment_template_json")),
                 rs.getInt("enabled") == 1, rs.getInt("deleted") == 1,
+                rs.getString("project_id"),
                 Instant.parse(rs.getString("created_at")),
                 Instant.parse(rs.getString("updated_at")));
     }
@@ -559,6 +734,7 @@ public class EventReactionService {
             EventType eventType, Map<String, Object> filter,
             ReactionActionType actionType, Map<String, Object> assignmentTemplate,
             boolean enabled, boolean deleted,
+            String projectId,
             Instant createdAt, Instant updatedAt) {}
 
     public record ReactionDispatch(
@@ -585,6 +761,7 @@ public class EventReactionService {
             Map<String, Object> eventPayload,
             String existingReactionId, String rootEventId,
             Integer causationDepth,
+            String reactionProjectId, String eventProjectId,
             Instant clockInstant) {}
 
     public record ReactionSimulation(

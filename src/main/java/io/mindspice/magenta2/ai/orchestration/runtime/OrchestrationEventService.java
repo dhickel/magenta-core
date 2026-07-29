@@ -18,8 +18,11 @@ import com.fasterxml.jackson.databind.ObjectMapper;
  * Typed event publication service. Events are persisted with payload, then
  * dispatched through {@link EventReactionService} for reaction evaluation.
  *
- * <p>Reaction dispatch is causal, with deduplication, loop detection, and
- * rate limits enforced at the reaction service boundary.
+ * <p>Reaction dispatch is causal, with deduplication, loop detection, rate
+ * limits, and project-trust matching enforced at the reaction service boundary.</p>
+ *
+ * <p>{@code projectId} is immutable server-derived attribution on the event row.
+ * Reactions match only events bearing the same trusted project_id.</p>
  */
 @Service
 public class OrchestrationEventService {
@@ -43,15 +46,23 @@ public class OrchestrationEventService {
     @Transactional
     public OrchestrationEvent publish(EventType eventType, String sourceType, String sourceId,
                                        Map<String, Object> payload) {
+        return publishProject(eventType, sourceType, sourceId, null, payload);
+    }
+
+    @Transactional
+    public OrchestrationEvent publishProject(EventType eventType, String sourceType, String sourceId,
+                                              String projectId, Map<String, Object> payload) {
         String eventId = UUID.randomUUID().toString();
         Instant now = Instant.now();
 
         jdbc.update("""
                 insert into orchestration_events (
-                    id, event_type, source_type, source_id, payload_json, created_at, handled_at
-                ) values (?, ?, ?, ?, ?, ?, ?)
+                    id, event_type, source_type, source_id, project_id,
+                    payload_json, created_at, handled_at
+                ) values (?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 eventId, eventType.name(), sourceType, sourceId,
+                projectId,
                 jsonOrNull(payload == null ? Map.of() : payload),
                 now.toString(), null);
 
@@ -69,7 +80,6 @@ public class OrchestrationEventService {
             return;
         }
 
-        // Dispatch through the reaction service
         List<EventReactionService.ReactionDispatch> dispatches =
                 reactionService.dispatch(event);
 
@@ -127,6 +137,16 @@ public class OrchestrationEventService {
                 """, (rs, row) -> eventFromRow(rs), sourceType, sourceId, boundedLimit, offset);
     }
 
+    public List<OrchestrationEvent> findEventsByProject(String projectId, int offset, int limit) {
+        int boundedLimit = Math.min(Math.max(limit, 1), 200);
+        return jdbc.query("""
+                select * from orchestration_events
+                where project_id = ?
+                order by created_at desc
+                limit ? offset ?
+                """, (rs, row) -> eventFromRow(rs), projectId, boundedLimit, offset);
+    }
+
     // ── Helpers ──
 
     private String jsonOrNull(Map<String, Object> payload) {
@@ -149,6 +169,7 @@ public class OrchestrationEventService {
                 EventType.valueOf(rs.getString("event_type")),
                 rs.getString("source_type"),
                 rs.getString("source_id"),
+                rs.getString("project_id"),
                 parseJson(rs.getString("payload_json")),
                 Instant.parse(rs.getString("created_at")),
                 nullableInstant(rs.getString("handled_at")));

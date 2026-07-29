@@ -764,7 +764,7 @@ class AgentOrchestrationControllerTest {
         private static final com.fasterxml.jackson.databind.ObjectMapper MAPPER = new com.fasterxml.jackson.databind.ObjectMapper();
 
         StubScheduleService() {
-            super(null, MAPPER, null, null, java.time.Clock.systemUTC(), true);
+            super(null, MAPPER, null, null, null, java.time.Clock.systemUTC(), true);
         }
 
         @Override
@@ -821,7 +821,7 @@ class AgentOrchestrationControllerTest {
         private static final com.fasterxml.jackson.databind.ObjectMapper MAPPER = new com.fasterxml.jackson.databind.ObjectMapper();
 
         StubReactionService() {
-            super(null, MAPPER, null, java.time.Clock.systemUTC(), true);
+            super(null, MAPPER, null, null, java.time.Clock.systemUTC(), true);
         }
 
         @Override

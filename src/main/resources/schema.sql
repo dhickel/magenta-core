@@ -433,10 +433,15 @@ create table if not exists orchestration_events (
     event_type text not null,
     source_type text,
     source_id text,
+    project_id text,
     payload_json text,
     created_at text not null,
     handled_at text
 );
+
+create index if not exists idx_orchestration_events_project
+    on orchestration_events (project_id, created_at desc)
+    where project_id is not null;
 
 create table if not exists runtime_settings (
     id text primary key,
@@ -1317,30 +1322,42 @@ create index if not exists idx_run_measurements_call_id
 create index if not exists idx_run_measurements_correlation
     on run_measurements (correlation_id) where correlation_id is not null;
 
--- ── Schedule and reaction management (migration 008) ──
+-- ── Schedule and reaction management (migration 008 base; v19 upgrades via migration 019) ──
 drop table if exists schedule_firings;
 drop table if exists agent_schedules;
 drop table if exists agent_event_reactions;
 
 create table if not exists schedule_definitions (
-    id                text primary key check (length(id) between 1 and 128),
+    id                text not null check (length(id) between 1 and 128),
     agent_id          text not null check (length(agent_id) > 0
         and instr(agent_id, '/') = 0 and instr(agent_id, char(92)) = 0),
     revision          integer not null check (revision >= 1),
-    cron_expression   text not null check (length(cron_expression) between 1 and 256),
-    timezone          text not null check (length(timezone) between 1 and 128),
+    current_revision  integer not null default 1 check (current_revision in (0, 1)),
+    mode              text not null default 'CRON' check (mode in ('CRON', 'ONE_TIME')),
+    cron_expression   text check ((mode = 'CRON' and length(cron_expression) between 1 and 256)
+        or (mode = 'ONE_TIME' and cron_expression is null)),
+    timezone          text check ((mode = 'CRON' and length(timezone) between 1 and 128)
+        or (mode = 'ONE_TIME' and timezone is null)),
+    fire_at           text check ((mode = 'ONE_TIME' and fire_at is not null)
+        or (mode = 'CRON' and fire_at is null)),
     dialect_version   text not null check (length(dialect_version) between 1 and 32),
     policy_version    text not null check (length(policy_version) between 1 and 32),
     enabled           integer not null check (enabled in (0, 1)),
     deleted           integer not null default 0 check (deleted in (0, 1)),
+    project_id        text,
     job_id            text,
     assignment_template_json text not null,
     created_at        text not null,
     updated_at        text not null,
-    unique (id, revision)
+    primary key (id, revision),
+    foreign key (project_id) references projects(id) on delete set null
 );
 create index if not exists idx_schedule_defs_agent on schedule_definitions (agent_id, deleted, enabled);
 create index if not exists idx_schedule_defs_enabled on schedule_definitions (enabled, deleted);
+create index if not exists idx_schedule_defs_project on schedule_definitions (project_id, deleted, enabled)
+    where project_id is not null;
+create unique index if not exists idx_schedule_defs_current on schedule_definitions (id)
+    where current_revision = 1;
 
 create table if not exists scheduler_claims (
     id                text primary key check (length(id) between 1 and 128),
@@ -1401,22 +1418,29 @@ create index if not exists idx_schedule_firing_attempts_firing on schedule_firin
 create index if not exists idx_schedule_firing_attempts_assignment on schedule_firing_attempts (assignment_id);
 
 create table if not exists reaction_definitions (
-    id                text primary key check (length(id) between 1 and 128),
+    id                text not null check (length(id) between 1 and 128),
     agent_id          text not null check (length(agent_id) > 0
         and instr(agent_id, '/') = 0 and instr(agent_id, char(92)) = 0),
     revision          integer not null check (revision >= 1),
+    current_revision  integer not null default 1 check (current_revision in (0, 1)),
     event_type        text not null check (length(event_type) between 1 and 64),
     filter_json       text,
     action_type       text not null check (action_type in ('ENQUEUE_ASSIGNMENT')),
     assignment_template_json text not null,
     enabled           integer not null check (enabled in (0, 1)),
     deleted           integer not null default 0 check (deleted in (0, 1)),
+    project_id        text,
     created_at        text not null,
     updated_at        text not null,
-    unique (id, revision)
+    primary key (id, revision),
+    foreign key (project_id) references projects(id) on delete set null
 );
 create index if not exists idx_reaction_defs_agent on reaction_definitions (agent_id, deleted, enabled);
 create index if not exists idx_reaction_defs_enabled_type on reaction_definitions (enabled, event_type, deleted);
+create index if not exists idx_reaction_defs_project on reaction_definitions (project_id, deleted, enabled)
+    where project_id is not null;
+create unique index if not exists idx_reaction_defs_current on reaction_definitions (id)
+    where current_revision = 1;
 
 create table if not exists reaction_dispatches (
     dispatch_id       text primary key check (length(dispatch_id) between 1 and 128),

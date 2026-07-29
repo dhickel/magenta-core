@@ -1732,18 +1732,6 @@ public class ProjectConsoleController {
         return unavailableProjectTab(projectId, "Chat", "context", response);
     }
 
-    @GetMapping("/projects/_detail/{projectId}/schedules")
-    @ResponseBody
-    public String projectSchedulesTab(@PathVariable String projectId, HttpServletResponse response) {
-        return unavailableProjectTab(projectId, "Schedules", "automation", response);
-    }
-
-    @GetMapping("/projects/_detail/{projectId}/events")
-    @ResponseBody
-    public String projectEventsTab(@PathVariable String projectId, HttpServletResponse response) {
-        return unavailableProjectTab(projectId, "Events", "automation", response);
-    }
-
     // ════════════════════════════════════════════════════════════════
     //  Shared rendering helpers
     // ════════════════════════════════════════════════════════════════

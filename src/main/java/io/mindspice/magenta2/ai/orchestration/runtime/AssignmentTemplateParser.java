@@ -22,6 +22,38 @@ final class AssignmentTemplateParser {
         return request(reactionAgentId, null, template, AssignmentType.REPORT);
     }
 
+    /**
+     * Converts an automation template without granting it authority over the
+     * server-owned executor, project, workspace, or lifecycle operation key.
+     */
+    static AssignmentRequest automationRequest(String agentId, String jobId, String projectId,
+                                               String operationKey, Map<String, Object> template,
+                                               AssignmentType defaultType) {
+        Map<String, Object> values = template == null ? Map.of() : template;
+        String templateProject = text(values.get("projectId"));
+        if (StringUtils.hasText(templateProject) && !templateProject.equals(projectId)) {
+            throw new IllegalArgumentException("automation template cannot override projectId");
+        }
+        if (StringUtils.hasText(text(values.get("agentId")))
+                || StringUtils.hasText(text(values.get("workspaceType")))
+                || StringUtils.hasText(text(values.get("workspaceKey")))
+                || StringUtils.hasText(text(values.get("operationKey")))
+                || StringUtils.hasText(text(values.get("contextBindingKey")))) {
+            throw new IllegalArgumentException("automation template contains server-owned attribution");
+        }
+        Map<String, Object> input = input(values);
+        String inputProject = text(input.get("projectId"));
+        if (StringUtils.hasText(inputProject) && !inputProject.equals(projectId)) {
+            throw new IllegalArgumentException("automation template input cannot override projectId");
+        }
+        AssignmentRequest request = new AssignmentRequest(
+            agentId, jobId, null, assignmentType(values.get("assignmentType"), defaultType),
+            null, integer(values.get("priority"), 0), text(values.get("modelOverride")),
+            projectId, null, null, input, operationKey);
+        validate(request);
+        return request;
+    }
+
     static void validate(AssignmentRequest request) {
         if (request.assignmentType() == null) {
             throw new IllegalArgumentException("assignmentType is required");

@@ -97,6 +97,28 @@ class ScheduleReactionFeatureParitySpringTest {
     }
 
     @Test
+    void scheduleRevisionsAppendAndDeleteCreatesAnImmutableTombstone() {
+        AgentProfile agent = agent();
+        AgentSchedule saved = scheduleService.save(agent.id(), new AgentSchedule(
+            null, agent.id(), null, Map.of("assignmentType", "REPORT"),
+            "0 0 * * * *", "UTC", true, null, null, null));
+
+        ScheduleService.ScheduleDefinition revised = scheduleService.update(agent.id(), saved.id(),
+            new ScheduleService.ScheduleDefinition(saved.id(), agent.id(), 0,
+                ScheduleMode.CRON, "0 */5 * * * *", "UTC", null,
+                true, false, null, null, Map.of("assignmentType", "REPORT"), null, null, null, null));
+
+        assertThat(revised.revision()).isEqualTo(2);
+        assertThat(scheduleService.definitionByRevision(agent.id(), saved.id(), 1).cronExpression())
+            .isEqualTo("0 0 * * * *");
+
+        scheduleService.delete(agent.id(), saved.id());
+        assertThat(scheduleService.definitionByRevision(agent.id(), saved.id(), 3).deleted()).isTrue();
+        assertThat(scheduleService.schedules(agent.id())).extracting(AgentSchedule::id)
+            .doesNotContain(saved.id());
+    }
+
+    @Test
     void scheduleAndReactionFragmentsComposeValidatedHtmxEditorsAndOobLists() throws Exception {
         AgentProfile agent = agent();
 

@@ -31,7 +31,12 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 /**
  * Fenced scheduler with revision-qualified definitions, owner+fence claims,
  * append-only firing audit, operation-key idempotency, retry, recovery,
- * and a side-effect-free simulation evaluator.
+ * project-scoped attribution, CRON/ONE_TIME exclusive modes, and a
+ * side-effect-free simulation evaluator.
+ *
+ * <p>Revision heads: {@code current_revision = 1} identifies the sole active
+ * revision. Updates advance the head pointer atomically (old {@code -> 0},
+ * new {@code -> 1}). Historical revisions are immutable.</p>
  */
 @Service
 public class ScheduleService {
@@ -47,18 +52,21 @@ public class ScheduleService {
     private final ObjectMapper objectMapper;
     private final AssignmentService assignmentService;
     private final OrchestrationEventService eventService;
+    private final ProjectService projectService;
     private final Clock clock;
     private final boolean schedulesEnabled;
 
     public ScheduleService(JdbcTemplate jdbc, ObjectMapper objectMapper,
                            AssignmentService assignmentService,
                            OrchestrationEventService eventService,
+                           ProjectService projectService,
                            Clock clock,
                            @org.springframework.beans.factory.annotation.Value("${magenta.features.schedules-enabled:false}") boolean schedulesEnabled) {
         this.jdbc = jdbc;
         this.objectMapper = objectMapper.findAndRegisterModules();
         this.assignmentService = assignmentService;
         this.eventService = eventService;
+        this.projectService = projectService;
         this.clock = clock;
         this.schedulesEnabled = schedulesEnabled;
     }
@@ -68,16 +76,23 @@ public class ScheduleService {
     public List<ScheduleDefinition> definitions(String agentId) {
         return jdbc.query("""
                 select * from schedule_definitions
-                where agent_id = ? and deleted = 0
+                where agent_id = ? and deleted = 0 and current_revision = 1
                 order by created_at desc
                 """, (rs, row) -> definitionFromRow(rs), agentId);
+    }
+
+    public List<ScheduleDefinition> definitionsByProject(String projectId) {
+        return jdbc.query("""
+                select * from schedule_definitions
+                where project_id = ? and deleted = 0 and current_revision = 1
+                order by created_at desc
+                """, (rs, row) -> definitionFromRow(rs), projectId);
     }
 
     public ScheduleDefinition definition(String agentId, String scheduleId) {
         ScheduleDefinition def = jdbc.query("""
                 select * from schedule_definitions
-                where id = ? and deleted = 0
-                order by revision desc limit 1
+                where id = ? and deleted = 0 and current_revision = 1
                 """, rs -> rs.next() ? definitionFromRow(rs) : null, scheduleId);
         if (def == null || !agentId.equals(def.agentId())) {
             throw new IllegalStateException("schedule not found");
@@ -98,27 +113,47 @@ public class ScheduleService {
 
     @Transactional
     public ScheduleDefinition save(String agentId, ScheduleDefinition input) {
+        if (StringUtils.hasText(input.projectId())) {
+            throw new IllegalArgumentException("projectId is server-derived; use the project-scoped operation");
+        }
         String id = StringUtils.hasText(input.id()) ? input.id() : UUID.randomUUID().toString();
         int nextRevision;
         Integer currentRev = jdbc.queryForObject(
                 "select max(revision) from schedule_definitions where id = ?", Integer.class, id);
         nextRevision = currentRev == null || currentRev == 0 ? 1 : currentRev + 1;
 
-        CronExpression cron = validateCron(input.cronExpression());
-        ZoneId zoneId = validateTimezone(input.timezone());
+        validateMode(input);
+
         String assignmentJson = jsonOrThrow(input.assignmentTemplate());
         Instant now = clock.instant();
 
+        // Advance revision head: clear current_revision on prior revisions
+        if (nextRevision > 1) {
+            jdbc.update("""
+                    update schedule_definitions set current_revision = 0
+                    where id = ? and current_revision = 1
+                    """, id);
+        }
+
         jdbc.update("""
                 insert into schedule_definitions (
-                    id, agent_id, revision, cron_expression, timezone, dialect_version,
-                    policy_version, enabled, deleted, job_id, assignment_template_json,
-                    created_at, updated_at
-                ) values (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?)
+                    id, agent_id, revision, current_revision, mode,
+                    cron_expression, timezone, fire_at,
+                    dialect_version, policy_version,
+                    enabled, deleted, project_id, job_id,
+                    assignment_template_json, created_at, updated_at
+                ) values (?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?)
                 """,
-                id, agentId, nextRevision, input.cronExpression().trim(), zoneId.getId(),
+                id, agentId, nextRevision,
+                input.mode() != null ? input.mode().name() : ScheduleMode.CRON.name(),
+                input.cronExpression(),
+                input.timezone(),
+                input.fireAt() != null ? input.fireAt().toString() : null,
                 DIALECT_VERSION, POLICY_VERSION,
-                input.enabled() ? 1 : 0, input.jobId(), assignmentJson,
+                input.enabled() ? 1 : 0,
+                input.projectId(),
+                input.jobId(),
+                assignmentJson,
                 now.toString(), now.toString());
 
         return definitionByRevision(agentId, id, nextRevision);
@@ -127,25 +162,10 @@ public class ScheduleService {
     @Transactional
     public ScheduleDefinition update(String agentId, String scheduleId, ScheduleDefinition input) {
         ScheduleDefinition current = definition(agentId, scheduleId);
-        CronExpression cron = validateCron(input.cronExpression());
-        ZoneId zoneId = validateTimezone(input.timezone());
-        String assignmentJson = jsonOrThrow(input.assignmentTemplate());
-        int nextRevision = current.revision() + 1;
-        Instant now = clock.instant();
-
-        jdbc.update("""
-                insert into schedule_definitions (
-                    id, agent_id, revision, cron_expression, timezone, dialect_version,
-                    policy_version, enabled, deleted, job_id, assignment_template_json,
-                    created_at, updated_at
-                ) values (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?)
-                """,
-                scheduleId, agentId, nextRevision, input.cronExpression().trim(), zoneId.getId(),
-                DIALECT_VERSION, POLICY_VERSION,
-                input.enabled() ? 1 : 0, input.jobId(), assignmentJson,
-                current.createdAt().toString(), now.toString());
-
-        return definitionByRevision(agentId, scheduleId, nextRevision);
+        if (input.projectId() != null && !input.projectId().equals(current.projectId())) {
+            throw new IllegalArgumentException("projectId is immutable");
+        }
+        return appendRevision(agentId, current, input, current.projectId(), false);
     }
 
     @Transactional
@@ -153,8 +173,9 @@ public class ScheduleService {
         ScheduleDefinition current = definition(agentId, scheduleId);
         if (current.enabled() == enabled) return current;
         return update(agentId, scheduleId, new ScheduleDefinition(
-                scheduleId, agentId, current.revision(), current.cronExpression(),
-                current.timezone(), enabled, false,
+                scheduleId, agentId, current.revision(),
+                current.mode(), current.cronExpression(), current.timezone(),
+                current.fireAt(), enabled, false, current.projectId(),
                 current.jobId(), current.assignmentTemplate(),
                 current.dialectVersion(), current.policyVersion(),
                 current.createdAt(), current.updatedAt()));
@@ -163,16 +184,190 @@ public class ScheduleService {
     @Transactional
     public void softDelete(String agentId, String scheduleId) {
         ScheduleDefinition current = definition(agentId, scheduleId);
-        Instant now = clock.instant();
-        jdbc.update("""
-                update schedule_definitions set deleted = 1, updated_at = ?
-                where id = ? and agent_id = ?
-                """, now.toString(), scheduleId, agentId);
+        appendRevision(agentId, current, current, current.projectId(), true);
     }
 
     @Transactional
     public void delete(String agentId, String scheduleId) {
         softDelete(agentId, scheduleId);
+    }
+
+    private ScheduleDefinition appendRevision(String agentId, ScheduleDefinition current,
+                                              ScheduleDefinition input, String projectId,
+                                              boolean tombstone) {
+        ScheduleMode mode = input.mode() != null ? input.mode() : current.mode();
+        String cron = mode == ScheduleMode.CRON
+                ? (input.cronExpression() != null ? input.cronExpression() : current.cronExpression()) : null;
+        String timezone = mode == ScheduleMode.CRON
+                ? (input.timezone() != null ? input.timezone() : current.timezone()) : null;
+        Instant fireAt = mode == ScheduleMode.ONE_TIME
+                ? (input.fireAt() != null ? input.fireAt() : current.fireAt()) : null;
+        ScheduleDefinition effective = new ScheduleDefinition(current.id(), agentId, current.revision() + 1,
+                mode, cron, timezone, fireAt, tombstone ? false : input.enabled(), tombstone,
+                projectId, input.jobId() != null ? input.jobId() : current.jobId(),
+                input.assignmentTemplate() != null ? input.assignmentTemplate() : current.assignmentTemplate(),
+                current.dialectVersion(), current.policyVersion(), current.createdAt(), clock.instant());
+        if (!tombstone) {
+            validateMode(effective);
+        }
+        Instant now = effective.updatedAt();
+        int cleared = jdbc.update("""
+                update schedule_definitions set current_revision = 0
+                where id = ? and revision = ? and current_revision = 1
+                """, current.id(), current.revision());
+        if (cleared != 1) {
+            throw new IllegalStateException("schedule revision conflict");
+        }
+        jdbc.update("""
+                insert into schedule_definitions (
+                    id, agent_id, revision, current_revision, mode,
+                    cron_expression, timezone, fire_at, dialect_version, policy_version,
+                    enabled, deleted, project_id, job_id, assignment_template_json, created_at, updated_at
+                ) values (?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, effective.id(), effective.agentId(), effective.revision(), effective.mode().name(),
+                effective.cronExpression(), effective.timezone(),
+                effective.fireAt() == null ? null : effective.fireAt().toString(),
+                effective.dialectVersion(), effective.policyVersion(), effective.enabled() ? 1 : 0,
+                effective.deleted() ? 1 : 0, effective.projectId(), effective.jobId(),
+                jsonOrThrow(effective.assignmentTemplate()), effective.createdAt().toString(), now.toString());
+        return effective;
+    }
+
+    // ── Project-scoped save ──
+
+    @Transactional
+    public ScheduleDefinition saveForProject(String projectId, String executingAgentId,
+                                              ScheduleDefinition input) {
+        requireActiveProject(projectId);
+        requireProjectMember(projectId, executingAgentId);
+        if (StringUtils.hasText(input.id())) {
+            throw new IllegalArgumentException("schedule id is server-generated on create");
+        }
+
+        String id = UUID.randomUUID().toString();
+        int nextRevision;
+        Integer currentRev = jdbc.queryForObject(
+                "select max(revision) from schedule_definitions where id = ?", Integer.class, id);
+        nextRevision = currentRev == null || currentRev == 0 ? 1 : currentRev + 1;
+
+        validateMode(input);
+
+        String assignmentJson = jsonOrThrow(input.assignmentTemplate());
+        Instant now = clock.instant();
+
+        if (nextRevision > 1) {
+            jdbc.update("""
+                    update schedule_definitions set current_revision = 0
+                    where id = ? and current_revision = 1
+                    """, id);
+        }
+
+        jdbc.update("""
+                insert into schedule_definitions (
+                    id, agent_id, revision, current_revision, mode,
+                    cron_expression, timezone, fire_at,
+                    dialect_version, policy_version,
+                    enabled, deleted, project_id, job_id,
+                    assignment_template_json, created_at, updated_at
+                ) values (?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?)
+                """,
+                id, executingAgentId, nextRevision,
+                input.mode() != null ? input.mode().name() : ScheduleMode.CRON.name(),
+                input.cronExpression(), input.timezone(),
+                input.fireAt() != null ? input.fireAt().toString() : null,
+                DIALECT_VERSION, POLICY_VERSION,
+                input.enabled() ? 1 : 0,
+                projectId,
+                input.jobId(),
+                assignmentJson,
+                now.toString(), now.toString());
+
+        // Publish project-scoped event
+        eventService.publishProject(EventType.SCHEDULE_CREATED, "SCHEDULE", id, projectId, Map.of(
+                "scheduleId", id,
+                "agentId", executingAgentId,
+                "projectId", projectId,
+                "revision", String.valueOf(nextRevision)
+        ));
+
+        return definitionByRevision(executingAgentId, id, nextRevision);
+    }
+
+    @Transactional
+    public ScheduleDefinition updateForProject(String projectId, String executingAgentId,
+                                                String scheduleId, ScheduleDefinition input) {
+        requireActiveProject(projectId);
+        requireProjectMember(projectId, executingAgentId);
+        ScheduleDefinition current = definition(executingAgentId, scheduleId);
+        if (!projectId.equals(current.projectId())) {
+            throw new IllegalStateException("schedule is not in this project");
+        }
+        return appendRevision(executingAgentId, current, input, projectId, false);
+    }
+
+    @Transactional
+    public ScheduleDefinition enableForProject(String projectId, String executingAgentId,
+                                                String scheduleId, boolean enabled) {
+        requireActiveProject(projectId);
+        requireProjectMember(projectId, executingAgentId);
+
+        ScheduleDefinition current = definition(executingAgentId, scheduleId);
+        if (!projectId.equals(current.projectId())) {
+            throw new IllegalStateException("schedule is not in this project");
+        }
+        if (current.enabled() == enabled) return current;
+        return updateForProject(projectId, executingAgentId, scheduleId, new ScheduleDefinition(
+                scheduleId, executingAgentId, current.revision(),
+                current.mode(), current.cronExpression(), current.timezone(),
+                current.fireAt(), enabled, false, projectId,
+                current.jobId(), current.assignmentTemplate(),
+                current.dialectVersion(), current.policyVersion(),
+                current.createdAt(), current.updatedAt()));
+    }
+
+    @Transactional
+    public void deleteForProject(String projectId, String executingAgentId, String scheduleId) {
+        requireActiveProject(projectId);
+        requireProjectMember(projectId, executingAgentId);
+        ScheduleDefinition current = definition(executingAgentId, scheduleId);
+        if (!projectId.equals(current.projectId())) {
+            throw new IllegalStateException("schedule is not in this project");
+        }
+        softDelete(executingAgentId, scheduleId);
+    }
+
+    // ── Mode validation ──
+
+    private void validateMode(ScheduleDefinition input) {
+        ScheduleMode mode = input.mode() != null ? input.mode() : ScheduleMode.CRON;
+        switch (mode) {
+            case CRON -> {
+                if (input.fireAt() != null) {
+                    throw new IllegalArgumentException("fireAt is only valid for ONE_TIME mode");
+                }
+                if (!StringUtils.hasText(input.cronExpression())) {
+                    throw new IllegalArgumentException("cronExpression is required for CRON mode");
+                }
+                if (!CronExpression.isValidExpression(input.cronExpression().trim())) {
+                    throw new IllegalArgumentException("invalid cronExpression: " + input.cronExpression());
+                }
+                if (!StringUtils.hasText(input.timezone())) {
+                    throw new IllegalArgumentException("timezone is required for CRON mode");
+                }
+                ZoneId.of(input.timezone().trim()); // validates
+            }
+            case ONE_TIME -> {
+                if (StringUtils.hasText(input.cronExpression()) || StringUtils.hasText(input.timezone())) {
+                    throw new IllegalArgumentException("cronExpression and timezone are only valid for CRON mode");
+                }
+                if (input.fireAt() == null) {
+                    throw new IllegalArgumentException("fireAt is required for ONE_TIME mode");
+                }
+                if (!input.fireAt().isAfter(clock.instant())) {
+                    throw new IllegalArgumentException("fireAt must be in the future for ONE_TIME mode");
+                }
+            }
+        }
     }
 
     // ── Claim Management ──
@@ -208,11 +403,9 @@ public class ScheduleService {
         }
 
         if (existing.expiresAt().isAfter(now) && !existing.ownerId().equals(ownerId)) {
-            // Claim is still valid for another owner
             return existing;
         }
 
-        // Takeover or renew with incremented fence
         int updated = jdbc.update("""
                 update scheduler_claims
                 set owner_id = ?, fence = fence + 1, heartbeat_at = ?, expires_at = ?, updated_at = ?
@@ -260,15 +453,15 @@ public class ScheduleService {
         } else if (claim.ownerId().equals(claimOwner())) {
             heartbeat(claim.id(), claim.ownerId(), claim.fence());
         } else {
-            return; // Another owner holds the claim
+            return;
         }
 
         Instant now = clock.instant();
 
-        // Find enabled, non-deleted schedules with due slots
+        // Select enabled, non-deleted, current-revision-only schedules
         List<ScheduleDefinition> definitions = jdbc.query("""
                 select * from schedule_definitions
-                where enabled = 1 and deleted = 0
+                where enabled = 1 and deleted = 0 and current_revision = 1
                 """, (rs, row) -> definitionFromRow(rs));
 
         for (ScheduleDefinition def : definitions) {
@@ -281,10 +474,27 @@ public class ScheduleService {
     }
 
     private void processDueSchedule(ScheduleDefinition def, SchedulerClaim claim, Instant now) {
+        if (StringUtils.hasText(def.projectId())) {
+            try {
+                requireActiveProject(def.projectId());
+                requireProjectMember(def.projectId(), def.agentId());
+            } catch (RuntimeException ineligible) {
+                log.info("Skipping ineligible project schedule {}: {}", def.id(), ineligible.getMessage());
+                return;
+            }
+        }
+        ScheduleMode mode = def.mode() != null ? def.mode() : ScheduleMode.CRON;
+
+        switch (mode) {
+            case CRON -> processCronSchedule(def, claim, now);
+            case ONE_TIME -> processOneTimeSchedule(def, claim, now);
+        }
+    }
+
+    private void processCronSchedule(ScheduleDefinition def, SchedulerClaim claim, Instant now) {
         CronExpression cron = validateCron(def.cronExpression());
         ZoneId zoneId = validateTimezone(def.timezone());
 
-        // Determine the current slot
         ZonedDateTime zoneNow = ZonedDateTime.ofInstant(now, zoneId);
         ZonedDateTime previousSlot = previousSlot(cron, zoneNow);
 
@@ -300,12 +510,35 @@ public class ScheduleService {
                 """, Integer.class, def.id(), def.revision(), slotStr, def.timezone());
         if (existing != null && existing > 0) return;
 
-        // Check overlap policy — if linked work is active, skip
         if (hasActiveLinkedWork(def)) return;
 
-        // Create firing
+        createAndEnqueueFiring(def, claim, now, slotStr, def.timezone());
+    }
+
+    private void processOneTimeSchedule(ScheduleDefinition def, SchedulerClaim claim, Instant now) {
+        if (def.fireAt() == null) return;
+
+        // Check if already past the fire time (within a reasonable window)
+        if (def.fireAt().isAfter(now)) return;
+
+        // Check if already fired for this revision
+        String slotStr = def.fireAt().toString();
+        Integer existing = jdbc.queryForObject("""
+                select count(*) from schedule_firings
+                where schedule_id = ? and slot_instant = ?
+                  and firing_state in ('ENQUEUED', 'EXHAUSTED', 'RECOVERED', 'CONFLICT')
+                """, Integer.class, def.id(), slotStr);
+        if (existing != null && existing > 0) return;
+
+        if (hasActiveLinkedWork(def)) return;
+
+        createAndEnqueueFiring(def, claim, now, slotStr, "UTC");
+    }
+
+    private void createAndEnqueueFiring(ScheduleDefinition def, SchedulerClaim claim,
+                                         Instant now, String slotStr, String timezone) {
         String firingId = UUID.randomUUID().toString();
-        String operationKey = def.id() + ":" + def.revision() + ":" + slotStr + ":" + def.timezone();
+        String operationKey = def.id() + ":" + def.revision() + ":" + slotStr + ":" + timezone;
         String templateJson = jsonOrThrow(def.assignmentTemplate());
         String requestDigest = sha256(operationKey + templateJson);
 
@@ -316,14 +549,21 @@ public class ScheduleService {
                     template_snapshot_json, created_at, updated_at
                 ) values (?, ?, ?, ?, ?, ?, 'CLAIMED', ?, ?, ?, ?, ?)
                 """,
-                firingId, def.id(), def.revision(), slotStr, def.timezone(),
+                firingId, def.id(), def.revision(), slotStr, timezone,
                 "GAP_SKIP", operationKey, requestDigest, templateJson,
                 now.toString(), now.toString());
 
-        if (inserted == 0) return; // Race — another poller got it
+        if (inserted == 0) return;
 
-        // Enqueue via attempt
         enqueueFiring(firingId, operationKey, requestDigest, templateJson, def, claim, now);
+
+        // For ONE_TIME, disable after firing to prevent re-processing
+        if (def.mode() == ScheduleMode.ONE_TIME) {
+            jdbc.update("""
+                    update schedule_definitions set enabled = 0, updated_at = ?
+                    where id = ? and revision = ? and current_revision = 1
+                    """, now.toString(), def.id(), def.revision());
+        }
     }
 
     private void enqueueFiring(String firingId, String operationKey, String requestDigest,
@@ -346,7 +586,6 @@ public class ScheduleService {
                     claim.ownerId(), claim.fence(), now.toString());
 
             try {
-                // Verify claim is still valid
                 SchedulerClaim current = currentClaim();
                 if (current == null || current.fence() != claim.fence()
                         || !current.ownerId().equals(claim.ownerId())) {
@@ -358,21 +597,17 @@ public class ScheduleService {
                     break;
                 }
 
-                // Build assignment from template
                 Map<String, Object> template = parseJson(templateJson);
-                AssignmentRequest request = AssignmentTemplateParser.scheduleRequest(
-                        new AgentSchedule(def.id(), def.agentId(), def.jobId(),
-                                template, def.cronExpression(), def.timezone(),
-                                def.enabled(), null, null, null));
+                AssignmentRequest request = AssignmentTemplateParser.automationRequest(
+                        def.agentId(), def.jobId(), def.projectId(), operationKey, template,
+                        AssignmentType.JOB_RUN);
                 String assignmentId = UUID.randomUUID().toString();
 
-                // Create the assignment
                 WorkAssignment assignment = assignmentService.create(assignmentId, request);
                 String taskRunId = jdbc.queryForObject(
                         "select task_run_id from task_run_native_links where assignment_id = ? order by created_at desc limit 1",
                         String.class, assignmentId);
 
-                // Update firing with success
                 jdbc.update("""
                         update schedule_firings
                         set firing_state = 'ENQUEUED', assignment_id = ?,
@@ -391,7 +626,7 @@ public class ScheduleService {
                         """, now.toString(), assignmentId, taskRunId, taskRunId,
                         assignmentId, attemptId);
 
-                eventService.publish(EventType.SCHEDULE_DUE, "SCHEDULE", def.id(), Map.of(
+                eventService.publishProject(EventType.SCHEDULE_DUE, "SCHEDULE", def.id(), def.projectId(), Map.of(
                         "scheduleId", def.id(),
                         "agentId", def.agentId(),
                         "firingId", firingId,
@@ -410,7 +645,6 @@ public class ScheduleService {
             }
         }
 
-        // Exhausted
         jdbc.update("""
                 update schedule_firings
                 set firing_state = 'EXHAUSTED', updated_at = ?
@@ -419,7 +653,6 @@ public class ScheduleService {
     }
 
     private boolean hasActiveLinkedWork(ScheduleDefinition def) {
-        // Check if any firing for this schedule is linked to an active assignment
         Integer count = jdbc.queryForObject("""
                 select count(*) from schedule_firings sf
                 join work_assignments wa on wa.id = sf.assignment_id
@@ -437,7 +670,6 @@ public class ScheduleService {
         if (claim == null) return 0;
         Instant now = clock.instant();
 
-        // Recover CLAIMED firings with expired claims
         List<String> staleFirings = jdbc.queryForList("""
                 select sf.firing_id from schedule_firings sf
                 where sf.firing_state = 'CLAIMED'
@@ -464,7 +696,6 @@ public class ScheduleService {
         String scheduleId = (String) firing.get("schedule_id");
         int revision = ((Number) firing.get("revision")).intValue();
 
-        // Check if existing assignment linked to this idempotent op already succeeded
         Integer existingCount = jdbc.queryForObject("""
                 select count(*) from task_run_idempotent_ops
                 where operation_key = ? and operation_state = 'completed'
@@ -479,7 +710,6 @@ public class ScheduleService {
             return;
         }
 
-        // Get current schedule definition
         ScheduleDefinition def = jdbc.query("""
                 select * from schedule_definitions where id = ? and revision = ?
                 """, rs -> rs.next() ? definitionFromRow(rs) : null, scheduleId, revision);
@@ -501,9 +731,26 @@ public class ScheduleService {
 
     /**
      * Pure, side-effect-free schedule evaluation suitable for simulation.
-     * Returns deterministic decisions without creating any persistence records.
      */
     public ScheduleSimulation simulate(ScheduleSimRequest request) {
+        ScheduleMode mode = request.mode() != null ? request.mode() : ScheduleMode.CRON;
+
+        switch (mode) {
+            case CRON -> {
+                return simulateCron(request);
+            }
+            case ONE_TIME -> {
+                return simulateOneTime(request);
+            }
+            default -> {
+                return new ScheduleSimulation(null, null, null,
+                        false, false, false, List.of(),
+                        "INVALID_MODE", false, 0, "Unknown mode");
+            }
+        }
+    }
+
+    private ScheduleSimulation simulateCron(ScheduleSimRequest request) {
         CronExpression cron;
         try {
             cron = validateCron(request.cronExpression());
@@ -512,7 +759,7 @@ public class ScheduleService {
                     List.of(), "INVALID_CRON", false, 0, e.getMessage());
         }
 
-        ZoneId zoneId = null;
+        ZoneId zoneId;
         try {
             zoneId = validateTimezone(request.timezone());
         } catch (IllegalArgumentException e) {
@@ -533,7 +780,6 @@ public class ScheduleService {
             cursor = next;
         }
 
-        // Check for DST gap/overlap around next slot
         boolean dstGap = false;
         boolean dstOverlap = false;
         if (!nextSlots.isEmpty()) {
@@ -543,7 +789,6 @@ public class ScheduleService {
             dstOverlap = hasDstOverlap(zoneNow, nextZoned, zoneId);
         }
 
-        // Check for misfire
         boolean misfireDetected = false;
         int missedSlots = 0;
         if (!nextSlots.isEmpty()) {
@@ -559,14 +804,41 @@ public class ScheduleService {
             }
         }
 
-        String error = null;
-        String state = "OK";
-
         return new ScheduleSimulation(
                 DIALECT_VERSION, zoneId.getId(), now.toString(),
                 request.enabled() != null ? request.enabled() : true,
                 dstGap, dstOverlap,
-                nextSlots, state, misfireDetected, missedSlots, error);
+                nextSlots, "OK", misfireDetected, missedSlots, null);
+    }
+
+    private ScheduleSimulation simulateOneTime(ScheduleSimRequest request) {
+        if (request.fireAt() == null) {
+            return new ScheduleSimulation(null, null, null,
+                    false, false, false, List.of(),
+                    "INVALID_FIRE_AT", false, 0, "fireAt is required for ONE_TIME mode");
+        }
+
+        Instant now = request.clockInstant() != null ? request.clockInstant() : clock.instant();
+
+        boolean past = !request.fireAt().isAfter(now);
+        boolean enabled = request.enabled() != null ? request.enabled() : true;
+
+        List<String> nextSlots = new ArrayList<>();
+        if (!past) {
+            nextSlots.add(request.fireAt().toString());
+        }
+
+        String state = "OK";
+        String error = null;
+        if (past) {
+            error = "fireAt is in the past";
+            state = "PAST";
+        }
+
+        return new ScheduleSimulation(
+                "ONE_TIME", "UTC", now.toString(),
+                enabled, false, false,
+                nextSlots, state, false, 0, error);
     }
 
     private boolean hasDstGap(ZonedDateTime from, ZonedDateTime to, ZoneId zoneId) {
@@ -590,7 +862,6 @@ public class ScheduleService {
     }
 
     private long estimatedCronIntervalMinutes(CronExpression cron) {
-        // Estimate from the expression — crude approach
         try {
             Instant now = clock.instant();
             ZonedDateTime z1 = ZonedDateTime.ofInstant(now, ZoneId.of("UTC"));
@@ -624,7 +895,22 @@ public class ScheduleService {
                 """, (rs, row) -> attemptFromRow(rs), firingId);
     }
 
-    // ── Backward-compatible wrappers (delegate to new API) ──
+    // ── Project helper ──
+
+    private void requireActiveProject(String projectId) {
+        Project project = projectService.getProject(projectId);
+        if (project.archived()) {
+            throw new IllegalStateException("Project is archived");
+        }
+    }
+
+    private void requireProjectMember(String projectId, String agentId) {
+        if (!projectService.isMember(projectId, agentId)) {
+            throw new IllegalStateException("Agent is not a member of this project");
+        }
+    }
+
+    // ── Backward-compatible wrappers ──
 
     public List<AgentSchedule> schedules(String agentId) {
         return definitions(agentId).stream().map(this::toLegacySchedule).toList();
@@ -636,19 +922,26 @@ public class ScheduleService {
 
     @Transactional
     public AgentSchedule save(String agentId, AgentSchedule schedule) {
-        // Validate template through existing parser
         AssignmentTemplateParser.scheduleRequest(new AgentSchedule(
                 schedule.id(), agentId,
                 normalizeStr(schedule.jobId()),
                 schedule.assignmentTemplate() == null ? Map.of() : schedule.assignmentTemplate(),
+                schedule.mode() != null ? schedule.mode() : ScheduleMode.CRON,
                 schedule.cronExpression(),
                 schedule.timezone() != null ? schedule.timezone() : "UTC",
-                schedule.enabled(), schedule.nextRunAt(),
-                schedule.createdAt(), schedule.updatedAt()));
+                schedule.fireAt(),
+                schedule.enabled(),
+                schedule.projectId(),
+                schedule.nextRunAt(), schedule.createdAt(), schedule.updatedAt()));
         ScheduleDefinition def = save(agentId, new ScheduleDefinition(
-                schedule.id(), agentId, 0, schedule.cronExpression(),
+                schedule.id(), agentId, 0,
+                schedule.mode() != null ? schedule.mode() : ScheduleMode.CRON,
+                schedule.cronExpression(),
                 schedule.timezone() != null ? schedule.timezone() : "UTC",
-                schedule.enabled(), false, schedule.jobId(),
+                schedule.fireAt(),
+                schedule.enabled(), false,
+                schedule.projectId(),
+                schedule.jobId(),
                 schedule.assignmentTemplate() != null ? schedule.assignmentTemplate() : Map.of(),
                 null, null, null, null));
         return toLegacySchedule(def);
@@ -663,8 +956,11 @@ public class ScheduleService {
 
     private AgentSchedule toLegacySchedule(ScheduleDefinition def) {
         return new AgentSchedule(def.id(), def.agentId(), def.jobId(),
-                def.assignmentTemplate(), def.cronExpression(), def.timezone(),
-                def.enabled(), null, def.createdAt(), def.updatedAt());
+                def.assignmentTemplate(),
+                def.mode() != null ? def.mode() : ScheduleMode.CRON,
+                def.cronExpression(), def.timezone(), def.fireAt(),
+                def.enabled(), def.projectId(),
+                null, def.createdAt(), def.updatedAt());
     }
 
     // ── Cancellation ──
@@ -690,7 +986,11 @@ public class ScheduleService {
     // ── Helpers ──
 
     private static String normalizeStr(String value) {
-        return org.springframework.util.StringUtils.hasText(value) ? value.trim() : null;
+        return StringUtils.hasText(value) ? value.trim() : null;
+    }
+
+    private static String coalesce(String preferred, String fallback) {
+        return StringUtils.hasText(preferred) ? preferred : fallback;
     }
 
     static CronExpression validateCron(String expression) {
@@ -711,8 +1011,7 @@ public class ScheduleService {
     }
 
     static ZonedDateTime previousSlot(CronExpression cron, ZonedDateTime after) {
-        // Walk back from `after` to find the most recent slot
-        ZonedDateTime current = after.minusDays(2); // reasonable search window
+        ZonedDateTime current = after.minusDays(2);
         ZonedDateTime last = null;
         while (current.isBefore(after) || current.equals(after)) {
             ZonedDateTime next = cron.next(current);
@@ -756,10 +1055,19 @@ public class ScheduleService {
     // ── Row mappers ──
 
     private ScheduleDefinition definitionFromRow(java.sql.ResultSet rs) throws java.sql.SQLException {
+        ScheduleMode mode;
+        try {
+            mode = ScheduleMode.valueOf(rs.getString("mode"));
+        } catch (Exception e) {
+            mode = ScheduleMode.CRON;
+        }
         return new ScheduleDefinition(
                 rs.getString("id"), rs.getString("agent_id"), rs.getInt("revision"),
+                mode,
                 rs.getString("cron_expression"), rs.getString("timezone"),
+                nullableInstant(rs.getString("fire_at")),
                 rs.getInt("enabled") == 1, rs.getInt("deleted") == 1,
+                rs.getString("project_id"),
                 rs.getString("job_id"), parseJson(rs.getString("assignment_template_json")),
                 rs.getString("dialect_version"), rs.getString("policy_version"),
                 Instant.parse(rs.getString("created_at")), Instant.parse(rs.getString("updated_at")));
@@ -805,8 +1113,11 @@ public class ScheduleService {
 
     public record ScheduleDefinition(
             String id, String agentId, int revision,
+            ScheduleMode mode,
             String cronExpression, String timezone,
+            Instant fireAt,
             boolean enabled, boolean deleted,
+            String projectId,
             String jobId, Map<String, Object> assignmentTemplate,
             String dialectVersion, String policyVersion,
             Instant createdAt, Instant updatedAt) {}
@@ -835,6 +1146,8 @@ public class ScheduleService {
 
     public record ScheduleSimRequest(
             String cronExpression, String timezone,
+            ScheduleMode mode,
+            Instant fireAt,
             Boolean enabled, Integer slotCount,
             Instant clockInstant) {}
 

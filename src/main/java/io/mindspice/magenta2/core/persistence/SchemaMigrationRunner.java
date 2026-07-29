@@ -237,6 +237,9 @@ public final class SchemaMigrationRunner {
             java.util.stream.Stream.concat(FOUNDATION_TABLES_V17.stream(),
                     java.util.stream.Stream.of("project_materialization_templates",
                             "agent_materialization_generations")).toList());
+    // V19: schedule_definitions, reaction_definitions rebuilt with composite PK,
+    // new columns (current_revision, mode, fire_at, project_id), same dependent tables.
+    private static final List<String> FOUNDATION_TABLES_V19 = FOUNDATION_TABLES_V18;
     private static final Set<String> FOUNDATION_INDEXES_V10 = Set.of(
             "idx_skill_candidate_versions_lookup", "idx_skill_candidate_observations_candidate",
             "idx_skill_candidate_observations_scan", "idx_skill_exact_assignments_target",
@@ -307,6 +310,16 @@ public final class SchemaMigrationRunner {
                             "idx_agent_materialization_generations_agent",
                             "idx_agent_materialization_generations_head"))
                     .collect(java.util.stream.Collectors.toSet()));
+    // V19: add new indexes for project_id, current_revision, and orchestration_events.project_id
+    private static final Set<String> FOUNDATION_INDEXES_V19 = java.util.Set.copyOf(
+            java.util.stream.Stream.concat(FOUNDATION_INDEXES_V18.stream(),
+                    java.util.stream.Stream.of(
+                            "idx_schedule_defs_project",
+                            "idx_schedule_defs_current",
+                            "idx_reaction_defs_project",
+                            "idx_reaction_defs_current",
+                            "idx_orchestration_events_project"))
+                    .collect(java.util.stream.Collectors.toSet()));
 
     private static final Map<String, List<String>> FOUNDATION_COLUMNS = Map.ofEntries(
             Map.entry("task_run_locations", List.of("task_run_id", "source_kind", "source_id", "workspace_type",
@@ -366,9 +379,10 @@ public final class SchemaMigrationRunner {
                     "timeout_ms", "exit_code", "truncation_kind", "interruption_kind",
                     "rejection_reason", "failure_detail", "completeness", "created_at", "updated_at")),
             Map.entry("schedule_definitions", List.of("id", "agent_id", "revision",
-                    "cron_expression", "timezone", "dialect_version", "policy_version",
-                    "enabled", "deleted", "job_id", "assignment_template_json",
-                    "created_at", "updated_at")),
+                    "current_revision", "mode", "cron_expression", "timezone", "fire_at",
+                    "dialect_version", "policy_version",
+                    "enabled", "deleted", "project_id", "job_id",
+                    "assignment_template_json", "created_at", "updated_at")),
             Map.entry("scheduler_claims", List.of("id", "owner_id", "fence",
                     "heartbeat_at", "expires_at", "claimed_at", "created_at", "updated_at")),
             Map.entry("schedule_firings", List.of("firing_id", "schedule_id", "revision",
@@ -381,8 +395,10 @@ public final class SchemaMigrationRunner {
                     "outcome", "error_class", "assignment_id", "task_run_id",
                     "native_run_id", "correlation_id", "created_at")),
             Map.entry("reaction_definitions", List.of("id", "agent_id", "revision",
+                    "current_revision",
                     "event_type", "filter_json", "action_type", "assignment_template_json",
-                    "enabled", "deleted", "created_at", "updated_at")),
+                    "enabled", "deleted", "project_id",
+                    "created_at", "updated_at")),
             Map.entry("reaction_dispatches", List.of("dispatch_id", "reaction_id", "revision",
                     "source_event_id", "operation_key", "request_digest", "template_snapshot_json",
                     "root_event_id", "parent_event_id", "parent_dispatch_id",
@@ -525,6 +541,7 @@ public final class SchemaMigrationRunner {
                     ensureV15Columns(connection, resource.version());
                     ensureV16WorkTaskIntegrity(connection, resource.version());
                     ensureV17JobDefinitionVersion(connection, resource.version());
+                    ensureV19EventProjectColumn(connection, resource.version());
                     ScriptUtils.executeSqlScript(connection, new EncodedResource(
                             new ByteArrayResource(resource.bytes(), resource.name()), StandardCharsets.UTF_8));
                     ensureV14ImmutableAttributionTrigger(connection, resource.version());
@@ -536,6 +553,7 @@ public final class SchemaMigrationRunner {
                 // that cannot pass through ScriptUtils must also be installed here.
                 ensureV16WorkTaskIntegrity(connection, latestVersion);
                 ensureV17JobDefinitionVersion(connection, latestVersion);
+                ensureV19EventProjectColumn(connection, latestVersion);
                 ensureV14ImmutableAttributionTrigger(connection, latestVersion);
                 validateOwnedSchema(connection, latestVersion);
                 statement.execute("commit");
@@ -831,6 +849,16 @@ public final class SchemaMigrationRunner {
         }
     }
 
+    /** SQLite-safe column installation for migration 019 and fresh-schema adoption. */
+    private void ensureV19EventProjectColumn(Connection connection, int version) throws SQLException {
+        if (version < 19 || tableColumns(connection, "orchestration_events").contains("project_id")) {
+            return;
+        }
+        try (Statement statement = connection.createStatement()) {
+            statement.execute("alter table orchestration_events add column project_id text");
+        }
+    }
+
     /**
      * SQLite-safe corrective shape for a migration 015 checksum that is already durable.
      * This remains required for every target at or beyond 016 because fresh initialization
@@ -919,7 +947,8 @@ public final class SchemaMigrationRunner {
         if (latestVersion < 1) {
             return;
         }
-        List<String> expectedTables = latestVersion >= 18 ? FOUNDATION_TABLES_V18
+        List<String> expectedTables = latestVersion >= 19 ? FOUNDATION_TABLES_V19
+                : latestVersion >= 18 ? FOUNDATION_TABLES_V18
                 : latestVersion >= 17 ? FOUNDATION_TABLES_V17
                 : latestVersion >= 16 ? FOUNDATION_TABLES_V16
                 : latestVersion >= 15 ? FOUNDATION_TABLES_V15
@@ -948,6 +977,19 @@ public final class SchemaMigrationRunner {
                         .filter(column -> !column.equals("lineage_parent_task_run_id")
                                 && !column.equals("lineage_mode"))
                         .toList();
+            }
+            // V19 column additions: schedule_definitions and reaction_definitions
+            // gain new columns only at v19; earlier versions use the old column set.
+            if (latestVersion < 19 && "schedule_definitions".equals(table)) {
+                expectedCols = List.of("id", "agent_id", "revision",
+                        "cron_expression", "timezone", "dialect_version", "policy_version",
+                        "enabled", "deleted", "job_id", "assignment_template_json",
+                        "created_at", "updated_at");
+            }
+            if (latestVersion < 19 && "reaction_definitions".equals(table)) {
+                expectedCols = List.of("id", "agent_id", "revision",
+                        "event_type", "filter_json", "action_type", "assignment_template_json",
+                        "enabled", "deleted", "created_at", "updated_at");
             }
             if (expectedCols != null && !actual.containsAll(expectedCols)) {
                 throw new MigrationException("Incompatible partial table " + table + ": " + actual);
@@ -1066,10 +1108,25 @@ public final class SchemaMigrationRunner {
             String rxnDefs = normalized(tableSql(connection, "reaction_definitions"));
             String rxnDispatches = normalized(tableSql(connection, "reaction_dispatches"));
             String rxnAttempts = normalized(tableSql(connection, "reaction_dispatch_attempts"));
-            if (!schedDefs.contains("unique (id, revision)")
-                    || !schedDefs.contains("revision integer not null check (revision >= 1)")
-                    || !schedDefs.contains("dialect_version text not null")) {
-                throw new MigrationException("schedule_definitions is missing required constraints");
+            if (latestVersion >= 19) {
+                if (!schedDefs.contains("primary key (id, revision)")
+                        || !schedDefs.contains("current_revision in (0, 1)")
+                        || !schedDefs.contains("mode in ('cron', 'one_time')")
+                        || !schedDefs.contains("dialect_version text not null")) {
+                    throw new MigrationException("schedule_definitions is missing v19 constraints");
+                }
+            } else {
+                // At versions 8-18, accept either old or new table shape because
+                // schema.sql may already carry the v19 structure.
+                boolean valid = schedDefs.contains("revision integer not null check (revision >= 1)")
+                        && schedDefs.contains("dialect_version text not null");
+                boolean oldShape = schedDefs.contains("unique (id, revision)");
+                boolean newShape = schedDefs.contains("primary key (id, revision)")
+                        && schedDefs.contains("current_revision in (0, 1)")
+                        && schedDefs.contains("mode in ('cron', 'one_time')");
+                if (!valid || (!oldShape && !newShape)) {
+                    throw new MigrationException("schedule_definitions is missing required constraints");
+                }
             }
             if (!schedFirings.contains("unique (schedule_id, revision, slot_instant, timezone)")
                     || !schedFirings.contains("firing_state text not null check")
@@ -1081,9 +1138,20 @@ public final class SchemaMigrationRunner {
                     || !firingAttempts.contains("foreign key (firing_id) references schedule_firings")) {
                 throw new MigrationException("schedule_firing_attempts is missing required constraints");
             }
-            if (!rxnDefs.contains("unique (id, revision)")
-                    || !rxnDefs.contains("action_type text not null check")) {
-                throw new MigrationException("reaction_definitions is missing required constraints");
+            if (latestVersion >= 19) {
+                if (!rxnDefs.contains("primary key (id, revision)")
+                        || !rxnDefs.contains("current_revision in (0, 1)")
+                        || !rxnDefs.contains("action_type text not null check")) {
+                    throw new MigrationException("reaction_definitions is missing v19 constraints");
+                }
+            } else {
+                boolean valid = rxnDefs.contains("action_type text not null check");
+                boolean oldShape = rxnDefs.contains("unique (id, revision)");
+                boolean newShape = rxnDefs.contains("primary key (id, revision)")
+                        && rxnDefs.contains("current_revision in (0, 1)");
+                if (!valid || (!oldShape && !newShape)) {
+                    throw new MigrationException("reaction_definitions is missing required constraints");
+                }
             }
             if (!rxnDispatches.contains("unique (reaction_id, revision, source_event_id)")
                     || !rxnDispatches.contains("length(request_digest) = 64")
@@ -1248,6 +1316,24 @@ public final class SchemaMigrationRunner {
                     || !generations.contains("substr(project_key, 1, 11) = 'v1-project-'")
                     || !generations.contains("substr(project_key, 12) not glob '*[^0-9a-f]*'")) {
                 throw new MigrationException("agent_materialization_generations is missing required constraints");
+            }
+        }
+        if (latestVersion >= 19) {
+            if (!allIndexes.containsAll(FOUNDATION_INDEXES_V19)) {
+                throw new MigrationException("Missing migration-owned v19 indexes: "
+                        + FOUNDATION_INDEXES_V19.stream().filter(index -> !allIndexes.contains(index)).toList());
+            }
+            // Verify new columns exist on schedule_definitions (composite PK validated above)
+            if (!tableColumns(connection, "schedule_definitions").containsAll(
+                    List.of("current_revision", "mode", "fire_at", "project_id"))) {
+                throw new MigrationException("schedule_definitions is missing v19 columns");
+            }
+            if (!tableColumns(connection, "reaction_definitions").containsAll(
+                    List.of("current_revision", "project_id"))) {
+                throw new MigrationException("reaction_definitions is missing v19 columns");
+            }
+            if (!tableColumns(connection, "orchestration_events").contains("project_id")) {
+                throw new MigrationException("orchestration_events is missing v19 project_id column");
             }
         }
         if (latestVersion >= 6) {

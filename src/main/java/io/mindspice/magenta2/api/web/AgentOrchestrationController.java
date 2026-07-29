@@ -24,6 +24,7 @@ import io.mindspice.magenta2.ai.orchestration.runtime.InboxService;
 import io.mindspice.magenta2.ai.orchestration.runtime.OrchestrationEvent;
 import io.mindspice.magenta2.ai.orchestration.runtime.OrchestrationEventService;
 import io.mindspice.magenta2.ai.orchestration.runtime.ReactionActionType;
+import io.mindspice.magenta2.ai.orchestration.runtime.ScheduleMode;
 import io.mindspice.magenta2.ai.orchestration.runtime.ScheduleService;
 import io.mindspice.magenta2.ai.orchestration.runtime.ScheduleService.ScheduleDefinition;
 import io.mindspice.magenta2.ai.orchestration.runtime.ScheduleService.ScheduleFiring;
@@ -266,8 +267,11 @@ public class AgentOrchestrationController {
         try {
             return scheduleService.save(agentId, new ScheduleDefinition(
                     null, agentId, 0,
+                    ScheduleMode.CRON,
                     request.cronExpression(), request.timezone(),
+                    null,
                     request.enabled() != null ? request.enabled() : true, false,
+                    null,
                     request.jobId(),
                     request.assignmentTemplate() == null ? Map.of() : request.assignmentTemplate(),
                     null, null, null, null));
@@ -288,10 +292,14 @@ public class AgentOrchestrationController {
             ScheduleDefinition existing = scheduleService.definition(agentId, scheduleId);
             return scheduleService.update(agentId, scheduleId, new ScheduleDefinition(
                     scheduleId, agentId, existing.revision(),
+                    existing.mode() != null ? existing.mode() : ScheduleMode.CRON,
                     request.cronExpression() != null ? request.cronExpression() : existing.cronExpression(),
                     request.timezone() != null ? request.timezone() : existing.timezone(),
+                    existing.fireAt(),
                     request.enabled() != null ? request.enabled() : existing.enabled(),
-                    false, request.jobId() != null ? request.jobId() : existing.jobId(),
+                    false,
+                    existing.projectId(),
+                    request.jobId() != null ? request.jobId() : existing.jobId(),
                     request.assignmentTemplate() != null ? request.assignmentTemplate() : existing.assignmentTemplate(),
                     null, null, existing.createdAt(), existing.updatedAt()));
         } catch (IllegalArgumentException | IllegalStateException | java.time.DateTimeException exception) {
@@ -417,6 +425,7 @@ public class AgentOrchestrationController {
                     request.actionType() != null ? request.actionType() : ReactionActionType.ENQUEUE_ASSIGNMENT,
                     request.assignmentTemplate() == null ? Map.of() : request.assignmentTemplate(),
                     request.enabled() != null ? request.enabled() : true, false,
+                    null,
                     null, null));
         } catch (IllegalArgumentException | IllegalStateException exception) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, exception.getMessage());
@@ -440,7 +449,8 @@ public class AgentOrchestrationController {
                     request.actionType() != null ? request.actionType() : existing.actionType(),
                     request.assignmentTemplate() != null ? request.assignmentTemplate() : existing.assignmentTemplate(),
                     request.enabled() != null ? request.enabled() : existing.enabled(),
-                    false, existing.createdAt(), existing.updatedAt()));
+                    false, existing.projectId(),
+                    existing.createdAt(), existing.updatedAt()));
         } catch (IllegalArgumentException | IllegalStateException exception) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, exception.getMessage());
         }

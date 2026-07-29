@@ -183,25 +183,23 @@ class ProjectConsoleControllerTest {
             "/projects/_detail/{projectId}/jobs", "/projects/_detail/{projectId}/outputs",
             "/projects/_detail/{projectId}/settings",
             "/projects/_detail/{projectId}/tasks", "/projects/_detail/{projectId}/chat",
-            "/projects/_detail/{projectId}/schedules", "/projects/_detail/{projectId}/events",
             "/projects/_editor/{projectId}", "/projects/_detail/{projectId}/delete-confirm",
             "/projects/{projectId}");
+        // Schedules and Events routes are on ProjectAutomationController (Phase 06)
     }
 
     @Test
     void unavailableTabsRenderCleanState() {
         String tasks = controller.projectTasksTab("project-1", mock(HttpServletResponse.class));
         String chat = controller.projectChatTab("project-1", mock(HttpServletResponse.class));
-        String schedules = controller.projectSchedulesTab("project-1", mock(HttpServletResponse.class));
-        String events = controller.projectEventsTab("project-1", mock(HttpServletResponse.class));
 
         assertThat(tasks).contains("Tasks");
         assertThat(chat).contains("Chat").contains("not yet available");
-        assertThat(schedules).contains("Schedules").contains("not yet available");
-        assertThat(events).contains("Events").contains("not yet available");
 
-        // Unavailable tabs must not expose any speculative API
-        for (String html : List.of(chat, schedules, events)) {
+        // Schedules and Events tabs are now available in Phase 06;
+        // they are served by ProjectAutomationController, not this controller.
+        // Verify the routes exist on the new controller instead.
+        for (String html : List.of(chat)) {
             assertThat(html).doesNotContain("hx-get", "hx-post", "hx-put", "hx-delete");
         }
     }

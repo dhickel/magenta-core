@@ -14,6 +14,7 @@ import io.mindspice.magenta2.ai.orchestration.runtime.EventReactionService.React
 import io.mindspice.magenta2.ai.orchestration.runtime.EventReactionService.ReactionDispatch;
 import io.mindspice.magenta2.ai.orchestration.runtime.EventType;
 import io.mindspice.magenta2.ai.orchestration.runtime.ReactionActionType;
+import io.mindspice.magenta2.ai.orchestration.runtime.ScheduleMode;
 import io.mindspice.magenta2.ai.orchestration.runtime.ScheduleService.ScheduleDefinition;
 import io.mindspice.magenta2.ai.orchestration.runtime.ScheduleService.ScheduleFiring;
 import io.mindspice.magenta2.ai.orchestration.runtime.ScheduleService.ScheduleFiringAttempt;
@@ -245,8 +246,11 @@ public class ScheduleReactionFragments {
 
     private ScheduleDefinition scheduleInput(String agentId, String scheduleId, Map<String, String> params) {
         return new ScheduleDefinition(scheduleId, agentId, 0,
+                ScheduleMode.CRON,
                 required(params, "cronExpression"), required(params, "timezone"),
+                null,
                 Boolean.parseBoolean(params.getOrDefault("enabled", "true")), false,
+                null,
                 blankToNull(params.get("jobId")), parseMap(params.get("assignmentTemplate"), "assignmentTemplate"),
                 null, null, null, null);
     }
@@ -260,7 +264,7 @@ public class ScheduleReactionFragments {
                                            @RequestParam String timezone,
                                            @RequestParam(defaultValue = "true") boolean enabled) {
         ScheduleSimulation result = scheduleService.simulate(
-                new ScheduleSimRequest(cronExpression, timezone, enabled, 5, null));
+                new ScheduleSimRequest(cronExpression, timezone, ScheduleMode.CRON, null, enabled, 5, null));
 
         StringBuilder html = new StringBuilder();
         html.append("<div class=\"simulation-preview schedule-sim\">");
@@ -584,7 +588,8 @@ public class ScheduleReactionFragments {
         return new ReactionDefinition(reactionId, agentId, 0, eventType,
                 parseMap(params.get("filter"), "filter"), actionType,
                 parseMap(params.get("assignmentTemplate"), "assignmentTemplate"),
-                Boolean.parseBoolean(params.getOrDefault("enabled", "true")), false, null, null);
+                Boolean.parseBoolean(params.getOrDefault("enabled", "true")), false,
+                null, null, null);
     }
 
     // ── Reaction simulation preview ──
@@ -607,7 +612,7 @@ public class ScheduleReactionFragments {
         } catch (Exception ignored) { /* use empty maps */ }
 
         ReactionSimulation result = reactionService.simulate(
-                new ReactionSimRequest(eventType, filterMap, payloadMap, null, null, null, null));
+                new ReactionSimRequest(eventType, filterMap, payloadMap, null, null, null, null, null, null));
 
         StringBuilder html = new StringBuilder();
         html.append("<div class=\"simulation-preview reaction-sim\">");
