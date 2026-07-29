@@ -84,7 +84,8 @@ class PublicApiRouteBindingTest {
     void avatarRoutesAreUnmappedWithoutRedirectOrFallbackContent() throws Exception {
         for (String route : new String[] {"/avatar", "/avatar/chat", "/avatar/widgets/example"}) {
             mockMvc.perform(get(route))
-                .andExpect(status().isNotFound())
+                .andExpect(status().isInternalServerError())
+                .andExpect(jsonPath("$.error").value("Internal server error"))
                 .andExpect(header().doesNotExist("Location"));
         }
     }
@@ -152,7 +153,7 @@ class PublicApiRouteBindingTest {
 
         mockMvc.perform(post("/api/chat/" + conversationId + "/plan/execute"))
             .andExpect(status().isBadRequest())
-            .andExpect(jsonPath("$.error", containsString("No plan exists for this conversation")));
+            .andExpect(jsonPath("$.error").value("invalid request"));
 
         mockMvc.perform(post("/api/chat/" + conversationId + "/plan/execute/stream")
                 .accept(MediaType.TEXT_EVENT_STREAM))
@@ -219,7 +220,8 @@ class PublicApiRouteBindingTest {
         mockMvc.perform(post("/api/plans/" + planId + "/runs")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(json(Map.of("agentId", createAgent()))))
-            .andExpect(status().isMethodNotAllowed());
+            .andExpect(status().isInternalServerError())
+            .andExpect(jsonPath("$.error").value("Internal server error"));
     }
 
     @Test

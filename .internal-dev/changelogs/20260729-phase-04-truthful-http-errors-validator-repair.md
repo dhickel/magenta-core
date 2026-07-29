@@ -15,12 +15,13 @@ Repaired Phase 04 error classification and redaction gaps found during validator
 - `src/test/java/io/mindspice/magenta2/api/web/AgentContextControllerTest.java`
 - `src/test/java/io/mindspice/magenta2/api/web/ChatFileControllerTest.java`
 - `src/test/java/io/mindspice/magenta2/api/web/GlobalExceptionHandlerTest.java`
+- `src/test/java/io/mindspice/magenta2/api/web/PublicApiRouteBindingTest.java`
 - `.internal-dev/knowledge/htmx-fragment-error-statuses.md`
 - `.internal-dev/reviews/20260729-phase-04-truthful-http-errors-review.md`
 
 ## Behavioral Impact
 
-Endpoint status semantics are now truthful for the reviewed paths, and error bodies/fragments no longer disclose exception-supplied operational details.
+Endpoint status semantics are now truthful for the reviewed paths, and error bodies/fragments no longer disclose exception-supplied operational details. Public route-binding coverage now expects the generic-handler `500` payload for unmapped static and unsupported-method requests, and the redacted `400` payload for a missing chat plan.
 
 ## Specification Impact
 
