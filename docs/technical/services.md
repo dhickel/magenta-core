@@ -150,3 +150,34 @@ Sources: [`ai/orchestration/settings`](../../src/main/java/io/mindspice/magenta2
 Tables: `runtime_settings`.
 
 Controllers: `RuntimeSettingsController`, `ModelController`, `RuntimeController`, `DashboardController`, and settings fragments in `OrchestrationController`.
+
+## Project Chat Service
+
+Sources: [`ai/chat/project`](../../src/main/java/io/mindspice/magenta2/ai/chat/project).
+
+- `ProjectChatService` owns project-scoped SSE streaming chat restricted to read-only context. Each conversation is server-created per project/agent pair. Chat has no file write, process execution, skill activation, or tool authority.
+- SSE transport uses safe `textContent` rendering and strict event-type validation. No `innerHTML` or raw transport in the JavaScript module (`project-chat.js`).
+- Stream events validate `projectId`, `memberAgentId`, `conversationId`, and `operationId` on every event frame.
+
+Tables: project-chat conversations use migration 020.
+
+Controllers: `ProjectChatController`.
+
+## Work Task Services
+
+Sources: [`ai/orchestration/tasks`](../../src/main/java/io/mindspice/magenta2/ai/orchestration/tasks).
+
+- `WorkTaskService` owns lightweight project-attributed task definitions, CRUD, promote-to-plan, submit, retry, and attempt history. Tasks carry title, description, pin, priority, preferred agent, and promoted plan linkage.
+- All mutations require `operationKey`. Version-mismatch conflicts return `409`. Promotion requires version match; submission requires promotion and an eligible project-member agent.
+- Attempts track assignment identity, order, and derived status from the assignment service.
+
+Tables: `work_task_definitions`, `work_task_attempts`.
+
+Controllers: Task endpoints in `ProjectConsoleController`, `WorkTaskFragments`.
+
+## Project Operations Access Service
+
+Sources: [`ai/orchestration/runtime/ProjectOperationsAccessService.java`](../../src/main/java/io/mindspice/magenta2/ai/orchestration/runtime/ProjectOperationsAccessService.java).
+
+- `ProjectOperationsAccessService` gates project-scoped operations behind active-project and trusted-deployment checks. Archived projects return controlled errors; non-trusted deployments return capability-disabled states.
+- Used by project Files, Templates, Tasks, Chat, and Output tabs to enforce consistent authorization before domain-specific checks.

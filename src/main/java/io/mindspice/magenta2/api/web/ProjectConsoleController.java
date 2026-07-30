@@ -83,6 +83,7 @@ import jakarta.servlet.http.HttpServletResponse;
 public class ProjectConsoleController {
     private static final Logger log = LoggerFactory.getLogger(ProjectConsoleController.class);
     private static final String PROJECTS_JS = "/js/orchestration/projects.js?v=5";
+    private static final String PROJECT_CHAT_JS = "/js/orchestration/project-chat.js?v=1";
     private static final String HTMX_ERRORS_JS = "/js/orchestration/htmx-errors.js?v=1";
     private static final String DASHBOARD_CSS = "/css/orchestration.css?v=14";
 
@@ -215,7 +216,8 @@ public class ProjectConsoleController {
                         .withChild(new Div().withClass("dashboard-empty").withInnerText("Loading..."))))
                 .withChild(new Div().withClass("browser-detail").withChild(detail)))
             .withChild(moduleScript(HTMX_ERRORS_JS))
-            .withChild(moduleScript(PROJECTS_JS));
+            .withChild(moduleScript(PROJECTS_JS))
+            .withChild(moduleScript(PROJECT_CHAT_JS));
     }
 
     // ════════════════════════════════════════════════════════════════
@@ -1723,13 +1725,74 @@ public class ProjectConsoleController {
     }
 
     // ════════════════════════════════════════════════════════════════
-    //  Unavailable tabs (future phases)
+    //  Tab: Chat (context)
     // ════════════════════════════════════════════════════════════════
 
     @GetMapping("/projects/_detail/{projectId}/chat")
     @ResponseBody
-    public String projectChatTab(@PathVariable String projectId, HttpServletResponse response) {
-        return unavailableProjectTab(projectId, "Chat", "context", response);
+    public String projectChatTab(@PathVariable String projectId,
+                                 @RequestParam(required = false) String memberAgentId,
+                                 HttpServletResponse response) {
+        if (!fragments.findTab("chat").orElseThrow().available()) {
+            return unavailableProjectTab(projectId, "Chat", "context", response);
+        }
+        try {
+            projectService.getProject(projectId);
+
+            List<ProjectAgentMembership> members = sortedProjectMembers(projectId);
+            if (members.isEmpty()) {
+                Div panel = new Div().withClass("project-chat-tab")
+                    .withChild(Header.H2("Project Chat"))
+                    .withChild(new Div().withClass("orch-panel")
+                        .withInnerText("No project members available for project chat."));
+                return panel.render();
+            }
+
+            // Select member: use query param, then fallback to first member
+            String requested = StringUtils.hasText(memberAgentId) ? memberAgentId
+                    : members.getFirst().agentId();
+
+            // Verify the selected member is actually in the project
+            String selected = members.stream()
+                    .anyMatch(m -> m.agentId().equals(requested))
+                    ? requested : members.getFirst().agentId();
+
+            Div panel = new Div().withClass("project-chat-tab")
+                .withChild(Header.H2("Project Chat"))
+                .withChild(new Paragraph("Project-scoped chat restricted to read-only context. "
+                    + "Select a member agent to scope the conversation."));
+
+            // Member selector
+            List<ProjectChatFragments.MemberOption> options = members.stream()
+                    .map(m -> {
+                        String displayName = m.agentId();
+                        try {
+                            AgentProfile profile = agentProfileService.get(m.agentId());
+                            if (profile != null && StringUtils.hasText(profile.name())) {
+                                displayName = profile.name();
+                            }
+                        } catch (RuntimeException ignored) { }
+                        return new ProjectChatFragments.MemberOption(m.agentId(), displayName);
+                    })
+                    .toList();
+            panel.withChild(new RawHtml(ProjectChatFragments.memberSelector(projectId, selected, options)));
+
+            // Chat panel loaded via HTMX
+            panel.withChild(new Div().withId("project-chat-panel").withClass("orch-panel project-chat-panel")
+                .withAttribute("hx-get", ProjectChatFragments.route(projectId, selected, "/panel"))
+                .withAttribute("hx-trigger", "load")
+                .withAttribute("hx-swap", "outerHTML")
+                .withChild(new Div().withClass("dashboard-empty").withInnerText("Loading chat…")));
+
+            return panel.render();
+        } catch (IllegalArgumentException e) {
+            response.setStatus(HttpServletResponse.SC_NOT_FOUND);
+            return fragments.errorNotFound("Project not found.");
+        } catch (RuntimeException e) {
+            log.warn("Project chat tab unavailable for {}", projectId, e);
+            response.setStatus(HttpServletResponse.SC_SERVICE_UNAVAILABLE);
+            return fragments.errorUnavailable("Project chat is temporarily unavailable.");
+        }
     }
 
     // ════════════════════════════════════════════════════════════════

@@ -45,7 +45,7 @@ HTMX routes should return server-rendered HTML fragments and preserve consistent
 
 For modal hosts, keep one stable target element in the page and return modal content for `innerHTML` swaps, or return the full target with `outerHTML`. Do not return a second element with the same id inside an `innerHTML` target. The workspace explorer uses `#workspace-file-modal` as its stable host and returns modal content without duplicating that id.
 
-The project chooser replaces only `#project-detail-container`. A selected project owns a stable `#project-tab-panel`; Dashboard, Members, Files, Jobs, Outputs, and Settings responses replace only that host. Form failures use the explicit marked non-2xx fragment contract and do not issue unrelated OOB refreshes. Successful create/save/delete operations may OOB-refresh only `#project-list` and, on deletion, clear the selected detail.
+The project chooser replaces only `#project-detail-container`. A selected project owns a stable `#project-tab-panel`; all 11 tab responses (Dashboard, Queue, Tasks, Jobs, Outputs, Files, Chat, Schedules, Events, Members, Settings) replace only that host. `AppNavigation` is the canonical single source for grouped tab order, deep-link mapping, host IDs, active state, and availability. Form failures use the explicit marked non-2xx fragment contract and do not issue unrelated OOB refreshes. Successful create/save/delete operations may OOB-refresh only `#project-list` and, on deletion, clear the selected detail. `projects.js` owns active-tab presentation and browser-history coordination only; it issues no transport requests. Project-chat SSE uses `project-chat.js` with safe `textContent`-only DOM insertion and strict event-type validation.
 
 ## JavaScript Islands
 

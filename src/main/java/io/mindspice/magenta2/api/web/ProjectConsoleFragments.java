@@ -2,18 +2,11 @@ package io.mindspice.magenta2.api.web;
 
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
-import java.time.Instant;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
-import io.mindspice.magenta2.ai.orchestration.runtime.OrchestrationStatus;
 import io.mindspice.magenta2.ai.orchestration.runtime.Project;
-import io.mindspice.magenta2.ai.orchestration.runtime.ProjectAgentMembership;
-import io.mindspice.magenta2.ai.orchestration.runtime.WorkAssignment;
-import io.mindspice.simplypages.builders.ShellBuilder;
-import io.mindspice.simplypages.builders.ShellTemplate;
 import io.mindspice.simplypages.components.Div;
 import io.mindspice.simplypages.components.Header;
 import io.mindspice.simplypages.components.Paragraph;
@@ -28,58 +21,44 @@ import org.springframework.util.StringUtils;
  *
  * <p>Renders project chooser, grouped tab navigation, tab shell, and
  * controlled unavailable/empty/error states. Owns no scope resolution,
- * persistence, or authorization logic.</p>
+ * persistence, or authorization logic. The canonical tab registry,
+ * order, labels, and deep-link mapping are defined in {@link AppNavigation}.</p>
  */
 @org.springframework.stereotype.Component
 public final class ProjectConsoleFragments {
 
-    // ── Tab registry ──
+    // ── Tab registry (delegates to AppNavigation) ──
+
+    /** Re-export the canonical tab descriptor from {@link AppNavigation} for controller use. */
     public record ProjectTab(String group, String label, String key, boolean available) {
         public String route(String projectId) {
-            return "/projects/_detail/" + e(projectId) + "/" + key;
+            return AppNavigation.findTab(key)
+                .map(t -> t.route(projectId))
+                .orElse("/projects/_detail/" + e(projectId) + "/" + key);
         }
 
         public String hostId() {
             return "project-tab-panel";
         }
+
+        static ProjectTab from(AppNavigation.ProjectTab t) {
+            return new ProjectTab(t.group(), t.label(), t.key(), t.available());
+        }
     }
 
-    static final List<ProjectTab> TAB_REGISTRY = List.of(
-        new ProjectTab("overview",   "Dashboard",  "dashboard",  true),
-        new ProjectTab("work",       "Queue",      "queue",      true),
-        new ProjectTab("work",       "Tasks",      "tasks",      true),
-        new ProjectTab("work",       "Jobs",       "jobs",       true),
-        new ProjectTab("work",       "Outputs",    "outputs",    true),
-        new ProjectTab("context",    "Files",      "files",      true),
-        new ProjectTab("context",    "Chat",       "chat",       false),
-        new ProjectTab("automation", "Schedules",  "schedules",  true),
-        new ProjectTab("automation", "Events",     "events",     true),
-        new ProjectTab("admin",      "Members",    "members",    true),
-        new ProjectTab("admin",      "Settings",   "settings",   true)
-    );
-
-    /** Ordered group keys for rendering. */
-    static final List<String> GROUP_ORDER = List.of("overview", "work", "context", "automation", "admin");
-
-    static final Map<String, String> GROUP_LABELS = Map.of(
-        "overview",   "Overview",
-        "work",       "Work",
-        "context",    "Context",
-        "automation", "Automation",
-        "admin",      "Administration"
-    );
-
-    /** Return the ordered list of project-console tabs for the registry. */
+    /** Return the ordered list of project-console tabs. */
     public List<ProjectTab> projectTabs() {
-        return TAB_REGISTRY;
+        return AppNavigation.consoleTabs().stream().map(ProjectTab::from).toList();
     }
 
+    /** Lookup a tab by canonical key. */
     public Optional<ProjectTab> findTab(String key) {
-        return TAB_REGISTRY.stream().filter(tab -> tab.key().equals(key)).findFirst();
+        return AppNavigation.findTab(key).map(ProjectTab::from);
     }
 
+    /** Default active tab. */
     public ProjectTab defaultTab() {
-        return findTab("queue").orElseThrow();
+        return ProjectTab.from(AppNavigation.defaultTab());
     }
 
     // ── Chooser empty state ──
@@ -119,38 +98,35 @@ public final class ProjectConsoleFragments {
                     .withChild(new Div().withClass("dashboard-empty").withInnerText("Loading..."))));
     }
 
-    // ── Grouped tab navigation ──
+    // ── Grouped tab navigation (delegates grouping to AppNavigation) ──
     public Component groupedTabNav(String projectId, String selectedTabKey) {
         HtmlTag nav = new HtmlTag("nav")
             .withClass("orch-tabs project-tabs project-tabs-grouped")
             .withAttribute("aria-label", "Project views");
 
-        Map<String, List<ProjectTab>> groups = new LinkedHashMap<>();
-        for (String group : GROUP_ORDER) {
-            List<ProjectTab> tabs = TAB_REGISTRY.stream()
-                .filter(t -> t.group().equals(group))
-                .toList();
-            if (!tabs.isEmpty()) groups.put(group, tabs);
-        }
+        Map<String, List<AppNavigation.ProjectTab>> groups = AppNavigation.groupedTabs();
 
-        for (Map.Entry<String, List<ProjectTab>> entry : groups.entrySet()) {
+        for (Map.Entry<String, List<AppNavigation.ProjectTab>> entry : groups.entrySet()) {
             String groupKey = entry.getKey();
-            String groupLabel = GROUP_LABELS.getOrDefault(groupKey, groupKey);
+            String groupLabel = AppNavigation.GROUP_LABELS.getOrDefault(groupKey, groupKey);
             HtmlTag groupWrapper = new HtmlTag("div").withClass("project-tab-group")
                 .withChild(new HtmlTag("span").withClass("project-tab-group-label").withInnerText(groupLabel));
-            for (ProjectTab tab : entry.getValue()) {
+            for (AppNavigation.ProjectTab tab : entry.getValue()) {
+                boolean isActive = tab.key().equals(selectedTabKey);
+                boolean isAvailable = tab.available();
                 Button button = Button.create(tab.label());
-                if (tab.key().equals(selectedTabKey)) button.withClass("active");
-                if (!tab.available()) button.withClass("tab-unavailable");
+                if (isActive) button.withClass("active");
+                if (!isAvailable) button.withClass("tab-unavailable");
                 button.withAttribute("data-project-tab", tab.key())
                     .withAttribute("data-tab-button", "true")
                     .withAttribute("data-project-tab-group", tab.group())
-                    .withAttribute("data-tab-available", String.valueOf(tab.available()))
-                    .withAttribute("aria-selected", String.valueOf(tab.key().equals(selectedTabKey)))
+                    .withAttribute("data-tab-available", String.valueOf(isAvailable))
+                    .withAttribute("aria-selected", String.valueOf(isActive))
                     .withAttribute("hx-get", tab.route(projectId))
                     .withAttribute("hx-target", "#project-tab-panel")
                     .withAttribute("hx-swap", "innerHTML")
-                    .withAttribute("data-htmx-error-swap", "true");
+                    .withAttribute("data-htmx-error-swap", "true")
+                    .withAttribute("aria-disabled", String.valueOf(!isAvailable));
                 groupWrapper.withChild(button);
             }
             nav.withChild(groupWrapper);

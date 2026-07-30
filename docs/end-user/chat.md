@@ -85,12 +85,19 @@ Deleting or clearing a session removes the visible conversation history and any 
 
 ## System Chat vs Normal Chat
 
-Magenta has two distinct chat surfaces:
+Magenta has three distinct chat surfaces:
 
 | Surface | Location | Purpose | Authority |
 | --- | --- | --- | --- |
 | **Normal chat** | `/chat` | Conversational assistant and anonymous plan drafting | Configured chat tools, subject to their individual capability gates |
+| **Project chat** | `/projects/{projectId}` Chat tab | Project-scoped chat restricted to read-only context | Server-created per project/agent pair; SSE streaming with safe `textContent` rendering; no file write, process execution, skill activation, or tool authority |
 | **System chat** | `/agents/{agentId}` System Chat panel | Operational monitoring and queue-operation proposals | Fixed deny-by-default profile; bounded non-secret reads; restricted tools; non-executing proposals only |
+
+### Project Chat
+
+The project **Chat** tab provides project-scoped streaming chat restricted to read-only context. It is bound to one member agent per conversation and does not create, edit, or delete workspace content. Select a member agent from the tab's selector to scope the conversation. Project chat conversations are server-created per project/agent pair and do not appear in the `/chat` session list.
+
+Project chat SSE transport uses only safe `textContent` DOM rendering with strict event-type validation and explicit payload size limits. It carries no `innerHTML`, tool selection, or HTMX error-policy in its JavaScript module. The stream validates `projectId`, `memberAgentId`, `conversationId`, and `operationId` on every event.
 
 System chat is exclusively agent-scoped and server-created. It uses a server-owned fixed prompt and tool set; runtime settings currently supply its enabled state and model. It can read bounded agent-status, workspace-metadata, and assignment-lifecycle facts, and can propose queue operations (pause, resume, retry, replay, cancel) on assignments. Proposals require explicit user confirmation through the ordinary lifecycle control plane before execution.
 

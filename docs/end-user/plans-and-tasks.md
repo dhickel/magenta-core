@@ -95,6 +95,7 @@ Plan submissions create agent assignments and may create task run records. The p
 
 - The agent **Queue** tab for active assignments.
 - The agent **History** tab for terminal assignments, diagnostics, and transcripts.
+- The project **Tasks** tab at `/projects/{projectId}` for in-project work-task CRUD, promote-to-plan, submit, retry, and attempt-history.
 - `/outputs` for artifacts.
 - `/jobs` when the plan runs as part of a job.
 

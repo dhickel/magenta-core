@@ -597,9 +597,10 @@ public class ChatService {
             return;
         }
         var origin = chatSessionMetadataRepository.findOrigin(conversationId);
-        if (origin.isPresent() && origin.get() == ChatSessionOrigin.SYSTEM_CHAT) {
+        if (origin.isPresent() && (origin.get() == ChatSessionOrigin.SYSTEM_CHAT
+                || origin.get() == ChatSessionOrigin.PROJECT_CHAT)) {
             throw new IllegalArgumentException(
-                    "System chat conversations cannot be used through public chat endpoints");
+                    "Restricted chat conversations cannot be used through public chat endpoints");
         }
     }
 
@@ -1237,6 +1238,7 @@ public class ChatService {
             .map(this::session)
             .filter(session -> session.origin() != ChatSessionOrigin.AGENT_CHAT)
             .filter(session -> session.origin() != ChatSessionOrigin.SYSTEM_CHAT)
+            .filter(session -> session.origin() != ChatSessionOrigin.PROJECT_CHAT)
             .filter(session -> !session.archived())
             .filter(session -> interactionMode(session.conversationId()) == PlanMode.NORMAL)
             .sorted(java.util.Comparator

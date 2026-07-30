@@ -3740,6 +3740,150 @@
     overflow-wrap: anywhere;
 }
 
+/* ── Project Chat ── */
+
+.project-chat-tab {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+}
+
+.project-chat-tab .orch-panel-heading {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.5rem 0.75rem;
+    border-bottom: 1px solid #e7ecf3;
+}
+
+.project-chat-tab .orch-panel-heading h3 {
+    margin: 0;
+    font-size: 0.9rem;
+    color: #3b4a5e;
+}
+
+.project-chat-agent-selector {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.35rem;
+    padding: 0.4rem 0;
+}
+
+.project-chat-agent-selector button {
+    font-size: 0.78rem;
+    padding: 0.25rem 0.6rem;
+    border: 1px solid #c7d5e5;
+    border-radius: 4px;
+    background: #f8fafc;
+    color: #3b4a5e;
+    cursor: pointer;
+    transition: background 0.15s;
+}
+
+.project-chat-agent-selector button:hover {
+    background: #e8f0fe;
+}
+
+.project-chat-agent-selector button.active {
+    background: #3b4a5e;
+    color: #fff;
+    border-color: #3b4a5e;
+}
+
+.project-chat-panel {
+    box-sizing: border-box;
+    border: 1px solid #c7d5e5;
+    border-radius: 6px;
+    background: #fff;
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+    max-height: min(65vh, 46rem);
+    min-width: 0;
+    padding: 0;
+    overflow: hidden;
+}
+
+.project-chat-panel .orch-panel-heading {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.5rem 0.75rem;
+    border-bottom: 1px solid #e7ecf3;
+}
+
+.project-chat-panel .orch-panel-heading h3 {
+    margin: 0;
+    font-size: 0.9rem;
+    color: #3b4a5e;
+}
+
+.project-chat-history {
+    flex: 1 1 auto;
+    overflow: auto;
+    padding: 0.65rem 0.75rem;
+    min-height: 10rem;
+    max-height: 32rem;
+    background: #f8fafc;
+    border-bottom: 1px solid #edf1f6;
+}
+
+.project-chat-msg {
+    margin-bottom: 0.6rem;
+    padding: 0.4rem 0.6rem;
+    border-radius: 5px;
+    max-width: 90%;
+}
+
+.project-chat-msg-user {
+    background: #e8f0fe;
+    margin-left: auto;
+    border: 1px solid #c4d7f2;
+}
+
+.project-chat-msg-assistant {
+    background: #f4f6f9;
+    margin-right: auto;
+    border: 1px solid #dfe4ed;
+}
+
+.project-chat-msg-role {
+    font-size: 0.68rem;
+    font-weight: 600;
+    color: #5a6d82;
+    margin-bottom: 0.15rem;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+}
+
+.project-chat-msg-text {
+    font-size: 0.82rem;
+    color: #2c3a4d;
+    line-height: 1.4;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
+.project-chat-input-form {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto auto;
+    gap: 0.4rem;
+    padding: 0.6rem 0.75rem;
+    border-top: 1px solid #e7ecf3;
+}
+
+.project-chat-input-form input[type="text"] {
+    width: 100%;
+    box-sizing: border-box;
+}
+
+.project-chat-stream-status {
+    font-size: 0.72rem;
+    color: #6b7f96;
+    padding: 0.15rem 0.75rem 0.5rem;
+    min-height: 1.1rem;
+}
+
 /* ── Phase 06: Files Area Navigation ── */
 
 .agent-files-nav {
@@ -4057,12 +4201,33 @@
 .project-tab-group button.tab-unavailable {
     color: var(--color-muted, #657789);
     cursor: pointer;
-    opacity: 1;
+    opacity: 0.8;
+    border-bottom-style: dashed;
+}
+
+.project-tab-group button[aria-disabled="true"] {
+    color: var(--color-muted, #8a97a9);
+    cursor: not-allowed;
+    opacity: 0.65;
+    border-bottom-style: dashed;
 }
 
 .project-console-layout .dashboard-empty,
 .project-detail-shell .dashboard-empty {
-    padding: 0.8rem 0.65rem;
+    padding: 1rem 0.75rem;
+}
+
+/* Consistent empty-state spacing for all project-console empty surfaces */
+.project-dashboard .dashboard-empty,
+.project-members-tab .dashboard-empty,
+.project-files-tab .dashboard-empty,
+.project-jobs-tab .dashboard-empty,
+.project-outputs-tab .dashboard-empty,
+.project-chat-tab .dashboard-empty,
+.project-settings-tab .dashboard-empty {
+    padding: 1rem 0.75rem;
+    border: 1px dashed var(--color-border-light, #dde5ef);
+    border-radius: 5px;
 }
 
 /* ── Project unavailable tab state ── */
@@ -4185,4 +4350,70 @@
 #project-queue-transcript {
     margin-top: 1rem;
     min-height: 80px;
+}
+
+/* ── Mobile: project grouped tabs do not overlap ── */
+@media (max-width: 640px) {
+    .project-tabs-grouped {
+        flex-direction: column;
+        border-bottom: none;
+        gap: 0;
+    }
+
+    .project-tab-group {
+        border-right: none;
+        border-bottom: 1px solid var(--color-border-light, #e0e6eb);
+    }
+
+    .project-tab-group:last-child {
+        border-bottom: none;
+    }
+
+    .project-tab-group button {
+        padding: 0.4rem 0.6rem;
+        font-size: 0.78rem;
+    }
+
+    .project-tab-group-label {
+        padding: 0.3rem 0.6rem 0;
+    }
+
+    /* Prevent tab button text from overlapping on very narrow screens */
+    .project-tab-group button {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    /* Ensure detail container doesn't overflow horizontally */
+    .project-detail-shell,
+    .project-dashboard,
+    .project-members-tab,
+    .project-files-tab,
+    .project-jobs-tab,
+    .project-outputs-tab,
+    .project-settings-tab,
+    .project-chat-tab {
+        max-width: 100%;
+        overflow-x: hidden;
+        word-break: break-word;
+    }
+
+    #project-tab-panel {
+        min-height: 200px;
+        max-width: 100%;
+        overflow-x: hidden;
+    }
+
+    .project-console-layout {
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    .project-chooser {
+        max-height: 16rem;
+    }
+
+    .project-dashboard-identity {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
 }

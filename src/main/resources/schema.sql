@@ -42,8 +42,20 @@ create table if not exists ai_chat_session_metadata (
     origin text,
     surface text,
     agent_id text,
+    project_id text,
+    member_agent_id text,
+    materialization_key text,
+    materialization_generation integer,
+    owner_binding_key text,
     updated_at text
 );
+
+create index if not exists idx_chat_session_project_origin
+    on ai_chat_session_metadata (project_id, origin);
+
+create unique index if not exists idx_chat_session_project_tuple
+    on ai_chat_session_metadata (project_id, member_agent_id, materialization_key, materialization_generation)
+    where origin = 'PROJECT_CHAT';
 
 create table if not exists agent_jobs (
     id text primary key,

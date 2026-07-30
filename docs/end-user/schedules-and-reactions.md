@@ -1,6 +1,6 @@
 # Schedules And Reactions
 
-Schedules and event reactions automate assignment enqueueing for an agent. They are available from the selected agent's **Schedules** and **Reactions** tabs when their feature flags are enabled.
+Schedules and event reactions automate assignment enqueueing for an agent. They are available from the selected agent's **Schedules** and **Reactions** tabs when their feature flags are enabled. Project-scoped views are available at `/projects/{projectId}` under the **Schedules** and **Events** tabs; when gated unavailable they render controlled redacted disabled states.
 
 ## Schedules
 

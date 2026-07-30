@@ -134,14 +134,22 @@ Assignment create/read payloads expose `projectId`, `workspaceType`, `workspaceK
 
 ## Projects: `/api/projects`
 
-Source: [`ProjectController`](../../src/main/java/io/mindspice/magenta2/api/web/ProjectController.java), [`ProjectService`](../../src/main/java/io/mindspice/magenta2/ai/orchestration/runtime/ProjectService.java).
+Source: [`ProjectConsoleController`](../../src/main/java/io/mindspice/magenta2/api/web/ProjectConsoleController.java), [`ProjectChatController`](../../src/main/java/io/mindspice/magenta2/api/web/ProjectChatController.java), [`ProjectService`](../../src/main/java/io/mindspice/magenta2/ai/orchestration/runtime/ProjectService.java).
 
 - `GET/POST /api/projects`, `GET/PUT/DELETE /api/projects/{projectId}`.
 - `POST /api/projects/{projectId}/agents`, `GET /api/projects/{projectId}/agents`, `DELETE /api/projects/{projectId}/agents/{agentId}`.
 - `GET /api/projects/{projectId}/network`, `GET /api/projects/{projectId}/events`.
-No project workspace or release routes exist. Projects have no filesystem-root or lease authority.
 
-Create accepts `name`/`description` or legacy-compatible `title`/`summary`, plus nullable legacy `ownerAgentId` and git repo URL. Projects are shared workspace and visibility records, not executable work units. Membership add/remove controls are available through project routes. Deletion and membership removal can return `409` when active assignments, leases, jobs, or runs still reference the project/member. Workspace release can return `409` when a lease cannot be released immediately.
+**Project Chat:**
+- `POST /api/projects/{projectId}/chat/stream?message=&memberAgentId=`: SSE streaming project chat restricted to read-only context. Server-created per project/agent pair. Stream validates `projectId`, `memberAgentId`, `conversationId`, and `operationId` on every event frame. Safe `textContent` rendering in `project-chat.js`.
+
+**Project Console Fragment Routes (HTMX):**
+- `GET /projects/_detail/{projectId}/{dashboard|queue|tasks|jobs|outputs|files|chat|schedules|events|members|settings}`: tab fragments targeting `#project-tab-panel`.
+- `GET|POST|PUT /projects/_detail/{projectId}/tasks/**`: work-task CRUD, promote, submit, retry, attempt detail.
+- `GET /projects/_detail/{projectId}/jobs/{jobId}`, `PUT .../jobs/{jobId}/preferred-agent`: job detail and preferred-executor update.
+- `GET|POST /projects/_detail/{projectId}/outputs/{artifactId}`, `/preview`, `/download`.
+- `GET /projects/_detail/{projectId}/files/list|preview`: read-only materialization reads.
+- `POST|DELETE /projects/_detail/{projectId}/members/**`, `PUT /projects/_editor/{projectId}`, `DELETE /projects/{projectId}`.
 
 ## Workspaces: `/api/workspace/{type}/{id}` and `/api/workspace/user`
 

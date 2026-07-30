@@ -191,17 +191,16 @@ class ProjectConsoleControllerTest {
     @Test
     void unavailableTabsRenderCleanState() {
         String tasks = controller.projectTasksTab("project-1", mock(HttpServletResponse.class));
-        String chat = controller.projectChatTab("project-1", mock(HttpServletResponse.class));
 
         assertThat(tasks).contains("Tasks");
-        assertThat(chat).contains("Chat").contains("not yet available");
+    }
 
-        // Schedules and Events tabs are now available in Phase 06;
-        // they are served by ProjectAutomationController, not this controller.
-        // Verify the routes exist on the new controller instead.
-        for (String html : List.of(chat)) {
-            assertThat(html).doesNotContain("hx-get", "hx-post", "hx-put", "hx-delete");
-        }
+    @Test
+    void chatTabRendersMemberSelectorWhenNoMembers() {
+        String chat = controller.projectChatTab("project-1", null, mock(HttpServletResponse.class));
+
+        assertThat(chat).contains("Project Chat");
+        assertThat(chat).contains("No project members available");
     }
 
     @Test

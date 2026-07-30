@@ -283,6 +283,77 @@ public class ChatSessionMetadataRepository {
         );
     }
 
+    /**
+     * Creates one immutable server-owned project-chat identity. A conflicting
+     * existing conversation is never retargeted.
+     */
+    public boolean createProjectChatSession(ProjectChatSession session) {
+        if (session == null || !session.isComplete()) {
+            return false;
+        }
+        jdbcTemplate.update(
+            """
+                insert into ai_chat_session_metadata (
+                    conversation_id, origin, agent_id, project_id, member_agent_id,
+                    materialization_key, materialization_generation, owner_binding_key, updated_at)
+                values (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                on conflict(conversation_id) do nothing
+                """,
+            session.conversationId(), ChatSessionOrigin.PROJECT_CHAT.name(), session.memberAgentId(),
+            session.projectId(), session.memberAgentId(), session.materializationKey(),
+            session.materializationGeneration(), session.ownerBindingKey(), now());
+        return findProjectChatSession(session.conversationId()).map(session::equals).orElse(false);
+    }
+
+    public Optional<ProjectChatSession> findProjectChatSession(String conversationId) {
+        if (!StringUtils.hasText(conversationId)) {
+            return Optional.empty();
+        }
+        return jdbcTemplate.query(
+            """
+                select conversation_id, project_id, member_agent_id, materialization_key,
+                       materialization_generation, owner_binding_key
+                from ai_chat_session_metadata
+                where conversation_id = ? and origin = ?
+                """,
+            rs -> rs.next() ? Optional.of(new ProjectChatSession(
+                rs.getString("conversation_id"), rs.getString("project_id"),
+                rs.getString("member_agent_id"), rs.getString("materialization_key"),
+                rs.getInt("materialization_generation"), rs.getString("owner_binding_key")))
+                : Optional.empty(),
+            conversationId, ChatSessionOrigin.PROJECT_CHAT.name());
+    }
+
+    public Optional<String> findProjectId(String conversationId) {
+        if (!StringUtils.hasText(conversationId)) {
+            return Optional.empty();
+        }
+        return jdbcTemplate.query(
+            "select project_id from ai_chat_session_metadata where conversation_id = ?",
+            rs -> {
+                if (!rs.next()) return Optional.empty();
+                String projectId = rs.getString("project_id");
+                return StringUtils.hasText(projectId) ? Optional.of(projectId) : Optional.empty();
+            },
+            conversationId
+        );
+    }
+
+    public Optional<String> findMemberAgentId(String conversationId) {
+        if (!StringUtils.hasText(conversationId)) {
+            return Optional.empty();
+        }
+        return jdbcTemplate.query(
+            "select member_agent_id from ai_chat_session_metadata where conversation_id = ?",
+            rs -> {
+                if (!rs.next()) return Optional.empty();
+                String agentId = rs.getString("member_agent_id");
+                return StringUtils.hasText(agentId) ? Optional.of(agentId) : Optional.empty();
+            },
+            conversationId
+        );
+    }
+
     public void saveAgentOrigin(String conversationId, String agentId) {
         if (!StringUtils.hasText(conversationId) || !StringUtils.hasText(agentId)) {
             return;
@@ -445,6 +516,21 @@ public class ChatSessionMetadataRepository {
         if (!columns.contains("agent_id")) {
             jdbcTemplate.execute("alter table ai_chat_session_metadata add column agent_id text");
         }
+        if (!columns.contains("project_id")) {
+            jdbcTemplate.execute("alter table ai_chat_session_metadata add column project_id text");
+        }
+        if (!columns.contains("member_agent_id")) {
+            jdbcTemplate.execute("alter table ai_chat_session_metadata add column member_agent_id text");
+        }
+        if (!columns.contains("materialization_key")) {
+            jdbcTemplate.execute("alter table ai_chat_session_metadata add column materialization_key text");
+        }
+        if (!columns.contains("materialization_generation")) {
+            jdbcTemplate.execute("alter table ai_chat_session_metadata add column materialization_generation integer");
+        }
+        if (!columns.contains("owner_binding_key")) {
+            jdbcTemplate.execute("alter table ai_chat_session_metadata add column owner_binding_key text");
+        }
     }
 
     private boolean booleanValue(String conversationId, String column) {
@@ -472,5 +558,15 @@ public class ChatSessionMetadataRepository {
 
     private String now() {
         return Instant.now().toString();
+    }
+
+    public record ProjectChatSession(String conversationId, String projectId, String memberAgentId,
+                                     String materializationKey, int materializationGeneration,
+                                     String ownerBindingKey) {
+        public boolean isComplete() {
+            return StringUtils.hasText(conversationId) && StringUtils.hasText(projectId)
+                    && StringUtils.hasText(memberAgentId) && StringUtils.hasText(materializationKey)
+                    && materializationGeneration > 0 && StringUtils.hasText(ownerBindingKey);
+        }
     }
 }

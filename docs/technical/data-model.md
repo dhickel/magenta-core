@@ -131,6 +131,16 @@ Source package: [`ai/chat/system`](../../src/main/java/io/mindspice/magenta2/ai/
 
 Proposals are non-executing; confirmation passes through the ordinary scoped lifecycle control plane.
 
+## Project Chat
+
+Source package: [`ai/chat/project`](../../src/main/java/io/mindspice/magenta2/ai/chat/project). Migration 020.
+
+- `project_chat_conversations`: server-created per-project/per-agent chat conversations with conversation id, project id, member agent id, optional project-context binding metadata, and timestamps. Conversations are read-only context and carry no file/system tool authority.
+- `project_chat_messages`: ordered chat messages by conversation id with role, text, and timestamp. Message text is stored as plain text; SSE transport renders text using safe `textContent` DOM insertion only.
+- `project_chat_operations`: idempotent operation records for project-chat stream submissions keyed by `(conversation_id, operation_key)`.
+
+Project chat has no file write, process execution, skill activation, or tool authority. It is bound to one member agent and does not create or modify workspace content.
+
 ## Typed Workspaces and Outputs
 
 Source package: [`ai/orchestration/workspaces`](../../src/main/java/io/mindspice/magenta2/ai/orchestration/workspaces).

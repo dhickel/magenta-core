@@ -42,9 +42,15 @@ Materialization state is visible in the agent's **Context** panel at `/agents/{a
 
 ## Project Console
 
-Use `/projects` to organize work around a project record while retaining the project chooser sidebar. A selected project opens six focused tabs: **Dashboard**, **Members**, **Files**, **Jobs**, **Outputs**, and **Settings**. Projects remain metadata and membership context; they do not create workspace roots or acquire filesystem leases.
+Use `/projects` to organize work around a project record while retaining the project chooser sidebar. A selected project opens 11 focused tabs across 5 groups: **Overview** (Dashboard), **Work** (Queue, Tasks, Jobs, Outputs), **Context** (Files, Chat), **Automation** (Schedules, Events), and **Administration** (Members, Settings). Projects remain metadata and membership context; they do not create workspace roots or acquire filesystem leases.
 
 The Dashboard shows the neutral **Tracked** project-record state, authoritative counts, member agent/status cards, active assignments, materialization health, and recent project-attributed jobs. Unsupported or unavailable facts are labelled unavailable rather than shown as zero.
+
+**Queue** shows active project-scoped assignments with exact assignment identity, canonical status, and inline transcript/diagnostic links that use persisted assignment links. **Tasks** supports work-task definition CRUD, promote-to-plan, submit-for-execution, retry, and attempt-history browsing. **Jobs** displays project-attributed job definitions with run-history expansion and preferred-executor update. **Outputs** resolves published project outputs through durable assignment-to-run-to-publication links.
+
+**Files** is a read-only view of current members' exact V2 project materialization generations. **Chat** provides project-scoped SSE streaming chat restricted to read-only context, bound to one member agent per conversation. **Schedules** and **Events** display automation facts; when gated unavailable they render controlled redacted disabled states.
+
+**Members** lists assigned members and roles with HTMX add/remove controls. **Settings** contains name, description, Owner Agent, manager type, default model, materialization template revisions, and inline deletion confirmation. Unavailable, gate-disabled, or archived tabs render redacted disabled states with clear labelling.
 
 ### Create A Project
 

@@ -240,6 +240,8 @@ public final class SchemaMigrationRunner {
     // V19: schedule_definitions, reaction_definitions rebuilt with composite PK,
     // new columns (current_revision, mode, fire_at, project_id), same dependent tables.
     private static final List<String> FOUNDATION_TABLES_V19 = FOUNDATION_TABLES_V18;
+    // V20: project chat metadata columns added to ai_chat_session_metadata.
+    private static final List<String> FOUNDATION_TABLES_V20 = FOUNDATION_TABLES_V19;
     private static final Set<String> FOUNDATION_INDEXES_V10 = Set.of(
             "idx_skill_candidate_versions_lookup", "idx_skill_candidate_observations_candidate",
             "idx_skill_candidate_observations_scan", "idx_skill_exact_assignments_target",
@@ -319,6 +321,10 @@ public final class SchemaMigrationRunner {
                             "idx_reaction_defs_project",
                             "idx_reaction_defs_current",
                             "idx_orchestration_events_project"))
+                    .collect(java.util.stream.Collectors.toSet()));
+    private static final Set<String> FOUNDATION_INDEXES_V20 = java.util.Set.copyOf(
+            java.util.stream.Stream.concat(FOUNDATION_INDEXES_V19.stream(),
+                    java.util.stream.Stream.of("idx_chat_session_project_origin", "idx_chat_session_project_tuple"))
                     .collect(java.util.stream.Collectors.toSet()));
 
     private static final Map<String, List<String>> FOUNDATION_COLUMNS = Map.ofEntries(
@@ -542,6 +548,7 @@ public final class SchemaMigrationRunner {
                     ensureV16WorkTaskIntegrity(connection, resource.version());
                     ensureV17JobDefinitionVersion(connection, resource.version());
                     ensureV19EventProjectColumn(connection, resource.version());
+                    ensureV20ProjectChatColumns(connection, resource.version());
                     ScriptUtils.executeSqlScript(connection, new EncodedResource(
                             new ByteArrayResource(resource.bytes(), resource.name()), StandardCharsets.UTF_8));
                     ensureV14ImmutableAttributionTrigger(connection, resource.version());
@@ -554,6 +561,7 @@ public final class SchemaMigrationRunner {
                 ensureV16WorkTaskIntegrity(connection, latestVersion);
                 ensureV17JobDefinitionVersion(connection, latestVersion);
                 ensureV19EventProjectColumn(connection, latestVersion);
+                ensureV20ProjectChatColumns(connection, latestVersion);
                 ensureV14ImmutableAttributionTrigger(connection, latestVersion);
                 validateOwnedSchema(connection, latestVersion);
                 statement.execute("commit");
@@ -859,6 +867,31 @@ public final class SchemaMigrationRunner {
         }
     }
 
+    /** SQLite-safe column installation for migration 020 and fresh-schema adoption. */
+    private void ensureV20ProjectChatColumns(Connection connection, int version) throws SQLException {
+        if (version < 20) {
+            return;
+        }
+        Set<String> columns = new HashSet<>(tableColumns(connection, "ai_chat_session_metadata"));
+        try (Statement statement = connection.createStatement()) {
+            if (!columns.contains("project_id")) {
+                statement.execute("alter table ai_chat_session_metadata add column project_id text");
+            }
+            if (!columns.contains("member_agent_id")) {
+                statement.execute("alter table ai_chat_session_metadata add column member_agent_id text");
+            }
+            if (!columns.contains("materialization_key")) {
+                statement.execute("alter table ai_chat_session_metadata add column materialization_key text");
+            }
+            if (!columns.contains("materialization_generation")) {
+                statement.execute("alter table ai_chat_session_metadata add column materialization_generation integer");
+            }
+            if (!columns.contains("owner_binding_key")) {
+                statement.execute("alter table ai_chat_session_metadata add column owner_binding_key text");
+            }
+        }
+    }
+
     /**
      * SQLite-safe corrective shape for a migration 015 checksum that is already durable.
      * This remains required for every target at or beyond 016 because fresh initialization
@@ -947,7 +980,8 @@ public final class SchemaMigrationRunner {
         if (latestVersion < 1) {
             return;
         }
-        List<String> expectedTables = latestVersion >= 19 ? FOUNDATION_TABLES_V19
+        List<String> expectedTables = latestVersion >= 20 ? FOUNDATION_TABLES_V20
+                : latestVersion >= 19 ? FOUNDATION_TABLES_V19
                 : latestVersion >= 18 ? FOUNDATION_TABLES_V18
                 : latestVersion >= 17 ? FOUNDATION_TABLES_V17
                 : latestVersion >= 16 ? FOUNDATION_TABLES_V16
@@ -1334,6 +1368,17 @@ public final class SchemaMigrationRunner {
             }
             if (!tableColumns(connection, "orchestration_events").contains("project_id")) {
                 throw new MigrationException("orchestration_events is missing v19 project_id column");
+            }
+        }
+        if (latestVersion >= 20) {
+            if (!allIndexes.containsAll(FOUNDATION_INDEXES_V20)) {
+                throw new MigrationException("Missing migration-owned v20 indexes: "
+                        + FOUNDATION_INDEXES_V20.stream().filter(index -> !allIndexes.contains(index)).toList());
+            }
+            if (!tableColumns(connection, "ai_chat_session_metadata").containsAll(
+                    List.of("project_id", "member_agent_id", "materialization_key",
+                            "materialization_generation", "owner_binding_key"))) {
+                throw new MigrationException("ai_chat_session_metadata is missing v20 columns");
             }
         }
         if (latestVersion >= 6) {

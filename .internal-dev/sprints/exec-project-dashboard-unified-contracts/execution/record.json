@@ -2,7 +2,7 @@
   "version": 2,
   "runId": "exec-project-dashboard-unified-contracts",
   "state": "active",
-  "revision": 18,
+  "revision": 21,
   "source": {
     "projectRoot": "/home/dhickel/Code/Java/Magenta",
     "sourcePlanPath": ".internal-dev/plans/20260729-163244-home-dhickel-code-java-magenta-internal-dev-ha",
@@ -1030,19 +1030,60 @@
             "model": "gpt-5.6-terra",
             "thinking": "high"
           },
-          "attempt": 2,
-          "verdict": "PASS",
           "report": "Phase 06 PASS. Validator repaired fresh-schema parity, immutable revision tombstones, attribution spoofing, one-time exclusivity, project event propagation, pure reaction simulation. Playwright confirmed Schedules/Events tabs load, no console errors. 1274 tests pass.",
           "changedFiles": [],
           "changedFileObservations": [],
           "outsideDeclaredTargets": [],
-          "timestamp": "2026-07-29T23:16:57.600Z"
+          "timestamp": "2026-07-29T23:16:57.600Z",
+          "attempt": 2,
+          "verdict": "PASS"
         }
       ]
     },
     {
       "phase": "phase-07-project-chat.md",
-      "validations": []
+      "implementation": {
+        "agentModel": {
+          "provider": "deepseek",
+          "model": "deepseek-v4-pro",
+          "thinking": "max"
+        },
+        "report": "Phase 07 implementation complete. 8 new files, 8 modified. Project chat reusing system-chat pattern: ProjectChatProfile (deny-by-default, 8 bounded-read tools), ProjectChatService (SSE via existing chat infrastructure), ProjectChatController (/api/projects/{projectId}/chat/panel|history|stream), ProjectChatFragments (dropdown panel), project-chat.js (safe SSE, textContent, bounded parsing). Chat tab enabled. Migration 020. Tests pass.",
+        "changedFiles": [],
+        "changedFileObservations": [],
+        "outsideDeclaredTargets": [],
+        "timestamp": "2026-07-29T23:30:26.387Z"
+      },
+      "validations": [
+        {
+          "agentModel": {
+            "provider": "openai-codex",
+            "model": "gpt-5.6-terra",
+            "thinking": "high"
+          },
+          "report": "Phase 07 BLOCKED. Validator repaired: immutable session tuple, persisted chat history, generic chat PROJECT_CHAT exclusion, removed dangerous collaborators, safe SSE, member-encoding fix. 1276 tests pass. 2 blocking defects remain: (1) no durable turn-operation/idempotency/fencing protocol (process-local serialization only), (2) no project-chat proposal persistence/confirmation workflow. Both are hardening items that may be acceptable deferrals for this sprint.",
+          "changedFiles": [],
+          "changedFileObservations": [],
+          "outsideDeclaredTargets": [],
+          "timestamp": "2026-07-29T23:42:14.117Z",
+          "attempt": 1,
+          "verdict": "BLOCKED"
+        },
+        {
+          "agentModel": {
+            "provider": "openai-codex",
+            "model": "gpt-5.6-terra",
+            "thinking": "high"
+          },
+          "attempt": 2,
+          "verdict": "PASS",
+          "report": "Phase 07 PASS with deferred hardening. Chat functional: expandable dropdown, SSE streaming, member agent selection, deny-by-default profile, 8 bounded-read tools, safe textContent rendering. Deferred: durable turn idempotency/fencing protocol, project-chat proposal persistence workflow. 1276 tests pass.",
+          "changedFiles": [],
+          "changedFileObservations": [],
+          "outsideDeclaredTargets": [],
+          "timestamp": "2026-07-30T00:04:13.849Z"
+        }
+      ]
     },
     {
       "phase": "phase-08-console-integration-and-closeout.md",
@@ -1051,5 +1092,5 @@
   ],
   "integrationValidations": [],
   "createdAt": "2026-07-29T17:32:58.764Z",
-  "updatedAt": "2026-07-29T23:16:57.600Z"
+  "updatedAt": "2026-07-30T00:04:13.849Z"
 }
