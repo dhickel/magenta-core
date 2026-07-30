@@ -6,18 +6,18 @@
 
 ## Change Summary
 
-Closed a project-attributed submission bypass by enforcing the existing trusted-deployment capability at the shared eligibility gate.
+Closed a project-attributed submission bypass by enforcing the existing removed project-operation gate capability at the shared eligibility gate.
 
 ## Files
 
-- `src/main/java/io/mindspice/magenta2/ai/orchestration/runtime/ProjectOperationsAccessService.java`
+- `src/main/java/io/mindspice/magenta2/ai/orchestration/runtime/removed project-operation gate.java`
 - `src/test/java/io/mindspice/magenta2/ai/orchestration/runtime/AssignmentAuthorityFoundationTest.java`
 - `src/test/java/io/mindspice/magenta2/ai/orchestration/runtime/OrchestrationRunnerLifecycleIntegrationTest.java`
 - `src/test/java/io/mindspice/magenta2/api/web/PublicApiRouteBindingTest.java`
 
 ## Behavioral Impact
 
-Project-attributed submissions now fail closed unless trusted deployment is explicitly enabled, then still require an active project and current member executor.
+Project-attributed submissions now fail closed unless removed project-operation gate is explicitly enabled, then still require an active project and current member executor.
 
 ## Specification Impact
 

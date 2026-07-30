@@ -27,8 +27,6 @@ import io.mindspice.magenta2.ai.orchestration.runtime.AssignmentService.Assignme
 import io.mindspice.magenta2.ai.orchestration.runtime.AssignmentService.AssignmentTranscript;
 import io.mindspice.magenta2.ai.orchestration.runtime.OrchestrationStatus;
 import io.mindspice.magenta2.ai.orchestration.runtime.Project;
-import io.mindspice.magenta2.ai.orchestration.runtime.ProjectOperationsAccessService;
-import io.mindspice.magenta2.ai.orchestration.runtime.ProjectOperationsAccessService.ProjectAccessDeniedException;
 import io.mindspice.magenta2.ai.orchestration.runtime.ProjectService;
 import io.mindspice.magenta2.ai.orchestration.runtime.WorkAssignment;
 import io.mindspice.simplypages.components.Div;
@@ -57,20 +55,17 @@ public class ProjectWorkController {
     private final AssignmentControlService assignmentControlService;
     private final AssignmentService assignmentService;
     private final ProjectService projectService;
-    private final ProjectOperationsAccessService projectAccessService;
     private final ProjectConsoleFragments fragments;
 
     public ProjectWorkController(AssignmentQueryService assignmentQueryService,
                                  AssignmentControlService assignmentControlService,
                                  AssignmentService assignmentService,
                                  ProjectService projectService,
-                                 ProjectOperationsAccessService projectAccessService,
                                  ProjectConsoleFragments fragments) {
         this.assignmentQueryService = assignmentQueryService;
         this.assignmentControlService = assignmentControlService;
         this.assignmentService = assignmentService;
         this.projectService = projectService;
-        this.projectAccessService = projectAccessService;
         this.fragments = fragments;
     }
 
@@ -120,10 +115,10 @@ public class ProjectWorkController {
             return cursorError(projectId, filter, stale
                 ? "The queue changed or the cursor expired. Refresh the queue."
                 : "The queue cursor is malformed.").render();
-        } catch (ProjectAccessDeniedException e) {
-            response.setStatus(projectAccessStatus(projectId));
+        } catch (IllegalStateException e) {
+            response.setStatus(HttpStatus.CONFLICT.value());
             return queueError("This project queue view is unavailable.").render();
-        } catch (IllegalArgumentException | IllegalStateException e) {
+        } catch (IllegalArgumentException e) {
             response.setStatus(HttpStatus.NOT_FOUND.value());
             return fragments.errorNotFound("Project or assignment not found.");
         } catch (RuntimeException e) {
@@ -139,10 +134,10 @@ public class ProjectWorkController {
         try {
             AssignmentListEntry entry = resolveAnyProjectEntry(projectId, assignmentId);
             return inspector(entry).render();
-        } catch (ProjectAccessDeniedException e) {
-            response.setStatus(projectAccessStatus(projectId));
+        } catch (IllegalStateException e) {
+            response.setStatus(HttpStatus.CONFLICT.value());
             return inspectorState("This assignment is unavailable in the active project queue.");
-        } catch (IllegalArgumentException | IllegalStateException e) {
+        } catch (IllegalArgumentException e) {
             response.setStatus(HttpStatus.NOT_FOUND.value());
             return inspectorState("Assignment not found in this project.");
         }
@@ -159,10 +154,10 @@ public class ProjectWorkController {
                 return transcriptState("No persisted conversation link is available for this assignment.");
             }
             return transcript(entry, transcript).render();
-        } catch (ProjectAccessDeniedException e) {
-            response.setStatus(projectAccessStatus(projectId));
+        } catch (IllegalStateException e) {
+            response.setStatus(HttpStatus.CONFLICT.value());
             return transcriptState("Transcript is unavailable for this project state.");
-        } catch (IllegalArgumentException | IllegalStateException e) {
+        } catch (IllegalArgumentException e) {
             response.setStatus(HttpStatus.NOT_FOUND.value());
             return transcriptState("Transcript is unavailable for this assignment.");
         }
@@ -176,10 +171,10 @@ public class ProjectWorkController {
             AssignmentListEntry entry = resolveAnyProjectEntry(projectId, assignmentId);
             AssignmentDiagnostics diagnostics = assignmentService.diagnostics(entry.id());
             return diagnostics(entry, diagnostics).render();
-        } catch (ProjectAccessDeniedException e) {
-            response.setStatus(projectAccessStatus(projectId));
+        } catch (IllegalStateException e) {
+            response.setStatus(HttpStatus.CONFLICT.value());
             return inspectorState("Diagnostics are unavailable for this project state.");
-        } catch (IllegalArgumentException | IllegalStateException e) {
+        } catch (IllegalArgumentException e) {
             response.setStatus(HttpStatus.NOT_FOUND.value());
             return inspectorState("Diagnostics are unavailable for this assignment.");
         }
@@ -197,9 +192,6 @@ public class ProjectWorkController {
             assignmentControlService.setPriority(assignmentId, nonNegativeInt(priority, "priority"),
                 nonNegativeInt(rowVersion, "row version"), projectId, operationKey, scope.label());
             return controlSuccess(projectId, "Priority updated.");
-        } catch (ProjectAccessDeniedException e) {
-            response.setStatus(HttpStatus.SERVICE_UNAVAILABLE.value());
-            return queueError("Priority controls are disabled.").render();
         } catch (StaleRevisionException | OperationConflictException e) {
             response.setStatus(HttpStatus.CONFLICT.value());
             return queueError("The assignment changed. Refresh the queue before retrying.").render();
@@ -225,13 +217,10 @@ public class ProjectWorkController {
             assignmentControlService.requestCancel(entry.agentId(), entry.id(), operationKey,
                 "agent:" + entry.agentId());
             return controlSuccess(projectId, "Cancellation request submitted.");
-        } catch (ProjectAccessDeniedException e) {
-            response.setStatus(HttpStatus.SERVICE_UNAVAILABLE.value());
-            return queueError("Cancellation controls are disabled.").render();
         } catch (OperationConflictException e) {
             response.setStatus(HttpStatus.CONFLICT.value());
             return queueError("The assignment cannot be cancelled in its current state.").render();
-        } catch (IllegalArgumentException | IllegalStateException e) {
+        } catch (IllegalArgumentException e) {
             response.setStatus(HttpStatus.NOT_FOUND.value());
             return queueError("Assignment not found in this project.").render();
         } catch (RuntimeException e) {
@@ -449,29 +438,17 @@ public class ProjectWorkController {
     private AssignmentListEntry resolveAnyProjectEntry(String projectId, String assignmentId) {
         try {
             return assignmentQueryService.resolveEntry(readScope(projectId, false), assignmentId);
-        } catch (ProjectAccessDeniedException archived) {
+        } catch (IllegalStateException archived) {
             return assignmentQueryService.resolveEntry(readScope(projectId, true), assignmentId);
         }
     }
 
     private ProjectScope readScope(String projectId, boolean history) {
         Project project = projectService.getProject(projectId);
-        if (project.archived()) {
-            if (!history) throw new ProjectAccessDeniedException("Archived project");
-            if (!projectAccessService.isTrustedDeployment()) {
-                throw new ProjectAccessDeniedException("Historical project reads require capability");
-            }
+        if (project.archived() && !history) {
+            throw new IllegalStateException("Project is archived");
         }
         return new ProjectScope(project.id());
-    }
-
-    private int projectAccessStatus(String projectId) {
-        try {
-            return projectService.getProject(projectId).archived() && !projectAccessService.isTrustedDeployment()
-                ? HttpStatus.SERVICE_UNAVAILABLE.value() : HttpStatus.CONFLICT.value();
-        } catch (RuntimeException ignored) {
-            return HttpStatus.NOT_FOUND.value();
-        }
     }
 
     private boolean isStaleCursor(InvalidCursorException error) {

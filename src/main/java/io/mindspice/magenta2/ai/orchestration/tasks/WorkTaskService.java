@@ -22,7 +22,7 @@ import io.mindspice.magenta2.ai.orchestration.runtime.AssignmentRequest;
 import io.mindspice.magenta2.ai.orchestration.runtime.AssignmentService;
 import io.mindspice.magenta2.ai.orchestration.runtime.AssignmentType;
 import io.mindspice.magenta2.ai.orchestration.runtime.OrchestrationStatus;
-import io.mindspice.magenta2.ai.orchestration.runtime.ProjectOperationsAccessService;
+import io.mindspice.magenta2.ai.orchestration.runtime.ProjectService;
 import io.mindspice.magenta2.ai.orchestration.runtime.WorkAssignment;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -49,7 +49,7 @@ public class WorkTaskService {
 
     private final WorkTaskRepository repository;
     private final AgentProfileService agentProfileService;
-    private final ProjectOperationsAccessService projectAccessService;
+    private final ProjectService projectService;
     private final PlanService planService;
     private final AssignmentService assignmentService;
 
@@ -60,20 +60,20 @@ public class WorkTaskService {
     /** 4-arg constructor for callers that don't need AssignmentService. */
     public WorkTaskService(WorkTaskRepository repository,
                            AgentProfileService agentProfileService,
-                           ProjectOperationsAccessService projectAccessService,
+                           ProjectService projectService,
                            PlanService planService) {
-        this(repository, agentProfileService, projectAccessService, planService, null);
+        this(repository, agentProfileService, projectService, planService, null);
     }
 
     @Autowired
     public WorkTaskService(WorkTaskRepository repository,
                            @Autowired(required = false) AgentProfileService agentProfileService,
-                           @Autowired(required = false) ProjectOperationsAccessService projectAccessService,
+                           @Autowired(required = false) ProjectService projectService,
                            @Autowired(required = false) PlanService planService,
                            @Autowired(required = false) AssignmentService assignmentService) {
         this.repository = repository;
         this.agentProfileService = agentProfileService;
-        this.projectAccessService = projectAccessService;
+        this.projectService = projectService;
         this.planService = planService;
         this.assignmentService = assignmentService;
     }
@@ -104,15 +104,14 @@ public class WorkTaskService {
         String normalizedTitle = requireTitle(title);
         String normalizedDesc = StringUtils.hasText(description) ? description.strip() : null;
         String normalizedProjectId = StringUtils.hasText(projectId) ? projectId : null;
-        requireTaskMutationCapability();
         String normalizedAgent = StringUtils.hasText(preferredAgentId) ? preferredAgentId : null;
 
         validatePin(pin, normalizedProjectId);
         validatePreferredAgent(normalizedAgent, normalizedProjectId);
 
         // Archive guard on create: reject tasks for archived projects
-        if (normalizedProjectId != null && projectAccessService != null) {
-            projectAccessService.requireActiveProject(normalizedProjectId);
+        if (normalizedProjectId != null) {
+            requireProjectService().requireActiveProject(normalizedProjectId);
         }
 
         Instant now = Instant.now();
@@ -192,7 +191,6 @@ public class WorkTaskService {
                                     String title, String description,
                                     Integer defaultPriority, Boolean pin,
                                     String preferredAgentId) {
-        requireTaskMutationCapability();
         WorkTaskDefinition existing = getById(taskId);
         if (existing.definitionVersion() != expectedVersion) {
             throw new IllegalStateException(
@@ -296,7 +294,6 @@ public class WorkTaskService {
      */
     @Transactional
     boolean bindProject(String taskId, String projectId) {
-        requireTaskMutationCapability();
         WorkTaskDefinition existing = getById(taskId);
         if (existing.projectId() != null) {
             return false;
@@ -306,9 +303,7 @@ public class WorkTaskService {
         }
 
         // Archive guard: target project must be active
-        if (projectAccessService != null) {
-            projectAccessService.requireActiveProject(projectId);
-        }
+        requireProjectService().requireActiveProject(projectId);
 
         List<WorkTaskAttempt> attempts = repository.findAttemptsByTask(taskId);
         if (!attempts.isEmpty()) {
@@ -381,7 +376,6 @@ public class WorkTaskService {
      */
     @Transactional
     WorkTaskDefinition promote(String taskId, String planId, int expectedVersion) {
-        requireTaskMutationCapability();
         WorkTaskDefinition existing = getById(taskId);
         if (existing.promotedPlanId() != null) {
             throw new IllegalStateException(
@@ -426,7 +420,6 @@ public class WorkTaskService {
     @Transactional
     public WorkTaskDefinition promoteOperation(String operationKey, String taskId,
                                                 int expectedVersion) {
-        requireTaskMutationCapability();
         requireOperationKey(operationKey);
         String digest = sha256(buildPromoteDigestPayload(taskId, expectedVersion));
 
@@ -606,7 +599,6 @@ public class WorkTaskService {
     WorkTaskAttempt submit(String taskId, String agentId, String runDisplayName,
                                    String workspaceType, String workspaceKey,
                                    String operationKey) {
-        requireTaskMutationCapability();
         WorkTaskDefinition task = getById(taskId);
 
         // Require promoted
@@ -623,8 +615,8 @@ public class WorkTaskService {
         }
 
         // Capability gate: project membership
-        if (task.projectId() != null && projectAccessService != null) {
-            projectAccessService.requireEligibleSubmission(task.projectId(), agentId);
+        if (task.projectId() != null) {
+            requireProjectService().requireActiveProjectWithMember(task.projectId(), agentId);
         } else if (agentProfileService != null) {
             // Unbound task: validate agent eligibility
             AgentProfile agent = agentProfileService.get(agentId);
@@ -679,7 +671,6 @@ public class WorkTaskService {
     public WorkTaskAttempt submitOperation(String operationKey, String taskId,
                                             String agentId, String runDisplayName,
                                             String workspaceType, String workspaceKey) {
-        requireTaskMutationCapability();
         requireOperationKey(operationKey);
         String digest = sha256(buildSubmitDigestPayload(taskId, agentId,
             runDisplayName, workspaceType, workspaceKey));
@@ -741,7 +732,6 @@ public class WorkTaskService {
      */
     @Transactional
     WorkTaskAttempt retry(String taskId, String operationKey) {
-        requireTaskMutationCapability();
         WorkTaskDefinition task = getById(taskId);
 
         // Archive guard
@@ -777,7 +767,6 @@ public class WorkTaskService {
      */
     @Transactional
     public WorkTaskAttempt retryOperation(String operationKey, String taskId) {
-        requireTaskMutationCapability();
         requireOperationKey(operationKey);
         String digest = sha256(buildRetryDigestPayload(taskId));
 
@@ -829,7 +818,6 @@ public class WorkTaskService {
     @Transactional
     WorkTaskAttempt recordAttempt(String taskId, String assignmentId,
                                           String predecessorAttemptId) {
-        requireTaskMutationCapability();
         WorkTaskDefinition task = getById(taskId);
 
         // Archive guard: reject attempts on tasks bound to archived projects
@@ -916,8 +904,8 @@ public class WorkTaskService {
      * Require that a task's bound project (if any) is not archived.
      */
     private void requireProjectNotArchived(WorkTaskDefinition task) {
-        if (task.projectId() != null && projectAccessService != null) {
-            projectAccessService.requireActiveProject(task.projectId());
+        if (task.projectId() != null) {
+            requireProjectService().requireActiveProject(task.projectId());
         }
     }
 
@@ -943,9 +931,7 @@ public class WorkTaskService {
 
         if (StringUtils.hasText(projectId)) {
             // Project-bound: require current member
-            if (projectAccessService != null) {
-                projectAccessService.requireActiveProjectWithMember(projectId, preferredAgentId);
-            }
+            requireProjectService().requireActiveProjectWithMember(projectId, preferredAgentId);
         } else {
             // Unbound: require agent eligibility
             if (agentProfileService != null) {
@@ -971,11 +957,11 @@ public class WorkTaskService {
 
     // ── Service helpers ──
 
-    private void requireTaskMutationCapability() {
-        if (projectAccessService == null || !projectAccessService.isTrustedDeployment()) {
-            throw new ProjectOperationsAccessService.ProjectAccessDeniedException(
-                "Work task mutations require trusted deployment capability");
+    private ProjectService requireProjectService() {
+        if (projectService == null) {
+            throw new IllegalStateException("Project service is unavailable");
         }
+        return projectService;
     }
 
     private void requireOperationKey(String operationKey) {

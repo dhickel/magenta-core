@@ -25,7 +25,6 @@ class ProjectServiceTest {
     private ProjectService projectService;
     private ProjectRepository projectRepository;
     private OrchestrationRuntimeRepository runtimeRepository;
-    private ProjectOperationsAccessService accessService;
 
     @BeforeEach
     void setUp() throws IOException {
@@ -33,11 +32,9 @@ class ProjectServiceTest {
         JdbcTemplate jdbc = jdbcTemplate();
         projectRepository = new ProjectRepository(jdbc, new ObjectMapper());
         runtimeRepository = new OrchestrationRuntimeRepository(jdbc, new ObjectMapper());
-        accessService = new ProjectOperationsAccessService(projectRepository, runtimeRepository, null);
-        accessService.enableTrustedDeployment();
         projectService = new ProjectService(projectRepository,
             mock(io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceDirectoryService.class),
-            runtimeRepository, null, accessService, null);
+            runtimeRepository, null, null);
     }
 
     @Test
@@ -84,9 +81,7 @@ class ProjectServiceTest {
         JdbcTemplate jdbc = jdbcTemplate();
         ProjectRepository projects = new ProjectRepository(jdbc, new ObjectMapper());
         OrchestrationRuntimeRepository runtime = new OrchestrationRuntimeRepository(jdbc, new ObjectMapper());
-        ProjectOperationsAccessService access = new ProjectOperationsAccessService(projects, runtime, null);
-        access.enableTrustedDeployment();
-        ProjectService service = new ProjectService(projects, mock(io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceDirectoryService.class), runtime, null, access, null);
+        ProjectService service = new ProjectService(projects, mock(io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceDirectoryService.class), runtime, null, null);
         Project project = service.createProject("Active", "desc", "agent-active", null);
         runtime.insertAssignment(new WorkAssignment(
             "assignment-active", "agent-active", null, null, AssignmentType.REPORT, 1,
@@ -99,7 +94,7 @@ class ProjectServiceTest {
             .isInstanceOf(IllegalStateException.class)
             .hasMessageContaining("active assignments");
         assertThatThrownBy(() -> service.removeAgent(project.id(), "agent-active"))
-            .isInstanceOf(ProjectOperationsAccessService.ProjectAccessDeniedException.class)
+            .isInstanceOf(IllegalStateException.class)
             .hasMessageContaining("active assignment");
     }
 

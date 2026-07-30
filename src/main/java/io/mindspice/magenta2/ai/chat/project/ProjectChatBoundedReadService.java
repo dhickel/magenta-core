@@ -7,7 +7,6 @@ import java.util.Objects;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.mindspice.magenta2.ai.orchestration.context.AgentMaterializationService;
 import io.mindspice.magenta2.ai.orchestration.context.AgentMaterializationService.FilesAuthorization;
-import io.mindspice.magenta2.ai.orchestration.runtime.ProjectOperationsAccessService;
 import io.mindspice.magenta2.ai.orchestration.runtime.ProjectOutputService;
 import io.mindspice.magenta2.ai.orchestration.runtime.ProjectService;
 import org.springframework.ai.tool.ToolCallback;
@@ -26,20 +25,17 @@ final class ProjectChatBoundedReadService {
     private final AgentMaterializationService materializationService;
     private final ProjectService projectService;
     private final ProjectOutputService projectOutputService;
-    private final ProjectOperationsAccessService projectAccessService;
     private final ObjectMapper objectMapper;
 
     ProjectChatBoundedReadService(JdbcTemplate jdbc,
                                   AgentMaterializationService materializationService,
                                   ProjectService projectService,
                                   ProjectOutputService projectOutputService,
-                                  ProjectOperationsAccessService projectAccessService,
                                   ObjectMapper objectMapper) {
         this.jdbc = Objects.requireNonNull(jdbc);
         this.materializationService = Objects.requireNonNull(materializationService);
         this.projectService = Objects.requireNonNull(projectService);
         this.projectOutputService = Objects.requireNonNull(projectOutputService);
-        this.projectAccessService = Objects.requireNonNull(projectAccessService);
         this.objectMapper = Objects.requireNonNull(objectMapper);
     }
 
@@ -334,10 +330,7 @@ final class ProjectChatBoundedReadService {
         ProjectChatProfile profile = ProjectChatProfileHolder.current();
         if (profile == null) return null;
         try {
-            if (!projectAccessService.isTrustedDeployment()) {
-                return null;
-            }
-            projectAccessService.requireActiveProjectWithMember(profile.projectId(), profile.agentId());
+            projectService.requireActiveProjectWithMember(profile.projectId(), profile.agentId());
             FilesAuthorization authorization = materializationService.authorizeProjectFiles(
                     profile.agentId(), profile.projectId(), profile.materializationGeneration());
             if (!(authorization instanceof FilesAuthorization.Authorized authorized)

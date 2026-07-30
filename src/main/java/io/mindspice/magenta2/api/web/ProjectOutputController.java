@@ -2,7 +2,7 @@ package io.mindspice.magenta2.api.web;
 
 import java.io.IOException;
 
-import io.mindspice.magenta2.ai.orchestration.runtime.ProjectOperationsAccessService;
+import io.mindspice.magenta2.ai.orchestration.runtime.ProjectService;
 import io.mindspice.magenta2.ai.orchestration.runtime.ProjectOutputService;
 import io.mindspice.magenta2.ai.orchestration.workspaces.OutputArtifactService;
 import io.mindspice.magenta2.ai.orchestration.workspaces.PublicationRecord;
@@ -27,14 +27,14 @@ import org.springframework.web.bind.annotation.PathVariable;
 public final class ProjectOutputController {
     private final ProjectOutputService projectOutputService;
     private final OutputArtifactService outputArtifactService;
-    private final ProjectOperationsAccessService projectAccessService;
+    private final ProjectService projectService;
 
     public ProjectOutputController(ProjectOutputService projectOutputService,
                                    OutputArtifactService outputArtifactService,
-                                   ProjectOperationsAccessService projectAccessService) {
+                                   ProjectService projectService) {
         this.projectOutputService = projectOutputService;
         this.outputArtifactService = outputArtifactService;
-        this.projectAccessService = projectAccessService;
+        this.projectService = projectService;
     }
 
     @GetMapping("/projects/_detail/{projectId}/outputs/{artifactId}/preview")
@@ -60,15 +60,11 @@ public final class ProjectOutputController {
     }
 
     private PublicationRecord authorize(String projectId, String artifactId) {
-        if (!projectAccessService.isTrustedDeployment()) {
-            throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE,
-                    "Project output access is unavailable");
-        }
         try {
-            projectAccessService.requireActiveProject(projectId);
+            projectService.requireActiveProject(projectId);
         } catch (IllegalArgumentException exception) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Output not found");
-        } catch (ProjectOperationsAccessService.ProjectAccessDeniedException exception) {
+        } catch (IllegalStateException exception) {
             throw new ResponseStatusException(HttpStatus.CONFLICT,
                     "Project output access is unavailable");
         }

@@ -174,10 +174,3 @@ Sources: [`ai/orchestration/tasks`](../../src/main/java/io/mindspice/magenta2/ai
 Tables: `work_task_definitions`, `work_task_attempts`.
 
 Controllers: Task endpoints in `ProjectConsoleController`, `WorkTaskFragments`.
-
-## Project Operations Access Service
-
-Sources: [`ai/orchestration/runtime/ProjectOperationsAccessService.java`](../../src/main/java/io/mindspice/magenta2/ai/orchestration/runtime/ProjectOperationsAccessService.java).
-
-- `ProjectOperationsAccessService` gates project-scoped operations behind active-project and trusted-deployment checks. Archived projects return controlled errors; non-trusted deployments return capability-disabled states.
-- Used by project Files, Templates, Tasks, Chat, and Output tabs to enforce consistent authorization before domain-specific checks.

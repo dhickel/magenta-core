@@ -19,7 +19,7 @@ Repaired Phase 03 lightweight-task persistence, provenance, operation idempotenc
 
 ## Behavioral Impact
 
-Task submissions now preserve the Plan as executable source and Work Task as separate immutable origin. Attempts append and atomically become the designated display/retry attempt. Task and Plan edits remain independent after promotion. All public Task mutations require operation keys and project task controls fail closed when trusted deployment capability is disabled. Submit/retry operation replays return their exact persisted attempt even after later retries. Fresh schemas now install migration 016's SQLite promoted-Plan delete guard before its integrity validation, so clean application startup does not fail.
+Task submissions now preserve the Plan as executable source and Work Task as separate immutable origin. Attempts append and atomically become the designated display/retry attempt. Task and Plan edits remain independent after promotion. All public Task mutations require operation keys and project task controls fail closed when removed project-operation gate capability is disabled. Submit/retry operation replays return their exact persisted attempt even after later retries. Fresh schemas now install migration 016's SQLite promoted-Plan delete guard before its integrity validation, so clean application startup does not fail.
 
 ## Specification Impact
 

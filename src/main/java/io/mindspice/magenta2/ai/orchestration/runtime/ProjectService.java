@@ -24,12 +24,11 @@ public class ProjectService {
     private final WorkspaceDirectoryService workspaceDirectoryService;
     private final OrchestrationRuntimeRepository runtimeRepository;
     private final JobRepository jobRepository;
-    private final ProjectOperationsAccessService accessService;
     private final AssignmentQueryService queryService;
 
     public ProjectService(ProjectRepository projectRepository,
                           WorkspaceDirectoryService workspaceDirectoryService) {
-        this(projectRepository, workspaceDirectoryService, null, null, null, null);
+        this(projectRepository, workspaceDirectoryService, null, null, null);
     }
 
     @Autowired
@@ -37,13 +36,11 @@ public class ProjectService {
                           WorkspaceDirectoryService workspaceDirectoryService,
                           OrchestrationRuntimeRepository runtimeRepository,
                           @Autowired(required = false) JobRepository jobRepository,
-                          @Autowired(required = false) ProjectOperationsAccessService accessService,
                           @Autowired(required = false) AssignmentQueryService queryService) {
         this.projectRepository = projectRepository;
         this.workspaceDirectoryService = workspaceDirectoryService;
         this.runtimeRepository = runtimeRepository;
         this.jobRepository = jobRepository;
-        this.accessService = accessService;
         this.queryService = queryService;
     }
 
@@ -122,11 +119,7 @@ public class ProjectService {
 
     private ProjectAgentMembership addAgent(String projectId, String agentId,
                                              String role, Instant joinedAt) {
-        if (accessService != null) {
-            accessService.requireActiveProject(projectId);
-        } else {
-            getProject(projectId);
-        }
+        requireActiveProject(projectId);
         if (!StringUtils.hasText(agentId)) {
             throw new IllegalArgumentException("Agent ID is required");
         }
@@ -138,7 +131,13 @@ public class ProjectService {
     }
 
     public void removeAgent(String projectId, String agentId) {
-        requireAccessService().removeMember(projectId, agentId);
+        requireActiveProject(projectId);
+        if (!projectRepository.isMember(projectId, agentId)) {
+            throw new IllegalArgumentException("Agent " + agentId + " is not a member of project " + projectId);
+        }
+        requireProjectMembershipRemovalAllowed(projectId, agentId);
+        projectRepository.deleteMembership(projectId, agentId);
+        log.info("Agent {} removed from project {}", agentId, projectId);
     }
 
     public List<ProjectAgentMembership> listMembers(String projectId) {
@@ -184,11 +183,21 @@ public class ProjectService {
     // ════════════════════════════════════════════════════════════════
 
     public void archiveProject(String projectId) {
-        requireAccessService().archiveProject(projectId);
+        requireActiveProject(projectId);
+        if (runtimeRepository != null && runtimeRepository.countActiveAssignmentsForProject(projectId) > 0) {
+            throw new IllegalStateException("Project has active assignments and cannot be archived: " + projectId);
+        }
+        if (jobRepository != null && jobRepository.countActiveRunsByProject(projectId) > 0) {
+            throw new IllegalStateException("Project has active job runs and cannot be archived: " + projectId);
+        }
+        projectRepository.archive(projectId);
+        log.info("Project archived: {}", projectId);
     }
 
     public void restoreProject(String projectId) {
-        requireAccessService().restoreProject(projectId);
+        getProject(projectId);
+        projectRepository.restore(projectId);
+        log.info("Project restored: {}", projectId);
     }
 
     // ════════════════════════════════════════════════════════════════
@@ -223,13 +232,22 @@ public class ProjectService {
         }
     }
 
-    // ── Helpers ──
+    // ── Project lifecycle and membership guards ──
 
-    private ProjectOperationsAccessService requireAccessService() {
-        if (accessService == null) {
-            throw new IllegalStateException("Project operations access service is unavailable");
+    public Project requireActiveProject(String projectId) {
+        Project project = getProject(projectId);
+        if (project.archived()) {
+            throw new IllegalStateException("Project is archived: " + projectId);
         }
-        return accessService;
+        return project;
+    }
+
+    public Project requireActiveProjectWithMember(String projectId, String agentId) {
+        Project project = requireActiveProject(projectId);
+        if (!projectRepository.isMember(projectId, agentId)) {
+            throw new IllegalStateException("Agent " + agentId + " is not a member of project " + projectId);
+        }
+        return project;
     }
 
     private String normalize(String value) {

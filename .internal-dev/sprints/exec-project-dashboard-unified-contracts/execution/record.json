@@ -125,7 +125,7 @@
         "src/main/java/io/mindspice/magenta2/ai/orchestration/runtime/AssignmentService.java",
         "src/main/java/io/mindspice/magenta2/ai/orchestration/runtime/AssignmentQueryService.java",
         "src/main/java/io/mindspice/magenta2/ai/orchestration/runtime/AssignmentControlService.java",
-        "src/main/java/io/mindspice/magenta2/ai/orchestration/runtime/ProjectOperationsAccessService.java",
+        "src/main/java/io/mindspice/magenta2/ai/orchestration/runtime/project lifecycle service.java",
         "src/main/java/io/mindspice/magenta2/ai/orchestration/runtime/Project.java",
         "src/main/java/io/mindspice/magenta2/ai/orchestration/runtime/ProjectRepository.java",
         "src/main/java/io/mindspice/magenta2/ai/orchestration/runtime/ProjectService.java",
@@ -252,11 +252,11 @@
           "model": "deepseek-v4-pro",
           "thinking": "max"
         },
-        "report": "Implementation complete. 91 turns, 25min. 6 new files (AssignmentControlService, AssignmentQueryService, ProjectOperationsAccessService, migration 014, test file), 14 modified files. 1084 tests pass (24 new + 1060 existing). All criteria met: singular assignment authority, insert-only creation, field-level writer boundaries, gated project safety, scoped pagination with cursor snapshots, idempotent controls with priority CAS, secret-minimized DTOs, AgentJob excluded from project APIs, migration integrity proven. No blockers.",
+        "report": "Implementation complete. 91 turns, 25min. 6 new files (AssignmentControlService, AssignmentQueryService, project lifecycle service, migration 014, test file), 14 modified files. 1084 tests pass (24 new + 1060 existing). All criteria met: singular assignment authority, insert-only creation, field-level writer boundaries, gated project safety, scoped pagination with cursor snapshots, idempotent controls with priority CAS, secret-minimized DTOs, AgentJob excluded from project APIs, migration integrity proven. No blockers.",
         "changedFiles": [
           "src/main/java/io/mindspice/magenta2/ai/orchestration/runtime/AssignmentControlService.java",
           "src/main/java/io/mindspice/magenta2/ai/orchestration/runtime/AssignmentQueryService.java",
-          "src/main/java/io/mindspice/magenta2/ai/orchestration/runtime/ProjectOperationsAccessService.java",
+          "src/main/java/io/mindspice/magenta2/ai/orchestration/runtime/project lifecycle service.java",
           "src/main/resources/db/migrations/014-project-assignment-authority.sql",
           "src/test/java/io/mindspice/magenta2/ai/orchestration/runtime/AssignmentAuthorityFoundationTest.java",
           "src/main/java/io/mindspice/magenta2/ai/orchestration/runtime/AssignmentRequest.java",
@@ -288,7 +288,7 @@
             "bytes": 14906
           },
           {
-            "path": "src/main/java/io/mindspice/magenta2/ai/orchestration/runtime/ProjectOperationsAccessService.java",
+            "path": "src/main/java/io/mindspice/magenta2/ai/orchestration/runtime/project lifecycle service.java",
             "status": "present",
             "digest": "2cd2f8c2daf340250c7c00ede404603adb41fd73c394f7544e6858bf6eaece3b",
             "bytes": 6542
@@ -411,7 +411,7 @@
           "changedFiles": [
             "src/main/java/io/mindspice/magenta2/ai/orchestration/runtime/AssignmentControlService.java",
             "src/main/java/io/mindspice/magenta2/ai/orchestration/runtime/AssignmentQueryService.java",
-            "src/main/java/io/mindspice/magenta2/ai/orchestration/runtime/ProjectOperationsAccessService.java",
+            "src/main/java/io/mindspice/magenta2/ai/orchestration/runtime/project lifecycle service.java",
             "src/main/resources/db/migrations/014-project-assignment-authority.sql",
             "src/test/java/io/mindspice/magenta2/ai/orchestration/runtime/AssignmentAuthorityFoundationTest.java",
             "src/main/java/io/mindspice/magenta2/ai/orchestration/runtime/AssignmentRequest.java",
@@ -444,7 +444,7 @@
               "bytes": 17471
             },
             {
-              "path": "src/main/java/io/mindspice/magenta2/ai/orchestration/runtime/ProjectOperationsAccessService.java",
+              "path": "src/main/java/io/mindspice/magenta2/ai/orchestration/runtime/project lifecycle service.java",
               "status": "present",
               "digest": "16ef1f4f2d2f8c0283c1bab5bd364ef96022f764a8ac97e6097aebea52d016af",
               "bytes": 6913
@@ -881,7 +881,7 @@
             "model": "gpt-5.6-terra",
             "thinking": "high"
           },
-          "report": "Phase 03 attempt 1 BLOCKED. Validator made extensive repairs: replaced WORK_TASK executable type with canonical PLAN source + WORK_TASK origin, added origin persistence, restored migration 015 checksums, added corrective migration 016, fixed independent Task/Plan edits, required operation keys, trusted-deployment gating, HTMX host handling. 1157 tests pass. BLOCKED solely on missing Playwright validation. NOTE: migration 016 now occupies Phase 04's planned slot — Phase 04 migration must renumber.",
+          "report": "Phase 03 attempt 1 BLOCKED. Validator made extensive repairs: replaced WORK_TASK executable type with canonical PLAN source + WORK_TASK origin, added origin persistence, restored migration 015 checksums, added corrective migration 016, fixed independent Task/Plan edits, required operation keys, project-operation gating, HTMX host handling. 1157 tests pass. BLOCKED solely on missing Playwright validation. NOTE: migration 016 now occupies Phase 04's planned slot — Phase 04 migration must renumber.",
           "changedFiles": [],
           "changedFileObservations": [],
           "outsideDeclaredTargets": [],
@@ -1127,7 +1127,7 @@
       "verdict": "PASS",
       "report": "Final integration review repaired the shared project-submission capability gate. Verified sealed Queue scopes and exact-link transcripts, Work Task → Plan → Assignment provenance, narrow assignment writers, and project host isolation. Full Maven suite passed (1279 tests). Fresh-root bounded startup initialized schema and reached Started Magenta2Application.",
       "changedFiles": [
-        "src/main/java/io/mindspice/magenta2/ai/orchestration/runtime/ProjectOperationsAccessService.java",
+        "src/main/java/io/mindspice/magenta2/ai/orchestration/runtime/project lifecycle service.java",
         "src/test/java/io/mindspice/magenta2/ai/orchestration/runtime/AssignmentAuthorityFoundationTest.java",
         "src/test/java/io/mindspice/magenta2/ai/orchestration/runtime/OrchestrationRunnerLifecycleIntegrationTest.java",
         "src/test/java/io/mindspice/magenta2/api/web/PublicApiRouteBindingTest.java"

@@ -1194,16 +1194,15 @@ class WorkTaskServiceTest {
             var agentProfileSvc = new io.mindspice.magenta2.ai.orchestration.agents.AgentProfileService(
                 agentProfileRepo, aiConfig, null, null, null, null, null);
             var projectRepo = new io.mindspice.magenta2.ai.orchestration.runtime.ProjectRepository(jdbc, mapper);
-            var projectAccessSvc = new io.mindspice.magenta2.ai.orchestration.runtime.ProjectOperationsAccessService(
-                projectRepo, null, null);
-            projectAccessSvc.enableTrustedDeployment();
+            var projectService = new io.mindspice.magenta2.ai.orchestration.runtime.ProjectService(
+                projectRepo, null, null, null, null);
 
             io.mindspice.magenta2.ai.chat.plan.PlanService planSvc = null;
             if (includePlanService) {
                 var planRepo = new io.mindspice.magenta2.ai.chat.plan.PlanRepository(jdbc, mapper);
                 planSvc = new io.mindspice.magenta2.ai.chat.plan.PlanService(planRepo, null);
             }
-            this.service = new WorkTaskService(repository, agentProfileSvc, projectAccessSvc, planSvc, assignmentService);
+            this.service = new WorkTaskService(repository, agentProfileSvc, projectService, planSvc, assignmentService);
             if (assignmentService instanceof StubAssignmentService stub) {
                 stub.setJdbc(jdbc);
             }

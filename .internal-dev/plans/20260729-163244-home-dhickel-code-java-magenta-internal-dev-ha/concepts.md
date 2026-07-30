@@ -34,7 +34,6 @@
 
 ## Constraints
 
-- The server-owned trusted-deployment gate defaults false. It is a capability decision, not authentication: it trusts reachable callers only when enabled. Each service entry point for a sensitive read or mutation enforces the same capability decision; controllers map its result and disabled UI states expose no active control. Resource scope alone never authorizes access.
 - Archived projects preserve historical records and reject new work, membership changes, materializations, controls, automation activity, turns, and proposals. Archive and member removal are atomic guarded operations: they reject while active assignments, designated Task attempts, Job runs, enabled automation, provisioning materializations, in-flight turns, or live proposals would be stranded. Historical access remains capability-gated and never recomputes attribution from current membership.
 - Project-attributed assignment submission validates an active project and a current eligible executor. JSON `input.projectId`, caller paths, event payloads, filenames, and historical membership are never authoritative project identity.
 - Transcript lookup uses exact persisted assignment/conversation links. Project routes never use time-window, name, timestamp, or filesystem inference.

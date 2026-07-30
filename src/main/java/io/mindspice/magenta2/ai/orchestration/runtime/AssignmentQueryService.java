@@ -384,7 +384,7 @@ public class AssignmentQueryService {
         Project project = projectRepository.findById(projectId)
             .orElseThrow(() -> new IllegalArgumentException("Project not found"));
         if (project.archived() && !allowArchivedHistory) {
-            throw new ProjectOperationsAccessService.ProjectAccessDeniedException("Project is archived");
+            throw new IllegalStateException("Project is archived");
         }
     }
 

@@ -41,13 +41,6 @@ class OrchestrationRunnerLifecycleIntegrationTest {
     @Autowired AgentContextService contexts;
     @Autowired JobReassignmentService reassignments;
     @Autowired ProjectService projects;
-    @Autowired ProjectOperationsAccessService projectAccessService;
-
-    @BeforeEach
-    void enableProjectMutationCapability() {
-        projectAccessService.enableTrustedDeployment();
-    }
-
     @DynamicPropertySource
     static void properties(DynamicPropertyRegistry registry) {
         registry.add("magenta.root.path", () -> ROOT.toString());

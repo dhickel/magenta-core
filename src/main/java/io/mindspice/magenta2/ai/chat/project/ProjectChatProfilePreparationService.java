@@ -7,7 +7,7 @@ import io.mindspice.magenta2.ai.chat.repository.ChatSessionMetadataRepository;
 import io.mindspice.magenta2.ai.chat.repository.ChatSessionMetadataRepository.ProjectChatSession;
 import io.mindspice.magenta2.ai.orchestration.context.AgentMaterializationService;
 import io.mindspice.magenta2.ai.orchestration.context.AgentMaterializationService.FilesAuthorization;
-import io.mindspice.magenta2.ai.orchestration.runtime.ProjectOperationsAccessService;
+import io.mindspice.magenta2.ai.orchestration.runtime.ProjectService;
 import io.mindspice.magenta2.ai.orchestration.settings.RuntimeSettingsService;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -23,18 +23,18 @@ import org.springframework.util.StringUtils;
 class ProjectChatProfilePreparationService {
     private final RuntimeSettingsService runtimeSettingsService;
     private final AgentMaterializationService materializationService;
-    private final ProjectOperationsAccessService projectAccessService;
+    private final ProjectService projectService;
     private final ChatSessionMetadataRepository metadataRepository;
     private final ProjectChatToolRegistry toolRegistry;
 
     ProjectChatProfilePreparationService(RuntimeSettingsService runtimeSettingsService,
                                          AgentMaterializationService materializationService,
-                                         ProjectOperationsAccessService projectAccessService,
+                                         ProjectService projectService,
                                          ChatSessionMetadataRepository metadataRepository,
                                          ProjectChatToolRegistry toolRegistry) {
         this.runtimeSettingsService = runtimeSettingsService;
         this.materializationService = materializationService;
-        this.projectAccessService = projectAccessService;
+        this.projectService = projectService;
         this.metadataRepository = metadataRepository;
         this.toolRegistry = toolRegistry;
     }
@@ -49,10 +49,7 @@ class ProjectChatProfilePreparationService {
 
         FilesAuthorization authorization;
         try {
-            if (!projectAccessService.isTrustedDeployment()) {
-                return ProjectChatService.ProjectChatResult.unavailable();
-            }
-            projectAccessService.requireActiveProjectWithMember(projectId, memberAgentId);
+            projectService.requireActiveProjectWithMember(projectId, memberAgentId);
             authorization = materializationService.authorizeProjectFiles(memberAgentId, projectId, 0);
         } catch (RuntimeException ignored) {
             return ProjectChatService.ProjectChatResult.unavailable();

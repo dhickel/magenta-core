@@ -11,7 +11,7 @@ Post-phase review of Phase 07 Project Chat, focusing on restricted capability bo
 - Replaced mutable project-origin upsert behavior with create-or-verify immutable project-chat session tuples.
 - Captured project, selected member agent, exact materialization key/generation, and server-created owner-link key in metadata; migration 020 now owns the required columns and indexes.
 - Removed explorer/filesystem collaborators from the project-chat callback registry. The fixed eight-callback allowlist has no file-write, shell/process, skill, or package capability.
-- Revalidated trusted deployment, active project, current member, and exact READY generation at profile preparation, invocation finalization, and every tool callback.
+- Revalidated project operation, active project, current member, and exact READY generation at profile preparation, invocation finalization, and every tool callback.
 - Persisted bounded visible user/assistant project-chat history in `ai_chat_memory`; history reads now return persisted visible messages.
 - Excluded `PROJECT_CHAT` from generic browser session lists and public generic-chat conversation entry points.
 - Made project member selection use raw scoped identities while route generation performs one encoding pass.

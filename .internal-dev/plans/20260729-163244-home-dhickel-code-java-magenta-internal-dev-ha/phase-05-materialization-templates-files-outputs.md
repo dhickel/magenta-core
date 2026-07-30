@@ -69,7 +69,7 @@ All subphases A–F form one contiguous implementation sequence. Complete every 
 ### D. Preserve the exact-generation, read-only Files view
 
 1. Trace the existing Files route through `ProjectConsoleController` and materialization/workspace services. Before UI edits, inspect applicable SimplyPages documentation and matching demos; if unavailable, stop the UI edit rather than substituting raw markup or broad JavaScript.
-2. Route Files lookup through a server-owned resolver checking trusted-deployment capability, active/non-archived project, authorized current member, exact project source, exact `READY` generation, and trusted recomputed location. Request data cannot supply authoritative project/member/generation/root identity.
+2. Route Files lookup through a server-owned resolver checking project-operation capability, active/non-archived project, authorized current member, exact project source, exact `READY` generation, and trusted recomputed location. Request data cannot supply authoritative project/member/generation/root identity.
 3. Preserve one selected member/source view; do not merge trees or infer a fallback. Resolve relative read paths through established no-follow/real-path confinement, reject traversal and symlink escape, and provide no mutation, upload, delete, rename, or create operation.
 4. Return cross-project, cross-member, unavailable-generation, and confined-path failures without filesystem detail leakage. Limit names and errors to the authorized Files disclosure policy.
 

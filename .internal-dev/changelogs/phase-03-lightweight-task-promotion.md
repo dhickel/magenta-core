@@ -8,7 +8,7 @@ Implemented Subphase B of Phase 03 (Lightweight Project Tasks): guarded task def
 
 ## Files
 
-- `WorkTaskService.java`: enhanced create/edit with guard validations; added editOperation, bindProjectOperation, promoteOperation, submissionPreCheck; wired AgentProfileService, ProjectOperationsAccessService, and PlanService as optional dependencies; added archive guard (requireProjectNotArchived) on all mutation paths.
+- `WorkTaskService.java`: enhanced create/edit with guard validations; added editOperation, bindProjectOperation, promoteOperation, submissionPreCheck; wired AgentProfileService, removed project-operation gate, and PlanService as optional dependencies; added archive guard (requireProjectNotArchived) on all mutation paths.
 - `WorkTaskRepository.java`: added findCompletedOperation (returns taskId + resultJson), added findOperationDigest for digest conflict detection; added CompletedOperation record.
 - `WorkTaskServiceTest.java`: 45 tests covering pin validation, preferred agent membership/eligibility, archive gating on create/edit/promote/bind/recordAttempt, operation-key idempotency for EDIT/BIND/PROMOTE, promoteOperation Plan creation and idempotency, submissionPreCheck, and independent task↔plan edits.
 
@@ -33,7 +33,7 @@ None — this is implementation of already-specified Phase 03 Subphase B contrac
 - The `promote` method (direct-link, backward-compatible) bypasses Plan creation. Callers should migrate to `promoteOperation` for full behavior. The direct-link path does not validate the pre-existing plan id.
 - `submissionPreCheck` depends on `planService.getTask()` which may throw if the plan has been deleted. Callers in Subphase C should handle this gracefully.
 - `PlanService.saveTask()` is called within the promotion transaction. If `PlanService` later gains side effects, those would participate in the task promotion transaction.
-- The `AgentProfileService` and `ProjectOperationsAccessService` are constructor-injected as `@Autowired(required = false)`. If unavailable, guard validations are silently skipped (not fail-closed). This is intentional for testability; production wiring should always provide them.
+- The `AgentProfileService` and `removed project-operation gate` are constructor-injected as `@Autowired(required = false)`. If unavailable, guard validations are silently skipped (not fail-closed). This is intentional for testability; production wiring should always provide them.
 
 ## Follow-up Items
 

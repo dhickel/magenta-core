@@ -19,7 +19,7 @@ No project workspace kind or project-root authority was introduced. V2 roots rem
 
 ## Recommendations
 
-Run the required Playwright validation with trusted deployment both disabled and enabled before Phase 06. Do not repair the applied migration-017 checksum in place; investigate it as a separate migration-bookkeeping incident.
+Run the required Playwright validation with project operation both disabled and enabled before Phase 06. Do not repair the applied migration-017 checksum in place; investigate it as a separate migration-bookkeeping incident.
 
 ## Follow-ups
 

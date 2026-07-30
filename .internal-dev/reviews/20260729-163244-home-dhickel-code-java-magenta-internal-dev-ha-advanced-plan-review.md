@@ -73,7 +73,7 @@ Reviewed only `phase-08-console-integration-and-closeout.md` against the Phase L
 
 5. **Cross-phase sequencing must not turn optional integration into hidden coupling.** The Job phase may integrate Task provenance when it exists, but Job authority and queued reassignment cannot rely on Task behavior for correctness. Shared contracts now require every cross-domain link to be optional, explicit, and independently validated.
 
-6. **Sensitive-read and idempotency scope needed sharper qualification.** The trusted-deployment gate is not caller authentication. It must be enforced through one capability decision at each service entry point, with controllers mapping the outcome, and disabled capabilities must remain unavailable. Operation keys require a server-defined actor/caller binding; where no trustworthy actor exists, the sensitive capability remains disabled rather than treating a client value as identity.
+6. **Sensitive-read and idempotency scope needed sharper qualification.** The project-operation gate is not caller authentication. It must be enforced through one capability decision at each service entry point, with controllers mapping the outcome, and disabled capabilities must remain unavailable. Operation keys require a server-defined actor/caller binding; where no trustworthy actor exists, the sensitive capability remains disabled rather than treating a client value as identity.
 
 7. **Final validation omitted some handoff-specific proof obligations.** The corrected criteria add capability-disabled behavior, native-run boundary proof, durable reassignment recovery, archive/member-removal races, exact durable output-link parity, generic-chat denial, migration failure/drift cases, and UI accessibility/host-isolation evidence.
 

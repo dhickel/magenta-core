@@ -518,8 +518,6 @@ public class AgentMaterializationService {
     public sealed interface FilesAuthorization {
         /** Authorized for read-only browse; location is verified and confined. */
         record Authorized(MaterializationGenerationLocation location, GenerationRecord generation) implements FilesAuthorization {}
-        /** Trusted-deployment capability is disabled. */
-        record CapabilityDisabled() implements FilesAuthorization {}
         /** Project is archived. */
         record ProjectArchived() implements FilesAuthorization {}
         /** Project member not found. */
@@ -539,7 +537,7 @@ public class AgentMaterializationService {
     /**
      * Authorize project Files read access for a single member.
      *
-     * <p>Revalidates capability, project state (not archived), current member
+     * <p>Revalidates project state (not archived), current member
      * access, exact project source, ready generation with expected generation
      * number, and confined read-only path resolution. One-member view only —
      * never infer member or workspace.</p>

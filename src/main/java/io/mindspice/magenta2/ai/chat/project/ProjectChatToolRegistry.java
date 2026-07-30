@@ -6,7 +6,6 @@ import java.util.Map;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.mindspice.magenta2.ai.orchestration.context.AgentMaterializationService;
-import io.mindspice.magenta2.ai.orchestration.runtime.ProjectOperationsAccessService;
 import io.mindspice.magenta2.ai.orchestration.runtime.ProjectOutputService;
 import io.mindspice.magenta2.ai.orchestration.runtime.ProjectService;
 import org.springframework.ai.tool.ToolCallback;
@@ -25,9 +24,9 @@ public class ProjectChatToolRegistry {
 
     public ProjectChatToolRegistry(JdbcTemplate jdbc, AgentMaterializationService materializationService,
                                    ProjectService projectService, ProjectOutputService projectOutputService,
-                                   ProjectOperationsAccessService projectAccessService, ObjectMapper objectMapper) {
+                                   ObjectMapper objectMapper) {
         ProjectChatBoundedReadService reads = new ProjectChatBoundedReadService(
-                jdbc, materializationService, projectService, projectOutputService, projectAccessService, objectMapper);
+                jdbc, materializationService, projectService, projectOutputService, objectMapper);
         Map<String, ToolCallback> fixed = new LinkedHashMap<>();
         fixed.put("project_project_status", reads.projectStatusCallback());
         fixed.put("project_member_fact", reads.memberFactCallback());

@@ -30,14 +30,11 @@ public class AssignmentControlService {
 
     private final OrchestrationRuntimeRepository repository;
     private final AssignmentService assignmentService;
-    private final ProjectOperationsAccessService projectAccessService;
 
     public AssignmentControlService(OrchestrationRuntimeRepository repository,
-                                    AssignmentService assignmentService,
-                                    ProjectOperationsAccessService projectAccessService) {
+                                    AssignmentService assignmentService) {
         this.repository = repository;
         this.assignmentService = assignmentService;
-        this.projectAccessService = projectAccessService;
     }
 
     // ── Priority CAS ──
@@ -64,10 +61,6 @@ public class AssignmentControlService {
         if (!StringUtils.hasText(projectId)) {
             throw new IllegalArgumentException("Priority controls require a canonical project scope");
         }
-        if (projectAccessService == null || !projectAccessService.isTrustedDeployment()) {
-            throw new ProjectOperationsAccessService.ProjectAccessDeniedException(
-                "Priority controls require trusted deployment capability");
-        }
         String key = StringUtils.hasText(operationKey) ? operationKey.trim()
             : "priority:" + UUID.randomUUID();
         WorkAssignment current = assignmentService.get(assignmentId);
@@ -78,7 +71,7 @@ public class AssignmentControlService {
         if (!resource.equals(scope)) {
             throw new OperationConflictException("Control scope does not match canonical project attribution");
         }
-        String actor = "trusted-deployment";
+        String actor = "magenta-server";
         String digest = digestCanonical("PRIORITY_CAS", actor, resource, assignmentId,
             String.valueOf(newPriority), String.valueOf(expectedRowVersion));
 
@@ -145,15 +138,11 @@ public class AssignmentControlService {
                                          String operationKey, String scope) {
         String key = StringUtils.hasText(operationKey) ? operationKey.trim()
             : "cancel:" + UUID.randomUUID();
-        if (projectAccessService == null || !projectAccessService.isTrustedDeployment()) {
-            throw new ProjectOperationsAccessService.ProjectAccessDeniedException(
-                "Cancellation controls require trusted deployment capability");
-        }
         WorkAssignment current = assignmentService.get(assignmentId);
         if (!agentId.equals(current.agentId()) || !("agent:" + agentId).equals(scope)) {
             throw new OperationConflictException("Control scope does not match canonical assignment attribution");
         }
-        String actor = "trusted-deployment";
+        String actor = "magenta-server";
         String resource = "agent:" + agentId;
 
         String digest = digestCanonical("REQUEST_CANCEL", actor, resource, assignmentId);

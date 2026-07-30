@@ -5,7 +5,6 @@ import java.util.List;
 import io.mindspice.magenta2.ai.orchestration.runtime.Project;
 import io.mindspice.magenta2.ai.orchestration.runtime.ProjectAgentMembership;
 import io.mindspice.magenta2.ai.orchestration.runtime.ProjectEvent;
-import io.mindspice.magenta2.ai.orchestration.runtime.ProjectOperationsAccessService.ProjectAccessDeniedException;
 import io.mindspice.magenta2.ai.orchestration.runtime.ProjectService;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -107,7 +106,7 @@ public class ProjectController {
             projectService.removeAgent(projectId, agentId);
         } catch (IllegalArgumentException e) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, e.getMessage());
-        } catch (ProjectAccessDeniedException | IllegalStateException e) {
+        } catch (IllegalStateException e) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, e.getMessage());
         }
     }
@@ -132,7 +131,7 @@ public class ProjectController {
             projectService.archiveProject(projectId);
         } catch (IllegalArgumentException e) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, e.getMessage());
-        } catch (ProjectAccessDeniedException e) {
+        } catch (IllegalStateException e) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, e.getMessage());
         }
     }
@@ -143,7 +142,7 @@ public class ProjectController {
             projectService.restoreProject(projectId);
         } catch (IllegalArgumentException e) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, e.getMessage());
-        } catch (ProjectAccessDeniedException | IllegalStateException e) {
+        } catch (IllegalStateException e) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, e.getMessage());
         }
     }

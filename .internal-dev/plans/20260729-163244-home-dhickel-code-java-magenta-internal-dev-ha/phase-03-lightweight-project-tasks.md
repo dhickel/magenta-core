@@ -36,7 +36,7 @@ phase-02-project-queue-and-console-seams.md
 - Enforce at most one nonterminal Task-origin assignment through a migration-level uniqueness guard on the canonical Work Assignment origin/status representation proven in Phase 01, and atomically append/designate attempts. Do not use an application-only precheck, mutable Task status, or whole-row assignment update.
 - Attempts are append-only exact Task/assignment/order/predecessor links. A retry after terminal state appends one successor; identical operation replay returns its recorded attempt and appends nothing. The designated-attempt pointer changes only atomically with accepted append.
 - Promotion creates or records one immutable Plan link. Same key/digest replays; changed digest conflicts; later promotion converges to the existing link. The public Plan service is the only Plan writer. Task edits never update Plan and Plan edits never update Task.
-- Every sensitive Task service entry applies the trusted-deployment capability and server-owned canonical scope. DTOs exclude raw input/output, unrestricted errors, paths, leases, checkpoints, secrets, and internal diagnostics. Mutations bind operation key/digest to server-derived caller, action, scope, resource, expected revision, and request semantics.
+- Every sensitive Task service entry applies the project-operation capability and server-owned canonical scope. DTOs exclude raw input/output, unrestricted errors, paths, leases, checkpoints, secrets, and internal diagnostics. Mutations bind operation key/digest to server-derived caller, action, scope, resource, expected revision, and request semantics.
 
 ## Required Guides
 
@@ -89,7 +89,7 @@ After all A–D work is complete, run one phase-level set:
 
 - Run focused Task repository/service/controller/authorization/concurrency tests with Plan and Assignment regressions.
 - Verify fresh schema through `015`, supported warm upgrade from `014`, repeated application, checksum mismatch and partial-shape rejection, foreign-key/index shape, and `schema.sql`/migrated metadata equivalence.
-- Run relevant Maven/static checks and bounded Spring Boot startup with trusted-deployment capability disabled and enabled; confirm disabled routes fail closed with no active Task controls.
+- Run relevant Maven/static checks and bounded Spring Boot startup with project-operation capability disabled and enabled; confirm disabled routes fail closed with no active Task controls.
 - Use a Playwright subagent against the running app for management, promotion replay, explicit-executor submit, history, archive/empty/error/disabled states, deep links, HTMX host isolation, keyboard/focus/ARIA, desktop/mobile screenshots, and visual review of density, hierarchy, alignment, wrapping, overflow, affordance, and first viewport.
 - Inspect the final diff for whole-row assignment writes, duplicate authority, optional scope, unbounded reads, sensitive DTOs, client-derived project identity, unjustified JavaScript, placeholders, unrelated edits, and `/api/tasks` change.
 - Require orchestration post-phase validator review-and-repair PASS only after this complete set; subphases have no independent pass gate.

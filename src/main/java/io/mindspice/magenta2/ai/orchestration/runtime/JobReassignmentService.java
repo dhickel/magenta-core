@@ -23,7 +23,7 @@ import org.springframework.util.StringUtils;
  * Coordinates atomic queued job reassignment: revoke-and-clone an eligible
  * unstarted assignment in one transaction with idempotent operation persistence.
  *
- * <p>Reassignment is gated: trusted caller, active project, eligible
+ * <p>Reassignment requires an active project and eligible
  * destination member, queued/nonterminal/unleased/no-JobRun source at its
  * expected version. Source attribution, workspace, artifacts, outputs, lease,
  * and checkpoint are never copied or rewritten.</p>
@@ -42,18 +42,15 @@ public class JobReassignmentService {
     private final AssignmentService assignmentService;
     private final AgentProfileService agentProfileService;
     private final ProjectService projectService;
-    private final ProjectOperationsAccessService projectAccessService;
 
     public JobReassignmentService(JdbcTemplate jdbc,
                                   AssignmentService assignmentService,
                                   AgentProfileService agentProfileService,
-                                  ProjectService projectService,
-                                  ProjectOperationsAccessService projectAccessService) {
+                                  ProjectService projectService) {
         this.jdbc = jdbc;
         this.assignmentService = assignmentService;
         this.agentProfileService = agentProfileService;
         this.projectService = projectService;
-        this.projectAccessService = projectAccessService;
     }
 
     /**
@@ -164,13 +161,9 @@ public class JobReassignmentService {
                 return failOperation(operationKey, "CONFLICT",
                     "Reassignment scope does not match source project", null);
             }
-            if (projectAccessService == null) {
-                return failOperation(operationKey, "FAILED",
-                    "Project access service unavailable", null);
-            }
             try {
-                projectAccessService.requireEligibleSubmission(projectId, destinationAgentId);
-            } catch (ProjectOperationsAccessService.ProjectAccessDeniedException e) {
+                projectService.requireActiveProjectWithMember(projectId, destinationAgentId);
+            } catch (RuntimeException e) {
                 return failOperation(operationKey, "CONFLICT",
                     "Destination not an eligible project member: " + e.getMessage(), null);
             }

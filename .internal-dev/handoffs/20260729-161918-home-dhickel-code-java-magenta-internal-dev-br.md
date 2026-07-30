@@ -158,7 +158,6 @@ Retain the selected-tab shell while giving interactive tabs stable, host-scoped 
 14. Files, transcripts, and project output views are read-only. “Project views are read-only” does not apply to explicitly authorized Queue, Task, Job, Schedule, or Reaction controls.
 15. Grouped navigation and stable per-surface HTMX sub-hosts are the project-console direction.
 16. Project chat is implemented by adapting the existing agent system-chat component pattern to project scope with a selected member agent, deny-by-default profile, and auto-scrolling collapsible dropdown panel.
-17. No mutation or sensitive read is exposed merely because resource scope matches. Real caller authorization or an explicit trusted-deployment gate is required; otherwise the capability remains disabled.
 18. Project archive preserves historical assignments, transcripts, outputs, and audit. Hard deletion or cascading destruction of operational history is out of scope.
 
 ## Constraints
@@ -280,7 +279,7 @@ Retain the selected-tab shell while giving interactive tabs stable, host-scoped 
 These are evidence gates, not invitations to guess during implementation:
 
 1. **Runtime authority:** Which existing Job model and service own new writes, and which fields or consumers still treat native Job/run rows rather than `WorkAssignment` as lifecycle authority?
-2. **Access boundary:** What existing authentication or trusted-deployment mechanism can gate project transcripts, Files, Outputs, and lifecycle mutations? If none exists, those sensitive capabilities remain disabled.
+2. **Access boundary:** What existing authentication mechanism can govern project transcripts, Files, Outputs, and lifecycle mutations if the open-alpha posture changes?
 3. **Schema feasibility:** Do current assignment, transcript-link, event, schedule, reaction, and output schemas contain the required attribution, stable cursor fields, foreign keys, and indexes? Any “no migration” claim depends on this inspection.
 4. **Lifecycle removal behavior:** What current repository mechanisms support project archive, member removal, automation disablement, and historical reads without destructive cascades?
 5. **Running writer quiescence:** Which existing fence/interrupt mechanism proves a running assignment can no longer commit before a replacement is created? Until proven, reassignment remains limited to unleased work.
@@ -293,7 +292,7 @@ This handoff is ready for implementation planning only when:
 
 - The field-level authority matrix is verified against current code and schema.
 - Assignment immutability, route scope, membership, archive, idempotency, pagination, and preferred-agent eligibility contracts are documented as intended truth.
-- A caller authorization or trusted-deployment gate is identified for every sensitive read and mutation.
+- Lifecycle and membership guards are identified for every sensitive mutation.
 - The authoritative Job write model and bounded legacy-read strategy are selected.
 - Reassignment scope is explicitly limited to the protocol proven by tests.
 - Project chat uses the adapted system-chat component pattern with deny-by-default profile and selected member agent.

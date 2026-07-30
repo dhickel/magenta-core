@@ -48,7 +48,7 @@ public class AssignmentService {
     private final WorkspaceDirectoryService workspaceDirectoryService;
     private final TaskRunLifecycleService taskRunLifecycleService;
     private final AgentContextService agentContextService;
-    private final ProjectOperationsAccessService projectAccessService;
+    private final ProjectService projectService;
     private volatile Consumer<String> localInterruptHandler = ignored -> { };
 
     public AssignmentService(
@@ -86,7 +86,7 @@ public class AssignmentService {
         @Autowired(required = false) WorkspaceDirectoryService workspaceDirectoryService,
         @Autowired(required = false) TaskRunLifecycleService taskRunLifecycleService,
         @Autowired(required = false) AgentContextService agentContextService,
-        @Autowired(required = false) ProjectOperationsAccessService projectAccessService
+        @Autowired(required = false) ProjectService projectService
     ) {
         this.repository = repository;
         this.agentProfileService = agentProfileService;
@@ -98,7 +98,7 @@ public class AssignmentService {
         this.workspaceDirectoryService = workspaceDirectoryService;
         this.taskRunLifecycleService = taskRunLifecycleService;
         this.agentContextService = agentContextService;
-        this.projectAccessService = projectAccessService;
+        this.projectService = projectService;
     }
 
     @Transactional
@@ -135,12 +135,8 @@ public class AssignmentService {
             input.put("projectId", projectId);
         }
 
-        // Project safety gate: require active project and eligible executor for project-attributed submission
         if (StringUtils.hasText(projectId)) {
-            if (projectAccessService == null) {
-                throw new IllegalStateException("Project access capability is unavailable");
-            }
-            projectAccessService.requireEligibleSubmission(projectId, request.agentId());
+            requireProjectService().requireActiveProjectWithMember(projectId, request.agentId());
         }
 
         // Resolve workspace selection: type/key both absent or both present
@@ -199,6 +195,13 @@ public class AssignmentService {
         agentContextService.completeAssignmentSubmission(operationKey, intentDigest,
             bindingKey, reserved.id(), taskRunId);
         return reserved;
+    }
+
+    private ProjectService requireProjectService() {
+        if (projectService == null) {
+            throw new IllegalStateException("Project service is unavailable");
+        }
+        return projectService;
     }
 
     private void requireContextService() {

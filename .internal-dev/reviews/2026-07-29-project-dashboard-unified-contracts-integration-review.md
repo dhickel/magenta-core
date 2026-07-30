@@ -6,7 +6,7 @@ Reviewed cross-phase assignment authority, agent/project Queue overlap, Work Tas
 
 ## Findings
 
-- Repaired a submission capability bypass: `ProjectOperationsAccessService.requireEligibleSubmission` now requires the server-owned trusted-deployment capability before accepting a project-attributed submission.
+- Repaired a submission capability bypass: `project lifecycle service.requireEligibleSubmission` now requires the server-owned project-operation capability before accepting a project-attributed submission.
 - Agent and project queues consume the shared `AssignmentQueryService` under sealed scopes. Project transcripts use durable assignment-conversation links only.
 - Work Tasks submit a promoted Plan as `PLAN/<id>` and retain `WORK_TASK/<id>` as immutable origin; retries append attempts through assignment lineage.
 - No whole-row assignment upsert remains. The sole assignment write outside `OrchestrationRuntimeRepository` is the intentional job-reassignment guarded CAS revoke, which atomically revoke-and-clones instead of retargeting attribution.

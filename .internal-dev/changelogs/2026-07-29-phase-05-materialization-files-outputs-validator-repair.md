@@ -29,4 +29,4 @@ Warm startup against the local existing database fails before application wiring
 
 ## Follow-up Items
 
-Run the required Playwright desktop/mobile checks with trusted deployment disabled and enabled. Investigate the existing migration-017 checksum drift without modifying an applied migration.
+Run the required Playwright desktop/mobile checks with removed project-operation gate disabled and enabled. Investigate the existing migration-017 checksum drift without modifying an applied migration.

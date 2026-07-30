@@ -187,93 +187,6 @@ class AssignmentAuthorityFoundationTest {
         assertThat(completed.get().operationState()).isEqualTo("COMPLETED");
     }
 
-    // ── Project access service ──
-
-    @Test
-    void projectAccessServiceRequiresActiveProject() {
-        var ctx = newCtx();
-        ctx.projects.save(new Project("proj-1", "Test", "desc", null, null, null, null, null,
-            false, Instant.now(), Instant.now()));
-
-        Project result = ctx.access.requireActiveProject("proj-1");
-        assertThat(result.id()).isEqualTo("proj-1");
-    }
-
-    @Test
-    void projectAccessServiceRejectsArchivedProject() {
-        var ctx = newCtx();
-        ctx.projects.save(new Project("proj-1", "Test", "desc", null, null, null, null, null,
-            true, Instant.now(), Instant.now()));
-
-        assertThatThrownBy(() -> ctx.access.requireActiveProject("proj-1"))
-            .isInstanceOf(ProjectOperationsAccessService.ProjectAccessDeniedException.class)
-            .hasMessageContaining("archived");
-    }
-
-    @Test
-    void projectAccessServiceRejectsSubmissionWhenTrustedDeploymentIsDisabled() {
-        var ctx = newCtx();
-        ctx.projects.save(new Project("proj-1", "Test", "desc", null, null, null, null, null,
-            false, Instant.now(), Instant.now()));
-        ctx.projects.saveMembership(new ProjectAgentMembership(
-            UUID.randomUUID().toString(), "proj-1", "agent-1", "member", Instant.now()));
-
-        assertThatThrownBy(() -> ctx.access.requireEligibleSubmission("proj-1", "agent-1"))
-            .isInstanceOf(ProjectOperationsAccessService.ProjectAccessDeniedException.class)
-            .hasMessageContaining("trusted deployment capability");
-    }
-
-    @Test
-    void projectAccessServiceRequiresMemberForSubmission() {
-        var ctx = newCtx();
-        ctx.projects.save(new Project("proj-1", "Test", "desc", null, null, null, null, null,
-            false, Instant.now(), Instant.now()));
-
-        ctx.access.enableTrustedDeployment();
-        // Agent "agent-1" is not a member
-        assertThatThrownBy(() -> ctx.access.requireEligibleSubmission("proj-1", "agent-1"))
-            .isInstanceOf(ProjectOperationsAccessService.ProjectAccessDeniedException.class)
-            .hasMessageContaining("not a member");
-    }
-
-    @Test
-    void projectAccessServiceAllowsEligibleMemberSubmission() {
-        var ctx = newCtx();
-        ctx.projects.save(new Project("proj-1", "Test", "desc", null, null, null, null, null,
-            false, Instant.now(), Instant.now()));
-        ctx.projects.saveMembership(new ProjectAgentMembership(
-            UUID.randomUUID().toString(), "proj-1", "agent-1", "member", Instant.now()));
-
-        ctx.access.enableTrustedDeployment();
-        // Should not throw
-        ctx.access.requireEligibleSubmission("proj-1", "agent-1");
-    }
-
-    @Test
-    void archiveBlockedByActiveAssignments() {
-        var ctx = newCtx();
-        ctx.projects.save(new Project("proj-1", "Test", "desc", null, null, null, null, null,
-            false, Instant.now(), Instant.now()));
-        ctx.repo.insertAssignment(assignment(UUID.randomUUID().toString(), "agent-1", "proj-1",
-            AssignmentType.TASK_RUN, OrchestrationStatus.QUEUED));
-        ctx.access.enableTrustedDeployment();
-
-        assertThatThrownBy(() -> ctx.access.archiveProject("proj-1"))
-            .isInstanceOf(ProjectOperationsAccessService.ProjectAccessDeniedException.class)
-            .hasMessageContaining("active assignment");
-    }
-
-    @Test
-    void archiveRequiresTrustedDeployment() {
-        var ctx = newCtx();
-        ctx.projects.save(new Project("proj-1", "Test", "desc", null, null, null, null, null,
-            false, Instant.now(), Instant.now()));
-
-        assertThatThrownBy(() -> ctx.access.archiveProject("proj-1"))
-            .isInstanceOf(ProjectOperationsAccessService.ProjectAccessDeniedException.class)
-            .hasMessageContaining("trusted deployment");
-    }
-
     // ── Assignment query service ──
 
     @Test
@@ -399,7 +312,6 @@ class AssignmentAuthorityFoundationTest {
     record TestContext(
         OrchestrationRuntimeRepository repo,
         ProjectRepository projects,
-        ProjectOperationsAccessService access,
         AssignmentQueryService query
     ) {}
 
@@ -410,9 +322,8 @@ class AssignmentAuthorityFoundationTest {
         ObjectMapper mapper = new ObjectMapper();
         OrchestrationRuntimeRepository repo = new OrchestrationRuntimeRepository(jdbc, mapper);
         ProjectRepository projects = new ProjectRepository(jdbc, mapper);
-        ProjectOperationsAccessService access = new ProjectOperationsAccessService(projects, repo, null);
         AssignmentQueryService query = new AssignmentQueryService(repo, projects);
-        return new TestContext(repo, projects, access, query);
+        return new TestContext(repo, projects, query);
     }
 
     static WorkAssignment assignment(String id, String agentId, String projectId,

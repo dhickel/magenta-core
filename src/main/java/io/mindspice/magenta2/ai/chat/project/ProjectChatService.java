@@ -8,7 +8,7 @@ import io.mindspice.magenta2.ai.chat.repository.ChatMemoryRepository;
 import io.mindspice.magenta2.ai.chat.repository.ChatSessionMetadataRepository;
 import io.mindspice.magenta2.ai.orchestration.context.AgentMaterializationService;
 import io.mindspice.magenta2.ai.orchestration.context.AgentMaterializationService.FilesAuthorization;
-import io.mindspice.magenta2.ai.orchestration.runtime.ProjectOperationsAccessService;
+import io.mindspice.magenta2.ai.orchestration.runtime.ProjectService;
 import io.mindspice.magenta2.ai.chat.service.ChatModelRouter;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -41,7 +41,7 @@ public class ProjectChatService {
     private final ChatMemoryRepository memoryRepository;
     private final ChatSessionMetadataRepository metadataRepository;
     private final AgentMaterializationService materializationService;
-    private final ProjectOperationsAccessService projectAccessService;
+    private final ProjectService projectService;
     private final ConcurrentHashMap<String, Object> conversationLocks = new ConcurrentHashMap<>();
 
     public ProjectChatService(ProjectChatProfilePreparationService preparationService,
@@ -50,14 +50,14 @@ public class ProjectChatService {
                               ChatMemoryRepository memoryRepository,
                               ChatSessionMetadataRepository metadataRepository,
                               AgentMaterializationService materializationService,
-                              ProjectOperationsAccessService projectAccessService) {
+                              ProjectService projectService) {
         this.preparationService = preparationService;
         this.chatModelRouter = chatModelRouter;
         this.toolRegistry = toolRegistry;
         this.memoryRepository = memoryRepository;
         this.metadataRepository = metadataRepository;
         this.materializationService = materializationService;
-        this.projectAccessService = projectAccessService;
+        this.projectService = projectService;
     }
 
     public ProjectChatResult resolveProfile(String projectId, String memberAgentId) {
@@ -135,10 +135,7 @@ public class ProjectChatService {
             return false;
         }
         try {
-            if (!projectAccessService.isTrustedDeployment()) {
-                return false;
-            }
-            projectAccessService.requireActiveProjectWithMember(profile.projectId(), profile.agentId());
+            projectService.requireActiveProjectWithMember(profile.projectId(), profile.agentId());
             FilesAuthorization authorization = materializationService.authorizeProjectFiles(
                     profile.agentId(), profile.projectId(), profile.materializationGeneration());
             return authorization instanceof FilesAuthorization.Authorized authorized

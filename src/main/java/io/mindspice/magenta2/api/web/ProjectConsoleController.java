@@ -33,8 +33,6 @@ import io.mindspice.magenta2.ai.orchestration.runtime.JobRunStatus;
 import io.mindspice.magenta2.ai.orchestration.runtime.JobService;
 import io.mindspice.magenta2.ai.orchestration.runtime.Project;
 import io.mindspice.magenta2.ai.orchestration.runtime.ProjectAgentMembership;
-import io.mindspice.magenta2.ai.orchestration.runtime.ProjectOperationsAccessService;
-import io.mindspice.magenta2.ai.orchestration.runtime.ProjectOperationsAccessService.ProjectAccessDeniedException;
 import io.mindspice.magenta2.ai.orchestration.runtime.ProjectService;
 import io.mindspice.magenta2.ai.orchestration.tasks.WorkTaskAttempt;
 import io.mindspice.magenta2.ai.orchestration.tasks.WorkTaskDefinition;
@@ -102,7 +100,6 @@ public class ProjectConsoleController {
     private final WorkspaceExplorerService workspaceExplorerService;
     private final WorkTaskService workTaskService;
     private final PlanService planService;
-    private final ProjectOperationsAccessService projectAccessService;
     private final ProjectOutputService projectOutputService;
     private final ProjectMaterializationTemplateService templateService;
 
@@ -120,7 +117,6 @@ public class ProjectConsoleController {
                                     WorkspaceExplorerService workspaceExplorerService,
                                     WorkTaskService workTaskService,
                                     PlanService planService,
-                                    ProjectOperationsAccessService projectAccessService,
                                     ProjectOutputService projectOutputService,
                                     ProjectMaterializationTemplateService templateService) {
         this.projectService = projectService;
@@ -137,7 +133,6 @@ public class ProjectConsoleController {
         this.workspaceExplorerService = workspaceExplorerService;
         this.workTaskService = workTaskService;
         this.planService = planService;
-        this.projectAccessService = projectAccessService;
         this.projectOutputService = projectOutputService;
         this.templateService = templateService;
         this.dashboardShell = createShell(null);
@@ -483,22 +478,13 @@ public class ProjectConsoleController {
             return unavailableProjectTab(projectId, "Files", "context", response);
         }
         try {
-            // Capability gate
-            if (projectAccessService == null || !projectAccessService.isTrustedDeployment()) {
-                response.setStatus(HttpServletResponse.SC_SERVICE_UNAVAILABLE);
-                return filesTabShell(projectId, null,
-                    WorkspaceExplorerFragments.projectMaterializationState(
-                        "Capability disabled",
-                        "Project Files requires trusted deployment capability.", "capability-disabled"));
-            }
-
             // Project existence and active check
             try {
-                projectAccessService.requireActiveProject(projectId);
+                projectService.requireActiveProject(projectId);
             } catch (IllegalArgumentException e) {
                 response.setStatus(HttpServletResponse.SC_NOT_FOUND);
                 return fragments.errorNotFound("Project not found.");
-            } catch (ProjectAccessDeniedException e) {
+            } catch (IllegalStateException e) {
                 response.setStatus(HttpServletResponse.SC_CONFLICT);
                 return filesTabShell(projectId, null,
                     WorkspaceExplorerFragments.projectMaterializationState(
@@ -572,10 +558,6 @@ public class ProjectConsoleController {
                         throw e;
                     }
                 }
-                case AgentMaterializationService.FilesAuthorization.CapabilityDisabled cd ->
-                    WorkspaceExplorerFragments.projectMaterializationState(
-                        "Capability disabled",
-                        "Project Files requires trusted deployment capability.", "capability-disabled");
                 case AgentMaterializationService.FilesAuthorization.ProjectArchived pa ->
                     WorkspaceExplorerFragments.projectMaterializationState(
                         "Project archived",
@@ -673,19 +655,12 @@ public class ProjectConsoleController {
             return unavailableProjectTab(projectId, "Files", "context", response);
         }
         try {
-            // Capability and project checks
-            if (projectAccessService == null || !projectAccessService.isTrustedDeployment()) {
-                response.setStatus(HttpServletResponse.SC_SERVICE_UNAVAILABLE);
-                return WorkspaceExplorerFragments.projectMaterializationState(
-                    "Capability disabled",
-                    "Project Files requires trusted deployment capability.", "capability-disabled");
-            }
             try {
-                projectAccessService.requireActiveProject(projectId);
+                projectService.requireActiveProject(projectId);
             } catch (IllegalArgumentException e) {
                 response.setStatus(HttpServletResponse.SC_NOT_FOUND);
                 return new Div().withClass("orch-error").withInnerText("Project not found.").render();
-            } catch (ProjectAccessDeniedException e) {
+            } catch (IllegalStateException e) {
                 response.setStatus(HttpServletResponse.SC_CONFLICT);
                 return WorkspaceExplorerFragments.projectMaterializationState(
                     "Project archived",
@@ -717,12 +692,6 @@ public class ProjectConsoleController {
                         response.setStatus(fileErrorStatus(e));
                         yield new Div().withClass("orch-error").withInnerText(e.getMessage()).render();
                     }
-                }
-                case AgentMaterializationService.FilesAuthorization.CapabilityDisabled cd -> {
-                    response.setStatus(HttpServletResponse.SC_SERVICE_UNAVAILABLE);
-                    yield WorkspaceExplorerFragments.projectMaterializationState(
-                        "Capability disabled",
-                        "Project Files requires trusted deployment capability.", "capability-disabled");
                 }
                 case AgentMaterializationService.FilesAuthorization.ProjectArchived pa -> {
                     response.setStatus(HttpServletResponse.SC_CONFLICT);
@@ -775,19 +744,13 @@ public class ProjectConsoleController {
             return unavailableProjectTab(projectId, "Files", "context", response);
         }
         try {
-            // Capability and project checks
-            if (projectAccessService == null || !projectAccessService.isTrustedDeployment()) {
-                response.setStatus(HttpServletResponse.SC_SERVICE_UNAVAILABLE);
-                return WorkspaceExplorerFragments.projectMaterializationInspector(null,
-                    "Project Files requires trusted deployment capability.");
-            }
             try {
-                projectAccessService.requireActiveProject(projectId);
+                projectService.requireActiveProject(projectId);
             } catch (IllegalArgumentException e) {
                 response.setStatus(HttpServletResponse.SC_NOT_FOUND);
                 return WorkspaceExplorerFragments.projectMaterializationInspector(null,
                     "Project not found.");
-            } catch (ProjectAccessDeniedException e) {
+            } catch (IllegalStateException e) {
                 response.setStatus(HttpServletResponse.SC_CONFLICT);
                 return WorkspaceExplorerFragments.projectMaterializationInspector(null,
                     "File browsing is unavailable for archived projects.");
@@ -1166,12 +1129,7 @@ public class ProjectConsoleController {
                                       @RequestParam String directories,
                                       HttpServletResponse response) {
         try {
-            if (projectAccessService == null || !projectAccessService.isTrustedDeployment()) {
-                response.setStatus(HttpServletResponse.SC_SERVICE_UNAVAILABLE);
-                return projectTemplatePanel(projectId, directories,
-                    "Template changes require trusted deployment capability.").render();
-            }
-            projectAccessService.requireActiveProject(projectId);
+            projectService.requireActiveProject(projectId);
             List<String> paths = java.util.Arrays.asList(directories.split("\\R", -1));
             if (templateService.findLatestByProjectId(projectId).isPresent()) {
                 templateService.createRevision(projectId, paths);
@@ -1182,7 +1140,7 @@ public class ProjectConsoleController {
         } catch (IllegalArgumentException e) {
             response.setStatus(HttpServletResponse.SC_BAD_REQUEST);
             return projectTemplatePanel(projectId, directories, e.getMessage()).render();
-        } catch (ProjectAccessDeniedException e) {
+        } catch (IllegalStateException e) {
             response.setStatus(HttpServletResponse.SC_CONFLICT);
             return projectTemplatePanel(projectId, directories, e.getMessage()).render();
         } catch (RuntimeException e) {
@@ -1244,10 +1202,6 @@ public class ProjectConsoleController {
         }
         try {
             Project project = projectService.getProject(projectId);
-            if (projectAccessService == null || !projectAccessService.isTrustedDeployment()) {
-                return WorkTaskFragments.errorUnavailable(
-                    "Task controls are unavailable until trusted deployment capability is enabled.").render();
-            }
             List<WorkTaskDefinition> tasks = workTaskService.listByProject(projectId);
             List<WorkTaskFragments.WorkTaskRow> rows = tasks.stream()
                 .map(t -> taskToRow(t, project.archived()))
@@ -1322,7 +1276,7 @@ public class ProjectConsoleController {
             response.setStatus(HttpServletResponse.SC_BAD_REQUEST);
             List<WorkTaskFragments.AgentOption> agentOptions = buildAgentOptions(projectId);
             return WorkTaskFragments.createForm(projectId, params, e.getMessage(), agentOptions).render();
-        } catch (ProjectAccessDeniedException e) {
+        } catch (IllegalStateException e) {
             response.setStatus(HttpServletResponse.SC_SERVICE_UNAVAILABLE);
             List<WorkTaskFragments.AgentOption> agentOptions = buildAgentOptions(projectId);
             return WorkTaskFragments.createForm(projectId, params, e.getMessage(), agentOptions).render();
@@ -1415,9 +1369,6 @@ public class ProjectConsoleController {
         } catch (IllegalArgumentException e) {
             response.setStatus(HttpServletResponse.SC_BAD_REQUEST);
             return editErrorFragment(projectId, taskId, params, e.getMessage());
-        } catch (ProjectAccessDeniedException e) {
-            response.setStatus(HttpServletResponse.SC_SERVICE_UNAVAILABLE);
-            return editErrorFragment(projectId, taskId, params, e.getMessage());
         } catch (RuntimeException e) {
             log.warn("Task edit failed for {} / {}", projectId, taskId, e);
             response.setStatus(HttpServletResponse.SC_SERVICE_UNAVAILABLE);
@@ -1472,9 +1423,6 @@ public class ProjectConsoleController {
         } catch (IllegalArgumentException e) {
             response.setStatus(HttpServletResponse.SC_BAD_REQUEST);
             return WorkTaskFragments.errorBadRequest(e.getMessage()).render();
-        } catch (ProjectAccessDeniedException e) {
-            response.setStatus(HttpServletResponse.SC_SERVICE_UNAVAILABLE);
-            return WorkTaskFragments.errorUnavailable(e.getMessage()).render();
         } catch (RuntimeException e) {
             log.warn("Task promote failed for {} / {}", projectId, taskId, e);
             response.setStatus(HttpServletResponse.SC_SERVICE_UNAVAILABLE);
@@ -1552,9 +1500,6 @@ public class ProjectConsoleController {
             } catch (RuntimeException ex) {
                 return WorkTaskFragments.errorBadRequest(e.getMessage()).render();
             }
-        } catch (ProjectAccessDeniedException e) {
-            response.setStatus(HttpServletResponse.SC_SERVICE_UNAVAILABLE);
-            return WorkTaskFragments.errorUnavailable(e.getMessage()).render();
         } catch (RuntimeException e) {
             log.warn("Task submit failed for {} / {}", projectId, taskId, e);
             response.setStatus(HttpServletResponse.SC_SERVICE_UNAVAILABLE);
@@ -1598,9 +1543,6 @@ public class ProjectConsoleController {
             response.setStatus(HttpServletResponse.SC_BAD_REQUEST);
             return renderTaskDetailSafely(projectId, taskId)
                 + WorkTaskFragments.statusMessage(e.getMessage(), true).render();
-        } catch (ProjectAccessDeniedException e) {
-            response.setStatus(HttpServletResponse.SC_SERVICE_UNAVAILABLE);
-            return WorkTaskFragments.errorUnavailable(e.getMessage()).render();
         } catch (RuntimeException e) {
             log.warn("Task retry failed for {} / {}", projectId, taskId, e);
             response.setStatus(HttpServletResponse.SC_SERVICE_UNAVAILABLE);

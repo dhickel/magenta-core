@@ -55,9 +55,6 @@ class ProjectConsoleControllerTest {
         when(workTaskService.listByProject(any())).thenReturn(java.util.List.of());
         io.mindspice.magenta2.ai.chat.plan.PlanService planService
             = mock(io.mindspice.magenta2.ai.chat.plan.PlanService.class);
-        io.mindspice.magenta2.ai.orchestration.runtime.ProjectOperationsAccessService projectAccessService
-            = mock(io.mindspice.magenta2.ai.orchestration.runtime.ProjectOperationsAccessService.class);
-        when(projectAccessService.isTrustedDeployment()).thenReturn(true);
         io.mindspice.magenta2.ai.orchestration.runtime.ProjectOutputService projectOutputService
             = mock(io.mindspice.magenta2.ai.orchestration.runtime.ProjectOutputService.class);
 
@@ -67,7 +64,7 @@ class ProjectConsoleControllerTest {
             fragments, entityLookupService, entitySelectorComponents,
             agentContextService, agentMaterializationService,
             workspaceDirectoryService, workspaceExplorerService,
-            workTaskService, planService, projectAccessService, projectOutputService,
+            workTaskService, planService, projectOutputService,
             mock(io.mindspice.magenta2.ai.orchestration.runtime.ProjectMaterializationTemplateService.class));
     }
 
@@ -147,7 +144,6 @@ class ProjectConsoleControllerTest {
             mock(WorkspaceDirectoryService.class), mock(WorkspaceExplorerService.class),
             mock(io.mindspice.magenta2.ai.orchestration.tasks.WorkTaskService.class),
             mock(io.mindspice.magenta2.ai.chat.plan.PlanService.class),
-            mock(io.mindspice.magenta2.ai.orchestration.runtime.ProjectOperationsAccessService.class),
             mock(io.mindspice.magenta2.ai.orchestration.runtime.ProjectOutputService.class),
             mock(io.mindspice.magenta2.ai.orchestration.runtime.ProjectMaterializationTemplateService.class));
 
