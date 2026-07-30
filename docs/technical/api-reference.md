@@ -141,7 +141,7 @@ Source: [`ProjectConsoleController`](../../src/main/java/io/mindspice/magenta2/a
 - `GET /api/projects/{projectId}/network`, `GET /api/projects/{projectId}/events`.
 
 **Project Chat:**
-- `POST /api/projects/{projectId}/chat/stream?message=&memberAgentId=`: SSE streaming project chat restricted to read-only context. Server-created per project/agent pair. Stream validates `projectId`, `memberAgentId`, `conversationId`, and `operationId` on every event frame. Safe `textContent` rendering in `project-chat.js`.
+- `POST /api/projects/{projectId}/chat/stream?message=&memberAgentId=`: SSE streaming project chat restricted to read-only context. The server derives the conversation from the immutable project/member/exact-READY-materialization-generation tuple. Stream validates `projectId`, `memberAgentId`, `conversationId`, and `operationId` on every event frame. Safe `textContent` rendering in `project-chat.js`.
 
 **Project Console Fragment Routes (HTMX):**
 - `GET /projects/_detail/{projectId}/{dashboard|queue|tasks|jobs|outputs|files|chat|schedules|events|members|settings}`: tab fragments targeting `#project-tab-panel`.

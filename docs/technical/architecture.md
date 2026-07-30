@@ -14,7 +14,7 @@ Source anchors:
 - Agent context and materialization: [`ai/orchestration/context`](../../src/main/java/io/mindspice/magenta2/ai/orchestration/context) — `AgentContextService` owns versioned defaults, insert-only immutable bindings, and context capture; `AgentMaterializationService` owns generation-safe project materialization lifecycle.
 - System chat: [`ai/chat/system`](../../src/main/java/io/mindspice/magenta2/ai/chat/system) — `SystemChatService` provides a fixed deny-by-default profile with bounded reads, restricted tools, and user-confirmable queue-operation proposals. Runtime settings currently supply enabled state and model; the prompt, callback allowlist, and context bound are server-owned constants.
 - AI configuration: [`ai/config/user`](../../src/main/java/io/mindspice/magenta2/ai/config/user)
-- Schema: [`schema.sql`](../../src/main/resources/schema.sql) and ordered migrations 001-018 in [`db/migrations`](../../src/main/resources/db/migrations)
+- Schema: [`schema.sql`](../../src/main/resources/schema.sql) and ordered migrations 001-020 in [`db/migrations`](../../src/main/resources/db/migrations)
 
 ## Request Flow
 
@@ -89,7 +89,7 @@ The schema groups into these domains:
 - Observability and automation: `run_summaries`, `run_measurements`, revisioned schedule definitions/claims/firings/attempts, and reaction definitions/dispatches/attempts.
 - Jobs/projects/workspace metadata/settings: `job_definitions`, `job_runs`, `job_recurrences`, `projects`, memberships/events, file labels/actions, compatibility `run_output_artifacts`, and `runtime_settings`.
 
-See [Data Model](data-model.md) and the historical [Schema Migrations 001–009](migrations-001-009.md) guide. Ordered resources are contiguous through `018-project-materialization-generations.sql`: versions 010-012 add materialization/context/binding persistence, version 013 adds system-chat proposals, version 014 adds project assignment authority, versions 015-016 add lightweight work tasks and their corrective integrity repair, version 017 adds job reassignment operations, and version 018 adds immutable project template revisions plus V2 materialization generations. Schedule/reaction hardening remains immutable version 008, while version 009 records the runner-owned warm-bookkeeping compatibility release without changing schema end state.
+See [Data Model](data-model.md) and the historical [Schema Migrations 001–009](migrations-001-009.md) guide. Ordered resources are contiguous through `020-project-chat.sql`: versions 010-012 add materialization/context/binding persistence, version 013 adds system-chat proposals, version 014 adds project assignment authority, versions 015-016 add lightweight work tasks and their corrective integrity repair, version 017 adds job reassignment operations, version 018 adds immutable project template revisions plus V2 materialization generations, version 019 adds project automation/event attribution, and version 020 adds immutable project-chat metadata columns and indexes. Schedule/reaction hardening remains immutable version 008, while version 009 records the runner-owned warm-bookkeeping compatibility release without changing schema end state.
 
 ## Streaming Model
 

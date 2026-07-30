@@ -1,6 +1,6 @@
 # Data Model
 
-Primary Magenta SQLite schema is initialized from [`schema.sql`](../../src/main/resources/schema.sql) and evolved by checksum-protected ordered resources 001-018 in [`db/migrations`](../../src/main/resources/db/migrations). Migration-owned structures use `SchemaMigrationRunner`; older unrelated repositories may still add compatibility columns for warm databases. The [001–009 guide](migrations-001-009.md) covers the original immutable foundation; migrations 010-018 are documented in their domain sections below.
+Primary Magenta SQLite schema is initialized from [`schema.sql`](../../src/main/resources/schema.sql) and evolved by checksum-protected ordered resources 001-020 in [`db/migrations`](../../src/main/resources/db/migrations). Migration-owned structures use `SchemaMigrationRunner`; older unrelated repositories may still add compatibility columns for warm databases. The [001–009 guide](migrations-001-009.md) covers the original immutable foundation; migrations 010-020 are documented in their domain sections below.
 
 ## Avatar Personal Data (Removed)
 
@@ -135,11 +135,10 @@ Proposals are non-executing; confirmation passes through the ordinary scoped lif
 
 Source package: [`ai/chat/project`](../../src/main/java/io/mindspice/magenta2/ai/chat/project). Migration 020.
 
-- `project_chat_conversations`: server-created per-project/per-agent chat conversations with conversation id, project id, member agent id, optional project-context binding metadata, and timestamps. Conversations are read-only context and carry no file/system tool authority.
-- `project_chat_messages`: ordered chat messages by conversation id with role, text, and timestamp. Message text is stored as plain text; SSE transport renders text using safe `textContent` DOM insertion only.
-- `project_chat_operations`: idempotent operation records for project-chat stream submissions keyed by `(conversation_id, operation_key)`.
+- `ai_chat_session_metadata`: stores one immutable `PROJECT_CHAT` session tuple per `(project_id, member_agent_id, materialization_key, materialization_generation)`, together with its server-derived conversation id and owner-binding key. Migration 020 adds the project-chat columns and tuple index.
+- `ai_chat_memory`: stores the bounded visible user and assistant history for the server-created conversation. Message text is stored as plain text; SSE transport renders text using safe `textContent` DOM insertion only.
 
-Project chat has no file write, process execution, skill activation, or tool authority. It is bound to one member agent and does not create or modify workspace content.
+Project chat has no separate conversation, message, or operation table. It has no file write, process execution, skill activation, or tool authority, is bound to one member plus one exact READY materialization generation, and does not create or modify workspace content.
 
 ## Typed Workspaces and Outputs
 

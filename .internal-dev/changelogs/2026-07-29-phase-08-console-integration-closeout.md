@@ -39,8 +39,10 @@ Updated all specified files:
 - **orchestration.css:** Consistent styling across all tabs, project-specific responsive overrides.
 
 ### Subphase F: Closeout
-- `mvn test`: 1276 tests, 0 failures, BUILD SUCCESS.
-- Audit diff for duplicate authority, unbounded queries, sensitive DTOs, raw HTML: clean.
+- `mvn test`: 1276 tests, 0 failures, BUILD SUCCESS at the original phase closeout; the post-phase validator then added focused composition coverage and reran `mvn test` successfully (1278 tests, 0 failures).
+- The post-phase validator's default-root bounded startup exposed the separate version-17 checksum-drift blocker tracked in GitHub #46.
+- The later post-phase validator found and repaired a nested duplicate `#project-chat-history` host and a second tab descriptor wrapper that weakened the claimed canonical registry.
+- The later validator also corrected documentation that incorrectly described migrations as ending at 018 and described unimplemented project-chat tables/operation idempotency.
 - All changed files listed below.
 
 ## Files
@@ -80,7 +82,8 @@ Updated all specified files:
 All specifications updated to reflect current implemented state. No new architectural decisions required — this phase is integration/documentation only. The existing architecture entries already reflect Phase 02-08 completion.
 
 ## Risks
-- None. This is a documentation, CSS, and composition-audit phase with no new features or authority.
+- The original Phase 07 validator review records unresolved durable project-chat turn serialization/idempotency and proposal-workflow requirements. This closeout must not be treated as proof that those Phase 07 exit criteria passed.
 
 ## Follow-up Items
-- None required for Phase 08 scope.
+- Complete the durable project-chat turn/proposal authority identified by `.internal-dev/reviews/2026-07-29-project-chat-validator-review.md` before declaring the full sprint validated.
+- Repair the version-17 warm-database checksum drift tracked in `.internal-dev/bugs/migration-017-applied-checksum-drift/report.md` and [GitHub #46](https://github.com/dhickel/Magenta/issues/46) before retrying default-root startup.

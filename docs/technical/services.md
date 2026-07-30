@@ -155,11 +155,11 @@ Controllers: `RuntimeSettingsController`, `ModelController`, `RuntimeController`
 
 Sources: [`ai/chat/project`](../../src/main/java/io/mindspice/magenta2/ai/chat/project).
 
-- `ProjectChatService` owns project-scoped SSE streaming chat restricted to read-only context. Each conversation is server-created per project/agent pair. Chat has no file write, process execution, skill activation, or tool authority.
+- `ProjectChatService` owns project-scoped SSE streaming chat restricted to read-only context. Each server-created conversation is bound to the immutable tuple of project, member agent, materialization key, and READY generation. Chat has no file write, process execution, skill activation, or tool authority.
 - SSE transport uses safe `textContent` rendering and strict event-type validation. No `innerHTML` or raw transport in the JavaScript module (`project-chat.js`).
 - Stream events validate `projectId`, `memberAgentId`, `conversationId`, and `operationId` on every event frame.
 
-Tables: project-chat conversations use migration 020.
+Persistence: migration 020 adds project-chat tuple metadata to `ai_chat_session_metadata`; visible messages remain in `ai_chat_memory`. There is no project-chat operation/idempotency table.
 
 Controllers: `ProjectChatController`.
 

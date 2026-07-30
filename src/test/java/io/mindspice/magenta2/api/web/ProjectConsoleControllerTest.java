@@ -208,4 +208,19 @@ class ProjectConsoleControllerTest {
         String html = controller.projectDetailFragment("project-1", null, mock(HttpServletResponse.class));
         assertThat(html).contains("data-project-tab=\"queue\"", "active");
     }
+
+    @Test
+    void projectChatHistoryReplacesItsStableHostInsteadOfNestingIt() {
+        String html = ProjectChatFragments.panel("project-1", "agent-1", "conversation-1", true);
+
+        assertThat(html).contains("id=\"project-chat-history\"", "hx-swap=\"outerHTML\"");
+        assertThat(ProjectChatFragments.history("project-1", "agent-1", List.of())).containsOnlyOnce(
+            "id=\"project-chat-history\"");
+    }
+
+    @Test
+    void projectFragmentsExposeTheCanonicalNavigationRegistry() {
+        assertThat(new ProjectConsoleFragments().projectTabs())
+            .containsExactlyElementsOf(AppNavigation.consoleTabs());
+    }
 }

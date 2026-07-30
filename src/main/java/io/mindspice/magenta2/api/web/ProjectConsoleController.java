@@ -48,7 +48,7 @@ import io.mindspice.magenta2.ai.orchestration.workspaces.RunOutputArtifact;
 import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceDirectoryService;
 import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceExplorerService;
 import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceFileException;
-import io.mindspice.magenta2.api.web.ProjectConsoleFragments.ProjectTab;
+import io.mindspice.magenta2.api.web.AppNavigation.ProjectTab;
 import io.mindspice.magenta2.api.web.selector.EntityKind;
 import io.mindspice.magenta2.api.web.selector.EntityLookupService;
 import io.mindspice.magenta2.api.web.selector.EntitySelectorComponents;

@@ -48,7 +48,7 @@ The Dashboard shows the neutral **Tracked** project-record state, authoritative 
 
 **Queue** shows active project-scoped assignments with exact assignment identity, canonical status, and inline transcript/diagnostic links that use persisted assignment links. **Tasks** supports work-task definition CRUD, promote-to-plan, submit-for-execution, retry, and attempt-history browsing. **Jobs** displays project-attributed job definitions with run-history expansion and preferred-executor update. **Outputs** resolves published project outputs through durable assignment-to-run-to-publication links.
 
-**Files** is a read-only view of current members' exact V2 project materialization generations. **Chat** provides project-scoped SSE streaming chat restricted to read-only context, bound to one member agent per conversation. **Schedules** and **Events** display automation facts; when gated unavailable they render controlled redacted disabled states.
+**Files** is a read-only view of current members' exact V2 project materialization generations. **Chat** provides project-scoped SSE streaming chat restricted to read-only context, bound to one member agent and its exact READY materialization generation. **Schedules** and **Events** display automation facts; when gated unavailable they render controlled redacted disabled states.
 
 **Members** lists assigned members and roles with HTMX add/remove controls. **Settings** contains name, description, Owner Agent, manager type, default model, materialization template revisions, and inline deletion confirmation. Unavailable, gate-disabled, or archived tabs render redacted disabled states with clear labelling.
 

@@ -49,7 +49,7 @@ final class ProjectChatFragments {
             .withChild(heading("Project Chat", chip(conversationId)))
             .withChild(new Div().withId(HISTORY_ID).withClass("project-chat-history")
                 .hxGet(route(projectId, memberAgentId, "/panel/history"))
-                .hxTrigger("load").hxSwap("innerHTML")
+                .hxTrigger("load").hxSwap("outerHTML")
                 .withChild(new Paragraph("Loading conversation…").withClass("orch-muted")))
             .withChild(inputForm())
             .withChild(new Div().withClass("project-chat-stream-status"));

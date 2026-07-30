@@ -90,12 +90,12 @@ Magenta has three distinct chat surfaces:
 | Surface | Location | Purpose | Authority |
 | --- | --- | --- | --- |
 | **Normal chat** | `/chat` | Conversational assistant and anonymous plan drafting | Configured chat tools, subject to their individual capability gates |
-| **Project chat** | `/projects/{projectId}` Chat tab | Project-scoped chat restricted to read-only context | Server-created per project/agent pair; SSE streaming with safe `textContent` rendering; no file write, process execution, skill activation, or tool authority |
+| **Project chat** | `/projects/{projectId}` Chat tab | Project-scoped chat restricted to read-only context | Server-created for an immutable project/member/READY-materialization-generation tuple; SSE streaming with safe `textContent` rendering; no file write, process execution, skill activation, or tool authority |
 | **System chat** | `/agents/{agentId}` System Chat panel | Operational monitoring and queue-operation proposals | Fixed deny-by-default profile; bounded non-secret reads; restricted tools; non-executing proposals only |
 
 ### Project Chat
 
-The project **Chat** tab provides project-scoped streaming chat restricted to read-only context. It is bound to one member agent per conversation and does not create, edit, or delete workspace content. Select a member agent from the tab's selector to scope the conversation. Project chat conversations are server-created per project/agent pair and do not appear in the `/chat` session list.
+The project **Chat** tab provides project-scoped streaming chat restricted to read-only context. It is bound to one member agent per conversation and does not create, edit, or delete workspace content. Select a member agent from the tab's selector to scope the conversation. Project chat conversations are server-created for the selected project member and its exact READY materialization generation; they do not appear in the `/chat` session list.
 
 Project chat SSE transport uses only safe `textContent` DOM rendering with strict event-type validation and explicit payload size limits. It carries no `innerHTML`, tool selection, or HTMX error-policy in its JavaScript module. The stream validates `projectId`, `memberAgentId`, `conversationId`, and `operationId` on every event.
 
@@ -108,7 +108,7 @@ System chat cannot:
 - Execute its own proposals
 - Be selected or created through the `/chat` surface
 
-System chat SSE streaming uses safe `textContent`-only rendering in `system-chat.js`. It is the only new JavaScript transport added for operational surfaces; all other agent console interactions use HTMX.
+System chat SSE streaming uses safe `textContent`-only rendering in `system-chat.js`. It is the agent-console SSE transport; standard agent-console interactions use HTMX. Project chat has its own separately restricted SSE island.
 
 ## Alpha Limits
 

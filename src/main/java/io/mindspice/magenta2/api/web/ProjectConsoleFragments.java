@@ -29,36 +29,19 @@ public final class ProjectConsoleFragments {
 
     // ── Tab registry (delegates to AppNavigation) ──
 
-    /** Re-export the canonical tab descriptor from {@link AppNavigation} for controller use. */
-    public record ProjectTab(String group, String label, String key, boolean available) {
-        public String route(String projectId) {
-            return AppNavigation.findTab(key)
-                .map(t -> t.route(projectId))
-                .orElse("/projects/_detail/" + e(projectId) + "/" + key);
-        }
-
-        public String hostId() {
-            return "project-tab-panel";
-        }
-
-        static ProjectTab from(AppNavigation.ProjectTab t) {
-            return new ProjectTab(t.group(), t.label(), t.key(), t.available());
-        }
+    /** Return the ordered canonical project-console tabs. */
+    List<AppNavigation.ProjectTab> projectTabs() {
+        return AppNavigation.consoleTabs();
     }
 
-    /** Return the ordered list of project-console tabs. */
-    public List<ProjectTab> projectTabs() {
-        return AppNavigation.consoleTabs().stream().map(ProjectTab::from).toList();
+    /** Lookup a canonical tab by key. */
+    Optional<AppNavigation.ProjectTab> findTab(String key) {
+        return AppNavigation.findTab(key);
     }
 
-    /** Lookup a tab by canonical key. */
-    public Optional<ProjectTab> findTab(String key) {
-        return AppNavigation.findTab(key).map(ProjectTab::from);
-    }
-
-    /** Default active tab. */
-    public ProjectTab defaultTab() {
-        return ProjectTab.from(AppNavigation.defaultTab());
+    /** Return the canonical default tab. */
+    AppNavigation.ProjectTab defaultTab() {
+        return AppNavigation.defaultTab();
     }
 
     // ── Chooser empty state ──
@@ -79,7 +62,7 @@ public final class ProjectConsoleFragments {
         return projectDetailShell(project, defaultTab());
     }
 
-    public Component projectDetailShell(Project project, ProjectTab selectedTab) {
+    Component projectDetailShell(Project project, AppNavigation.ProjectTab selectedTab) {
         return new Div()
             .withClass("entity-detail-layout entity-detail-layout-full project-detail-shell")
             .withAttribute("data-project-id", project.id())

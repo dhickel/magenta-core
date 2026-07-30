@@ -36,7 +36,7 @@ Do not put sensitive secrets, raw credentials, or unrestricted filesystem conten
 Unsafe routes include:
 
 - Chat turns, commands, interrupts, and conversation metadata changes.
-- Project chat streams (`POST /api/projects/{projectId}/chat/stream`) — read-only context, server-created per project/agent pair, no file/write/skill/process authority.
+- Project chat streams (`POST /api/projects/{projectId}/chat/stream`) — read-only context, server-created for an immutable project/member/READY-materialization-generation tuple, with no file/write/skill/process authority.
 - Plan/task/workflow/job/project/agent/settings CRUD.
 - Assignment lifecycle controls.
 - Schedule/reaction changes.

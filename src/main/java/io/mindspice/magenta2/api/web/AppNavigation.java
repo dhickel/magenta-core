@@ -6,7 +6,6 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.stream.Collectors;
 
 import io.mindspice.simplypages.builders.TopNavBuilder;
 import io.mindspice.simplypages.components.navigation.SideNav;
