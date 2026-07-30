@@ -14,6 +14,7 @@ import io.mindspice.magenta2.ai.orchestration.agents.AgentProfileService;
 import io.mindspice.magenta2.ai.orchestration.agents.AgentProfileStatus;
 import io.mindspice.magenta2.ai.orchestration.context.AgentContextRepository.PersonalSelection;
 import io.mindspice.magenta2.ai.orchestration.context.AgentContextService;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -40,6 +41,12 @@ class OrchestrationRunnerLifecycleIntegrationTest {
     @Autowired AgentContextService contexts;
     @Autowired JobReassignmentService reassignments;
     @Autowired ProjectService projects;
+    @Autowired ProjectOperationsAccessService projectAccessService;
+
+    @BeforeEach
+    void enableProjectMutationCapability() {
+        projectAccessService.enableTrustedDeployment();
+    }
 
     @DynamicPropertySource
     static void properties(DynamicPropertyRegistry registry) {

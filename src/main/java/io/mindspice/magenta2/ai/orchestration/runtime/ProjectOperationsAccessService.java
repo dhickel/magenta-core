@@ -157,6 +157,7 @@ public class ProjectOperationsAccessService {
      * whose executor agent is a current member.
      */
     public void requireEligibleSubmission(String projectId, String agentId) {
+        requireTrustedDeployment("submission");
         requireActiveProjectWithMember(projectId, agentId);
     }
 

@@ -13,7 +13,7 @@ Source plan `.internal-dev/plans/20260729-163244-home-dhickel-code-java-magenta-
 - phase-05-materialization-templates-files-outputs.md: wave-05, implementation recorded, validation passed (2 attempt(s))
 - phase-06-project-automation-and-events.md: wave-06, implementation recorded, validation passed (2 attempt(s))
 - phase-07-project-chat.md: wave-07, implementation recorded, validation passed (2 attempt(s))
-- phase-08-console-integration-and-closeout.md: wave-08, implementation not recorded, validation pending (0 attempt(s))
+- phase-08-console-integration-and-closeout.md: wave-08, implementation recorded, validation passed (1 attempt(s))
 
 ## Artifacts
 
@@ -37,6 +37,7 @@ Source plan `.internal-dev/plans/20260729-163244-home-dhickel-code-java-magenta-
 - `phase-05-materialization-templates-files-outputs.md`: 2026-07-29T22:12:10.486Z, 0 changed-file observation(s), 0 outside declared targets
 - `phase-06-project-automation-and-events.md`: 2026-07-29T23:00:25.915Z, 0 changed-file observation(s), 0 outside declared targets
 - `phase-07-project-chat.md`: 2026-07-29T23:30:26.387Z, 0 changed-file observation(s), 0 outside declared targets
+- `phase-08-console-integration-and-closeout.md`: 2026-07-30T00:17:11.535Z, 0 changed-file observation(s), 0 outside declared targets
 
 ## Final Validation
 
@@ -54,8 +55,9 @@ Source plan `.internal-dev/plans/20260729-163244-home-dhickel-code-java-magenta-
 - `phase-06-project-automation-and-events.md` attempt 2: PASS at 2026-07-29T23:16:57.600Z
 - `phase-07-project-chat.md` attempt 1: BLOCKED at 2026-07-29T23:42:14.117Z
 - `phase-07-project-chat.md` attempt 2: PASS at 2026-07-30T00:04:13.849Z
-Integration validation not recorded.
+- `phase-08-console-integration-and-closeout.md` attempt 1: PASS at 2026-07-30T00:24:47.558Z
+Integration validation: PASS at 2026-07-30T00:31:55Z. Final review repaired the project-submission capability gate; sealed Queue scopes, exact-link transcript handling, Task → Plan → Assignment provenance, narrow assignment writers, and project host isolation were inspected. `mvn test` passed with 1279 tests, and a fresh-root bounded startup reached `Started Magenta2Application`.
 
 ## Outcome
 
-Active, revision 21.
+Completed, revision 24.

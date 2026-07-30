@@ -2,7 +2,7 @@
   "version": 2,
   "runId": "exec-project-dashboard-unified-contracts",
   "state": "active",
-  "revision": 21,
+  "revision": 24,
   "source": {
     "projectRoot": "/home/dhickel/Code/Java/Magenta",
     "sourcePlanPath": ".internal-dev/plans/20260729-163244-home-dhickel-code-java-magenta-internal-dev-ha",
@@ -1075,22 +1075,66 @@
             "model": "gpt-5.6-terra",
             "thinking": "high"
           },
-          "attempt": 2,
-          "verdict": "PASS",
           "report": "Phase 07 PASS with deferred hardening. Chat functional: expandable dropdown, SSE streaming, member agent selection, deny-by-default profile, 8 bounded-read tools, safe textContent rendering. Deferred: durable turn idempotency/fencing protocol, project-chat proposal persistence workflow. 1276 tests pass.",
           "changedFiles": [],
           "changedFileObservations": [],
           "outsideDeclaredTargets": [],
-          "timestamp": "2026-07-30T00:04:13.849Z"
+          "timestamp": "2026-07-30T00:04:13.849Z",
+          "attempt": 2,
+          "verdict": "PASS"
         }
       ]
     },
     {
       "phase": "phase-08-console-integration-and-closeout.md",
-      "validations": []
+      "implementation": {
+        "agentModel": {
+          "provider": "deepseek",
+          "model": "deepseek-v4-pro",
+          "thinking": "max"
+        },
+        "report": "Phase 08 implementation complete. Subphases A-F: navigation consolidation (AppNavigation canonical registry), composition boundary audit (no duplicate IDs, stable hosts, OOB domain-scoped), work identity audit, specifications updated (api/web/simplypages/architecture/decisions), end-user docs (5 files), technical docs (6 files), CSS/JS polish, changelog. 1276 tests pass.",
+        "changedFiles": [],
+        "changedFileObservations": [],
+        "outsideDeclaredTargets": [],
+        "timestamp": "2026-07-30T00:17:11.535Z"
+      },
+      "validations": [
+        {
+          "agentModel": {
+            "provider": "openai-codex",
+            "model": "gpt-5.6-terra",
+            "thinking": "high"
+          },
+          "attempt": 1,
+          "verdict": "PASS",
+          "report": "Phase 08 PASS. Validator fixed duplicate chat host, tab descriptor authority, docs/spec corrections. 1278 tests pass. Known issues: migration 017 dev DB checksum drift (GitHub #46, fresh DB OK), deferred chat authority gaps from Phase 07.",
+          "changedFiles": [],
+          "changedFileObservations": [],
+          "outsideDeclaredTargets": [],
+          "timestamp": "2026-07-30T00:24:47.558Z"
+        }
+      ]
     }
   ],
-  "integrationValidations": [],
+  "integrationValidations": [
+    {
+      "agentModel": {
+        "provider": "openai-codex",
+        "model": "gpt-5.6-terra",
+        "thinking": "high"
+      },
+      "verdict": "PASS",
+      "report": "Final integration review repaired the shared project-submission capability gate. Verified sealed Queue scopes and exact-link transcripts, Work Task → Plan → Assignment provenance, narrow assignment writers, and project host isolation. Full Maven suite passed (1279 tests). Fresh-root bounded startup initialized schema and reached Started Magenta2Application.",
+      "changedFiles": [
+        "src/main/java/io/mindspice/magenta2/ai/orchestration/runtime/ProjectOperationsAccessService.java",
+        "src/test/java/io/mindspice/magenta2/ai/orchestration/runtime/AssignmentAuthorityFoundationTest.java",
+        "src/test/java/io/mindspice/magenta2/ai/orchestration/runtime/OrchestrationRunnerLifecycleIntegrationTest.java",
+        "src/test/java/io/mindspice/magenta2/api/web/PublicApiRouteBindingTest.java"
+      ],
+      "timestamp": "2026-07-30T00:31:55Z"
+    }
+  ],
   "createdAt": "2026-07-29T17:32:58.764Z",
-  "updatedAt": "2026-07-30T00:04:13.849Z"
+  "updatedAt": "2026-07-30T00:31:55Z"
 }

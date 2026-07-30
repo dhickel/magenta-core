@@ -211,6 +211,19 @@ class AssignmentAuthorityFoundationTest {
     }
 
     @Test
+    void projectAccessServiceRejectsSubmissionWhenTrustedDeploymentIsDisabled() {
+        var ctx = newCtx();
+        ctx.projects.save(new Project("proj-1", "Test", "desc", null, null, null, null, null,
+            false, Instant.now(), Instant.now()));
+        ctx.projects.saveMembership(new ProjectAgentMembership(
+            UUID.randomUUID().toString(), "proj-1", "agent-1", "member", Instant.now()));
+
+        assertThatThrownBy(() -> ctx.access.requireEligibleSubmission("proj-1", "agent-1"))
+            .isInstanceOf(ProjectOperationsAccessService.ProjectAccessDeniedException.class)
+            .hasMessageContaining("trusted deployment capability");
+    }
+
+    @Test
     void projectAccessServiceRequiresMemberForSubmission() {
         var ctx = newCtx();
         ctx.projects.save(new Project("proj-1", "Test", "desc", null, null, null, null, null,

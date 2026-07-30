@@ -12,6 +12,8 @@ import java.util.stream.Collectors;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.mindspice.magenta2.ai.config.user.AiConfig;
+import io.mindspice.magenta2.ai.orchestration.runtime.ProjectOperationsAccessService;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
@@ -65,6 +67,14 @@ class PublicApiRouteBindingTest {
 
     @Autowired
     private RequestMappingHandlerMapping requestMappingHandlerMapping;
+
+    @Autowired
+    private ProjectOperationsAccessService projectAccessService;
+
+    @BeforeEach
+    void enableProjectMutationCapability() {
+        projectAccessService.enableTrustedDeployment();
+    }
 
     @DynamicPropertySource
     static void sqliteProperties(DynamicPropertyRegistry registry) {
