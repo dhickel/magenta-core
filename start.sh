@@ -27,4 +27,4 @@ fi
 
 (cd "$spring_ai_dir" && ./mvnw -q -pl models/spring-ai-deepseek -am -DskipTests install)
 cd "$repo_dir"
-exec mvn spring-boot:run "$@"
+exec mvn -pl magenta-app spring-boot:run -Dspring-boot.run.workingDirectory="$repo_dir" "$@"
