@@ -8,6 +8,7 @@ import io.mindspice.magenta2.ai.skills.AgentSkillRuntimeCatalogService;
 import org.springframework.ai.tool.ToolCallback;
 
 import java.util.List;
+import java.util.Set;
 
 /**
  * Resolves which tool callbacks are available for a turn, filtered by
@@ -44,9 +45,11 @@ public class ToolAccessPolicy {
     private final PlanService planService;
     private final TaskService taskService;
     private final AgentSkillRuntimeCatalogService skillRuntimeCatalogService;
+    private final Set<String> allowedTools;
+    private final Set<String> blockedTools;
 
     public ToolAccessPolicy(ChatToolRegistry chatToolRegistry, PlanService planService, TaskService taskService) {
-        this(chatToolRegistry, planService, taskService, null);
+        this(chatToolRegistry, planService, taskService, null, null, null);
     }
 
     public ToolAccessPolicy(
@@ -55,10 +58,37 @@ public class ToolAccessPolicy {
         TaskService taskService,
         AgentSkillRuntimeCatalogService skillRuntimeCatalogService
     ) {
+        this(chatToolRegistry, planService, taskService, skillRuntimeCatalogService, null, null);
+    }
+
+    ToolAccessPolicy(
+        ChatToolRegistry chatToolRegistry,
+        PlanService planService,
+        TaskService taskService,
+        AgentSkillRuntimeCatalogService skillRuntimeCatalogService,
+        Set<String> allowedTools,
+        Set<String> blockedTools
+    ) {
         this.chatToolRegistry = chatToolRegistry;
         this.planService = planService;
         this.taskService = taskService;
         this.skillRuntimeCatalogService = skillRuntimeCatalogService;
+        this.allowedTools = allowedTools;
+        this.blockedTools = blockedTools;
+    }
+
+    // ── Static factories ──
+
+    public static ToolAccessPolicy allowAll() {
+        return new ToolAccessPolicy(null, null, null, null, null, null);
+    }
+
+    public static ToolAccessPolicy allowList(Set<String> toolNames) {
+        return new ToolAccessPolicy(null, null, null, null, Set.copyOf(toolNames), null);
+    }
+
+    public static ToolAccessPolicy blockList(Set<String> toolNames) {
+        return new ToolAccessPolicy(null, null, null, null, null, Set.copyOf(toolNames));
     }
 
     /**

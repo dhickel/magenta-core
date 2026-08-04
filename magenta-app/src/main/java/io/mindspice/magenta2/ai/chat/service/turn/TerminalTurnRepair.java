@@ -6,14 +6,17 @@ import io.mindspice.magenta2.ai.chat.plan.PlanService;
 import io.mindspice.magenta2.ai.chat.service.ToolUseAbort;
 import io.mindspice.magenta2.ai.chat.task.TaskService;
 import org.springframework.ai.chat.messages.AssistantMessage;
+import org.springframework.ai.chat.messages.Message;
 import org.springframework.ai.chat.messages.SystemMessage;
 import org.springframework.util.StringUtils;
+
+import java.util.List;
 
 /**
  * Enforces terminal behavior guarantees for PLAN and EXECUTE modes.
  * Pure logic — no mutable state, no I/O beyond PlanService/TaskService queries.
  */
-public class TerminalTurnRepair {
+public class TerminalTurnRepair implements RepairStrategy, CompletionDetector {
 
     static final int EMPTY_FINAL_RESPONSE_RETRY_LIMIT = 2;
     static final int PLAN_TURN_REPAIR_RETRY_LIMIT = 2;
@@ -25,6 +28,30 @@ public class TerminalTurnRepair {
     public TerminalTurnRepair(PlanService planService, TaskService taskService) {
         this.planService = planService;
         this.taskService = taskService;
+    }
+
+    // ── CompletionDetector SPI ──
+
+    @Override
+    public boolean isComplete(TurnContext context) {
+        PlanMode mode = context.interactionMode();
+        String conversationId = context.conversationId();
+        // Conservative bridge: a turn is incomplete only when an execution-mode
+        // turn has not called its required completion tool.
+        return !needsExecutionCompletionRepair(conversationId, mode);
+    }
+
+    // ── RepairStrategy SPI ──
+
+    @Override
+    public List<Message> repair(TurnContext context, RepairReason reason) {
+        PlanMode mode = context.interactionMode();
+        return switch (reason) {
+            case EMPTY_RESPONSE -> List.of(emptyFinalResponseControlMessage(mode));
+            case TOOL_LOOP_EXCEEDED -> List.of();
+            case COMPLETION_NOT_DETECTED -> List.of(invalidExecutionCompletionControlMessage(mode));
+            case CUSTOM -> List.of();
+        };
     }
 
     // ── Empty final response detection ──

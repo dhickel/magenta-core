@@ -44,7 +44,7 @@ import org.springframework.util.StringUtils;
  * may add intent but never replace an earlier segment. A terminal
  * trusted-policy result ends the turn before model or tool use.
  */
-public class PromptContextAssembler {
+public class PromptContextAssembler implements PromptContributor {
 
     private final AiConfig aiConfig;
     private final RuntimeSettingsService runtimeSettingsService;
@@ -80,6 +80,18 @@ public class PromptContextAssembler {
         this.workTypeProfileService = workTypeProfileService;
         this.agentsMdResolver = agentsMdResolver;
         this.skillPromptCatalogAssembler = skillPromptCatalogAssembler;
+    }
+
+    // ── PromptContributor SPI ──
+
+    @Override
+    public String contribute(TurnContext context) {
+        PlanMode mode = context.interactionMode();
+        if (mode == null) {
+            mode = PlanMode.NORMAL;
+        }
+        String conversationId = context.conversationId();
+        return mergeModePrompt(mode, conversationId);
     }
 
     // ── Entry point ──
