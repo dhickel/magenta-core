@@ -1,3 +1,0 @@
-6. [GET] http://localhost:8082/workflows/_list => [200] 
-
-Note: 5 static requests not shown, run with "static" option to see them.

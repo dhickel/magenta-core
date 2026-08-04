@@ -1,1 +1,0 @@
-name=project-202605260906&description=Phase%2004%20recheck%20project%20browser%20fixture&ownerAgentId=&gitRepoUrl=&workTypeProfile=CODING_CENTRIC&model=&selectorContext.projectId=18bfc215-5c0f-4234-b6b0-4614aea5bc8f&agentId=&role=member&directoryName=folder-net-202605260911&fileName=

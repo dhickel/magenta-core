@@ -1,3 +1,0 @@
-10. [GET] http://localhost:18080/avatar/_work-areas/3c6f9985-e29c-4576-8ce1-22b901622d14/explorer => [200] 
-
-Note: 9 static requests not shown, run with "static" option to see them.

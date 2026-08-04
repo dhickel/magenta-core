@@ -1,5 +1,0 @@
-{
-  "url": "http://localhost:8082/plans",
-  "textHasRunName": false,
-  "text": "Magenta Operations\n\nOrchestration dashboard\n\nHome\nDashboard\nChat\n☰\nORCHESTRATION\nDashboard\nPlans\nWorkflows\nJobs\nProjects\nCOMMUNICATION\nInbox\nAgents\nTOOLS\nOutputs\nSettings\nPlans\n\nPlan and task template definitions. Edit structured inputs, outputs, steps, and submit to agents for execution.\n\nNew Plan\nNew Plan Chat\nNo plans.\nSelect a plan from the list or create a new one."
-}

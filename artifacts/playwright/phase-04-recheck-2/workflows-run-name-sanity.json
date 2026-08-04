@@ -1,5 +1,0 @@
-{
-  "url": "http://localhost:8082/workflows",
-  "textHasRunName": false,
-  "text": "Magenta Operations\n\nOrchestration dashboard\n\nHome\nDashboard\nChat\n☰\nORCHESTRATION\nDashboard\nPlans\nWorkflows\nJobs\nProjects\nCOMMUNICATION\nInbox\nAgents\nTOOLS\nOutputs\nSettings\nWorkflows\n\nCompose task nodes into route-connected workflow graphs with gates, approvals, and submit-to-agent execution.\n\nNew Workflow\nNo workflows.\nSelect a workflow from the list or create a new one.\nNew Workflow\nSubmit to Agent"
-}

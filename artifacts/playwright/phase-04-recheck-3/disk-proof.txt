@@ -1,8 +1,0 @@
-ROOT=/tmp/magenta2-phase04-recheck3-20260526050534
-PROJECT_DIR=/tmp/magenta2-phase04-recheck3-20260526050534/root/projects/18bfc215-5c0f-4234-b6b0-4614aea5bc8f
-folder_exact_exists=yes
-prefixed_folder_exists=folder-202605260907,
-comma_paths=0
-file_content:
-Phase 04 recheck saved content
-folder exact-name check passed

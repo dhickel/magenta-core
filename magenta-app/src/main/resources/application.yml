@@ -1,6 +1,3 @@
-server:
-  port: 8080
-
 app:
   ai:
     config-path: ./config/ai-config.example.json
@@ -18,10 +15,6 @@ magenta:
   # Agent execution uses filesystem-backed workspaces and host shell tools.
 
 spring:
-  web:
-    resources:
-      chain:
-        enabled: true
   datasource:
     url: jdbc:sqlite:${magenta.root.path}/magenta.sqlite?foreign_keys=true
     driver-class-name: org.sqlite.JDBC

@@ -2,7 +2,7 @@
   "version": 2,
   "runId": "exec-core-refactor-20260804",
   "state": "active",
-  "revision": 2,
+  "revision": 4,
   "source": {
     "projectRoot": "/home/dhickel/Code/Java/Magenta",
     "sourcePlanPath": ".internal-dev/plans/20260804-212000-home-dhickel-code-java-magenta-internal-dev-ha",
@@ -4396,8 +4396,6 @@
             "model": "gpt-5.6-terra",
             "thinking": "high"
           },
-          "attempt": 1,
-          "verdict": "PASS",
           "report": "Phase 01 validation VERDICT: PASS (deepseek-v4-pro:max). Validator independently verified: Enforcer bannedDependencies (5 coordinates) and Automatic-Module-Name io.mindspice.core present; magenta-app preserved all 19 original dependencies + spring-boot-maven-plugin; mvn clean verify passes (1271/1272; 1 pre-existing flaky ChatControllerTest verified passing in isolation); context startup verified (Magenta2Application started ~3.4s, Tomcat on ephemeral port); source preservation exact (387 main + 119 test Java files); no root src leftovers. Deviation ruling: magenta-app submodule ACCEPTED (Maven rejects jar packaging with <modules>; standard aggregator layout; later phases must use magenta-app/ path prefix and -pl magenta-app for spring-boot:run). Validator edit: start.sh now runs mvn -pl magenta-app spring-boot:run with -Dspring-boot.run.workingDirectory to keep config resolution. Remaining risk: pre-existing flaky ChatControllerTest (race in async streaming + await(5s)), unrelated to this phase.",
           "changedFiles": [
             "pom.xml",
@@ -4444,13 +4442,180 @@
             "mindspice-core/pom.xml",
             "mindspice-core-autoconfigure/pom.xml"
           ],
-          "timestamp": "2026-08-04T23:29:52.397Z"
+          "timestamp": "2026-08-04T23:29:52.397Z",
+          "attempt": 1,
+          "verdict": "PASS"
         }
       ]
     },
     {
       "phase": "phase-02-delete-web-ui.md",
-      "validations": []
+      "implementation": {
+        "agentModel": {
+          "provider": "deepseek",
+          "model": "deepseek-v4-pro",
+          "thinking": "max"
+        },
+        "report": "Phase 02 implementation evidence (deepseek-v4-pro). Deleted api/web/ (~53 files + selector/), static/ (css/js/favicon), test api/web tree (~21 files), playwright.config.js, test-results/, tests/playwright/, artifacts/playwright/. Renamed ChatStreamEvent → TurnEvent: removed ChatPlanState planState from all 8 subtypes, removed renderedHtml/thinkingHtml from Chunk/SystemNotice/Done, deleted OutputsChanged subtype, intermediate Javadoc; ChatPlanState.java preserved. Renamed ChatStreamEventSerializationTest → TurnEventSerializationTest (8 subtype tests, stale refs dropped). Removed server: and spring.web.resources.chain from application.yml. Removed 5 web dep blocks from magenta-app/pom.xml; added spring-boot-starter-test (test scope) since its transitive removal broke surviving @SpringBootTest compilation; adapted ScheduleReactionFeatureParitySpringTest (removed @AutoConfigureMockMvc/MockMvc/web imports/one HTMX fragment test). Validation: compile PASS (330 files), tests PASS (1041/0), headless startup PASS (no Tomcat/SseEmitter/servlet lines), all deletion audits PASS, zero ChatStreamEvent refs, zero api.web imports in retained code.",
+        "changedFiles": [
+          "magenta-app/pom.xml",
+          "magenta-app/src/main/java/io/mindspice/magenta2/ai/chat/model/TurnEvent.java",
+          "magenta-app/src/main/java/io/mindspice/magenta2/ai/chat/model/ChatStreamEvent.java",
+          "magenta-app/src/main/resources/application.yml",
+          "magenta-app/src/test/java/io/mindspice/magenta2/ai/chat/model/TurnEventSerializationTest.java",
+          "magenta-app/src/test/java/io/mindspice/magenta2/ai/chat/model/ChatStreamEventSerializationTest.java",
+          "magenta-app/src/test/java/io/mindspice/magenta2/ai/orchestration/runtime/ScheduleReactionFeatureParitySpringTest.java",
+          "magenta-app/src/main/java/io/mindspice/magenta2/api/web",
+          "magenta-app/src/main/resources/static",
+          "magenta-app/src/test/java/io/mindspice/magenta2/api/web",
+          "playwright.config.js",
+          "test-results",
+          "tests/playwright",
+          "artifacts/playwright"
+        ],
+        "changedFileObservations": [
+          {
+            "path": "magenta-app/pom.xml",
+            "status": "present",
+            "digest": "72b4275e994f1fbe62704eda1ae725e14c2419bb881ef52d474893db75e54093",
+            "bytes": 3921
+          },
+          {
+            "path": "magenta-app/src/main/java/io/mindspice/magenta2/ai/chat/model/TurnEvent.java",
+            "status": "present",
+            "digest": "753e21032264fcefdaa3c74f675426fac6f1a55ee5ea80e94ee5d5f005437f69",
+            "bytes": 1101
+          },
+          {
+            "path": "magenta-app/src/main/java/io/mindspice/magenta2/ai/chat/model/ChatStreamEvent.java",
+            "status": "deleted"
+          },
+          {
+            "path": "magenta-app/src/main/resources/application.yml",
+            "status": "present",
+            "digest": "abefa15e78c446714df56a35ccddcf774d2162c31b15056e2be20f7594ca1824",
+            "bytes": 1226
+          },
+          {
+            "path": "magenta-app/src/test/java/io/mindspice/magenta2/ai/chat/model/TurnEventSerializationTest.java",
+            "status": "present",
+            "digest": "0dc494d833d9e99008bda6d46afe54048fac3b0a9b386442509adfa4ee537ebb",
+            "bytes": 4630
+          },
+          {
+            "path": "magenta-app/src/test/java/io/mindspice/magenta2/ai/chat/model/ChatStreamEventSerializationTest.java",
+            "status": "deleted"
+          },
+          {
+            "path": "magenta-app/src/test/java/io/mindspice/magenta2/ai/orchestration/runtime/ScheduleReactionFeatureParitySpringTest.java",
+            "status": "present",
+            "digest": "5de95ec10448f4cf2fa6368cea98855b37851c8885c5cb44100d4bd672777e0b",
+            "bytes": 7993
+          },
+          {
+            "path": "magenta-app/src/main/java/io/mindspice/magenta2/api/web",
+            "status": "deleted"
+          },
+          {
+            "path": "magenta-app/src/main/resources/static",
+            "status": "deleted"
+          },
+          {
+            "path": "magenta-app/src/test/java/io/mindspice/magenta2/api/web",
+            "status": "deleted"
+          },
+          {
+            "path": "playwright.config.js",
+            "status": "deleted"
+          },
+          {
+            "path": "test-results",
+            "status": "deleted"
+          },
+          {
+            "path": "tests/playwright",
+            "status": "deleted"
+          },
+          {
+            "path": "artifacts/playwright",
+            "status": "deleted"
+          }
+        ],
+        "outsideDeclaredTargets": [
+          "magenta-app/pom.xml",
+          "magenta-app/src/main/java/io/mindspice/magenta2/ai/chat/model/TurnEvent.java",
+          "magenta-app/src/main/java/io/mindspice/magenta2/ai/chat/model/ChatStreamEvent.java",
+          "magenta-app/src/main/resources/application.yml",
+          "magenta-app/src/test/java/io/mindspice/magenta2/ai/chat/model/TurnEventSerializationTest.java",
+          "magenta-app/src/test/java/io/mindspice/magenta2/ai/chat/model/ChatStreamEventSerializationTest.java",
+          "magenta-app/src/test/java/io/mindspice/magenta2/ai/orchestration/runtime/ScheduleReactionFeatureParitySpringTest.java",
+          "magenta-app/src/main/java/io/mindspice/magenta2/api/web",
+          "magenta-app/src/main/resources/static",
+          "magenta-app/src/test/java/io/mindspice/magenta2/api/web",
+          "tests/playwright",
+          "artifacts/playwright"
+        ],
+        "timestamp": "2026-08-04T23:53:33.301Z"
+      },
+      "validations": [
+        {
+          "agentModel": {
+            "provider": "openai-codex",
+            "model": "gpt-5.6-terra",
+            "thinking": "high"
+          },
+          "attempt": 1,
+          "verdict": "PASS",
+          "report": "Phase 02 validation VERDICT: PASS (deepseek-v4-pro:max). Independent verification of all 19 criteria: all deletions confirmed on disk; TurnEvent.java faithful intermediate rename (8 subtypes with exact keep-columns, no planState/renderedHtml/thinkingHtml/OutputsChanged, no ChatPlanState import); ChatPlanState.java preserved unchanged; TurnEventSerializationTest covers 8 subtypes with no stale refs; pom.xml zero web deps; application.yml clean. Commands: mvn compile -pl magenta-app BUILD SUCCESS (330 files); mvn test -pl magenta-app 1041 tests 0 failures; headless startup confirmed (Started Magenta2Application in 3.09s, zero Tomcat/EmbeddedWeb/SseEmitter/servlet lines, app stayed alive). Deviations ruled acceptable: spring-boot-starter-test explicit test dep necessary (web dep removal dropped it as transitive, breaking surviving @SpringBootTest compilation; alternative would reintroduce web deps); ScheduleReactionFeatureParitySpringTest adaptation correct minimal fix (covers still-surviving orchestration code until Phase 05; full deletion premature). No validator edits needed. Remaining risks: stale surefire report filenames (build artifacts, harmless); full turn-loop execution needs Ollama at http://192.168.1.112:11434 (environment dependency, not required for this gate).",
+          "changedFiles": [
+            "magenta-app/pom.xml",
+            "magenta-app/src/main/java/io/mindspice/magenta2/ai/chat/model/TurnEvent.java",
+            "magenta-app/src/main/resources/application.yml",
+            "magenta-app/src/test/java/io/mindspice/magenta2/ai/chat/model/TurnEventSerializationTest.java",
+            "magenta-app/src/test/java/io/mindspice/magenta2/ai/orchestration/runtime/ScheduleReactionFeatureParitySpringTest.java"
+          ],
+          "changedFileObservations": [
+            {
+              "path": "magenta-app/pom.xml",
+              "status": "present",
+              "digest": "72b4275e994f1fbe62704eda1ae725e14c2419bb881ef52d474893db75e54093",
+              "bytes": 3921
+            },
+            {
+              "path": "magenta-app/src/main/java/io/mindspice/magenta2/ai/chat/model/TurnEvent.java",
+              "status": "present",
+              "digest": "753e21032264fcefdaa3c74f675426fac6f1a55ee5ea80e94ee5d5f005437f69",
+              "bytes": 1101
+            },
+            {
+              "path": "magenta-app/src/main/resources/application.yml",
+              "status": "present",
+              "digest": "abefa15e78c446714df56a35ccddcf774d2162c31b15056e2be20f7594ca1824",
+              "bytes": 1226
+            },
+            {
+              "path": "magenta-app/src/test/java/io/mindspice/magenta2/ai/chat/model/TurnEventSerializationTest.java",
+              "status": "present",
+              "digest": "0dc494d833d9e99008bda6d46afe54048fac3b0a9b386442509adfa4ee537ebb",
+              "bytes": 4630
+            },
+            {
+              "path": "magenta-app/src/test/java/io/mindspice/magenta2/ai/orchestration/runtime/ScheduleReactionFeatureParitySpringTest.java",
+              "status": "present",
+              "digest": "5de95ec10448f4cf2fa6368cea98855b37851c8885c5cb44100d4bd672777e0b",
+              "bytes": 7993
+            }
+          ],
+          "outsideDeclaredTargets": [
+            "magenta-app/pom.xml",
+            "magenta-app/src/main/java/io/mindspice/magenta2/ai/chat/model/TurnEvent.java",
+            "magenta-app/src/main/resources/application.yml",
+            "magenta-app/src/test/java/io/mindspice/magenta2/ai/chat/model/TurnEventSerializationTest.java",
+            "magenta-app/src/test/java/io/mindspice/magenta2/ai/orchestration/runtime/ScheduleReactionFeatureParitySpringTest.java"
+          ],
+          "timestamp": "2026-08-04T23:53:40.009Z"
+        }
+      ]
     },
     {
       "phase": "phase-03-create-spi-interfaces.md",
@@ -4503,5 +4668,5 @@
   ],
   "integrationValidations": [],
   "createdAt": "2026-08-04T23:11:03.465Z",
-  "updatedAt": "2026-08-04T23:29:52.397Z"
+  "updatedAt": "2026-08-04T23:53:40.009Z"
 }
