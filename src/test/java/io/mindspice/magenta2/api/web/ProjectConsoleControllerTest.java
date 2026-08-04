@@ -69,21 +69,23 @@ class ProjectConsoleControllerTest {
     }
 
     @Test
-    void selectedProjectUsesGroupedTabsInOrder() {
+    void selectedProjectRendersFlatTabsWithChatAccordion() {
         String html = controller.projectDetailFragment("project-1", null, mock(HttpServletResponse.class));
 
-        // Verify grouped tab structure with functional and unavailable tabs
+        // Verify flat tab structure with chat as a persistent accordion above the tabs
+        assertThat(html).contains("Chat with Agent");
         assertThat(html).contains("data-project-tab=\"dashboard\"");
         assertThat(html).contains("data-project-tab=\"queue\"");
         assertThat(html).contains("data-project-tab=\"tasks\"");
         assertThat(html).contains("data-project-tab=\"jobs\"");
         assertThat(html).contains("data-project-tab=\"outputs\"");
         assertThat(html).contains("data-project-tab=\"files\"");
-        assertThat(html).contains("data-project-tab=\"chat\"");
         assertThat(html).contains("data-project-tab=\"schedules\"");
         assertThat(html).contains("data-project-tab=\"events\"");
         assertThat(html).contains("data-project-tab=\"members\"");
         assertThat(html).contains("data-project-tab=\"settings\"");
+        // Chat is not a tab — it is the accordion above
+        assertThat(html).doesNotContain("data-project-tab=\"chat\"");
         assertThat(html).contains("id=\"project-tab-panel\"");
         assertThat(html).contains("Tracked");
     }
@@ -202,7 +204,7 @@ class ProjectConsoleControllerTest {
     @Test
     void activeTabButtonMarkedActive() {
         String html = controller.projectDetailFragment("project-1", null, mock(HttpServletResponse.class));
-        assertThat(html).contains("data-project-tab=\"queue\"", "active");
+        assertThat(html).contains("data-project-tab=\"dashboard\"", "active");
     }
 
     @Test

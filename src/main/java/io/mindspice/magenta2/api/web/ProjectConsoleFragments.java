@@ -66,6 +66,9 @@ public final class ProjectConsoleFragments {
         return new Div()
             .withClass("entity-detail-layout entity-detail-layout-full project-detail-shell")
             .withAttribute("data-project-id", project.id())
+            .withChild(new HtmlTag("details").withClass("agent-chat-accordion")
+                .withChild(new HtmlTag("summary").withInnerText("Chat with Agent"))
+                .withChild(projectChatAccordionPanel(project.id())))
             .withChild(new Div().withClass("entity-detail-main")
                 .withChild(new Div().withClass("project-detail-heading")
                     .withChild(new Div().withClass("entity-title")
@@ -73,12 +76,48 @@ public final class ProjectConsoleFragments {
                         .withChild(new Paragraph(StringUtils.hasText(project.description())
                             ? project.description() : "No description")))
                     .withChild(new HtmlTag("span").withClass("orch-status-chip tracked").withInnerText("Tracked")))
-                .withChild(groupedTabNav(project.id(), selectedTab.key()))
+                .withChild(flatTabNav(project.id(), selectedTab.key()))
                 .withChild(new Div().withId("project-tab-panel").withClass("orch-panel")
                     .withAttribute("hx-get", selectedTab.route(project.id()))
                     .withAttribute("hx-trigger", "load")
                     .withAttribute("hx-swap", "innerHTML")
                     .withChild(new Div().withClass("dashboard-empty").withInnerText("Loading..."))));
+    }
+
+    /** Chat accordion panel lazy-loaded into the project detail shell. */
+    private Component projectChatAccordionPanel(String projectId) {
+        return new Div()
+            .withClass("project-chat-tab")
+            .withAttribute("hx-get", "/projects/_detail/" + e(projectId) + "/chat")
+            .withAttribute("hx-trigger", "load")
+            .withAttribute("hx-swap", "innerHTML")
+            .withChild(new Div().withClass("dashboard-empty").withInnerText("Loading chat…"));
+    }
+
+    /** Flat horizontal tab navigation matching the agent dashboard layout. */
+    public Component flatTabNav(String projectId, String selectedTabKey) {
+        HtmlTag nav = new HtmlTag("nav")
+            .withClass("orch-tabs project-tabs")
+            .withAttribute("aria-label", "Project views");
+        for (AppNavigation.ProjectTab tab : AppNavigation.consoleTabs()) {
+            if (AppNavigation.TAB_NAV_EXCLUDE.contains(tab.key())) continue;
+            boolean isActive = tab.key().equals(selectedTabKey);
+            boolean isAvailable = tab.available();
+            Button button = Button.create(tab.label());
+            if (isActive) button.withClass("active");
+            if (!isAvailable) button.withClass("tab-unavailable");
+            button.withAttribute("data-project-tab", tab.key())
+                .withAttribute("data-tab-button", "true")
+                .withAttribute("data-tab-available", String.valueOf(isAvailable))
+                .withAttribute("aria-selected", String.valueOf(isActive))
+                .withAttribute("hx-get", tab.route(projectId))
+                .withAttribute("hx-target", "#project-tab-panel")
+                .withAttribute("hx-swap", "innerHTML")
+                .withAttribute("data-htmx-error-swap", "true")
+                .withAttribute("aria-disabled", String.valueOf(!isAvailable));
+            nav.withChild(button);
+        }
+        return nav;
     }
 
     // ── Grouped tab navigation (delegates grouping to AppNavigation) ──

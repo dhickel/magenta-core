@@ -82,7 +82,7 @@ final class AppNavigation {
         }
     }
 
-    /** Ordered registry: 5 groups, 11 tabs. */
+    /** Ordered registry: 5 groups, 11 tabs. Chat is a persistent accordion above the tabs and is excluded from tab navigation. */
     static final List<ProjectTab> TAB_REGISTRY = List.of(
         new ProjectTab("overview",   "Dashboard",  "dashboard",  true),
         new ProjectTab("work",       "Queue",      "queue",      true),
@@ -96,6 +96,9 @@ final class AppNavigation {
         new ProjectTab("admin",      "Members",    "members",    true),
         new ProjectTab("admin",      "Settings",   "settings",   true)
     );
+
+    /** Tabs to render in the flat navigation bar (excludes Chat which is a persistent accordion). */
+    static final java.util.Set<String> TAB_NAV_EXCLUDE = java.util.Set.of("chat");
 
     /** Ordered group keys for rendering. */
     static final List<String> GROUP_ORDER = List.of("overview", "work", "context", "automation", "admin");
@@ -120,7 +123,7 @@ final class AppNavigation {
 
     /** Default active tab. */
     static ProjectTab defaultTab() {
-        return findTab("queue").orElseThrow();
+        return findTab("dashboard").orElseThrow();
     }
 
     /**
