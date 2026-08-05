@@ -5,28 +5,19 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.concurrent.CompletionException;
-import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.Semaphore;
 import java.util.function.Consumer;
 import java.util.regex.Matcher;
 import java.util.LinkedHashMap;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 
 import java.io.IOException;
-import java.io.PrintWriter;
-import java.io.StringWriter;
-import java.nio.file.Path;
-import java.time.Duration;
-import java.time.Instant;
 
 import org.springframework.web.client.ResourceAccessException;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import io.mindspice.magenta2.ai.agent.job.AgentJobService;
-import io.mindspice.magenta2.ai.agent.job.AgentJobStatus;
 import io.mindspice.magenta2.ai.chat.model.ChatMessage;
 import io.mindspice.magenta2.ai.chat.model.ChatPlanState;
 import io.mindspice.magenta2.ai.chat.model.ChatRequest;
@@ -35,56 +26,22 @@ import io.mindspice.magenta2.ai.chat.model.ChatSession;
 import io.mindspice.magenta2.ai.chat.model.ChatSessionOrigin;
 import io.mindspice.magenta2.ai.chat.model.ChatToolActivity;
 import io.mindspice.magenta2.ai.chat.model.ContextUsage;
-import io.mindspice.magenta2.ai.chat.plan.PlanDefinition;
-import io.mindspice.magenta2.ai.chat.model.PlanMode;
-import io.mindspice.magenta2.ai.chat.plan.PlanService;
-import io.mindspice.magenta2.ai.chat.plan.PlanStatus;
-import io.mindspice.magenta2.ai.chat.plan.PlanToolContext;
-import io.mindspice.magenta2.ai.chat.plan.PlanToolExecutionContext;
 import io.mindspice.magenta2.ai.chat.rendering.ChatMarkdownRenderer;
 import io.mindspice.magenta2.ai.chat.repository.AuditRepository;
 import io.mindspice.magenta2.ai.chat.repository.ChatSessionMetadataRepository;
 import io.mindspice.magenta2.ai.chat.service.turn.PromptContextAssembler;
 import io.mindspice.magenta2.ai.chat.service.turn.TerminalTurnRepair;
-import io.mindspice.magenta2.ai.chat.service.turn.TrustedContextPolicyAssembler;
-import io.mindspice.magenta2.ai.chat.service.turn.TrustedContextPolicyAssembler.TrustedPolicyResult;
-import io.mindspice.magenta2.ai.chat.service.turn.TurnContext;
 import io.mindspice.magenta2.ai.chat.service.turn.ToolAccessPolicy;
 import io.mindspice.magenta2.ai.chat.service.turn.TurnAuditWriter;
 import io.mindspice.magenta2.ai.chat.service.turn.TurnDiagnostic;
 import io.mindspice.magenta2.ai.chat.service.turn.TurnPhase;
-import io.mindspice.magenta2.ai.chat.task.TaskRun;
-import io.mindspice.magenta2.ai.chat.task.TaskRunStatus;
-import io.mindspice.magenta2.ai.chat.task.TaskService;
+
 import io.mindspice.magenta2.ai.chat.tool.ChatToolRegistry;
 import io.mindspice.magenta2.ai.chat.tool.ToolTranscriptService;
 import io.mindspice.magenta2.ai.chat.tool.ToolTranscriptService.ToolTranscriptEntry;
 import io.mindspice.magenta2.ai.config.user.AgentConfig;
 import io.mindspice.magenta2.ai.config.user.AiConfig;
 import io.mindspice.magenta2.ai.config.user.ModelConfig;
-import io.mindspice.magenta2.ai.orchestration.agents.AgentProfile;
-import io.mindspice.magenta2.ai.orchestration.context.AgentContextService;
-import io.mindspice.magenta2.ai.orchestration.context.AgentContextService.BindingResolution;
-import io.mindspice.magenta2.ai.orchestration.context.AgentContextService.ContextOutcome;
-import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceDescriptor;
-import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceDirectoryService;
-import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceKind;
-import io.mindspice.magenta2.ai.execution.ActiveTurnPhase;
-import io.mindspice.magenta2.ai.execution.ActiveTurnRegistry.ActiveTurn;
-import io.mindspice.magenta2.ai.execution.ConversationTurnCoordinator;
-import io.mindspice.magenta2.ai.execution.MagentaWorkRequest;
-import io.mindspice.magenta2.ai.orchestration.runtime.OrchestrationTaskContext;
-import io.mindspice.magenta2.ai.orchestration.runtime.OrchestrationTaskContextHolder;
-import io.mindspice.magenta2.ai.orchestration.runtime.RunMeasurementRepository;
-import io.mindspice.magenta2.ai.orchestration.runtime.RunMeasurementRepository.MeasurementCompleteness;
-import io.mindspice.magenta2.ai.orchestration.runtime.RunMeasurementRepository.MeasurementKind;
-import io.mindspice.magenta2.ai.orchestration.runtime.RunMeasurementRepository.MeasurementOutcome;
-import io.mindspice.magenta2.ai.orchestration.runtime.RunMeasurementRepository.RunMeasurement;
-import io.mindspice.magenta2.ai.orchestration.settings.RuntimeSettingsService;
-import io.mindspice.magenta2.ai.orchestration.workspaces.AgentsMdResolver;
-import io.mindspice.magenta2.ai.skills.AgentSkillActivationService;
-import io.mindspice.magenta2.ai.skills.AgentSkillPromptCatalogAssembler;
-import io.mindspice.magenta2.ai.skills.AgentSkillRuntimeCatalogService;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.client.ChatClientResponse;
 import org.springframework.ai.chat.memory.ChatMemory;
@@ -105,7 +62,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.tool.ToolCallback;
 import org.springframework.ai.tool.execution.ToolExecutionException;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 import reactor.core.publisher.Flux;
@@ -119,28 +75,8 @@ public class ChatService {
 
     private static final Pattern THINK_TAG_PATTERN = Pattern.compile("(?is)<think>(.*?)</think>");
     private static final int EMPTY_FINAL_RESPONSE_RETRY_LIMIT = 2;
-    private static final int PLAN_TURN_REPAIR_RETRY_LIMIT = 2;
-    private static final int EXECUTION_COMPLETION_REPAIR_RETRY_LIMIT = 2;
+    private static final int REPAIR_RETRY_LIMIT = 2;
     private static final String OLLAMA_TOOLS_UNSUPPORTED_MESSAGE = "does not support tools";
-    // Backward-compatible references to ToolAccessPolicy constants
-    public static final List<String> PLAN_MODE_TOOLS = ToolAccessPolicy.PLAN_MODE_TOOLS;
-    public static final List<String> TASK_MODE_TOOLS = ToolAccessPolicy.TASK_MODE_TOOLS;
-    private static final String EXECUTE_PLAN_MESSAGE = "Execute the saved plan now. Work through the plan directly and report the completed result.";
-    private static final String EXECUTE_PLAN_CLEAN_MESSAGE = "Execute the approved anonymous chat plan now using only the approved plan instructions and the persistent chat file directory context. Do not rely on earlier chat transcript details unless they are present in the approved plan.";
-    private static final String PLAN_NEEDS_REVIEW_MESSAGE = "Plan execution needs review. Magenta could not verify completion through plan_complete after retrying. Review the saved execution evidence and validation feedback before trusting the result.";
-    private static final String PLAN_ANSWER_MODEL_FAILURE_MESSAGE = "I saved your planning answer, but Magenta could not continue the planning turn because the configured planning model request failed. Check the selected planning model and API credentials, then send another planning message to continue.";
-    private static final String PLAN_ANSWER_CONTINUATION_FAILURE_MESSAGE = "I saved your planning answer, but Magenta could not continue the planning turn because a planning tool or model call failed. Check the unavailable service or model configuration, then send another planning message to continue.";
-    private static final String EXECUTE_TASK_MESSAGE = """
-        Execute the reusable task now using the provided runtime inputs.
-        Work through the declared task steps directly. You must call task_complete with outputValues keyed exactly by declared output name before any final completion answer.
-        If you cannot complete the task, call task_report with the evidence gathered and explain the missing output, then continue until task_complete succeeds or Magenta marks the run for review.
-        """.trim();
-    private static final String BEGIN_PLAN_MESSAGE = "The user is ready to plan. The backend has collected the opening answers; continue planning from that seed context.";
-    private static final String CONTINUE_PLAN_MESSAGE = "The user opened an existing plan in planning chat. Review the loaded structured state and ask the next focused question needed to improve or complete the plan.";
-
-    static final Set<String> FILE_MUTATING_TOOL_NAMES = Set.of(
-        "file_write", "file_append", "file_replace", "file_delete"
-    );
 
     private final ChatMemory chatMemory;
     private final ChatMemoryRepository chatMemoryRepository;
@@ -153,73 +89,16 @@ public class ChatService {
     private final ToolCallingManager toolCallingManager;
     private final ChatToolRegistry chatToolRegistry;
     private final ToolTranscriptService toolTranscriptService;
-    private final PlanService planService;
-    private final TaskService taskService;
-    private final AgentJobService agentJobService;
-    private final ConversationTurnCoordinator turnCoordinator;
     private final AuditRepository auditRepository;
     private final ObjectMapper objectMapper;
-    private final RuntimeSettingsService runtimeSettingsService;
-    private final AuditService auditService;
-    private final RequestResolver requestResolver;
-    private final ChatFileService chatFileService;
-    private final ChatPendingMessageService chatPendingMessageService;
-    private final AgentSkillActivationService agentSkillActivationService;
-    private final RunMeasurementRepository measurementRepo;
     private final Set<String> toolUnsupportedModels = ConcurrentHashMap.newKeySet();
-    private final Map<String, Semaphore> streamLocks = new ConcurrentHashMap<>();
 
-    // Extracted turn components (Plan 01 — Chat Turn Orchestration)
+    // Extracted turn components
     private final PromptContextAssembler promptAssembler;
     private final ToolAccessPolicy toolAccessPolicy;
     private final TerminalTurnRepair turnRepair;
     private final TurnAuditWriter turnAuditWriter;
 
-    // Setter-injected to preserve lightweight constructor fixtures while the
-    // production service always resolves immutable bindings before a turn.
-    private AgentContextService agentContextService;
-    private WorkspaceDirectoryService workspaceDirectoryService;
-    private final ThreadLocal<TrustedPolicyResult> activeTrustedPolicies = new ThreadLocal<>();
-
-    public ChatService(
-        ChatMemory chatMemory,
-        ChatMemoryRepository chatMemoryRepository,
-        ChatSessionMetadataRepository chatSessionMetadataRepository,
-        ChatMarkdownRenderer chatMarkdownRenderer,
-        AiConfig aiConfig
-    ) {
-        this(
-            chatMemory,
-            chatMemoryRepository,
-            chatSessionMetadataRepository,
-            chatMarkdownRenderer,
-            aiConfig,
-            null,
-            null,
-            null,
-            null,
-            null,
-            null,
-            null,
-            null,
-            null,
-            null,
-            null,
-            null,
-            null,
-            null,
-            null,
-            null,
-            null,
-            null,
-            null,
-            null,
-            null,
-            null,
-            null
-        );
-    }
-
     public ChatService(
         ChatMemory chatMemory,
         ChatMemoryRepository chatMemoryRepository,
@@ -232,130 +111,12 @@ public class ChatService {
         ToolCallingManager toolCallingManager,
         ChatToolRegistry chatToolRegistry,
         ToolTranscriptService toolTranscriptService,
-        PlanService planService,
-        TaskService taskService,
-        AgentJobService agentJobService,
-        ConversationTurnCoordinator turnCoordinator,
         AuditRepository auditRepository,
         ObjectMapper objectMapper,
-        RuntimeSettingsService runtimeSettingsService,
-        AuditService auditService,
-        RequestResolver requestResolver,
-        ChatFileService chatFileService,
-        ChatPendingMessageService chatPendingMessageService,
-        io.mindspice.magenta2.ai.chat.plan.WorkTypeProfileService workTypeProfileService,
-        AgentsMdResolver agentsMdResolver
-    ) {
-        this(
-            chatMemory,
-            chatMemoryRepository,
-            chatSessionMetadataRepository,
-            chatMarkdownRenderer,
-            aiConfig,
-            contextManagementAdvisor,
-            contextUsageTracker,
-            chatModelRouter,
-            toolCallingManager,
-            chatToolRegistry,
-            toolTranscriptService,
-            planService,
-            taskService,
-            agentJobService,
-            turnCoordinator,
-            auditRepository,
-            objectMapper,
-            runtimeSettingsService,
-            auditService,
-            requestResolver,
-            chatFileService,
-            chatPendingMessageService,
-            workTypeProfileService,
-            agentsMdResolver,
-            null,
-            null,
-            null,
-            null
-        );
-    }
-
-    public ChatService(
-        ChatMemory chatMemory,
-        ChatMemoryRepository chatMemoryRepository,
-        ChatSessionMetadataRepository chatSessionMetadataRepository,
-        ChatMarkdownRenderer chatMarkdownRenderer,
-        AiConfig aiConfig,
-        ContextManagementAdvisor contextManagementAdvisor,
-        ContextUsageTracker contextUsageTracker,
-        ChatModelRouter chatModelRouter,
-        ToolCallingManager toolCallingManager,
-        ChatToolRegistry chatToolRegistry,
-        ToolTranscriptService toolTranscriptService,
-        PlanService planService
-    ) {
-        this(
-            chatMemory,
-            chatMemoryRepository,
-            chatSessionMetadataRepository,
-            chatMarkdownRenderer,
-            aiConfig,
-            contextManagementAdvisor,
-            contextUsageTracker,
-            chatModelRouter,
-            toolCallingManager,
-            chatToolRegistry,
-            toolTranscriptService,
-            planService,
-            null,
-            null,
-            null,
-            null,
-            null,
-            null,
-            null,
-            aiConfig != null && chatSessionMetadataRepository != null
-                ? new RequestResolver(aiConfig, chatSessionMetadataRepository, chatMemoryRepository, planService, null, null, null)
-                : null,
-            null,
-            null,
-            null,
-            null,
-            null,
-            null,
-            null,
-            null
-        );
-    }
-
-    @Autowired
-    public ChatService(
-        ChatMemory chatMemory,
-        ChatMemoryRepository chatMemoryRepository,
-        ChatSessionMetadataRepository chatSessionMetadataRepository,
-        ChatMarkdownRenderer chatMarkdownRenderer,
-        AiConfig aiConfig,
-        ContextManagementAdvisor contextManagementAdvisor,
-        ContextUsageTracker contextUsageTracker,
-        ChatModelRouter chatModelRouter,
-        ToolCallingManager toolCallingManager,
-        ChatToolRegistry chatToolRegistry,
-        ToolTranscriptService toolTranscriptService,
-        @Autowired(required = false) PlanService planService,
-        @Autowired(required = false) TaskService taskService,
-        @Autowired(required = false) AgentJobService agentJobService,
-        @Autowired(required = false) ConversationTurnCoordinator turnCoordinator,
-        @Autowired(required = false) AuditRepository auditRepository,
-        @Autowired(required = false) ObjectMapper objectMapper,
-        @Autowired(required = false) RuntimeSettingsService runtimeSettingsService,
-        @Autowired(required = false) AuditService auditService,
-        @Autowired(required = false) RequestResolver requestResolver,
-        @Autowired(required = false) ChatFileService chatFileService,
-        @Autowired(required = false) ChatPendingMessageService chatPendingMessageService,
-        @Autowired(required = false) io.mindspice.magenta2.ai.chat.plan.WorkTypeProfileService workTypeProfileService,
-        @Autowired(required = false) AgentsMdResolver agentsMdResolver,
-        @Autowired(required = false) AgentSkillRuntimeCatalogService skillRuntimeCatalogService,
-        @Autowired(required = false) AgentSkillPromptCatalogAssembler skillPromptCatalogAssembler,
-        @Autowired(required = false) AgentSkillActivationService agentSkillActivationService,
-        @Autowired(required = false) RunMeasurementRepository measurementRepo
+        PromptContextAssembler promptAssembler,
+        ToolAccessPolicy toolAccessPolicy,
+        TerminalTurnRepair turnRepair,
+        TurnAuditWriter turnAuditWriter
     ) {
         this.chatMemory = chatMemory;
         this.chatMemoryRepository = chatMemoryRepository;
@@ -368,253 +129,100 @@ public class ChatService {
         this.toolCallingManager = toolCallingManager;
         this.chatToolRegistry = chatToolRegistry;
         this.toolTranscriptService = toolTranscriptService;
-        this.planService = planService;
-        this.taskService = taskService;
-        this.agentJobService = agentJobService;
-        this.turnCoordinator = turnCoordinator;
         this.auditRepository = auditRepository;
         this.objectMapper = objectMapper == null ? new ObjectMapper() : objectMapper;
-        this.runtimeSettingsService = runtimeSettingsService;
-        this.auditService = auditService;
-        this.requestResolver = requestResolver;
-        this.chatFileService = chatFileService;
-        this.chatPendingMessageService = chatPendingMessageService;
-        this.agentSkillActivationService = agentSkillActivationService;
-        this.measurementRepo = measurementRepo;
-
-        // Initialize extracted turn components
-        this.promptAssembler = new PromptContextAssembler(
-            aiConfig,
-            runtimeSettingsService,
-            planService,
-            taskService,
-            workTypeProfileService,
-            agentsMdResolver,
-            skillPromptCatalogAssembler
-        );
-        this.toolAccessPolicy = new ToolAccessPolicy(chatToolRegistry, planService, taskService, skillRuntimeCatalogService);
-        this.turnRepair = new TerminalTurnRepair(planService, taskService);
-        this.turnAuditWriter = new TurnAuditWriter(auditService, auditRepository);
+        this.promptAssembler = promptAssembler;
+        this.toolAccessPolicy = toolAccessPolicy;
+        this.turnRepair = turnRepair;
+        this.turnAuditWriter = turnAuditWriter;
     }
 
-    @Autowired(required = false)
-    void setTrustedContextServices(AgentContextService agentContextService,
-                                   WorkspaceDirectoryService workspaceDirectoryService) {
-        this.agentContextService = agentContextService;
-        this.workspaceDirectoryService = workspaceDirectoryService;
-    }
-
-    public ChatService(
-        ChatMemory chatMemory,
-        ChatMemoryRepository chatMemoryRepository,
-        ChatSessionMetadataRepository chatSessionMetadataRepository,
-        ChatMarkdownRenderer chatMarkdownRenderer,
-        AiConfig aiConfig,
-        ContextManagementAdvisor contextManagementAdvisor,
-        ContextUsageTracker contextUsageTracker,
-        ChatModelRouter chatModelRouter,
-        ToolCallingManager toolCallingManager,
-        ChatToolRegistry chatToolRegistry,
-        ToolTranscriptService toolTranscriptService,
-        PlanService planService,
-        TaskService taskService,
-        AgentJobService agentJobService,
-        ConversationTurnCoordinator turnCoordinator,
-        AuditRepository auditRepository,
-        ObjectMapper objectMapper,
-        RuntimeSettingsService runtimeSettingsService,
-        AuditService auditService,
-        RequestResolver requestResolver,
-        ChatFileService chatFileService,
-        ChatPendingMessageService chatPendingMessageService,
-        io.mindspice.magenta2.ai.chat.plan.WorkTypeProfileService workTypeProfileService
-    ) {
-        this(
-            chatMemory,
-            chatMemoryRepository,
-            chatSessionMetadataRepository,
-            chatMarkdownRenderer,
-            aiConfig,
-            contextManagementAdvisor,
-            contextUsageTracker,
-            chatModelRouter,
-            toolCallingManager,
-            chatToolRegistry,
-            toolTranscriptService,
-            planService,
-            taskService,
-            agentJobService,
-            turnCoordinator,
-            auditRepository,
-            objectMapper,
-            runtimeSettingsService,
-            auditService,
-            requestResolver,
-            chatFileService,
-            chatPendingMessageService,
-            workTypeProfileService,
-            null,
-            null,
-            null,
-            null,
-            null
-        );
-    }
+    // ── Public chat API ──
 
     public ChatResponse chat(ChatRequest request) {
         if (!(request instanceof ChatRequest.MsgRequest msgRequest)) {
             throw new IllegalArgumentException("message request is required");
         }
         rejectSystemChatConversation(msgRequest.conversationId());
-        ResolvedChatRequest resolvedRequest = requestResolver.resolve(msgRequest);
+        ResolvedChatRequest resolvedRequest = resolveFromMsgRequest(msgRequest);
         return chat(resolvedRequest);
     }
 
     public ChatResponse.MsgResponse chat(String conversationId, String message, String model) {
         rejectSystemChatConversation(conversationId);
-        ResolvedChatRequest resolvedRequest = requestResolver.resolve(conversationId, message, model, null);
+        ResolvedChatRequest resolvedRequest = resolveFromParams(conversationId, message, model);
         return chat(resolvedRequest);
+    }
+
+    public ResolvedChatRequest resolve(ChatRequest request) {
+        if (request instanceof ChatRequest.MsgRequest messageRequest) {
+            rejectSystemChatConversation(messageRequest.conversationId());
+            return resolveFromMsgRequest(messageRequest);
+        }
+        throw new IllegalArgumentException("message request is required");
+    }
+
+    private ResolvedChatRequest resolveFromMsgRequest(ChatRequest.MsgRequest msgRequest) {
+        return resolveFromParams(msgRequest.conversationId(), msgRequest.message(), msgRequest.model());
+    }
+
+    private ResolvedChatRequest resolveFromParams(String conversationId, String message, String model) {
+        String convId = StringUtils.hasText(conversationId) ? conversationId : UUID.randomUUID().toString();
+        String resolvedModel = StringUtils.hasText(model) ? model : defaultModel();
+        return new ResolvedChatRequest(convId, message, resolvedModel);
     }
 
     private ChatResponse.MsgResponse chat(ResolvedChatRequest resolvedRequest) {
         rejectSystemChatConversation(resolvedRequest.conversationId());
-        return chat(resolvedRequest, null, null);
+        return chatNow(resolvedRequest);
     }
 
-    private ChatResponse.MsgResponse chat(
-        ResolvedChatRequest resolvedRequest,
-        List<String> approvedToolNames,
-        OrchestrationTaskContext turnContext
-    ) {
-        if (turnCoordinator != null) {
-            return await(turnCoordinator.submit(
-                resolvedRequest.conversationId(),
-                MagentaWorkRequest.CHAT_PRIORITY,
-                "chat turn " + resolvedRequest.conversationId(),
-                () -> chatNow(resolvedRequest, null, approvedToolNames, turnContext)
-            ));
-        }
-        return chatNow(resolvedRequest, null, approvedToolNames, turnContext);
-    }
-
-    private ChatResponse.MsgResponse chatNow(ResolvedChatRequest resolvedRequest, ActiveTurn activeTurn) {
-        return chatNow(resolvedRequest, activeTurn, null, null);
-    }
-
-    private ChatResponse.MsgResponse chatNow(
-        ResolvedChatRequest resolvedRequest,
-        ActiveTurn activeTurn,
-        List<String> approvedToolNames,
-        OrchestrationTaskContext turnContext
-    ) {
-        OrchestrationTaskContext previousContext = OrchestrationTaskContextHolder.current();
-        boolean installedTurnContext = false;
-        if (turnContext != null) {
-            OrchestrationTaskContextHolder.set(turnContext);
-            installedTurnContext = true;
-        }
-        boolean installedChatContext = turnContext == null
-            && installChatFileContextIfNeeded(resolvedRequest.conversationId(), previousContext);
-        TrustedPolicyResult previousPolicy = activeTrustedPolicies.get();
-        try {
-            installTrustedPolicy(resolvedRequest);
-            List<ToolCallback> approvedTools = approvedTools(resolvedRequest, approvedToolNames);
-            if (!approvedTools.isEmpty() && supportsTools(resolvedRequest.model())) {
-                try {
-                    return toolChatWithRetry(resolvedRequest, approvedTools, activeTurn);
-                } catch (NonTransientAiException exception) {
-                    if (!isToolUnsupported(exception)) {
-                        throw exception;
-                    }
-                    rememberToolUnsupportedModel(resolvedRequest.model());
+    private ChatResponse.MsgResponse chatNow(ResolvedChatRequest resolvedRequest) {
+        List<ToolCallback> approvedTools = approvedTools(resolvedRequest);
+        if (!approvedTools.isEmpty() && supportsTools(resolvedRequest.model())) {
+            try {
+                return toolChatWithRetry(resolvedRequest, approvedTools);
+            } catch (NonTransientAiException exception) {
+                if (!isToolUnsupported(exception)) {
+                    throw exception;
                 }
+                rememberToolUnsupportedModel(resolvedRequest.model());
             }
-            return plainChat(resolvedRequest);
-        } finally {
-            restoreTrustedPolicy(previousPolicy);
-            restoreContext(previousContext, installedTurnContext || installedChatContext);
         }
+        return plainChat(resolvedRequest);
     }
 
-    public ChatResponse chatAsAgent(AgentProfile agent, ChatRequest.MsgRequest request) {
-        if (agent == null) {
-            throw new IllegalArgumentException("agent is required");
-        }
-        if (request == null) {
-            throw new IllegalArgumentException("message request is required");
-        }
+    // ── Public stream API ──
+
+    public Flux<ChatMessage> stream(ResolvedChatRequest request) {
         rejectSystemChatConversation(request.conversationId());
-        String model = StringUtils.hasText(request.model()) ? request.model() : agent.defaultModel();
-        if (!StringUtils.hasText(model)) {
-            model = defaultModel();
-        }
-        ResolvedChatRequest resolvedRequest = requestResolver.resolveForAgent(new ChatRequest.MsgRequest(
-            request.conversationId(),
-            request.message(),
-            model,
-            request.planningModel()
-        ), agent.id());
-        markAgentConversation(resolvedRequest.conversationId(), agent.id());
-        OrchestrationTaskContext turnContext = new OrchestrationTaskContext(
-            agent.id(), agent.name(), null, null, null, null,
-            null, null, null, "AGENT_CHAT", null, null, null,
-            null, null, null, null, null, resolvedRequest.contextBindingKey()
-        );
-        List<String> agentApprovedTools = agent.approvedTools() == null ? List.of() : agent.approvedTools();
-        return chat(resolvedRequest, agentApprovedTools, turnContext);
+        return streamNow(request);
     }
 
-    private boolean installChatFileContextIfNeeded(String conversationId, OrchestrationTaskContext previousContext) {
-        if (previousContext != null || planService == null || !StringUtils.hasText(conversationId)) {
-            return false;
+    private Flux<ChatMessage> streamNow(ResolvedChatRequest request) {
+        List<ToolCallback> approvedTools = approvedTools(request);
+        if (!approvedTools.isEmpty() && supportsTools(request.model())) {
+            return Flux.<ChatMessage>create(sink -> {
+                try {
+                    ChatMessage finalMessage = toolChatMessageWithRetry(request, approvedTools, sink::next);
+                    sink.next(finalMessage);
+                    sink.complete();
+                } catch (RuntimeException exception) {
+                    sink.error(exception);
+                }
+            })
+                .onErrorResume(NonTransientAiException.class, exception -> {
+                    if (!isToolUnsupported(exception)) {
+                        return Flux.error(exception);
+                    }
+                    rememberToolUnsupportedModel(request.model());
+                    return plainStream(request);
+                });
         }
-        try {
-            Path dir = planService.chatFileDirectory(conversationId).toRealPath();
-            String bindingKey = requestResolver == null ? null : requestResolver.contextBindingKey(conversationId);
-            OrchestrationTaskContextHolder.set(new OrchestrationTaskContext(
-                null, null, null, null, null, null, null, null, null, "CHAT", null, dir.toString(), null,
-                null, null, null, null, null, bindingKey
-            ));
-            return true;
-        } catch (RuntimeException | IOException ignored) {
-            return false;
-        }
+        return plainStream(request);
     }
 
-    private void restoreContext(OrchestrationTaskContext previousContext, boolean installedChatContext) {
-        if (!installedChatContext) {
-            return;
-        }
-        if (previousContext == null) {
-            OrchestrationTaskContextHolder.clear();
-        } else {
-            OrchestrationTaskContextHolder.set(previousContext);
-        }
-    }
-
-    private void rejectSystemChatConversation(String conversationId) {
-        if (conversationId == null || !StringUtils.hasText(conversationId)) {
-            return;
-        }
-        var origin = chatSessionMetadataRepository.findOrigin(conversationId);
-        if (origin.isPresent() && (origin.get() == ChatSessionOrigin.SYSTEM_CHAT
-                || origin.get() == ChatSessionOrigin.PROJECT_CHAT)) {
-            throw new IllegalArgumentException(
-                    "Restricted chat conversations cannot be used through public chat endpoints");
-        }
-    }
-
-    private String approvedPlanExecutionMessage(String conversationId, boolean cleanContext) {
-        String markdown = planService.approvalMarkdown(conversationId);
-        String files = "";
-        try {
-            files = "\n\nPersistent chat file directory: " + planService.chatFileDirectory(conversationId).toRealPath();
-        } catch (Exception e) {
-            logger.warn("Failed to resolve chat file directory for conversation: {}", conversationId, e);
-        }
-        return (cleanContext ? EXECUTE_PLAN_CLEAN_MESSAGE : EXECUTE_PLAN_MESSAGE)
-            + "\n\nApproved anonymous plan:\n\n" + markdown + files;
-    }
+    // ── Plain chat / stream ──
 
     private ChatResponse.MsgResponse plainChat(ResolvedChatRequest resolvedRequest) {
         turnAuditWriter.recordTurnStart(resolvedRequest);
@@ -637,84 +245,8 @@ public class ChatService {
             resolvedRequest.model(),
             response,
             maintenance.usage(),
-            planState(resolvedRequest.conversationId())
+            ChatPlanState.normal()
         );
-    }
-
-    public ResolvedChatRequest resolve(ChatRequest request) {
-        if (request instanceof ChatRequest.MsgRequest messageRequest) {
-            rejectSystemChatConversation(messageRequest.conversationId());
-        }
-        return requestResolver.resolve(request);
-    }
-
-    public Flux<ChatMessage> stream(ResolvedChatRequest request) {
-        return stream(request, null);
-    }
-
-    public Flux<ChatMessage> stream(ResolvedChatRequest request, ActiveTurn activeTurn) {
-        rejectSystemChatConversation(request.conversationId());
-        if (turnCoordinator != null) {
-            return Flux.defer(() -> {
-                Semaphore lock = streamLocks.computeIfAbsent(
-                    request.conversationId(), k -> new Semaphore(1));
-                if (!lock.tryAcquire()) {
-                    return Flux.error(new IllegalStateException(
-                        "Another stream is already active for conversation " + request.conversationId()));
-                }
-                return streamNow(request, activeTurn)
-                    .doFinally(signal -> {
-                        lock.release();
-                        streamLocks.compute(request.conversationId(), (k, v) ->
-                            v != null && v.availablePermits() > 0 ? null : v);
-                    });
-            });
-        }
-        return streamNow(request, activeTurn);
-    }
-
-    private Flux<ChatMessage> streamNow(ResolvedChatRequest request, ActiveTurn activeTurn) {
-        return Flux.defer(() -> {
-            OrchestrationTaskContext previousContext = OrchestrationTaskContextHolder.current();
-            boolean installedChatContext = installChatFileContextIfNeeded(request.conversationId(), previousContext);
-            TrustedPolicyResult previousPolicy = activeTrustedPolicies.get();
-            try {
-                installTrustedPolicy(request);
-                return streamNowWithContext(request, activeTurn)
-                    .doFinally(signal -> {
-                        restoreTrustedPolicy(previousPolicy);
-                        restoreContext(previousContext, installedChatContext);
-                    });
-            } catch (RuntimeException exception) {
-                restoreTrustedPolicy(previousPolicy);
-                restoreContext(previousContext, installedChatContext);
-                return Flux.error(exception);
-            }
-        });
-    }
-
-    private Flux<ChatMessage> streamNowWithContext(ResolvedChatRequest request, ActiveTurn activeTurn) {
-        List<ToolCallback> approvedTools = approvedTools(request);
-        if (!approvedTools.isEmpty() && supportsTools(request.model())) {
-            // Try the tool-capable path first. Models that reject tools are remembered and use plain chat later.
-            return Flux.<ChatMessage>create(sink -> {
-                try {
-                    ChatMessage finalMessage = toolChatMessageWithRetry(request, approvedTools, sink::next, activeTurn);
-                    sink.next(finalMessage);
-                    sink.complete();
-                } catch (RuntimeException exception) {
-                    sink.error(exception);
-                }
-            })
-                .onErrorResume(NonTransientAiException.class, exception -> {
-                    if (!isToolUnsupported(exception)) {
-                        return Flux.error(exception);
-                    }
-                    rememberToolUnsupportedModel(request.model());
-                    return plainStream(request);
-                });
-        }
-        return plainStream(request);
     }
 
     private Flux<ChatMessage> plainStream(ResolvedChatRequest request) {
@@ -734,483 +266,31 @@ public class ChatService {
         });
     }
 
-    public ChatMessage renderAssistantMessage(String text) {
-        MessageParts messageParts = splitThinkingFallback(text == null ? "" : text);
-        return renderAssistantMessage(messageParts);
-    }
-
-    public ChatMessage renderAssistantMessage(org.springframework.ai.chat.model.ChatResponse response) {
-        if (response == null || response.getResult() == null) {
-            return renderAssistantMessage("");
-        }
-        return renderAssistantMessage(response.getResult());
-    }
-
-    private ChatMessage renderAssistantMessage(org.springframework.ai.chat.model.Generation generation) {
-        if (generation == null) {
-            return renderAssistantMessage("");
-        }
-        String text = generation.getOutput() == null || generation.getOutput().getText() == null
-            ? ""
-            : generation.getOutput().getText();
-        String thinking = thinkingText(generation);
-        MessageParts messageParts = StringUtils.hasText(thinking)
-            ? new MessageParts(text, thinking)
-            : splitThinkingFallback(text);
-        return renderAssistantMessage(messageParts);
-    }
-
-    private ChatMessage renderAssistantMessage(MessageParts messageParts) {
-        String visibleText = messageParts.visibleText();
-        String thinkingText = messageParts.thinkingText();
-        return new ChatMessage(
-            "assistant",
-            visibleText,
-            chatMarkdownRenderer.render(visibleText),
-            StringUtils.hasText(thinkingText) ? chatMarkdownRenderer.render(thinkingText) : null
-        );
-    }
+    // ── Conversation management ──
 
     public void clearConversation(String conversationId) {
         if (StringUtils.hasText(conversationId)) {
             chatMemory.clear(conversationId);
             chatSessionMetadataRepository.deleteByConversationId(conversationId);
-            if (planService != null) {
-                planService.exitPlan(conversationId);
-            }
             if (contextUsageTracker != null) {
                 contextUsageTracker.clear(conversationId);
             }
-            if (chatPendingMessageService != null) {
-                chatPendingMessageService.deleteByConversationId(conversationId);
-            }
-            if (agentSkillActivationService != null) {
-                agentSkillActivationService.clearConversationActivations(conversationId);
-            }
         }
     }
 
-    public ChatResponse.MsgResponse beginPlan(String conversationId) {
-        return beginPlan(conversationId, null, null);
-    }
-
-    public ChatResponse.MsgResponse beginPlan(String conversationId, String selectedModel, String planningModel) {
-        return beginPlan(conversationId, selectedModel, planningModel, null);
-    }
-
-    public ChatResponse.MsgResponse beginPlan(
-        String conversationId,
-        String selectedModel,
-        String planningModel,
-        String userInstruction
-    ) {
-        requirePlanService();
-        String prePlanningModel = StringUtils.hasText(selectedModel)
-            ? selectedModel
-            : storedConversationModel(conversationId);
-        if (!StringUtils.hasText(prePlanningModel)) {
-            prePlanningModel = defaultModel();
-        }
-        String executionModel = StringUtils.hasText(planningModel)
-            ? planningModel
-            : resolvedPlanningModel(conversationId);
-        planService.beginPlan(conversationId, prePlanningModel, executionModel);
-        if (StringUtils.hasText(userInstruction)) {
-            planService.recordPromptAnswer(conversationId, userInstruction, null);
-        }
-        return new ChatResponse.MsgResponse(
-            conversationId,
-            executionModel,
-            "",
-            maintainContextUsage(conversationId, executionModel).usage(),
-            planState(conversationId)
-        );
-    }
-
-    public ChatResponse.MsgResponse beginPlanFromDefinition(
-        String conversationId,
-        String planId,
-        String selectedModel,
-        String planningModel
-    ) {
-        return beginPlanFromDefinition(conversationId, planId, selectedModel, planningModel, null);
-    }
-
-    public ChatResponse.MsgResponse beginPlanFromDefinition(
-        String conversationId,
-        String planId,
-        String selectedModel,
-        String planningModel,
-        String userInstruction
-    ) {
-        requirePlanService();
-        if (!StringUtils.hasText(planId)) {
-            throw new IllegalArgumentException("planId is required");
-        }
-        String prePlanningModel = StringUtils.hasText(selectedModel)
-            ? selectedModel
-            : storedConversationModel(conversationId);
-        if (!StringUtils.hasText(prePlanningModel)) {
-            prePlanningModel = defaultModel();
-        }
-        String executionModel = StringUtils.hasText(planningModel)
-            ? planningModel
-            : resolvedPlanningModel(conversationId);
-        PlanDefinition source = planService.getTask(planId);
-        planService.beginPlanFromDefinition(conversationId, source, prePlanningModel, executionModel);
-        String continuationMessage = CONTINUE_PLAN_MESSAGE;
-        if (StringUtils.hasText(userInstruction)) {
-            continuationMessage += " The user also asked: " + userInstruction.trim();
-        }
-        return chat(requestResolver.resolve(conversationId, continuationMessage, executionModel, null).withoutTitleJob());
-    }
-
-    public void exitPlan(String conversationId) {
-        requirePlanService();
-        String prePlanningModel = planService.prePlanningModel(conversationId);
-        planService.exitPlan(conversationId);
-        if (StringUtils.hasText(prePlanningModel)) {
-            chatSessionMetadataRepository.saveModel(conversationId, prePlanningModel);
-        }
-        if (contextUsageTracker != null) {
-            contextUsageTracker.clear(conversationId);
-        }
-    }
-
-    public ChatResponse.MsgResponse submitPlanAnswer(String conversationId, String answer, String notes) {
-        return submitPlanAnswer(conversationId, answer, notes, null);
-    }
-
-    public ChatResponse.MsgResponse submitPlanAnswer(String conversationId, String answer, String notes, Integer questionIndex) {
-        requirePlanService();
-        PlanDefinition plan;
-        try {
-            plan = planService.recordPromptAnswer(conversationId, answer, notes, questionIndex);
-        } catch (IllegalStateException exception) {
-            if (!isRecoverablePlanningAnswerConflict(exception) || planService.mode(conversationId) != PlanMode.PLAN) {
-                throw exception;
-            }
-            String model = resolvedPlanningModel(conversationId);
-            return savedAnswerFailureResponse(
-                conversationId,
-                model,
-                "That planning answer was for an older prompt. I refreshed the current planning prompt so you can continue."
-            );
-        }
-        if (plan.hasPendingQuestion()) {
-            String model = resolvedPlanningModel(conversationId);
-            return new ChatResponse.MsgResponse(
-                conversationId,
-                model,
-                "",
-                maintainContextUsage(conversationId, model).usage(),
-                planState(conversationId)
-            );
-        }
-        String continueModel = resolvedPlanningModel(conversationId);
-        try {
-            return chat(requestResolver.resolve(
-                conversationId,
-                "Continue planning from the three opening answers stored in the structured planning state. Treat those answers as authoritative seed context and ask only the next useful clarification if the plan is not ready.",
-                continueModel,
-                null
-            ).withoutTitleJob());
-        } catch (NonTransientAiException exception) {
-            logger.warn("Planning answer continuation failed conv={} model={}: {}",
-                conversationId, continueModel, exception.getMessage());
-            if (auditService != null) {
-                auditService.recordError(conversationId, "planning_model_failure",
-                    safeAiFailureMessage(exception), stackTraceString(exception), continueModel);
-            }
-            return savedAnswerFailureResponse(conversationId, continueModel, PLAN_ANSWER_MODEL_FAILURE_MESSAGE);
-        } catch (RuntimeException exception) {
-            logger.warn("Planning answer continuation failed conv={} model={}: {}",
-                conversationId, continueModel, exception.getMessage(), exception);
-            if (auditService != null) {
-                auditService.recordError(conversationId, "planning_continuation_failure",
-                    safeAiFailureMessage(exception), stackTraceString(exception), continueModel);
-            }
-            return savedAnswerFailureResponse(conversationId, continueModel, PLAN_ANSWER_CONTINUATION_FAILURE_MESSAGE);
-        }
-    }
-
-    private boolean isRecoverablePlanningAnswerConflict(IllegalStateException exception) {
-        if (exception == null || !StringUtils.hasText(exception.getMessage())) {
-            return false;
-        }
-        String message = exception.getMessage();
-        return message.contains("No active planning question exists")
-            || message.contains("Stale planning answer.");
-    }
-
-    private ChatResponse.MsgResponse savedAnswerFailureResponse(String conversationId, String model, String message) {
-        ensureRecoverablePlanningPrompt(conversationId);
-        chatMemory.add(conversationId, List.of(new AssistantMessage(message)));
-        return new ChatResponse.MsgResponse(
-            conversationId,
-            model,
-            message,
-            maintainContextUsage(conversationId, model).usage(),
-            planState(conversationId)
-        );
-    }
-
-    private void ensureRecoverablePlanningPrompt(String conversationId) {
-        if (planService == null || planService.mode(conversationId) != PlanMode.PLAN) {
+    private void rejectSystemChatConversation(String conversationId) {
+        if (conversationId == null || !StringUtils.hasText(conversationId)) {
             return;
         }
-        ChatPlanState state = planService.view(conversationId);
-        if (!"DRAFT".equals(state.status()) || StringUtils.hasText(state.promptQuestion())) {
-            return;
-        }
-        planService.askQuestions(conversationId, List.of(
-            "What should we clarify, change, or add before continuing this plan?"
-        ));
-    }
-
-    public ChatPlanState approvePlan(String conversationId) {
-        requirePlanService();
-        planService.approvePlan(conversationId);
-        return planState(conversationId);
-    }
-
-    public ChatPlanState continuePlanning(String conversationId) {
-        requirePlanService();
-        planService.askQuestions(
-            conversationId,
-            List.of("What should we clarify, change, or add before approving this plan?")
-        );
-        return planState(conversationId);
-    }
-
-    public ChatResponse.MsgResponse executeSavedPlan(String conversationId, boolean clearContext) {
-        return executeSavedPlan(conversationId, clearContext, true);
-    }
-
-    public ChatResponse.MsgResponse executeSavedPlan(String conversationId) {
-        return executeSavedPlan(conversationId, false, true);
-    }
-
-    private ChatResponse.MsgResponse executeSavedPlan(String conversationId, boolean clearContext, boolean persistFinalMessage) {
-        ResolvedChatRequest request = resolveSavedPlanExecution(conversationId, clearContext);
-        try {
-            ChatResponse.MsgResponse response = chat(request);
-            planService.recordFallbackExecutionEvidence(conversationId);
-            if (planService.mode(conversationId) == PlanMode.EXECUTE_PLAN) {
-                response = markPlanNeedsReviewResponse(response);
-            }
-            if (persistFinalMessage && isValidatedPlanCompletion(conversationId)) {
-                planService.persistChatFinalMessage(conversationId, response.response());
-            }
-            return new ChatResponse.MsgResponse(
-                response.conversationId(),
-                response.model(),
-                response.response(),
-                response.contextUsage(),
-                planState(conversationId),
-                response.toolActivities()
-            );
-        } catch (RuntimeException exception) {
-            recordExecutionFailure(conversationId, exception);
-            throw new IllegalStateException("Plan execution failed: " + rootCauseMessage(exception), exception);
+        var origin = chatSessionMetadataRepository.findOrigin(conversationId);
+        if (origin.isPresent() && (origin.get() == ChatSessionOrigin.SYSTEM_CHAT
+                || origin.get() == ChatSessionOrigin.PROJECT_CHAT)) {
+            throw new IllegalArgumentException(
+                    "Restricted chat conversations cannot be used through public chat endpoints");
         }
     }
 
-    public ResolvedChatRequest resolveSavedPlanExecution(String conversationId) {
-        return resolveSavedPlanExecution(conversationId, false);
-    }
-
-    public ResolvedChatRequest resolveSavedPlanExecution(String conversationId, boolean clearContext) {
-        rejectSystemChatConversation(conversationId);
-        requirePlanService();
-        String model = planService.executionModel(conversationId);
-        if (!StringUtils.hasText(model)) {
-            model = planService.prePlanningModel(conversationId);
-        }
-        if (!StringUtils.hasText(model)) {
-            model = storedConversationModel(conversationId);
-        }
-        if (!StringUtils.hasText(model)) {
-            model = defaultModel();
-        }
-        if (contextUsageTracker != null) {
-            contextUsageTracker.clear(conversationId);
-        }
-        planService.markExecuting(conversationId);
-        ResolvedChatRequest request = requestResolver.resolve(
-            conversationId,
-            approvedPlanExecutionMessage(conversationId, clearContext),
-            model,
-            null
-        ).withoutTitleJob();
-        return clearContext ? request.omittingStoredMessages() : request;
-    }
-
-    public void handlePlanExecutionStreamFinished(String conversationId) {
-        handlePlanExecutionStreamFinished(conversationId, null);
-    }
-
-    public void handlePlanExecutionStreamFinished(String conversationId, String finalMessage) {
-        requirePlanService();
-        planService.recordFallbackExecutionEvidence(conversationId);
-        if (planService.mode(conversationId) == PlanMode.EXECUTE_PLAN) {
-            planService.markNeedsReview(conversationId);
-            persistControlledReviewMessage(conversationId, finalMessage);
-        } else if (isValidatedPlanCompletion(conversationId)) {
-            planService.persistChatFinalMessage(conversationId, planService.finalMessage(conversationId));
-        }
-    }
-
-    public void recordExecutionFailure(String conversationId, RuntimeException exception) {
-        requirePlanService();
-        if (auditService != null) {
-            auditService.recordError(
-                conversationId, "plan_execution",
-                rootCauseMessage(exception),
-                stackTraceString(exception),
-                null
-            );
-        }
-        try {
-            planService.recordExecutionReport(
-                conversationId,
-                "Execution failed before completion.",
-                List.of(),
-                List.of(rootCauseMessage(exception)),
-                List.of("Saved plan execution did not complete."),
-                List.of()
-            );
-            planService.markNeedsReview(conversationId);
-        } catch (RuntimeException reportException) {
-            exception.addSuppressed(reportException);
-        }
-    }
-
-    public TaskExecutionResult executeTaskBlocking(String taskId, Map<String, Object> inputValues, String conversationId, String modelOverride) {
-        requireTaskService();
-        ResolvedTaskExecution execution = resolveTaskExecution(taskId, inputValues, conversationId, modelOverride);
-        TaskRun started = taskService.getRun(execution.runId());
-        if (started.status() != TaskRunStatus.RUNNING) {
-            return new TaskExecutionResult(execution.conversationId(), started, null);
-        }
-        try {
-            ChatResponse.MsgResponse response = chat(execution.request());
-            TaskRun run = taskService.getRun(execution.runId());
-            if (run.status() == TaskRunStatus.RUNNING) {
-                run = taskService.markActiveRunNeedsReview(
-                    execution.conversationId(),
-                    "Task execution returned without calling task_complete."
-                );
-            }
-            return new TaskExecutionResult(execution.conversationId(), run, response);
-        } catch (RuntimeException exception) {
-            try {
-                TaskRun current = taskService.getRun(execution.runId());
-                if (current.status() != TaskRunStatus.RUNNING) {
-                    return new TaskExecutionResult(execution.conversationId(), current, null);
-                }
-                TaskRun failed = taskService.failActiveRun(execution.conversationId(), rootCauseMessage(exception));
-                return new TaskExecutionResult(execution.conversationId(), failed, null);
-            } catch (RuntimeException failException) {
-                exception.addSuppressed(failException);
-                throw exception;
-            }
-        }
-    }
-
-    public Flux<TaskExecutionEvent> streamTaskExecution(String taskId, Map<String, Object> inputValues, String conversationId, String modelOverride) {
-        requireTaskService();
-        ResolvedTaskExecution execution = resolveTaskExecution(taskId, inputValues, conversationId, modelOverride);
-        return Flux.create(sink -> {
-            TrustedPolicyResult previousPolicy = activeTrustedPolicies.get();
-            try {
-                installTrustedPolicy(execution.request());
-                sink.next(TaskExecutionEvent.started(execution.conversationId(), execution.runId()));
-                TaskRun started = taskService.getRun(execution.runId());
-                if (started.status() != TaskRunStatus.RUNNING) {
-                    sink.next(TaskExecutionEvent.finished(execution.conversationId(), started));
-                    sink.complete();
-                    return;
-                }
-                ChatMessage finalMessage = toolChatMessageWithRetry(
-                    execution.request(),
-                    approvedTools(execution.request()),
-                    message -> sink.next(TaskExecutionEvent.message(execution.conversationId(), execution.runId(), message)),
-                    null
-                );
-                if (finalMessage != null) {
-                    sink.next(TaskExecutionEvent.message(execution.conversationId(), execution.runId(), finalMessage));
-                }
-                TaskRun run = taskService.getRun(execution.runId());
-                if (run.status() == TaskRunStatus.RUNNING) {
-                    run = taskService.markActiveRunNeedsReview(
-                        execution.conversationId(),
-                        "Task execution returned without calling task_complete."
-                    );
-                }
-                sink.next(TaskExecutionEvent.finished(execution.conversationId(), run));
-                sink.complete();
-            } catch (RuntimeException exception) {
-                TaskRun current = taskService.getRun(execution.runId());
-                if (current.status() == TaskRunStatus.RUNNING) {
-                    current = taskService.failActiveRun(execution.conversationId(), rootCauseMessage(exception));
-                }
-                sink.next(TaskExecutionEvent.finished(execution.conversationId(), current));
-                sink.complete();
-            } finally {
-                restoreTrustedPolicy(previousPolicy);
-            }
-        });
-    }
-
-    private ResolvedTaskExecution resolveTaskExecution(
-        String taskId,
-        Map<String, Object> inputValues,
-        String conversationId,
-        String modelOverride
-    ) {
-        String resolvedConversationId = StringUtils.hasText(conversationId) ? conversationId : UUID.randomUUID().toString();
-        String storedModel = storedConversationModel(resolvedConversationId);
-        String model = StringUtils.hasText(modelOverride)
-            ? modelOverride
-            : (StringUtils.hasText(storedModel) ? storedModel : defaultModel());
-        if (contextUsageTracker != null) {
-            contextUsageTracker.clear(resolvedConversationId);
-        }
-        OrchestrationTaskContext orchestrationContext = OrchestrationTaskContextHolder.current();
-        TaskRun run = taskService.startChatExecution(
-            resolvedConversationId,
-            taskId,
-            inputValues == null ? Map.of() : inputValues,
-            orchestrationContext
-        );
-        ResolvedChatRequest request = requestResolver.resolve(resolvedConversationId, EXECUTE_TASK_MESSAGE, model, null).withoutTitleJob();
-        return new ResolvedTaskExecution(resolvedConversationId, run.id(), request);
-    }
-
-    private String rootCauseMessage(Throwable throwable) {
-        Throwable current = throwable;
-        Throwable root = throwable;
-        while (current != null) {
-            root = current;
-            current = current.getCause();
-        }
-        String message = root == null ? null : root.getMessage();
-        if (!StringUtils.hasText(message) && throwable != null) {
-            message = throwable.getMessage();
-        }
-        return StringUtils.hasText(message) ? message : "unknown execution error";
-    }
-
-    private static String stackTraceString(Throwable throwable) {
-        StringWriter sw = new StringWriter();
-        throwable.printStackTrace(new PrintWriter(sw));
-        return sw.toString();
-    }
-
-    public ChatPlanState planState(String conversationId) {
-        return planService == null ? ChatPlanState.normal() : planService.view(conversationId);
-    }
+    // ── Session / history ──
 
     public List<String> listConversationIds() {
         return listSessions().stream()
@@ -1219,15 +299,7 @@ public class ChatService {
     }
 
     private List<String> rawConversationIds() {
-        List<String> conversationIds = new ArrayList<>(chatMemoryRepository.findConversationIds());
-        if (planService != null) {
-            for (String planConversationId : planService.listConversationIds()) {
-                if (!conversationIds.contains(planConversationId)) {
-                    conversationIds.add(planConversationId);
-                }
-            }
-        }
-        return conversationIds;
+        return new ArrayList<>(chatMemoryRepository.findConversationIds());
     }
 
     public List<ChatSession> listSessions() {
@@ -1240,7 +312,6 @@ public class ChatService {
             .filter(session -> session.origin() != ChatSessionOrigin.SYSTEM_CHAT)
             .filter(session -> session.origin() != ChatSessionOrigin.PROJECT_CHAT)
             .filter(session -> !session.archived())
-            .filter(session -> interactionMode(session.conversationId()) == PlanMode.NORMAL)
             .sorted(java.util.Comparator
                 .comparing(ChatSession::favorite).reversed()
                 .thenComparing(
@@ -1249,23 +320,6 @@ public class ChatService {
                 )
                 .thenComparing(ChatSession::conversationId))
             .toList();
-    }
-
-    public List<ChatSession> listAgentSessions(String agentId) {
-        if (chatSessionMetadataRepository == null) {
-            return List.of();
-        }
-        return chatSessionMetadataRepository.findAgentConversationIds(agentId).stream()
-            .map(this::session)
-            .filter(session -> !session.archived())
-            .toList();
-    }
-
-    public void markAgentConversation(String conversationId, String agentId) {
-        if (chatSessionMetadataRepository == null) {
-            return;
-        }
-        chatSessionMetadataRepository.saveAgentOrigin(conversationId, agentId);
     }
 
     public boolean conversationExists(String conversationId) {
@@ -1294,6 +348,125 @@ public class ChatService {
             chatMemoryRepository.saveAll(conversationId, messages);
         }
     }
+
+    private ChatSession session(String conversationId) {
+        return new ChatSession(
+            conversationId,
+            conversationTitle(conversationId),
+            conversationTitleJobStatus(conversationId),
+            chatSessionMetadataRepository.isFavorite(conversationId),
+            chatSessionMetadataRepository.isArchived(conversationId),
+            chatSessionMetadataRepository.findUpdatedAt(conversationId).orElse(null),
+            chatSessionMetadataRepository.findOrigin(conversationId).orElse(null),
+            chatSessionMetadataRepository.findAgentId(conversationId).orElse(null),
+            0
+        );
+    }
+
+    public String conversationTitleJobStatus(String conversationId) {
+        return null;
+    }
+
+    public String newConversationId() {
+        return UUID.randomUUID().toString();
+    }
+
+    public String conversationTitle(String conversationId) {
+        return chatSessionMetadataRepository.findTitle(conversationId).orElse(null);
+    }
+
+    public ChatSession renameConversation(String conversationId, String title) {
+        if (!StringUtils.hasText(conversationId)) {
+            throw new IllegalArgumentException("conversationId is required");
+        }
+        if (!StringUtils.hasText(title)) {
+            throw new IllegalArgumentException("title is required");
+        }
+        String normalizedTitle = title.trim().replaceAll("\\s+", " ");
+        if (normalizedTitle.length() > 120) {
+            normalizedTitle = normalizedTitle.substring(0, 120).replaceAll("\\s+\\S*$", "").trim();
+        }
+        chatSessionMetadataRepository.updateTitle(conversationId, normalizedTitle);
+        return session(conversationId);
+    }
+
+    public ChatSession setConversationFavorite(String conversationId, boolean favorite) {
+        if (!StringUtils.hasText(conversationId)) {
+            throw new IllegalArgumentException("conversationId is required");
+        }
+        chatSessionMetadataRepository.setFavorite(conversationId, favorite);
+        return session(conversationId);
+    }
+
+    public ChatSession setConversationArchived(String conversationId, boolean archived) {
+        if (!StringUtils.hasText(conversationId)) {
+            throw new IllegalArgumentException("conversationId is required");
+        }
+        chatSessionMetadataRepository.setArchived(conversationId, archived);
+        return session(conversationId);
+    }
+
+    // ── Model resolution ──
+
+    public String defaultModel() {
+        if (aiConfig != null && StringUtils.hasText(aiConfig.resolvedDefaultModelKey())) {
+            return aiConfig.resolvedDefaultModelKey();
+        }
+        String defaultAgentName = aiConfig.defaultAgent();
+        return aiConfig.agents().get(defaultAgentName).model();
+    }
+
+    public List<String> availableModels() {
+        return aiConfig.models().values().stream()
+            .map(config -> config.remoteModelName())
+            .filter(StringUtils::hasText)
+            .distinct()
+            .toList();
+    }
+
+    public record ModelOption(String key, String label) {}
+
+    public List<ModelOption> availableModelOptions() {
+        return aiConfig.models().entrySet().stream()
+            .filter(entry -> StringUtils.hasText(entry.getValue().remoteModelName()))
+            .map(entry -> new ModelOption(
+                entry.getKey(),
+                entry.getKey() + " (" + entry.getValue().remoteModelName() + ")"))
+            .sorted(java.util.Comparator.comparing(ModelOption::label))
+            .toList();
+    }
+
+    public String modelSelectionKey(String model) {
+        if (!StringUtils.hasText(model) || aiConfig == null || aiConfig.models() == null) {
+            return model;
+        }
+        if (aiConfig.models().containsKey(model)) {
+            return model;
+        }
+        String configuredDefault = aiConfig.resolvedDefaultModelKey();
+        if (remoteModelNameMatches(configuredDefault, model)) {
+            return configuredDefault;
+        }
+        return aiConfig.models().entrySet().stream()
+            .filter(entry -> model.equals(entry.getValue().remoteModelName()))
+            .map(Map.Entry::getKey)
+            .findFirst()
+            .orElse(model);
+    }
+
+    private boolean remoteModelNameMatches(String modelKey, String remoteModelName) {
+        if (!StringUtils.hasText(modelKey) || !StringUtils.hasText(remoteModelName)) {
+            return false;
+        }
+        ModelConfig config = aiConfig.models().get(modelKey);
+        return config != null && remoteModelName.equals(config.remoteModelName());
+    }
+
+    public String storedConversationModel(String conversationId) {
+        return chatSessionMetadataRepository.findModel(conversationId).orElse(null);
+    }
+
+    // ── Context usage ──
 
     public ContextUsage contextUsage(String conversationId, String model) {
         if (contextUsageTracker != null) {
@@ -1389,197 +562,30 @@ public class ChatService {
         }
     }
 
-    public String storedConversationModel(String conversationId) {
-        return chatSessionMetadataRepository.findModel(conversationId).orElse(null);
+    private String rootCauseMessage(Throwable throwable) {
+        Throwable current = throwable;
+        Throwable root = throwable;
+        while (current != null) {
+            root = current;
+            current = current.getCause();
+        }
+        String message = root == null ? null : root.getMessage();
+        if (!StringUtils.hasText(message) && throwable != null) {
+            message = throwable.getMessage();
+        }
+        return StringUtils.hasText(message) ? message : "unknown execution error";
     }
 
-    private String storedConversationPlanningModel(String conversationId) {
-        return chatSessionMetadataRepository.findPlanningModel(conversationId).orElse(null);
-    }
-
-    public String conversationTitle(String conversationId) {
-        String storedTitle = chatSessionMetadataRepository.findTitle(conversationId).orElse(null);
-        if (StringUtils.hasText(storedTitle)) {
-            return storedTitle;
-        }
-        if (planService == null) {
-            return null;
-        }
-        return planService.activePlan(conversationId)
-            .map(plan -> {
-                if (StringUtils.hasText(plan.goal())) {
-                    return "Plan for " + compactTitle(plan.goal());
-                }
-                return StringUtils.hasText(plan.title()) ? plan.title() : null;
-            })
-            .filter(StringUtils::hasText)
-            .orElse(null);
-    }
-
-    public ChatSession renameConversation(String conversationId, String title) {
-        if (!StringUtils.hasText(conversationId)) {
-            throw new IllegalArgumentException("conversationId is required");
-        }
-        if (!StringUtils.hasText(title)) {
-            throw new IllegalArgumentException("title is required");
-        }
-        String normalizedTitle = title.trim().replaceAll("\\s+", " ");
-        if (normalizedTitle.length() > 120) {
-            normalizedTitle = normalizedTitle.substring(0, 120).replaceAll("\\s+\\S*$", "").trim();
-        }
-        chatSessionMetadataRepository.updateTitle(conversationId, normalizedTitle);
-        return session(conversationId);
-    }
-
-    private String compactTitle(String value) {
-        String title = value.trim().replaceAll("\\s+", " ");
-        String prefix = "Plan for ";
-        int maxGoalLength = Math.max(16, 80 - prefix.length());
-        if (title.length() <= maxGoalLength) {
-            return title;
-        }
-        return title.substring(0, maxGoalLength).replaceAll("\\s+\\S*$", "").trim();
-    }
-
-    public ChatSession setConversationFavorite(String conversationId, boolean favorite) {
-        if (!StringUtils.hasText(conversationId)) {
-            throw new IllegalArgumentException("conversationId is required");
-        }
-        chatSessionMetadataRepository.setFavorite(conversationId, favorite);
-        return session(conversationId);
-    }
-
-    public ChatSession setConversationArchived(String conversationId, boolean archived) {
-        if (!StringUtils.hasText(conversationId)) {
-            throw new IllegalArgumentException("conversationId is required");
-        }
-        chatSessionMetadataRepository.setArchived(conversationId, archived);
-        return session(conversationId);
-    }
-
-    private ChatSession session(String conversationId) {
-        return new ChatSession(
-            conversationId,
-            conversationTitle(conversationId),
-            conversationTitleJobStatus(conversationId),
-            chatSessionMetadataRepository.isFavorite(conversationId),
-            chatSessionMetadataRepository.isArchived(conversationId),
-            chatSessionMetadataRepository.findUpdatedAt(conversationId).orElse(null),
-            chatSessionMetadataRepository.findOrigin(conversationId).orElse(null),
-            chatSessionMetadataRepository.findAgentId(conversationId).orElse(null),
-            chatFileService == null ? 0 : chatFileService.countFiles(conversationId)
-        );
-    }
-
-    public String conversationTitleJobStatus(String conversationId) {
-        if (agentJobService == null) {
-            return null;
-        }
-        return agentJobService.latestConversationTitleStatus(conversationId)
-            .map(AgentJobStatus::name)
-            .orElse(null);
-    }
-
-    public String newConversationId() {
-        return UUID.randomUUID().toString();
-    }
-
-    public String defaultModel() {
-        if (runtimeSettingsService != null) {
-            return runtimeSettingsService.defaultModel();
-        }
-        if (aiConfig != null && StringUtils.hasText(aiConfig.resolvedDefaultModelKey())) {
-            return aiConfig.resolvedDefaultModelKey();
-        }
-        String defaultAgentName = aiConfig.defaultAgent();
-        return aiConfig.agents().get(defaultAgentName).model();
-    }
-
-    public String planningModel() {
-        if (runtimeSettingsService != null) {
-            return runtimeSettingsService.planningModel();
-        }
-        if (aiConfig == null || aiConfig.models() == null) {
-            return defaultModel();
-        }
-        String modelKey = aiConfig.resolvedPlanningModelKey();
-        ModelConfig model = aiConfig.models().get(modelKey);
-        return model == null ? defaultModel() : model.remoteModelName();
-    }
-
-    private String resolvedPlanningModel(String conversationId) {
-        String stored = storedConversationPlanningModel(conversationId);
-        return StringUtils.hasText(stored) ? stored : planningModel();
-    }
-
-    public List<String> availableModels() {
-        return aiConfig.models().values().stream()
-            .map(config -> config.remoteModelName())
-            .filter(StringUtils::hasText)
-            .distinct()
-            .toList();
-    }
-
-    /**
-     * Returns model options as (key, label) pairs where key is the configured
-     * model alias and label is the remote model name for display.
-     * The key is validated by {@code RuntimeSettingsService} as the canonical model reference.
-     */
-    public record ModelOption(String key, String label) {}
-
-    public List<ModelOption> availableModelOptions() {
-        return aiConfig.models().entrySet().stream()
-            .filter(entry -> StringUtils.hasText(entry.getValue().remoteModelName()))
-            .map(entry -> new ModelOption(
-                entry.getKey(),
-                entry.getKey() + " (" + entry.getValue().remoteModelName() + ")"))
-            .sorted(java.util.Comparator.comparing(ModelOption::label))
-            .toList();
-    }
-
-    public String modelSelectionKey(String model) {
-        if (!StringUtils.hasText(model) || aiConfig == null || aiConfig.models() == null) {
-            return model;
-        }
-        if (aiConfig.models().containsKey(model)) {
-            return model;
-        }
-        if (runtimeSettingsService != null) {
-            String runtimeDefault = runtimeSettingsService.get().defaultModel();
-            if (remoteModelNameMatches(runtimeDefault, model)) {
-                return runtimeDefault;
-            }
-        }
-        String configuredDefault = aiConfig.resolvedDefaultModelKey();
-        if (remoteModelNameMatches(configuredDefault, model)) {
-            return configuredDefault;
-        }
-        return aiConfig.models().entrySet().stream()
-            .filter(entry -> model.equals(entry.getValue().remoteModelName()))
-            .map(Map.Entry::getKey)
-            .findFirst()
-            .orElse(model);
-    }
-
-    private boolean remoteModelNameMatches(String modelKey, String remoteModelName) {
-        if (!StringUtils.hasText(modelKey) || !StringUtils.hasText(remoteModelName)) {
-            return false;
-        }
-        ModelConfig config = aiConfig.models().get(modelKey);
-        return config != null && remoteModelName.equals(config.remoteModelName());
-    }
+    // ── Tool chat state machine ──
 
     private ChatResponse.MsgResponse toolChat(ResolvedChatRequest request, List<ToolCallback> approvedTools) {
-        return toolChat(request, approvedTools, null, null).response();
+        return toolChat(request, approvedTools, null).response();
     }
-
-    // ── Refactored toolChat: state machine dispatcher ──
 
     private ToolChatResult toolChat(
         ResolvedChatRequest request,
         List<ToolCallback> approvedTools,
-        Consumer<ChatMessage> toolMessageConsumer,
-        ActiveTurn activeTurn
+        Consumer<ChatMessage> toolMessageConsumer
     ) {
         if (chatModelRouter == null || toolCallingManager == null || contextManagementAdvisor == null || toolTranscriptService == null) {
             throw new IllegalStateException("Tool execution requires model routing, ToolCallingManager, context management, and tool transcripts");
@@ -1594,7 +600,6 @@ public class ChatService {
             ? currentInstructions
             : currentSystemInstructions;
         ToolCallingChatOptions options = toolOptions(request.model(), approvedTools);
-        PlanMode mode = interactionMode(request.conversationId());
 
         ContextManagementAdvisor.PreparedPrompt preparedPrompt = contextManagementAdvisor.preparePrompt(
             request.conversationId(), currentInstructions, request.model(), request.omitStoredMessages());
@@ -1602,19 +607,14 @@ public class ChatService {
 
         if (logger.isDebugEnabled()) {
             logger.debug("{}", TurnDiagnostic.start(request.conversationId(), TurnPhase.PREPARE,
-                Map.of("mode", mode, "model", request.model(), "toolCount", approvedTools.size())));
+                Map.of("model", request.model(), "toolCount", approvedTools.size())));
         }
-        logger.debug("Starting tool chat turn conv={} mode={} model={}",
-            request.conversationId(), mode, request.model());
+        logger.debug("Starting tool chat turn conv={} model={}",
+            request.conversationId(), request.model());
 
-        PlanToolExecutionContext.set(new PlanToolContext(
-            request.conversationId(), mode,
-            mode == PlanMode.EXECUTE_TASK && taskService != null
-                ? taskService.runIdForConversation(request.conversationId()) : null));
         turnAuditWriter.recordTurnStart(request);
 
-        var s = new ToolLoopState(request, approvedTools, toolMessageConsumer,
-            activeTurn, mode, options, toolLoopInstructions);
+        var s = new ToolLoopState(request, approvedTools, toolMessageConsumer, options, toolLoopInstructions);
         s.prompt = prompt;
         s.phase = TurnPhase.INVOKE_MODEL;
 
@@ -1630,29 +630,14 @@ public class ChatService {
             }
             return new ToolChatResult(s.chatResponse, s.finalMessage);
         } catch (RuntimeException e) {
-            logger.error("Tool chat turn failed conv={} mode={}: {}",
-                request.conversationId(), mode, e.getMessage(), e);
-            if (auditService != null) {
-                auditService.recordError(request.conversationId(), "tool_execution",
-                    e.getMessage(), stackTraceString(e), request.model());
-            }
+            logger.error("Tool chat turn failed conv={}: {}",
+                request.conversationId(), e.getMessage(), e);
             throw e;
-        } finally {
-            PlanToolExecutionContext.clear();
         }
     }
 
     private void handleInvokeModel(ToolLoopState s) {
-        phase(s.activeTurn, ActiveTurnPhase.MODEL_CALL);
-        Instant startedAt = Instant.now();
-        String invocationId = reserveMeasurement(s, MeasurementKind.MODEL, s.request.model());
-        try {
-            s.response = chatModelRouter.chatModel(s.request.model()).call(s.prompt);
-            completeModelMeasurement(invocationId, s, startedAt);
-        } catch (Exception e) {
-            completeModelMeasurementFailure(invocationId, s, startedAt, e);
-            throw e;
-        }
+        s.response = chatModelRouter.chatModel(s.request.model()).call(s.prompt);
         s.phase = TurnPhase.EVALUATE;
     }
 
@@ -1671,16 +656,6 @@ public class ChatService {
         }
         if (isEmptyFinalResponse(s.response)
             && s.emptyFinalResponseRetries < EMPTY_FINAL_RESPONSE_RETRY_LIMIT) {
-            s.phase = TurnPhase.REPAIR;
-            return;
-        }
-        if (requiresPlanTurnRepair(s.request.conversationId(), s.mode)
-            && s.planTurnRepairRetries < PLAN_TURN_REPAIR_RETRY_LIMIT) {
-            s.phase = TurnPhase.REPAIR;
-            return;
-        }
-        if (requiresExecutionCompletionRepair(s.request.conversationId(), s.mode)
-            && s.executionCompletionRepairRetries < EXECUTION_COMPLETION_REPAIR_RETRY_LIMIT) {
             s.phase = TurnPhase.REPAIR;
             return;
         }
@@ -1707,21 +682,13 @@ public class ChatService {
             return;
         }
 
-        phase(s.activeTurn, ActiveTurnPhase.TOOL_CALL);
         int promptMessageCount = s.prompt.getInstructions().size();
-        Instant toolsStartedAt = Instant.now();
-        Map<String, String> toolInvocationIds = reserveToolMeasurements(s);
         ToolExecutionResult toolExecutionResult;
         try {
             toolExecutionResult = toolCallingManager.executeToolCalls(s.prompt, s.response);
-            completeToolMeasurements(toolInvocationIds, s, toolExecutionResult, toolsStartedAt);
         } catch (ToolExecutionException exception) {
-            failToolMeasurements(toolInvocationIds, s, toolsStartedAt, exception);
             handleToolExecutionFailure(s, exception);
             return;
-        } catch (Exception exception) {
-            failToolMeasurements(toolInvocationIds, s, toolsStartedAt, exception);
-            throw exception;
         }
         List<ToolTranscriptEntry> toolTranscriptEntries = toolTranscriptEntries(s.response, toolExecutionResult);
         List<ChatMessage> pendingToolMessages = new ArrayList<>();
@@ -1743,22 +710,6 @@ public class ChatService {
                 s.conversationHistory.subList(promptMessageCount, s.conversationHistory.size()));
         }
         s.currentSystemInstructions = currentSystemInstructions(s.request);
-
-        phase(s.activeTurn, ActiveTurnPhase.TOOL_CHECKPOINT);
-        if (s.activeTurn != null) {
-            java.util.Optional<String> nextInterrupt = s.activeTurn.pollInterrupt();
-            while (nextInterrupt.isPresent()) {
-                String interrupt = nextInterrupt.get();
-                UserMessage interruptMessage = new UserMessage(interrupt);
-                s.conversationHistory.add(interruptMessage);
-                s.activeToolMessages.add(interruptMessage);
-                s.messagesToPersist.add(interruptMessage);
-                if (s.toolMessageConsumer != null) {
-                    s.toolMessageConsumer.accept(userMessage(interrupt));
-                }
-                nextInterrupt = s.activeTurn.pollInterrupt();
-            }
-        }
 
         try {
             s.toolLoopGuard.recordToolResponses(toolExecutionResult);
@@ -1798,30 +749,6 @@ public class ChatService {
 
         if (s.toolMessageConsumer != null) {
             pendingToolMessages.forEach(s.toolMessageConsumer);
-            for (ToolTranscriptEntry entry : toolTranscriptEntries) {
-                if (FILE_MUTATING_TOOL_NAMES.contains(entry.toolName())) {
-                    s.toolMessageConsumer.accept(new ChatMessage(
-                        "outputs_changed", s.request.conversationId(), null, null
-                    ));
-                }
-            }
-        }
-
-        if (s.mode == PlanMode.EXECUTE_PLAN && planService != null
-            && planService.mode(s.request.conversationId()) != PlanMode.EXECUTE_PLAN) {
-            s.validatedFinalMessage = planService.finalMessage(s.request.conversationId());
-            s.planCompletionDetected = true;
-            s.phase = TurnPhase.EVALUATE;
-            return;
-        }
-        if (s.mode == PlanMode.EXECUTE_TASK && taskService != null
-            && taskService.mode(s.request.conversationId()) != PlanMode.EXECUTE_TASK) {
-            String taskRunId = PlanToolExecutionContext.current() == null
-                ? null : PlanToolExecutionContext.current().runId();
-            s.validatedFinalMessage = taskRunId == null ? null : taskService.finalMessage(taskRunId);
-            s.planCompletionDetected = true;
-            s.phase = TurnPhase.EVALUATE;
-            return;
         }
 
         s.phase = TurnPhase.INVOKE_MODEL;
@@ -1853,7 +780,7 @@ public class ChatService {
         SystemMessage controlMessage = new SystemMessage(
             "One or more tool calls failed before Magenta could apply them: "
                 + compactParserMessage(exception.getMessage()) + ". "
-                + "Retry the failed tool call with the exact schema shown for that tool, or end the planning turn with ask_user_questions or plan_ready_for_approval."
+                + "Retry the failed tool call with the exact schema shown for that tool, or continue with another action."
         );
         s.messagesToPersist.add(controlMessage);
         s.activeToolMessages.add(controlMessage);
@@ -1979,31 +906,7 @@ public class ChatService {
             && s.emptyFinalResponseRetries < EMPTY_FINAL_RESPONSE_RETRY_LIMIT) {
             collectThinking(s.response, s.thinkingParts);
             s.emptyFinalResponseRetries++;
-            Message controlMessage = emptyFinalResponseControlMessage(s.mode);
-            List<Message> retryMessages = new ArrayList<>(s.prompt.getInstructions());
-            retryMessages.add(controlMessage);
-            s.prompt = new Prompt(retryMessages, s.prompt.getOptions());
-            s.phase = TurnPhase.INVOKE_MODEL;
-            return;
-        }
-
-        if (requiresPlanTurnRepair(s.request.conversationId(), s.mode)
-            && s.planTurnRepairRetries < PLAN_TURN_REPAIR_RETRY_LIMIT) {
-            collectThinking(s.response, s.thinkingParts);
-            s.planTurnRepairRetries++;
-            Message controlMessage = invalidPlanTurnControlMessage();
-            List<Message> retryMessages = new ArrayList<>(s.prompt.getInstructions());
-            retryMessages.add(controlMessage);
-            s.prompt = new Prompt(retryMessages, s.prompt.getOptions());
-            s.phase = TurnPhase.INVOKE_MODEL;
-            return;
-        }
-
-        if (requiresExecutionCompletionRepair(s.request.conversationId(), s.mode)
-            && s.executionCompletionRepairRetries < EXECUTION_COMPLETION_REPAIR_RETRY_LIMIT) {
-            collectThinking(s.response, s.thinkingParts);
-            s.executionCompletionRepairRetries++;
-            Message controlMessage = invalidExecutionCompletionControlMessage(s.mode);
+            Message controlMessage = emptyFinalResponseControlMessage();
             List<Message> retryMessages = new ArrayList<>(s.prompt.getInstructions());
             retryMessages.add(controlMessage);
             s.prompt = new Prompt(retryMessages, s.prompt.getOptions());
@@ -2015,13 +918,6 @@ public class ChatService {
     }
 
     private void handleFinalize(ToolLoopState s) {
-        String forcedPlanningQuestion = null;
-        if (requiresPlanTurnRepair(s.request.conversationId(), s.mode)) {
-            forcedPlanningQuestion = "What should we clarify, change, or add before continuing this plan?";
-            planService.askQuestions(s.request.conversationId(), List.of(forcedPlanningQuestion));
-        }
-
-        phase(s.activeTurn, ActiveTurnPhase.COMPLETING);
         collectThinking(s.response, s.thinkingParts);
 
         AssistantMessage finalAssistantMessage;
@@ -2029,20 +925,11 @@ public class ChatService {
             finalAssistantMessage = StringUtils.hasText(s.validatedFinalMessage)
                 ? new AssistantMessage(s.validatedFinalMessage)
                 : new AssistantMessage("");
-        } else if (StringUtils.hasText(forcedPlanningQuestion)) {
-            finalAssistantMessage = new AssistantMessage(forcedPlanningQuestion);
         } else if (s.response == null || s.response.getResult() == null) {
             finalAssistantMessage = new AssistantMessage("");
         } else {
             finalAssistantMessage = assistantMessageWithThinking(
                 s.response.getResult(), combinedThinking(s.thinkingParts));
-        }
-
-        if (!s.planCompletionDetected && s.mode == PlanMode.EXECUTE_PLAN && planService != null
-            && planService.mode(s.request.conversationId()) == PlanMode.EXECUTE_PLAN) {
-            planService.recordFallbackExecutionEvidence(s.request.conversationId());
-            planService.markNeedsReview(s.request.conversationId());
-            finalAssistantMessage = new AssistantMessage(PLAN_NEEDS_REVIEW_MESSAGE);
         }
 
         if (finalAssistantMessage != null) {
@@ -2063,7 +950,7 @@ public class ChatService {
             s.request.conversationId(), s.request.model(),
             finalAssistantMessage == null ? "" : finalAssistantMessage.getText(),
             maintenance.usage(),
-            planState(s.request.conversationId()),
+            ChatPlanState.normal(),
             List.copyOf(s.toolActivities));
 
         ChatMessage finalMessage = renderAssistantMessage(assistantMessageParts(
@@ -2071,8 +958,8 @@ public class ChatService {
             finalAssistantMessage == null ? "" : finalAssistantMessage.getText()));
 
         turnAuditWriter.enqueueTitleJob(s.request);
-        logger.debug("Tool chat turn completed conv={} mode={} tokens={}",
-            s.request.conversationId(), s.mode,
+        logger.debug("Tool chat turn completed conv={} tokens={}",
+            s.request.conversationId(),
             maintenance.usage() != null ? maintenance.usage().usedTokens() : "?");
 
         s.chatResponse = chatResponse;
@@ -2080,38 +967,70 @@ public class ChatService {
         s.phase = TurnPhase.DONE;
     }
 
-    private ChatResponse.MsgResponse markPlanNeedsReviewResponse(ChatResponse.MsgResponse response) {
-        planService.markNeedsReview(response.conversationId());
-        persistControlledReviewMessage(response.conversationId(), response.response());
-        return new ChatResponse.MsgResponse(
-            response.conversationId(),
-            response.model(),
-            PLAN_NEEDS_REVIEW_MESSAGE,
-            response.contextUsage(),
-            planState(response.conversationId()),
-            response.toolActivities()
-        );
-    }
+    // ── Tool chat retry wrappers ──
 
-    private boolean isValidatedPlanCompletion(String conversationId) {
-        return planService.activePlan(conversationId)
-            .map(plan -> plan.status() == PlanStatus.COMPLETED)
-            .orElse(false);
-    }
-
-    private void persistControlledReviewMessage(String conversationId, String ordinaryResponse) {
-        List<Message> messages = new ArrayList<>(chatMemoryRepository.findByConversationId(conversationId));
-        if (!messages.isEmpty()) {
-            Message last = messages.get(messages.size() - 1);
-            if (last instanceof AssistantMessage && java.util.Objects.equals(last.getText(), ordinaryResponse)) {
-                messages.remove(messages.size() - 1);
+    private ChatMessage toolChatMessage(
+        ResolvedChatRequest request,
+        List<ToolCallback> approvedTools,
+        Consumer<ChatMessage> toolMessageConsumer
+    ) {
+        ToolChatResult result = toolChat(request, approvedTools, toolMessageConsumer);
+        List<ChatMessage> history = history(request.conversationId());
+        if (!history.isEmpty()) {
+            ChatMessage lastMessage = history.get(history.size() - 1);
+            if (isAssistantRole(lastMessage.role())) {
+                return lastMessage;
             }
         }
-        messages.add(new AssistantMessage(PLAN_NEEDS_REVIEW_MESSAGE));
-        chatMemoryRepository.saveAll(conversationId, messages);
+        return result.finalMessage();
     }
 
-    // ── End refactored toolChat ──
+    private ChatMessage toolChatMessageWithRetry(
+        ResolvedChatRequest request,
+        List<ToolCallback> approvedTools,
+        Consumer<ChatMessage> toolMessageConsumer
+    ) {
+        List<Message> snapshot = snapshotConversation(request.conversationId());
+        try {
+            return toolChatMessage(request, approvedTools, toolMessageConsumer);
+        } catch (RuntimeException e) {
+            if (!isRetryable(e)) {
+                throw e;
+            }
+            logger.warn("Retrying turn after transient failure conv={}: {}", request.conversationId(), e.getMessage());
+            restoreConversation(request.conversationId(), snapshot);
+            try {
+                return toolChatMessage(request, approvedTools, toolMessageConsumer);
+            } catch (RuntimeException retryException) {
+                restoreConversation(request.conversationId(), snapshot);
+                throw retryException;
+            }
+        }
+    }
+
+    private ChatResponse.MsgResponse toolChatWithRetry(
+        ResolvedChatRequest request,
+        List<ToolCallback> approvedTools
+    ) {
+        List<Message> snapshot = snapshotConversation(request.conversationId());
+        try {
+            return toolChat(request, approvedTools, null).response();
+        } catch (RuntimeException e) {
+            if (!isRetryable(e)) {
+                throw e;
+            }
+            logger.warn("Retrying turn after transient failure conv={}: {}", request.conversationId(), e.getMessage());
+            restoreConversation(request.conversationId(), snapshot);
+            try {
+                return toolChat(request, approvedTools, null).response();
+            } catch (RuntimeException retryException) {
+                restoreConversation(request.conversationId(), snapshot);
+                throw retryException;
+            }
+        }
+    }
+
+    // ── Prompt / instructions ──
 
     private List<Message> currentInstructions(ResolvedChatRequest request) {
         String systemPrompt = effectiveSystemPrompt(request);
@@ -2123,266 +1042,6 @@ public class ChatService {
             .filter(SystemMessage.class::isInstance)
             .toList();
     }
-
-    private ChatMessage toolChatMessage(
-        ResolvedChatRequest request,
-        List<ToolCallback> approvedTools,
-        Consumer<ChatMessage> toolMessageConsumer,
-        ActiveTurn activeTurn
-    ) {
-        ToolChatResult result = toolChat(request, approvedTools, toolMessageConsumer, activeTurn);
-        List<ChatMessage> history = history(request.conversationId());
-        if (!history.isEmpty()) {
-            ChatMessage lastMessage = history.get(history.size() - 1);
-            if (isAssistantRole(lastMessage.role())) {
-                return lastMessage;
-            }
-        }
-        return result.finalMessage();
-    }
-
-    private ChatMessage userMessage(String text) {
-        return new ChatMessage("user", text, chatMarkdownRenderer.render(text), null);
-    }
-
-    private ChatMessage systemMessage(String text) {
-        return new ChatMessage("system", text, chatMarkdownRenderer.render(text), null);
-    }
-
-    public ChatMessage systemNotice(String text) {
-        return systemMessage(text);
-    }
-
-
-    private SystemMessage compactionNoticeMessage() {
-        return new SystemMessage(ContextManagementAdvisor.NOTICE_PREFIX + ContextManagementAdvisor.COMPACTION_NOTICE);
-    }
-
-    private boolean hasCompactionNotice(String conversationId) {
-        if (chatMemoryRepository == null || contextManagementAdvisor == null) {
-            return false;
-        }
-        return chatMemoryRepository.findByConversationId(conversationId).stream()
-            .anyMatch(contextManagementAdvisor::isCompactionNotice);
-    }
-
-    private void phase(ActiveTurn activeTurn, ActiveTurnPhase phase) {
-        if (activeTurn != null) {
-            activeTurn.phase(phase);
-        }
-    }
-
-    private ToolCallingChatOptions toolOptions(String model, List<ToolCallback> approvedTools) {
-        ToolCallingChatOptions options = StringUtils.hasText(model)
-            ? chatModelRouter.toolCallingOptions(model)
-            : DefaultToolCallingChatOptions.builder().build();
-        return options.mutate().toolCallbacks(approvedTools).build();
-    }
-
-    private ToolCallingChatOptions toolFinalOptions(String model) {
-        ToolCallingChatOptions options = StringUtils.hasText(model)
-            ? chatModelRouter.toolCallingOptions(model)
-            : DefaultToolCallingChatOptions.builder().build();
-        return options.mutate().toolCallbacks(List.of()).build();
-    }
-
-    private SystemMessage toolUseAbortControlMessage(ToolUseAbort abort) {
-        return turnRepair.toolUseAbortControlMessage(abort);
-    }
-
-    private boolean isEmptyFinalResponse(org.springframework.ai.chat.model.ChatResponse response) {
-        return turnRepair.hasNoContentOrToolCalls(response);
-    }
-
-    private SystemMessage emptyFinalResponseControlMessage(PlanMode mode) {
-        return turnRepair.emptyFinalResponseControlMessage(mode);
-    }
-
-    private boolean requiresPlanTurnRepair(String conversationId, PlanMode mode) {
-        return turnRepair.needsPlanTurnRepair(conversationId, mode);
-    }
-
-    private boolean requiresExecutionCompletionRepair(String conversationId, PlanMode mode) {
-        return turnRepair.needsExecutionCompletionRepair(conversationId, mode);
-    }
-
-    private SystemMessage invalidPlanTurnControlMessage() {
-        return turnRepair.invalidPlanTurnControlMessage();
-    }
-
-    private SystemMessage invalidExecutionCompletionControlMessage(PlanMode mode) {
-        return turnRepair.invalidExecutionCompletionControlMessage(mode);
-    }
-
-    private List<MalformedToolCall> malformedToolCalls(org.springframework.ai.chat.model.ChatResponse response) {
-        if (response == null || response.getResult() == null || response.getResult().getOutput() == null) {
-            return List.of();
-        }
-        List<MalformedToolCall> malformed = new ArrayList<>();
-        List<AssistantMessage.ToolCall> toolCalls = response.getResult().getOutput().getToolCalls();
-        for (AssistantMessage.ToolCall toolCall : toolCalls == null ? List.<AssistantMessage.ToolCall>of() : toolCalls) {
-            String arguments = toolCall.arguments();
-            if (!StringUtils.hasText(arguments)) {
-                malformed.add(new MalformedToolCall(
-                    toolCall.id(),
-                    toolCall.name(),
-                    arguments,
-                    "No argument JSON was provided."
-                ));
-                continue;
-            }
-            try {
-                objectMapper.readTree(arguments);
-            } catch (JsonProcessingException exception) {
-                malformed.add(new MalformedToolCall(
-                    toolCall.id(),
-                    toolCall.name(),
-                    arguments,
-                    exception.getOriginalMessage()
-                ));
-            }
-        }
-        return malformed;
-    }
-
-    private SystemMessage malformedToolCallControlMessage(List<MalformedToolCall> malformedToolCalls) {
-        String details = malformedToolCalls.stream()
-            .map(call -> "tool=" + valueOrUnknown(call.name())
-                + ", callId=" + valueOrUnknown(call.id())
-                + ", parser=" + compactParserMessage(call.parserMessage()))
-            .collect(java.util.stream.Collectors.joining("; "));
-        return new SystemMessage(
-            "One or more tool calls had malformed JSON arguments, so no tools in that batch were executed. "
-                + "Bad call details: " + details + ". "
-                + "Retry with valid JSON object arguments or choose the next action."
-        );
-    }
-
-    private String valueOrUnknown(String value) {
-        return StringUtils.hasText(value) ? value.trim() : "unknown";
-    }
-
-    private String compactParserMessage(String message) {
-        if (!StringUtils.hasText(message)) {
-            return "invalid JSON";
-        }
-        String compact = message.replaceAll("\\s+", " ").trim();
-        return compact.length() > 240 ? compact.substring(0, 240) + " [truncated]" : compact;
-    }
-
-    private List<ToolTranscriptEntry> toolTranscriptEntries(
-        org.springframework.ai.chat.model.ChatResponse response,
-        ToolExecutionResult toolExecutionResult
-    ) {
-        if (toolExecutionResult == null || toolExecutionResult.conversationHistory() == null) {
-            return List.of();
-        }
-        List<AssistantMessage.ToolCall> toolCalls = response.getResult().getOutput().getToolCalls();
-        Map<String, AssistantMessage.ToolCall> callsById = toolCalls.stream()
-            .collect(java.util.stream.Collectors.toMap(
-                AssistantMessage.ToolCall::id,
-                java.util.function.Function.identity(),
-                (left, right) -> left
-            ));
-
-        ToolResponseMessage latestToolResponseMessage = null;
-        for (Message message : toolExecutionResult.conversationHistory()) {
-            if (message instanceof ToolResponseMessage toolResponseMessage) {
-                latestToolResponseMessage = toolResponseMessage;
-            }
-        }
-        if (latestToolResponseMessage == null) {
-            return List.of();
-        }
-
-        return latestToolResponseMessage.getResponses().stream()
-            .map(toolResponse -> {
-                AssistantMessage.ToolCall toolCall = callsById.get(toolResponse.id());
-                String arguments = toolCall == null ? "" : toolCall.arguments();
-                return toolTranscriptService.fullResultEntry(
-                    toolResponse.id(),
-                    toolResponse.name(),
-                    arguments,
-                    toolResponse.responseData()
-                );
-            })
-            .toList();
-    }
-
-    private ChatMessage toolMessage(Message message) {
-        String text = toolTranscriptService.renderForHistory(message);
-        return new ChatMessage(
-            "tool",
-            text,
-            chatMarkdownRenderer.render(text),
-            null,
-            toolTranscriptService.activityFor(message)
-        );
-    }
-
-    private List<ToolCallback> approvedTools(ResolvedChatRequest request) {
-        return approvedTools(request, null);
-    }
-
-    private List<ToolCallback> approvedTools(ResolvedChatRequest request, List<String> approvedToolNames) {
-        if (chatToolRegistry == null) {
-            return List.of();
-        }
-        if (approvedToolNames != null) {
-            return filterApprovedTools(approvedToolNames, request);
-        }
-        if (runtimeSettingsService != null) {
-            return filterApprovedTools(runtimeSettingsService.approvedTools(), request);
-        }
-        if (aiConfig == null || !StringUtils.hasText(aiConfig.defaultAgent())) {
-            return List.of();
-        }
-        AgentConfig defaultAgent = aiConfig.agents().get(aiConfig.defaultAgent());
-        if (defaultAgent == null) {
-            return List.of();
-        }
-        return filterApprovedTools(defaultAgent.approvedTools(), request);
-    }
-
-    private List<ToolCallback> filterApprovedTools(List<String> approvedToolNames, ResolvedChatRequest request) {
-        PlanMode mode = interactionMode(request.conversationId());
-        return toolAccessPolicy.filterToolsByMode(approvedToolNames, mode, request.conversationId());
-    }
-
-    private boolean supportsTools(String model) {
-        return !StringUtils.hasText(model) || !toolUnsupportedModels.contains(model);
-    }
-
-    private void rememberToolUnsupportedModel(String model) {
-        if (StringUtils.hasText(model)) {
-            toolUnsupportedModels.add(model);
-        }
-    }
-
-    static boolean isToolUnsupported(Throwable exception) {
-        Throwable current = exception;
-        while (current != null) {
-            String message = current.getMessage();
-            if (message != null && message.contains(OLLAMA_TOOLS_UNSUPPORTED_MESSAGE)) {
-                return true;
-            }
-            current = current.getCause();
-        }
-        return false;
-    }
-
-    private static String safeAiFailureMessage(Throwable exception) {
-        String message = exception == null ? null : exception.getMessage();
-        if (!StringUtils.hasText(message)) {
-            return "AI model request failed";
-        }
-        if (message.contains("401") || message.toLowerCase().contains("authentication")) {
-            return "AI model request failed authentication";
-        }
-        return "AI model request failed";
-    }
-
-
 
     private ChatClient.ChatClientRequestSpec prompt(ResolvedChatRequest request) {
         ChatClient chatClient = chatModelRouter == null
@@ -2420,111 +1079,261 @@ public class ChatService {
     }
 
     String effectiveSystemPrompt(ResolvedChatRequest request) {
-        PlanMode mode = interactionMode(request.conversationId());
-        TrustedPolicyResult policy = activeTrustedPolicies.get();
-        if (policy == null) {
-            policy = resolveTrustedPolicy(request);
-        }
-        if (policy == null) {
-            // Compatibility fixtures without context persistence still use the
-            // typed composition path; production never reaches this branch.
-            return promptAssembler.mergeModePrompt(mode, request.conversationId(), null);
-        }
-
-        TurnContext turn = new TurnContext();
-        turn.resolvedRequest(request);
-        turn.interactionMode(mode);
-        promptAssembler.assemble(turn, policy);
-        if (turn.terminalBindingFailure()) {
-            throw new TrustedContextUnavailableException();
-        }
-        return turn.systemPrompt();
+        return promptAssembler.assembleTurnInstructions(request, defaultSystemPrompt())
+            .stream()
+            .filter(SystemMessage.class::isInstance)
+            .map(Message::getText)
+            .collect(Collectors.joining("\n"));
     }
 
-    /**
-     * Resolve the immutable binding once at the turn boundary, before tool
-     * selection or model construction. Lightweight legacy fixtures omit both
-     * services and retain their no-policy behavior; a partially wired runtime
-     * fails closed instead.
-     */
-    private void installTrustedPolicy(ResolvedChatRequest request) {
-        TrustedPolicyResult current = resolveTrustedPolicy(request);
-        if (current != null) {
-            activeTrustedPolicies.set(current);
-            if (current.isTerminal()) {
-                throw new TrustedContextUnavailableException();
+    // ── Tool resolution ──
+
+    private List<ToolCallback> approvedTools(ResolvedChatRequest request) {
+        return approvedTools(request, null);
+    }
+
+    private List<ToolCallback> approvedTools(ResolvedChatRequest request, List<String> approvedToolNames) {
+        if (chatToolRegistry == null) {
+            return List.of();
+        }
+        if (approvedToolNames != null) {
+            return filterApprovedTools(approvedToolNames, request);
+        }
+        if (aiConfig == null || !StringUtils.hasText(aiConfig.defaultAgent())) {
+            return List.of();
+        }
+        AgentConfig defaultAgent = aiConfig.agents().get(aiConfig.defaultAgent());
+        if (defaultAgent == null) {
+            return List.of();
+        }
+        return filterApprovedTools(defaultAgent.approvedTools(), request);
+    }
+
+    private List<ToolCallback> filterApprovedTools(List<String> approvedToolNames, ResolvedChatRequest request) {
+        return toolAccessPolicy.filterToolsByMode(
+            approvedToolNames,
+            toolAccessPolicy.interactionMode(request.conversationId()),
+            request.conversationId());
+    }
+
+    // ── Tool support detection ──
+
+    private boolean supportsTools(String model) {
+        return !StringUtils.hasText(model) || !toolUnsupportedModels.contains(model);
+    }
+
+    private void rememberToolUnsupportedModel(String model) {
+        if (StringUtils.hasText(model)) {
+            toolUnsupportedModels.add(model);
+        }
+    }
+
+    static boolean isToolUnsupported(Throwable exception) {
+        Throwable current = exception;
+        while (current != null) {
+            String message = current.getMessage();
+            if (message != null && message.contains(OLLAMA_TOOLS_UNSUPPORTED_MESSAGE)) {
+                return true;
+            }
+            current = current.getCause();
+        }
+        return false;
+    }
+
+    // ── Tool options ──
+
+    private ToolCallingChatOptions toolOptions(String model, List<ToolCallback> approvedTools) {
+        ToolCallingChatOptions options = StringUtils.hasText(model)
+            ? chatModelRouter.toolCallingOptions(model)
+            : DefaultToolCallingChatOptions.builder().build();
+        return options.mutate().toolCallbacks(approvedTools).build();
+    }
+
+    private ToolCallingChatOptions toolFinalOptions(String model) {
+        ToolCallingChatOptions options = StringUtils.hasText(model)
+            ? chatModelRouter.toolCallingOptions(model)
+            : DefaultToolCallingChatOptions.builder().build();
+        return options.mutate().toolCallbacks(List.of()).build();
+    }
+
+    // ── Repair helpers (mode-unaware) ──
+
+    private SystemMessage toolUseAbortControlMessage(ToolUseAbort abort) {
+        return turnRepair.toolUseAbortControlMessage(abort);
+    }
+
+    private boolean isEmptyFinalResponse(org.springframework.ai.chat.model.ChatResponse response) {
+        return turnRepair.hasNoContentOrToolCalls(response);
+    }
+
+    private SystemMessage emptyFinalResponseControlMessage() {
+        return new SystemMessage("""
+            Your previous response had thinking but no user-visible message and no tool calls.
+            Continue the turn now with a concise user-visible answer or an appropriate tool call.
+            Do not return an empty assistant message.
+            """.trim());
+    }
+
+    // ── Tool transcript / malformed calls ──
+
+    private List<MalformedToolCall> malformedToolCalls(org.springframework.ai.chat.model.ChatResponse response) {
+        if (response == null || response.getResult() == null || response.getResult().getOutput() == null) {
+            return List.of();
+        }
+        List<MalformedToolCall> malformed = new ArrayList<>();
+        List<AssistantMessage.ToolCall> toolCalls = response.getResult().getOutput().getToolCalls();
+        for (AssistantMessage.ToolCall toolCall : toolCalls == null ? List.<AssistantMessage.ToolCall>of() : toolCalls) {
+            String arguments = toolCall.arguments();
+            if (!StringUtils.hasText(arguments)) {
+                malformed.add(new MalformedToolCall(
+                    toolCall.id(),
+                    toolCall.name(),
+                    arguments,
+                    "No argument JSON was provided."
+                ));
+                continue;
+            }
+            try {
+                objectMapper.readTree(arguments);
+            } catch (JsonProcessingException exception) {
+                malformed.add(new MalformedToolCall(
+                    toolCall.id(),
+                    toolCall.name(),
+                    arguments,
+                    exception.getOriginalMessage()
+                ));
             }
         }
+        return malformed;
     }
 
-    private void restoreTrustedPolicy(TrustedPolicyResult previous) {
-        if (previous == null) {
-            activeTrustedPolicies.remove();
-        } else {
-            activeTrustedPolicies.set(previous);
-        }
+    private SystemMessage malformedToolCallControlMessage(List<MalformedToolCall> malformedToolCalls) {
+        String details = malformedToolCalls.stream()
+            .map(call -> "tool=" + valueOrUnknown(call.name())
+                + ", callId=" + valueOrUnknown(call.id())
+                + ", parser=" + compactParserMessage(call.parserMessage()))
+            .collect(Collectors.joining("; "));
+        return new SystemMessage(
+            "One or more tool calls had malformed JSON arguments, so no tools in that batch were executed. "
+                + "Bad call details: " + details + ". "
+                + "Retry with valid JSON object arguments or choose the next action."
+        );
     }
 
-    private TrustedPolicyResult resolveTrustedPolicy(ResolvedChatRequest request) {
-        if (agentContextService == null && workspaceDirectoryService == null) {
-            return null;
-        }
-        if (agentContextService == null || workspaceDirectoryService == null) {
-            return TrustedPolicyResult.terminal(ContextOutcome.UNAVAILABLE);
-        }
+    private String valueOrUnknown(String value) {
+        return StringUtils.hasText(value) ? value.trim() : "unknown";
+    }
 
-        String bindingKey = request.contextBindingKey();
-        OrchestrationTaskContext runtimeContext = OrchestrationTaskContextHolder.current();
-        if (!StringUtils.hasText(bindingKey) && runtimeContext != null) {
-            bindingKey = runtimeContext.contextBindingKey();
+    private String compactParserMessage(String message) {
+        if (!StringUtils.hasText(message)) {
+            return "invalid JSON";
         }
-        if (!StringUtils.hasText(bindingKey)) {
-            return TrustedPolicyResult.terminal(ContextOutcome.UNAVAILABLE);
-        }
+        String compact = message.replaceAll("\\s+", " ").trim();
+        return compact.length() > 240 ? compact.substring(0, 240) + " [truncated]" : compact;
+    }
 
-        var bindingLookup = agentContextService.getBinding(bindingKey);
-        if (bindingLookup.outcome() != ContextOutcome.AVAILABLE || bindingLookup.value() == null) {
-            return TrustedPolicyResult.terminal(ContextOutcome.UNAVAILABLE);
+    private List<ToolTranscriptEntry> toolTranscriptEntries(
+        org.springframework.ai.chat.model.ChatResponse response,
+        ToolExecutionResult toolExecutionResult
+    ) {
+        if (toolExecutionResult == null || toolExecutionResult.conversationHistory() == null) {
+            return List.of();
         }
-        try {
-            WorkspaceDescriptor agentDescriptor = workspaceDirectoryService.resolveForRead(
-                    WorkspaceKind.AGENT, bindingLookup.value().agentId());
-            WorkspaceDescriptor executionDescriptor = runtimeContext != null
-                    && runtimeContext.workspaceDescriptor() != null
-                    ? runtimeContext.workspaceDescriptor() : agentDescriptor;
-            if (executionDescriptor.kind() == WorkspaceKind.CHAT) {
-                return TrustedPolicyResult.terminal(ContextOutcome.UNAVAILABLE);
+        List<AssistantMessage.ToolCall> toolCalls = response.getResult().getOutput().getToolCalls();
+        Map<String, AssistantMessage.ToolCall> callsById = toolCalls.stream()
+            .collect(Collectors.toMap(
+                AssistantMessage.ToolCall::id,
+                java.util.function.Function.identity(),
+                (left, right) -> left
+            ));
+
+        ToolResponseMessage latestToolResponseMessage = null;
+        for (Message message : toolExecutionResult.conversationHistory()) {
+            if (message instanceof ToolResponseMessage toolResponseMessage) {
+                latestToolResponseMessage = toolResponseMessage;
             }
-            BindingResolution bindingResolution = agentContextService.resolveBinding(
-                    agentDescriptor, bindingLookup.value());
-            return TrustedContextPolicyAssembler.create(executionDescriptor, bindingResolution).assemble();
-        } catch (IllegalArgumentException | IllegalStateException exception) {
-            logger.debug("Trusted context could not be resolved for a chat turn");
-            return TrustedPolicyResult.terminal(ContextOutcome.UNAVAILABLE);
         }
+        if (latestToolResponseMessage == null) {
+            return List.of();
+        }
+
+        return latestToolResponseMessage.getResponses().stream()
+            .map(toolResponse -> {
+                AssistantMessage.ToolCall toolCall = callsById.get(toolResponse.id());
+                String arguments = toolCall == null ? "" : toolCall.arguments();
+                return toolTranscriptService.fullResultEntry(
+                    toolResponse.id(),
+                    toolResponse.name(),
+                    arguments,
+                    toolResponse.responseData()
+                );
+            })
+            .toList();
     }
 
-    private static final class TrustedContextUnavailableException extends IllegalStateException {
-        private TrustedContextUnavailableException() {
-            super("The selected context is unavailable. This turn did not run.");
-        }
+    // ── Message rendering ──
+
+    public ChatMessage renderAssistantMessage(String text) {
+        MessageParts messageParts = splitThinkingFallback(text == null ? "" : text);
+        return renderAssistantMessage(messageParts);
     }
 
-    private PlanMode interactionMode(String conversationId) {
-        return toolAccessPolicy.interactionMode(conversationId);
+    public ChatMessage renderAssistantMessage(org.springframework.ai.chat.model.ChatResponse response) {
+        if (response == null || response.getResult() == null) {
+            return renderAssistantMessage("");
+        }
+        return renderAssistantMessage(response.getResult());
     }
 
-    private void requirePlanService() {
-        if (planService == null) {
-            throw new IllegalStateException("Plan service is not available");
+    private ChatMessage renderAssistantMessage(org.springframework.ai.chat.model.Generation generation) {
+        if (generation == null) {
+            return renderAssistantMessage("");
         }
+        String text = generation.getOutput() == null || generation.getOutput().getText() == null
+            ? ""
+            : generation.getOutput().getText();
+        String thinking = thinkingText(generation);
+        MessageParts messageParts = StringUtils.hasText(thinking)
+            ? new MessageParts(text, thinking)
+            : splitThinkingFallback(text);
+        return renderAssistantMessage(messageParts);
     }
 
-    private void requireTaskService() {
-        if (taskService == null) {
-            throw new IllegalStateException("Task service is not available");
-        }
+    private ChatMessage renderAssistantMessage(MessageParts messageParts) {
+        String visibleText = messageParts.visibleText();
+        String thinkingText = messageParts.thinkingText();
+        return new ChatMessage(
+            "assistant",
+            visibleText,
+            chatMarkdownRenderer.render(visibleText),
+            StringUtils.hasText(thinkingText) ? chatMarkdownRenderer.render(thinkingText) : null
+        );
     }
+
+    private ChatMessage userMessage(String text) {
+        return new ChatMessage("user", text, chatMarkdownRenderer.render(text), null);
+    }
+
+    private ChatMessage systemMessage(String text) {
+        return new ChatMessage("system", text, chatMarkdownRenderer.render(text), null);
+    }
+
+    public ChatMessage systemNotice(String text) {
+        return systemMessage(text);
+    }
+
+    private ChatMessage toolMessage(Message message) {
+        String text = toolTranscriptService.renderForHistory(message);
+        return new ChatMessage(
+            "tool",
+            text,
+            chatMarkdownRenderer.render(text),
+            null,
+            toolTranscriptService.activityFor(message)
+        );
+    }
+
+    // ── History rendering ──
 
     private List<ChatMessage> toHistory(List<Message> messages) {
         return messages.stream()
@@ -2557,6 +1366,8 @@ public class ChatService {
         return "assistant".equalsIgnoreCase(role);
     }
 
+    // ── Thinking extraction ──
+
     private MessageParts assistantMessageParts(Message message, String sourceText) {
         String thinkingText = message == null || message.getMetadata() == null
             ? null
@@ -2581,7 +1392,7 @@ public class ChatService {
         if (!StringUtils.hasText(thinking)) {
             return output;
         }
-        Map<String, Object> metadata = new java.util.LinkedHashMap<>(output.getMetadata());
+        Map<String, Object> metadata = new LinkedHashMap<>(output.getMetadata());
         metadata.put(MESSAGE_THINKING_METADATA_KEY, thinking);
         return AssistantMessage.builder()
             .content(output.getText())
@@ -2604,16 +1415,14 @@ public class ChatService {
     private String combinedThinking(List<String> thinkingParts) {
         return thinkingParts.stream()
             .filter(StringUtils::hasText)
-            .collect(java.util.stream.Collectors.joining("\n\n"));
+            .collect(Collectors.joining("\n\n"));
     }
 
     static String thinkingText(org.springframework.ai.chat.model.Generation generation) {
-        // Ollama: ChatGenerationMetadata under "thinking"
         if (generation.getMetadata() != null) {
             String thinking = stringValue(generation.getMetadata().get(THINKING_METADATA_KEY));
             if (thinking != null) return thinking;
         }
-        // OpenAI/DeepSeek: AssistantMessage properties under "reasoningContent"
         org.springframework.ai.chat.messages.AssistantMessage output = generation.getOutput();
         if (output instanceof DeepSeekAssistantMessage deepSeekMessage) {
             String reasoning = deepSeekMessage.getReasoningContent();
@@ -2660,6 +1469,49 @@ public class ChatService {
         return new MessageParts(visible.toString().trim(), thinking.toString().trim());
     }
 
+    // ── Compaction helpers ──
+
+    private SystemMessage compactionNoticeMessage() {
+        return new SystemMessage(ContextManagementAdvisor.NOTICE_PREFIX + ContextManagementAdvisor.COMPACTION_NOTICE);
+    }
+
+    private boolean hasCompactionNotice(String conversationId) {
+        if (chatMemoryRepository == null || contextManagementAdvisor == null) {
+            return false;
+        }
+        return chatMemoryRepository.findByConversationId(conversationId).stream()
+            .anyMatch(contextManagementAdvisor::isCompactionNotice);
+    }
+
+    // ── Conversation snapshot / restore ──
+
+    private List<Message> snapshotConversation(String conversationId) {
+        if (!StringUtils.hasText(conversationId) || chatMemoryRepository == null) {
+            return List.of();
+        }
+        return new ArrayList<>(chatMemoryRepository.findByConversationId(conversationId));
+    }
+
+    private void restoreConversation(String conversationId, List<Message> snapshot) {
+        if (!StringUtils.hasText(conversationId) || chatMemoryRepository == null) {
+            return;
+        }
+        chatMemoryRepository.saveAll(conversationId, snapshot);
+    }
+
+    private boolean isRetryable(Throwable error) {
+        Throwable current = error;
+        while (current != null) {
+            if (current instanceof ResourceAccessException || current instanceof IOException) {
+                return true;
+            }
+            current = current.getCause();
+        }
+        return false;
+    }
+
+    // ── Data carriers ──
+
     private record MessageParts(String visibleText, String thinkingText) {
     }
 
@@ -2669,191 +1521,13 @@ public class ChatService {
     private record MalformedToolCall(String id, String name, String arguments, String parserMessage) {
     }
 
-    // ── Measurement Instrumentation ──
-
-    private String reserveMeasurement(ToolLoopState s, MeasurementKind kind, String modelOrToolName) {
-        if (measurementRepo == null) return null;
-        OrchestrationTaskContext ctx = OrchestrationTaskContextHolder.current();
-        if (ctx == null || ctx.taskRunLocation() == null) return null;
-        String taskRunId = ctx.taskRunId();
-        int attemptNumber = ctx.attemptNumber();
-        if (taskRunId == null || attemptNumber < 1) return null;
-        String invocationId = taskRunId + "/" + kind.name().toLowerCase() + "/" + UUID.randomUUID();
-        String callId = kind == MeasurementKind.MODEL
-                ? s.request.conversationId() + "/model/" + System.currentTimeMillis()
-                : s.request.conversationId() + "/tools/" + System.currentTimeMillis();
-        try {
-            measurementRepo.reserve(RunMeasurement.reserve(
-                    invocationId, taskRunId, attemptNumber, kind, callId, null));
-            return invocationId;
-        } catch (Exception e) {
-            logger.warn("Failed to reserve measurement {}: {}", invocationId, e.getMessage());
-            return null;
-        }
-    }
-
-    private Map<String, String> reserveToolMeasurements(ToolLoopState s) {
-        Map<String, String> ids = new java.util.LinkedHashMap<>();
-        if (measurementRepo == null) return ids;
-        OrchestrationTaskContext ctx = OrchestrationTaskContextHolder.current();
-        if (ctx == null || ctx.taskRunLocation() == null) return ids;
-        String taskRunId = ctx.taskRunId();
-        int attemptNumber = ctx.attemptNumber();
-        if (taskRunId == null || attemptNumber < 1) return ids;
-        List<org.springframework.ai.chat.messages.AssistantMessage.ToolCall> toolCalls =
-                s.response.getResult().getOutput().getToolCalls();
-        for (var tc : toolCalls) {
-            String invocationId = taskRunId + "/tool/" + tc.id();
-            try {
-                measurementRepo.reserve(RunMeasurement.reserve(
-                        invocationId, taskRunId, attemptNumber,
-                        MeasurementKind.TOOL, tc.id(), null));
-                ids.put(tc.id(), invocationId);
-            } catch (Exception e) {
-                logger.warn("Failed to reserve tool measurement {}: {}", invocationId, e.getMessage());
-            }
-        }
-        return ids;
-    }
-
-    private void completeModelMeasurement(String invocationId, ToolLoopState s, Instant startedAt) {
-        if (invocationId == null || measurementRepo == null) return;
-        Instant completedAt = Instant.now();
-        long elapsedMs = Duration.between(startedAt, completedAt).toMillis();
-        try {
-            org.springframework.ai.chat.model.ChatResponse response = s.response;
-            Integer inputTokens = null;
-            Integer outputTokens = null;
-            Integer totalTokens = null;
-            String provider = null;
-            if (response != null && response.getMetadata() != null) {
-                var metadata = response.getMetadata();
-                if (metadata.containsKey("usage")) {
-                    Object usage = metadata.get("usage");
-                    if (usage instanceof Map<?, ?> usageMap) {
-                        inputTokens = intFromMap(usageMap, "prompt_tokens", "input_tokens");
-                        outputTokens = intFromMap(usageMap, "completion_tokens", "output_tokens");
-                        totalTokens = intFromMap(usageMap, "total_tokens");
-                    }
-                }
-                if (metadata.containsKey("provider")) {
-                    provider = String.valueOf(metadata.get("provider"));
-                }
-            }
-            RunMeasurement reserved = measurementRepo.findById(invocationId).orElse(null);
-            if (reserved == null) return;
-            measurementRepo.complete(reserved.complete(
-                    MeasurementOutcome.SUCCEEDED, MeasurementCompleteness.COMPLETE,
-                    startedAt, completedAt, (int) elapsedMs,
-                    provider, s.request.model(), null,
-                    inputTokens, outputTokens, totalTokens,
-                    null, null, null, null, null, null));
-        } catch (Exception e) {
-            logger.warn("Failed to complete model measurement {}: {}", invocationId, e.getMessage());
-        }
-    }
-
-    private void completeModelMeasurementFailure(String invocationId, ToolLoopState s,
-                                                   Instant startedAt, Exception error) {
-        if (invocationId == null || measurementRepo == null) return;
-        Instant completedAt = Instant.now();
-        long elapsedMs = Duration.between(startedAt, completedAt).toMillis();
-        try {
-            RunMeasurement reserved = measurementRepo.findById(invocationId).orElse(null);
-            if (reserved == null) return;
-            measurementRepo.complete(reserved.complete(
-                    MeasurementOutcome.FAILED, MeasurementCompleteness.COMPLETE,
-                    startedAt, completedAt, (int) elapsedMs,
-                    null, s.request.model(), null,
-                    null, null, null,
-                    null, null, null, null, null,
-                    error.getMessage() != null ? error.getMessage() : "model call failed"));
-        } catch (Exception e) {
-            logger.warn("Failed to record model measurement failure {}: {}", invocationId, e.getMessage());
-        }
-    }
-
-    private void completeToolMeasurements(Map<String, String> invocationIds, ToolLoopState s,
-                                            ToolExecutionResult toolExecutionResult, Instant startedAt) {
-        if (invocationIds.isEmpty() || measurementRepo == null) return;
-        Instant completedAt = Instant.now();
-        Map<String, MeasurementOutcome> outcomes = toolResponseOutcomes(toolExecutionResult);
-        for (var tc : s.response.getResult().getOutput().getToolCalls()) {
-            String invocationId = invocationIds.get(tc.id());
-            if (invocationId == null) continue;
-            try {
-                RunMeasurement reserved = measurementRepo.findById(invocationId).orElse(null);
-                if (reserved == null) continue;
-                MeasurementOutcome outcome = outcomes.getOrDefault(tc.id(), MeasurementOutcome.SUCCEEDED);
-                long elapsedMs = Duration.between(startedAt, completedAt).toMillis();
-                measurementRepo.complete(reserved.complete(
-                        outcome, MeasurementCompleteness.COMPLETE,
-                        startedAt, completedAt, (int) elapsedMs,
-                        null, null, tc.name(),
-                        null, null, null,
-                        null, null, null, null, null, null));
-            } catch (Exception e) {
-                logger.warn("Failed to complete tool measurement {}: {}", invocationId, e.getMessage());
-            }
-        }
-    }
-
-    private void failToolMeasurements(Map<String, String> invocationIds, ToolLoopState s,
-                                        Instant startedAt, Exception error) {
-        if (invocationIds.isEmpty() || measurementRepo == null) return;
-        Instant completedAt = Instant.now();
-        for (var entry : invocationIds.entrySet()) {
-            try {
-                RunMeasurement reserved = measurementRepo.findById(entry.getValue()).orElse(null);
-                if (reserved == null) continue;
-                long elapsedMs = Duration.between(startedAt, completedAt).toMillis();
-                measurementRepo.complete(reserved.complete(
-                        MeasurementOutcome.FAILED, MeasurementCompleteness.COMPLETE,
-                        startedAt, completedAt, (int) elapsedMs,
-                        null, null, null,
-                        null, null, null,
-                        null, null, null, null, null,
-                        error.getMessage() != null ? error.getMessage() : "tool execution failed"));
-            } catch (Exception e) {
-                logger.warn("Failed to record tool measurement failure {}: {}", entry.getValue(), e.getMessage());
-            }
-        }
-    }
-
-    private static Map<String, MeasurementOutcome> toolResponseOutcomes(
-            ToolExecutionResult toolExecutionResult) {
-        Map<String, MeasurementOutcome> outcomes = new java.util.LinkedHashMap<>();
-        if (toolExecutionResult == null || toolExecutionResult.conversationHistory() == null) {
-            return outcomes;
-        }
-        for (var message : toolExecutionResult.conversationHistory()) {
-            if (message instanceof org.springframework.ai.chat.messages.ToolResponseMessage trm) {
-                for (var response : trm.getResponses()) {
-                    outcomes.put(response.id(), MeasurementOutcome.SUCCEEDED);
-                }
-            }
-        }
-        return outcomes;
-    }
-
-    private static Integer intFromMap(Map<?, ?> map, String... keys) {
-        for (String key : keys) {
-            Object value = map.get(key);
-            if (value instanceof Number num) return num.intValue();
-            if (value instanceof String s && org.springframework.util.StringUtils.hasText(s)) {
-                try { return Integer.parseInt(s); } catch (NumberFormatException ignored) { }
-            }
-        }
-        return null;
-    }
+    // ── Tool loop state ──
 
     private static final class ToolLoopState {
         // ── Immutable request context ──
         final ResolvedChatRequest request;
         final List<ToolCallback> approvedTools;
         final Consumer<ChatMessage> toolMessageConsumer;
-        final ActiveTurn activeTurn;
-        final PlanMode mode;
         final ToolCallingChatOptions toolOptions;
         List<Message> currentSystemInstructions;
 
@@ -2880,8 +1554,6 @@ public class ChatService {
         boolean planCompletionDetected = false;
         String validatedFinalMessage = null;
         int emptyFinalResponseRetries = 0;
-        int planTurnRepairRetries = 0;
-        int executionCompletionRepairRetries = 0;
 
         // ── Output (set by FINALIZE, returned by dispatcher) ──
         ChatResponse.MsgResponse chatResponse;
@@ -2891,118 +1563,14 @@ public class ChatService {
             ResolvedChatRequest request,
             List<ToolCallback> approvedTools,
             Consumer<ChatMessage> toolMessageConsumer,
-            ActiveTurn activeTurn,
-            PlanMode mode,
             ToolCallingChatOptions toolOptions,
             List<Message> currentSystemInstructions
         ) {
             this.request = request;
             this.approvedTools = approvedTools;
             this.toolMessageConsumer = toolMessageConsumer;
-            this.activeTurn = activeTurn;
-            this.mode = mode;
             this.toolOptions = toolOptions;
             this.currentSystemInstructions = currentSystemInstructions;
         }
-    }
-
-    private <T> T await(java.util.concurrent.CompletableFuture<T> future) {
-        try {
-            return future.get();
-        } catch (InterruptedException exception) {
-            Thread.currentThread().interrupt();
-            throw new IllegalStateException("Chat turn was interrupted", exception);
-        } catch (ExecutionException exception) {
-            Throwable cause = unwrap(exception);
-            if (cause instanceof RuntimeException runtimeException) {
-                throw runtimeException;
-            }
-            throw new IllegalStateException(cause);
-        }
-    }
-
-    private Throwable unwrap(Throwable error) {
-        Throwable current = error;
-        while ((current instanceof ExecutionException || current instanceof CompletionException) && current.getCause() != null) {
-            current = current.getCause();
-        }
-        return current;
-    }
-
-    // ── Conversation snapshot / restore for transient-failure recovery ──
-
-    private List<Message> snapshotConversation(String conversationId) {
-        if (!StringUtils.hasText(conversationId) || chatMemoryRepository == null) {
-            return List.of();
-        }
-        return new ArrayList<>(chatMemoryRepository.findByConversationId(conversationId));
-    }
-
-    private void restoreConversation(String conversationId, List<Message> snapshot) {
-        if (!StringUtils.hasText(conversationId) || chatMemoryRepository == null) {
-            return;
-        }
-        chatMemoryRepository.saveAll(conversationId, snapshot);
-    }
-
-    private boolean isRetryable(Throwable error) {
-        Throwable current = unwrap(error);
-        while (current != null) {
-            if (current instanceof ResourceAccessException || current instanceof IOException) {
-                return true;
-            }
-            current = current.getCause();
-        }
-        return false;
-    }
-
-    private ChatMessage toolChatMessageWithRetry(
-        ResolvedChatRequest request,
-        List<ToolCallback> approvedTools,
-        Consumer<ChatMessage> toolMessageConsumer,
-        ActiveTurn activeTurn
-    ) {
-        List<Message> snapshot = snapshotConversation(request.conversationId());
-        try {
-            return toolChatMessage(request, approvedTools, toolMessageConsumer, activeTurn);
-        } catch (RuntimeException e) {
-            if (!isRetryable(e)) {
-                throw e;
-            }
-            logger.warn("Retrying turn after transient failure conv={}: {}", request.conversationId(), e.getMessage());
-            restoreConversation(request.conversationId(), snapshot);
-            try {
-                return toolChatMessage(request, approvedTools, toolMessageConsumer, activeTurn);
-            } catch (RuntimeException retryException) {
-                restoreConversation(request.conversationId(), snapshot);
-                throw retryException;
-            }
-        }
-    }
-
-    private ChatResponse.MsgResponse toolChatWithRetry(
-        ResolvedChatRequest request,
-        List<ToolCallback> approvedTools,
-        ActiveTurn activeTurn
-    ) {
-        List<Message> snapshot = snapshotConversation(request.conversationId());
-        try {
-            return toolChat(request, approvedTools, null, activeTurn).response();
-        } catch (RuntimeException e) {
-            if (!isRetryable(e)) {
-                throw e;
-            }
-            logger.warn("Retrying turn after transient failure conv={}: {}", request.conversationId(), e.getMessage());
-            restoreConversation(request.conversationId(), snapshot);
-            try {
-                return toolChat(request, approvedTools, null, activeTurn).response();
-            } catch (RuntimeException retryException) {
-                restoreConversation(request.conversationId(), snapshot);
-                throw retryException;
-            }
-        }
-    }
-
-    private record ResolvedTaskExecution(String conversationId, String runId, ResolvedChatRequest request) {
     }
 }

@@ -2,7 +2,7 @@
   "version": 2,
   "runId": "exec-core-refactor-20260804",
   "state": "active",
-  "revision": 6,
+  "revision": 8,
   "source": {
     "projectRoot": "/home/dhickel/Code/Java/Magenta",
     "sourcePlanPath": ".internal-dev/plans/20260804-212000-home-dhickel-code-java-magenta-internal-dev-ha",
@@ -4697,8 +4697,6 @@
             "model": "gpt-5.6-terra",
             "thinking": "high"
           },
-          "attempt": 1,
-          "verdict": "PASS",
           "report": "Phase 03 validation VERDICT: PASS (deepseek-v4-pro:max). All 25 criteria verified against actual repository state: 4 new SPI files match Appendix A signatures (sealed AnswerResult with 4 subtypes, QuestionPendingContext record, RepairReason enum values, return types); RepairStrategy.java is the only new SPI importing org.springframework.ai (intentional per phase file); PromptContextAssembler.contribute() produces identical prompt text to assemble() with PlanMode.NORMAL null-guard and zero diff on assemble() methods; ChatService.java zero diff (callers at lines 2118/2437 untouched); ToolAccessPolicy all constants/constructors/methods preserved with null-registry edge safe; TerminalTurnRepair all public methods preserved byte-for-byte with repair text unchanged. Commands: mvn compile -pl magenta-app BUILD SUCCESS; mvn test -pl magenta-app 1041 tests 0 failures; git diff --stat exactly 7 in-scope files (3 modified + 4 new). No validator edits needed. No remaining risks.",
           "changedFiles": [
             "magenta-app/src/main/java/io/mindspice/magenta2/ai/chat/service/turn/InteractionHandler.java",
@@ -4762,13 +4760,80 @@
             "magenta-app/src/main/java/io/mindspice/magenta2/ai/chat/service/turn/ToolAccessPolicy.java",
             "magenta-app/src/main/java/io/mindspice/magenta2/ai/chat/service/turn/TerminalTurnRepair.java"
           ],
-          "timestamp": "2026-08-04T23:59:13.962Z"
+          "timestamp": "2026-08-04T23:59:13.962Z",
+          "attempt": 1,
+          "verdict": "PASS"
         }
       ]
     },
     {
       "phase": "phase-04-remove-chatservice-deps.md",
-      "validations": []
+      "implementation": {
+        "agentModel": {
+          "provider": "deepseek",
+          "model": "deepseek-v4-pro",
+          "thinking": "max"
+        },
+        "report": "Phase 04 implementation evidence (3 subphases, deepseek-v4-pro). A: stripped public orchestration API from ChatService.java (3009→2220 lines): deleted plan lifecycle methods (beginPlan*, submitPlanAnswer*, executeSavedPlan*, resolveSavedPlanExecution*, handlePlanExecutionStreamFinished*, planState, etc.), task execution methods, agent-chat methods (chatAsAgent, markAgentConversation, installChatFileContextIfNeeded, restoreContext), measurement instrumentation + call sites; simplified clearConversation/listSessions/session/conversationTitleJobStatus/conversationTitle; removed collaborator imports. B: rewrote ChatService.java (2220→1571 lines): removed 13 app-shell fields, ThreadLocal activeTrustedPolicies, streamLocks, ConversationTurnCoordinator, 5 overloaded constructors, trusted-policy wiring, @Autowired(required=false) setter injection, executeTaskBlocking/streamTaskExecution stubs, await/unwrap helpers, planningModel(), interactionMode(), plan-specific constants (PLAN_MODE_TOOLS/TASK_MODE_TOOLS/FILE_MUTATING_TOOL_NAMES/message constants); single 17-param canonical constructor; effectiveSystemPrompt via assembleTurnInstructions; streamNow() merged; PlanMode removed from ToolLoopState (NORMAL implicit); REPAIR_RETRY_LIMIT=2. C: ChatServiceTest.java 1442→571 lines: deleted 14 test methods + 8 unused inner classes; adapted 7 surviving tests to new constructor; listSessions test uses SYSTEM_CHAT origin instead of PlanService. Known dependency: 2 app-shell files (WorkflowTaskExecutor, OrchestrationRunnerService) fail compile calling removed executeTaskBlocking — Phase 05 deletion targets. ChatServiceTest passes 7/7 in isolation.",
+        "changedFiles": [
+          "magenta-app/src/main/java/io/mindspice/magenta2/ai/chat/service/ChatService.java",
+          "magenta-app/src/test/java/io/mindspice/magenta2/ai/chat/service/ChatServiceTest.java"
+        ],
+        "changedFileObservations": [
+          {
+            "path": "magenta-app/src/main/java/io/mindspice/magenta2/ai/chat/service/ChatService.java",
+            "status": "present",
+            "digest": "e9c99ec241837a1c024fca176bb4fa8281034fb2224b66937c732abd2ae380a2",
+            "bytes": 68411
+          },
+          {
+            "path": "magenta-app/src/test/java/io/mindspice/magenta2/ai/chat/service/ChatServiceTest.java",
+            "status": "present",
+            "digest": "42eaa60ba72998754ad34815a214c0adbb4849197211dad8e441f5f8eb59d294",
+            "bytes": 23967
+          }
+        ],
+        "outsideDeclaredTargets": [
+          "magenta-app/src/main/java/io/mindspice/magenta2/ai/chat/service/ChatService.java",
+          "magenta-app/src/test/java/io/mindspice/magenta2/ai/chat/service/ChatServiceTest.java"
+        ],
+        "timestamp": "2026-08-05T00:43:43.775Z"
+      },
+      "validations": [
+        {
+          "agentModel": {
+            "provider": "openai-codex",
+            "model": "gpt-5.6-terra",
+            "thinking": "high"
+          },
+          "attempt": 1,
+          "verdict": "PASS",
+          "report": "Phase 04 validation VERDICT: PASS (deepseek-v4-pro:max). All 17 criteria verified: exactly one 17-param constructor; zero @Autowired(required=false); zero ThreadLocal; zero orchestration/execution/skills/agent/PlanService/TaskService imports; 6-state turn loop preserved with no mode branches; FILE_MUTATING_TOOL_NAMES and plan message constants gone; REPAIR_RETRY_LIMIT present. SPI substitution coherence confirmed: the phase file's turnRepair.needsRepair() reference doesn't exist on the Phase 03 TerminalTurnRepair; implementer's substitution (removing needsPlanTurnRepair/needsExecutionCompletionRepair calls which always return false for NORMAL turns; keeping toolUseAbortControlMessage + emptyFinalResponseControlMessage) is behaviorally equivalent and correct; RepairStrategy.repair()/CompletionDetector.isComplete() deferral to Phase 06+ confirmed correct since ToolLoopState no longer carries mode. Validator repairs: removed residual PlanMode import from ChatService.java (inlined filterApprovedTools call chain and NORMAL empty-response message). mvn compile: only the 2 known Phase 05 deletion files fail; ChatServiceTest 7/7 PASS. Risks: ChatPlanState import persists (model-level, required by ChatResponse.MsgResponse, Phase 06-07 target); planCompletionDetected flag dead code in NORMAL mode; TerminalTurnRepair still constructor-depends on PlanService/TaskService (passed null; Phase 05 cleans); ToolAccessPolicy still exposes PlanMode in interactionMode()/filterToolsByMode() API (Phase 06 makes mode-unaware); Spring context won't start until Phase 05 provides SPI bean definitions (not an in-scope defect for Phase 04).",
+          "changedFiles": [
+            "magenta-app/src/main/java/io/mindspice/magenta2/ai/chat/service/ChatService.java",
+            "magenta-app/src/test/java/io/mindspice/magenta2/ai/chat/service/ChatServiceTest.java"
+          ],
+          "changedFileObservations": [
+            {
+              "path": "magenta-app/src/main/java/io/mindspice/magenta2/ai/chat/service/ChatService.java",
+              "status": "present",
+              "digest": "e9c99ec241837a1c024fca176bb4fa8281034fb2224b66937c732abd2ae380a2",
+              "bytes": 68411
+            },
+            {
+              "path": "magenta-app/src/test/java/io/mindspice/magenta2/ai/chat/service/ChatServiceTest.java",
+              "status": "present",
+              "digest": "42eaa60ba72998754ad34815a214c0adbb4849197211dad8e441f5f8eb59d294",
+              "bytes": 23967
+            }
+          ],
+          "outsideDeclaredTargets": [
+            "magenta-app/src/main/java/io/mindspice/magenta2/ai/chat/service/ChatService.java",
+            "magenta-app/src/test/java/io/mindspice/magenta2/ai/chat/service/ChatServiceTest.java"
+          ],
+          "timestamp": "2026-08-05T00:43:50.388Z"
+        }
+      ]
     },
     {
       "phase": "phase-05-delete-app-shell.md",
@@ -4813,5 +4878,5 @@
   ],
   "integrationValidations": [],
   "createdAt": "2026-08-04T23:11:03.465Z",
-  "updatedAt": "2026-08-04T23:59:13.962Z"
+  "updatedAt": "2026-08-05T00:43:50.388Z"
 }
