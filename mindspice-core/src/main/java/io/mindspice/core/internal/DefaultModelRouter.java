@@ -1,5 +1,6 @@
 package io.mindspice.core.internal;
 
+import io.mindspice.core.ConfigurationException;
 import io.mindspice.core.EndpointType;
 import io.mindspice.core.ModelConfig;
 import io.mindspice.core.NonNull;
@@ -10,6 +11,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.model.tool.ToolCallingChatOptions;
 import org.springframework.ai.model.tool.ToolCallingManager;
+import org.springframework.context.ApplicationContext;
 
 import java.time.Duration;
 import java.util.List;
@@ -62,6 +64,39 @@ public class DefaultModelRouter implements ModelRouter {
         this(configs, toolCallingManager, 360);
     }
 
+    /**
+     * Factory that resolves the {@link ToolCallingManager} from the Spring
+     * {@link ApplicationContext}. This is the preferred entry point for
+     * {@code TurnLoopBuilder} so that the builder itself never imports
+     * Spring AI types.
+     *
+     * @param configs model configurations keyed by alias
+     * @param context Spring application context
+     * @return a fully initialised router
+     * @throws ConfigurationException if {@code ToolCallingManager} cannot be resolved
+     */
+    public static DefaultModelRouter fromContext(
+        @NonNull Map<String, ModelConfig> configs,
+        @NonNull ApplicationContext context
+    ) {
+        ToolCallingManager tcm = context.getBeanProvider(ToolCallingManager.class)
+            .getIfAvailable(() -> {
+                log.info("No ToolCallingManager bean found — creating default");
+                try {
+                    var builderMethod = ToolCallingManager.class.getMethod("builder");
+                    Object builder = builderMethod.invoke(null);
+                    var buildMethod = builder.getClass().getMethod("build");
+                    return (ToolCallingManager) buildMethod.invoke(builder);
+                } catch (Exception e) {
+                    throw new ConfigurationException(
+                        "ToolCallingManager is required but could not be created. "
+                        + "Ensure spring-ai-model is on the classpath.",
+                        Map.of("error", "tool_calling_manager_missing"));
+                }
+            });
+        return new DefaultModelRouter(configs, tcm);
+    }
+
     // ── ModelRouter ──
 
     @Override
@@ -99,6 +134,21 @@ public class DefaultModelRouter implements ModelRouter {
     public boolean supportsStreaming(@NonNull String modelAlias) {
         ModelConfig config = requireConfig(modelAlias);
         return config.endpointType() != EndpointType.OLLAMA || OLLAMA_AVAILABLE;
+    }
+
+    @Override
+    public void closeChatModels() {
+        for (var entry : modelCache.entrySet()) {
+            ChatModel model = entry.getValue();
+            try {
+                if (model instanceof AutoCloseable ac) {
+                    ac.close();
+                }
+            } catch (Exception e) {
+                log.warn("Failed to close ChatModel for alias '{}': {}", entry.getKey(), e.getMessage());
+            }
+        }
+        modelCache.clear();
     }
 
     // ── Model construction ──

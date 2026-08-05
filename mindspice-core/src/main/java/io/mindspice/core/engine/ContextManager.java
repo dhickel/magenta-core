@@ -20,14 +20,14 @@ import java.util.List;
  * exceeds the compaction threshold, the {@link CompactionStrategy}
  * is triggered to reduce the working set.</p>
  */
-final class ContextManager {
+public final class ContextManager {
 
     private final ConversationMemory conversationMemory;
     private final TokenEstimator tokenEstimator;
     private final CompactionStrategy compactionStrategy;
     private final int bufferPercent;
 
-    ContextManager(@NonNull ConversationMemory conversationMemory,
+    public ContextManager(@NonNull ConversationMemory conversationMemory,
                    @NonNull TokenEstimator tokenEstimator,
                    @NonNull CompactionStrategy compactionStrategy,
                    int bufferPercent) {

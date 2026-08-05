@@ -32,9 +32,9 @@ import java.util.stream.Collectors;
  *               └────────────────┴────────────┴─────────────┘
  * </pre>
  *
- * <p>The engine is created via its package-private {@link Builder}.</p>
+ * <p>The engine is created via its {@link Builder}.</p>
  */
-final class DefaultTurnEngine {
+public final class DefaultTurnEngine {
 
     private static final Logger logger = LoggerFactory.getLogger(DefaultTurnEngine.class);
 
@@ -102,7 +102,7 @@ final class DefaultTurnEngine {
      * @param ctx mutable turn-scoped context
      * @return a cold Flux of turn lifecycle events
      */
-    Flux<TurnEvent> stream(TurnContext ctx) {
+    public Flux<TurnEvent> stream(TurnContext ctx) {
         return Flux.create(sink -> {
             ActiveTurnRegistry.ActiveTurn activeTurn = null;
             try {
@@ -131,7 +131,7 @@ final class DefaultTurnEngine {
      * @param ctx mutable turn-scoped context
      * @return the completed turn result
      */
-    TurnResult execute(TurnContext ctx) {
+    public TurnResult execute(TurnContext ctx) {
         List<TurnEvent> events = new ArrayList<>();
         TurnResult[] resultHolder = new TurnResult[1];
         Exception[] errorHolder = new Exception[1];
@@ -155,6 +155,17 @@ final class DefaultTurnEngine {
                 buildDiagnostic(ctx, TurnPhase.FINALIZE, TurnDiagnostic.OutcomeKind.FAILED, Map.of()));
         }
         return resultHolder[0];
+    }
+
+    /**
+     * Closes all cached {@code ChatModel} instances held by the internal
+     * {@link ModelRouter}. Called during {@code TurnLoop.close()}. Safe to
+     * call multiple times; the router caches are cleared after the first call.
+     */
+    public void closeChatModels() {
+        if (modelRouter != null) {
+            modelRouter.closeChatModels();
+        }
     }
 
     // ── Core turn loop ──
@@ -637,6 +648,13 @@ final class DefaultTurnEngine {
         sink.next(new TurnEvent.QuestionPending(ctx.turnId(), Instant.now(),
             questionText, computeUsage(ctx)));
 
+        // Persist accumulated messages before suspending so the
+        // conversation history includes the AI's question on resume.
+        if (!state.messagesToPersist.isEmpty()) {
+            conversationMemory.addMessages(ctx.sessionId(),
+                List.copyOf(state.messagesToPersist));
+        }
+
         // Complete the sink — the turn is suspended.
         // Resume path is wired in Phase 10 via TurnLoop.answer().
         state.currentPhase = TurnPhase.DONE;
@@ -938,7 +956,7 @@ final class DefaultTurnEngine {
 
     // ── Builder ──
 
-    static final class Builder {
+    public static final class Builder {
         // toolExecution
         ToolRegistry toolRegistry;
         ToolAccessPolicy toolAccessPolicy = ToolAccessPolicy.allowAll();
@@ -973,7 +991,7 @@ final class DefaultTurnEngine {
         ExecutorStrategy executorStrategy = ExecutorStrategy.VIRTUAL;
         int turnThreads = 4;
 
-        Builder toolExecution(ToolRegistry toolRegistry, ToolAccessPolicy toolAccessPolicy,
+        public Builder toolExecution(ToolRegistry toolRegistry, ToolAccessPolicy toolAccessPolicy,
                               ToolResultSummarizer toolResultSummarizer, ToolLoopGuard toolLoopGuard) {
             this.toolRegistry = toolRegistry;
             this.toolAccessPolicy = toolAccessPolicy != null ? toolAccessPolicy : ToolAccessPolicy.allowAll();
@@ -982,7 +1000,7 @@ final class DefaultTurnEngine {
             return this;
         }
 
-        Builder contextAssembly(ConversationMemory conversationMemory, TokenEstimator tokenEstimator,
+        public Builder contextAssembly(ConversationMemory conversationMemory, TokenEstimator tokenEstimator,
                                 CompactionStrategy compactionStrategy) {
             this.conversationMemory = conversationMemory;
             this.tokenEstimator = tokenEstimator;
@@ -990,29 +1008,29 @@ final class DefaultTurnEngine {
             return this;
         }
 
-        Builder contextManager(ContextManager contextManager) {
+        public Builder contextManager(ContextManager contextManager) {
             this.contextManager = contextManager;
             return this;
         }
 
-        Builder promptAssembler(DefaultPromptAssembler promptAssembler) {
+        public Builder promptAssembler(DefaultPromptAssembler promptAssembler) {
             this.promptAssembler = promptAssembler;
             return this;
         }
 
-        Builder responseRepair(CompletionDetector completionDetector, RepairStrategy repairStrategy) {
+        public Builder responseRepair(CompletionDetector completionDetector, RepairStrategy repairStrategy) {
             this.completionDetector = completionDetector != null ? completionDetector : ctx -> false;
             this.repairStrategy = repairStrategy != null ? repairStrategy : (ctx, reason) -> List.of();
             return this;
         }
 
-        Builder interaction(InteractionHandler interactionHandler, InteractionStore interactionStore) {
+        public Builder interaction(InteractionHandler interactionHandler, InteractionStore interactionStore) {
             this.interactionHandler = interactionHandler;
             this.interactionStore = interactionStore;
             return this;
         }
 
-        Builder infrastructure(ModelRouter modelRouter, TurnExecutor turnExecutor,
+        public Builder infrastructure(ModelRouter modelRouter, TurnExecutor turnExecutor,
                                ActiveTurnRegistry activeTurnRegistry,
                                ThinkingExtractor thinkingExtractor) {
             this.modelRouter = modelRouter;
@@ -1022,20 +1040,20 @@ final class DefaultTurnEngine {
             return this;
         }
 
-        Builder config(int maxToolRounds, int maxEmptyResponseRetries, Duration turnTimeout) {
+        public Builder config(int maxToolRounds, int maxEmptyResponseRetries, Duration turnTimeout) {
             this.maxToolRounds = maxToolRounds;
             this.maxEmptyResponseRetries = maxEmptyResponseRetries;
             this.turnTimeout = turnTimeout;
             return this;
         }
 
-        Builder executor(ExecutorStrategy strategy, int threads) {
+        public Builder executor(ExecutorStrategy strategy, int threads) {
             this.executorStrategy = strategy != null ? strategy : ExecutorStrategy.VIRTUAL;
             this.turnThreads = Math.max(threads, 1);
             return this;
         }
 
-        DefaultTurnEngine build() {
+        public DefaultTurnEngine build() {
             if (modelRouter == null) {
                 throw new ConfigurationException("ModelRouter is required",
                     Map.of("missing", "modelRouter"));

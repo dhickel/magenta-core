@@ -2,7 +2,7 @@
   "version": 2,
   "runId": "exec-core-refactor-20260804",
   "state": "active",
-  "revision": 18,
+  "revision": 20,
   "source": {
     "projectRoot": "/home/dhickel/Code/Java/Magenta",
     "sourcePlanPath": ".internal-dev/plans/20260804-212000-home-dhickel-code-java-magenta-internal-dev-ha",
@@ -6285,8 +6285,6 @@
             "model": "gpt-5.6-terra",
             "thinking": "high"
           },
-          "attempt": 1,
-          "verdict": "PASS",
           "report": "Phase 09 validation VERDICT: PASS (deepseek-v4-pro:max). All 21 criteria verified: DefaultTurnEngine 6-state cycle complete and coherent (Flux.create sink contract, interrupt polling after each phase, no Spring AI types in engine public signatures); Deviation A (internal interfaces public) ACCEPTED — internal package naming convention signals non-public API, Javadoc marks framework-internal, contract constraint applies to public API surface only; Deviation B (TurnLoopException concrete) ACCEPTED — directly instantiated in TurnEventRenderer.json(), sealed subclasses intact. DefaultToolRegistry collision message exact; SerialTurnGate state machine/timeout/drain thread-safe; CompositeThinkingExtractor 3 strategies; MarkdownRenderer graceful degradation; TurnEventRenderer json/sse with Jackson annotations on all 8 subtypes; example tools not auto-registered; DefaultToolResultSummarizer no hard-coded switch. Magenta: 32 main + 13 test + 1 META-INF deleted, no references to deleted types remain, ChatBeanConfig coherent. Commands: mvn compile mindspice-core PASS; mvn compile magenta-app PASS; mvn verify mindspice-core PASS (Enforcer); mvn test magenta-app 20/20 PASS; context starts 1.634s. Greps: zero ThreadLocal in framework; zero magenta2 refs from framework. Documented risks (no fixes needed): TurnExecutor has no concrete impl yet (Phase 10 facade); SerialTurnGate drain double-check pattern note; ContextManager hard-coded 128k maxTokens (model-specific refinement deferred); DefaultModelRouter reflection-based (SPI escape hatch exists); dead code model/TurnEvent.java + AgentChatPromptService left for Phase 14; commonmark 0.24.0 (matches reactor, correct choice over handoff 0.21.0). No validator edits needed.",
           "changedFiles": [
             "mindspice-core/src/main/java/io/mindspice/core/engine/DefaultTurnEngine.java",
@@ -6358,13 +6356,240 @@
             "mindspice-core/src/main/java/io/mindspice/core/DefaultToolResultSummarizer.java",
             "magenta-app/src/main/java/io/mindspice/magenta2/ai/chat/config/ChatBeanConfig.java"
           ],
-          "timestamp": "2026-08-05T02:13:45.864Z"
+          "timestamp": "2026-08-05T02:13:45.864Z",
+          "attempt": 1,
+          "verdict": "PASS"
         }
       ]
     },
     {
       "phase": "phase-10-facade.md",
-      "validations": []
+      "implementation": {
+        "agentModel": {
+          "provider": "deepseek",
+          "model": "deepseek-v4-pro",
+          "thinking": "max"
+        },
+        "report": "Phase 10 implementation evidence (3 subphases, deepseek-v4-pro). A: TurnLoop interface (10 facade methods + 3 sub-interfaces, framework NonNull/Nullable, full Javadoc). B: DefaultTurnLoop (package-private final, 16-param constructor, send/stream/answer/enqueue/claim/ack/release/clearSession/interrupt, close() 7-step drain with AtomicBoolean idempotence, Tools/Memory/Sessions inner classes, exception wrapping table; engine made public + Builder public + stream/execute public; engine persists messages on ask_user suspension). C: TurnLoopBuilder (create(ApplicationContext), 24 setters, promptContributor cumulative, auto-discovery with explicitlySet, 6-step build validation) + 8 new concrete classes: DefaultTurnExecutor (VIRTUAL/FIXED), ConcurrentActiveTurnRegistry (CHM+interrupt queue), DefaultMessageQueue, DefaultTokenEstimator (JTokkit CL100K_BASE), DefaultCompactionStrategy, DefaultCompletionDetector, DefaultRepairStrategy, DefaultModelCapabilityProvider; MessageQueueStore SPI gained releaseClaim(String); DefaultModelRouter.fromContext static factory; ContextManager/DefaultPromptAssembler public. Validation: mvn compile + verify PASS; zero org.springframework.ai in the 3 facade files; build() produces working instance with zero external config (in-memory SQLite).",
+        "changedFiles": [
+          "mindspice-core/src/main/java/io/mindspice/core/TurnLoop.java",
+          "mindspice-core/src/main/java/io/mindspice/core/DefaultTurnLoop.java",
+          "mindspice-core/src/main/java/io/mindspice/core/TurnLoopBuilder.java",
+          "mindspice-core/src/main/java/io/mindspice/core/internal/DefaultTurnExecutor.java",
+          "mindspice-core/src/main/java/io/mindspice/core/internal/ConcurrentActiveTurnRegistry.java",
+          "mindspice-core/src/main/java/io/mindspice/core/DefaultMessageQueue.java",
+          "mindspice-core/src/main/java/io/mindspice/core/DefaultTokenEstimator.java",
+          "mindspice-core/src/main/java/io/mindspice/core/DefaultCompactionStrategy.java",
+          "mindspice-core/src/main/java/io/mindspice/core/DefaultCompletionDetector.java",
+          "mindspice-core/src/main/java/io/mindspice/core/DefaultRepairStrategy.java",
+          "mindspice-core/src/main/java/io/mindspice/core/DefaultModelCapabilityProvider.java",
+          "mindspice-core/src/main/java/io/mindspice/core/spi/MessageQueueStore.java",
+          "mindspice-core/src/main/java/io/mindspice/core/persistence/SqliteMessageQueueStore.java",
+          "mindspice-core/src/main/java/io/mindspice/core/internal/DefaultModelRouter.java",
+          "mindspice-core/src/main/java/io/mindspice/core/engine/ContextManager.java",
+          "mindspice-core/src/main/java/io/mindspice/core/engine/DefaultPromptAssembler.java",
+          "mindspice-core/src/main/java/io/mindspice/core/engine/DefaultTurnEngine.java",
+          "mindspice-core/src/main/java/io/mindspice/core/internal/ModelRouter.java"
+        ],
+        "changedFileObservations": [
+          {
+            "path": "mindspice-core/src/main/java/io/mindspice/core/TurnLoop.java",
+            "status": "present",
+            "digest": "7293b66b86833a137b7c546ae9e00b4b2b3248c99b06990a3112c873a22aad4f",
+            "bytes": 14429
+          },
+          {
+            "path": "mindspice-core/src/main/java/io/mindspice/core/DefaultTurnLoop.java",
+            "status": "present",
+            "digest": "320b2ee9ecaf703575dd0c9547c1127978503ef0cc461f22e4f7ce147f8edf37",
+            "bytes": 31836
+          },
+          {
+            "path": "mindspice-core/src/main/java/io/mindspice/core/TurnLoopBuilder.java",
+            "status": "present",
+            "digest": "76a12aa2d9f7294b3435cd556274137a82b30cdd19696a4718f9caa85a17ba64",
+            "bytes": 23299
+          },
+          {
+            "path": "mindspice-core/src/main/java/io/mindspice/core/internal/DefaultTurnExecutor.java",
+            "status": "present",
+            "digest": "2a40cf3dfff957c158e44261871c1e6a2d4b531a97812e2c9d3262309496e6fe",
+            "bytes": 2739
+          },
+          {
+            "path": "mindspice-core/src/main/java/io/mindspice/core/internal/ConcurrentActiveTurnRegistry.java",
+            "status": "present",
+            "digest": "9f1bcf4b07debdfe675376408624d6943c41804d4bb0db5898f65f50b8046122",
+            "bytes": 2428
+          },
+          {
+            "path": "mindspice-core/src/main/java/io/mindspice/core/DefaultMessageQueue.java",
+            "status": "present",
+            "digest": "242622fdf775da243b1c227e273a3d35387ce847eba1691a9bee723990ce4291",
+            "bytes": 4422
+          },
+          {
+            "path": "mindspice-core/src/main/java/io/mindspice/core/DefaultTokenEstimator.java",
+            "status": "present",
+            "digest": "4d5af950781ab9398f920f1708f8956d691973bbc6407da44b4efbf258f48872",
+            "bytes": 1287
+          },
+          {
+            "path": "mindspice-core/src/main/java/io/mindspice/core/DefaultCompactionStrategy.java",
+            "status": "present",
+            "digest": "e294e0b2e3fd09ee74b8cffff9de0afcb40485175f93ffe399d85b1aa745b5ec",
+            "bytes": 1584
+          },
+          {
+            "path": "mindspice-core/src/main/java/io/mindspice/core/DefaultCompletionDetector.java",
+            "status": "present",
+            "digest": "9a937b79d4d21d34bcc17ff5e3c53efa4fcf82fd9de6f02f29911dc26faaf2dd",
+            "bytes": 1207
+          },
+          {
+            "path": "mindspice-core/src/main/java/io/mindspice/core/DefaultRepairStrategy.java",
+            "status": "present",
+            "digest": "98437102e999d791a78778ce1aae55e13cb638b0dfbdae6052fec392b15d576e",
+            "bytes": 1440
+          },
+          {
+            "path": "mindspice-core/src/main/java/io/mindspice/core/DefaultModelCapabilityProvider.java",
+            "status": "present",
+            "digest": "0a02fe4f926a9615d7aa7ac4b5e65c58fa973367756eb71e8d6a5098b1e26eb3",
+            "bytes": 1644
+          },
+          {
+            "path": "mindspice-core/src/main/java/io/mindspice/core/spi/MessageQueueStore.java",
+            "status": "present",
+            "digest": "192e8f9c530b3ab80935622727e93db61d3b247d3901bab867f1fe22352474cf",
+            "bytes": 903
+          },
+          {
+            "path": "mindspice-core/src/main/java/io/mindspice/core/persistence/SqliteMessageQueueStore.java",
+            "status": "present",
+            "digest": "1fbd7b9e3fa61a2dfb320fc2299671a372cd750314fd55670cfbab94bcfac9cc",
+            "bytes": 8700
+          },
+          {
+            "path": "mindspice-core/src/main/java/io/mindspice/core/internal/DefaultModelRouter.java",
+            "status": "present",
+            "digest": "362cc7fa29799bfe62bed8ce0edd237106741db77c7f5f870b7136fc249693bf",
+            "bytes": 19404
+          },
+          {
+            "path": "mindspice-core/src/main/java/io/mindspice/core/engine/ContextManager.java",
+            "status": "present",
+            "digest": "a78640724d766f40a39da917df5669cd789b261b67d6282c1374b86301e139f4",
+            "bytes": 4531
+          },
+          {
+            "path": "mindspice-core/src/main/java/io/mindspice/core/engine/DefaultPromptAssembler.java",
+            "status": "present",
+            "digest": "be8df92f09834c52a230b2949df8989d6e751d0b0b4b53da8e468cde88ed2c10",
+            "bytes": 3779
+          },
+          {
+            "path": "mindspice-core/src/main/java/io/mindspice/core/engine/DefaultTurnEngine.java",
+            "status": "present",
+            "digest": "2023aa04a987c3fe6590e30861601f29e4d55e77bc972fe893289fcb02ac90c0",
+            "bytes": 47935
+          },
+          {
+            "path": "mindspice-core/src/main/java/io/mindspice/core/internal/ModelRouter.java",
+            "status": "present",
+            "digest": "bbafcbb3f6d88203c31e05961147e2ff5743385c237786d1ae814a4f0c5bdb7f",
+            "bytes": 1259
+          }
+        ],
+        "outsideDeclaredTargets": [
+          "mindspice-core/src/main/java/io/mindspice/core/TurnLoop.java",
+          "mindspice-core/src/main/java/io/mindspice/core/DefaultTurnLoop.java",
+          "mindspice-core/src/main/java/io/mindspice/core/TurnLoopBuilder.java",
+          "mindspice-core/src/main/java/io/mindspice/core/internal/DefaultTurnExecutor.java",
+          "mindspice-core/src/main/java/io/mindspice/core/internal/ConcurrentActiveTurnRegistry.java",
+          "mindspice-core/src/main/java/io/mindspice/core/DefaultMessageQueue.java",
+          "mindspice-core/src/main/java/io/mindspice/core/DefaultTokenEstimator.java",
+          "mindspice-core/src/main/java/io/mindspice/core/DefaultCompactionStrategy.java",
+          "mindspice-core/src/main/java/io/mindspice/core/DefaultCompletionDetector.java",
+          "mindspice-core/src/main/java/io/mindspice/core/DefaultRepairStrategy.java",
+          "mindspice-core/src/main/java/io/mindspice/core/DefaultModelCapabilityProvider.java",
+          "mindspice-core/src/main/java/io/mindspice/core/spi/MessageQueueStore.java",
+          "mindspice-core/src/main/java/io/mindspice/core/persistence/SqliteMessageQueueStore.java",
+          "mindspice-core/src/main/java/io/mindspice/core/internal/DefaultModelRouter.java",
+          "mindspice-core/src/main/java/io/mindspice/core/engine/ContextManager.java",
+          "mindspice-core/src/main/java/io/mindspice/core/engine/DefaultPromptAssembler.java",
+          "mindspice-core/src/main/java/io/mindspice/core/engine/DefaultTurnEngine.java",
+          "mindspice-core/src/main/java/io/mindspice/core/internal/ModelRouter.java"
+        ],
+        "timestamp": "2026-08-05T02:48:31.801Z"
+      },
+      "validations": [
+        {
+          "agentModel": {
+            "provider": "openai-codex",
+            "model": "gpt-5.6-terra",
+            "thinking": "high"
+          },
+          "attempt": 1,
+          "verdict": "PASS",
+          "report": "Phase 10 validation VERDICT: PASS (deepseek-v4-pro:max). All 10 criteria verified: TurnLoop signatures exactly match handoff Appendix A (10 facade + 3 sub-interfaces); DefaultTurnLoop package-private final; TurnLoopBuilder public final with create(ApplicationContext), 22 handoff setters + 3 additive convenience setters, promptContributor cumulative, 6-step build validation; 8 new concrete classes production-quality (not stubs); exception wrapping at every public boundary with stream() gate release exactly once (AtomicBoolean guard); close() idempotent with 7-step order, each step try-caught; answer() flow correct. Deviation rulings: (a) DefaultTurnEngine public ACCEPTABLE (Builder pattern ensures only TurnLoopBuilder constructs; facade remains package-private); (b) close() ChatModel closing was MISSING — VALIDATOR FIXED: added closeChatModels() to ModelRouter interface, implemented in DefaultModelRouter (closes AutoCloseable cache entries), delegated via DefaultTurnEngine.closeChatModels(), wired into DefaultTurnLoop.close() step 7; (c) MessageQueueStore.releaseClaim(String) addition JUSTIFIED (required by DefaultMessageQueue.release() and recoverStaleClaims(); coherent, not contract drift). Commands: mvn compile + verify PASS; zero org.springframework.ai in the 3 facade files (only ApplicationContext import in TurnLoopBuilder, required per handoff). Remaining risks: reflection-based model construction fragility (framework-owned), no programmatic TurnLoopMetrics setter (handoff doesn't require), no tests yet (Phase 12).",
+          "changedFiles": [
+            "mindspice-core/src/main/java/io/mindspice/core/TurnLoop.java",
+            "mindspice-core/src/main/java/io/mindspice/core/DefaultTurnLoop.java",
+            "mindspice-core/src/main/java/io/mindspice/core/TurnLoopBuilder.java",
+            "mindspice-core/src/main/java/io/mindspice/core/engine/DefaultTurnEngine.java",
+            "mindspice-core/src/main/java/io/mindspice/core/internal/ModelRouter.java",
+            "mindspice-core/src/main/java/io/mindspice/core/internal/DefaultModelRouter.java"
+          ],
+          "changedFileObservations": [
+            {
+              "path": "mindspice-core/src/main/java/io/mindspice/core/TurnLoop.java",
+              "status": "present",
+              "digest": "7293b66b86833a137b7c546ae9e00b4b2b3248c99b06990a3112c873a22aad4f",
+              "bytes": 14429
+            },
+            {
+              "path": "mindspice-core/src/main/java/io/mindspice/core/DefaultTurnLoop.java",
+              "status": "present",
+              "digest": "320b2ee9ecaf703575dd0c9547c1127978503ef0cc461f22e4f7ce147f8edf37",
+              "bytes": 31836
+            },
+            {
+              "path": "mindspice-core/src/main/java/io/mindspice/core/TurnLoopBuilder.java",
+              "status": "present",
+              "digest": "76a12aa2d9f7294b3435cd556274137a82b30cdd19696a4718f9caa85a17ba64",
+              "bytes": 23299
+            },
+            {
+              "path": "mindspice-core/src/main/java/io/mindspice/core/engine/DefaultTurnEngine.java",
+              "status": "present",
+              "digest": "2023aa04a987c3fe6590e30861601f29e4d55e77bc972fe893289fcb02ac90c0",
+              "bytes": 47935
+            },
+            {
+              "path": "mindspice-core/src/main/java/io/mindspice/core/internal/ModelRouter.java",
+              "status": "present",
+              "digest": "bbafcbb3f6d88203c31e05961147e2ff5743385c237786d1ae814a4f0c5bdb7f",
+              "bytes": 1259
+            },
+            {
+              "path": "mindspice-core/src/main/java/io/mindspice/core/internal/DefaultModelRouter.java",
+              "status": "present",
+              "digest": "362cc7fa29799bfe62bed8ce0edd237106741db77c7f5f870b7136fc249693bf",
+              "bytes": 19404
+            }
+          ],
+          "outsideDeclaredTargets": [
+            "mindspice-core/src/main/java/io/mindspice/core/TurnLoop.java",
+            "mindspice-core/src/main/java/io/mindspice/core/DefaultTurnLoop.java",
+            "mindspice-core/src/main/java/io/mindspice/core/TurnLoopBuilder.java",
+            "mindspice-core/src/main/java/io/mindspice/core/engine/DefaultTurnEngine.java",
+            "mindspice-core/src/main/java/io/mindspice/core/internal/ModelRouter.java",
+            "mindspice-core/src/main/java/io/mindspice/core/internal/DefaultModelRouter.java"
+          ],
+          "timestamp": "2026-08-05T02:48:38.959Z"
+        }
+      ]
     },
     {
       "phase": "phase-11-autoconfigure.md",
@@ -6385,5 +6610,5 @@
   ],
   "integrationValidations": [],
   "createdAt": "2026-08-04T23:11:03.465Z",
-  "updatedAt": "2026-08-05T02:13:45.864Z"
+  "updatedAt": "2026-08-05T02:48:38.959Z"
 }

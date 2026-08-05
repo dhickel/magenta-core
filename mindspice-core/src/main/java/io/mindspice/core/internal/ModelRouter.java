@@ -29,4 +29,11 @@ public interface ModelRouter {
     ToolCallingChatOptions basicChatOptions(@NonNull String modelAlias);
 
     boolean supportsStreaming(@NonNull String modelAlias);
+
+    /**
+     * Closes all cached {@link ChatModel} instances.
+     * Called during {@code TurnLoop.close()} to release model resources.
+     * Safe to call multiple times; subsequent calls are no-ops.
+     */
+    void closeChatModels();
 }

@@ -19,15 +19,15 @@ import java.util.stream.Collectors;
  *   <li>Turn-specific instructions derived from context metadata</li>
  * </ol>
  *
- * <p>This is a framework-internal class — external consumers use
+ * <p>This is a framework-public class — external consumers use
  * the {@code TurnLoop} facade exclusively.</p>
  */
-final class DefaultPromptAssembler {
+public final class DefaultPromptAssembler {
 
     private final String defaultSystemPrompt;
     private final List<PromptContributor> contributors;
 
-    DefaultPromptAssembler(@NonNull String defaultSystemPrompt,
+    public DefaultPromptAssembler(@NonNull String defaultSystemPrompt,
                            @NonNull List<PromptContributor> contributors) {
         this.defaultSystemPrompt = defaultSystemPrompt;
         this.contributors = contributorsSorted(contributors);

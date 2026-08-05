@@ -163,6 +163,21 @@ public class SqliteMessageQueueStore implements MessageQueueStore {
     }
 
     @Override
+    public void releaseClaim(String messageId) {
+        try {
+            jdbc.update(
+                "UPDATE turnloop_pending_messages " +
+                "SET claim_token = NULL, claimed_at = NULL " +
+                "WHERE message_id = ?",
+                messageId
+            );
+        } catch (DataAccessException e) {
+            log.error("Failed to release claim for message {}", messageId, e);
+            throw new RuntimeException("Failed to release claim for message " + messageId, e);
+        }
+    }
+
+    @Override
     public List<PendingMessage> findStaleClaims(Instant staleThreshold) {
         try {
             return jdbc.query(

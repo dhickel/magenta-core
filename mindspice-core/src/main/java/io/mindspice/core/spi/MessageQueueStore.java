@@ -28,6 +28,8 @@ public interface MessageQueueStore {
 
     void deleteBySessionId(@NonNull String sessionId);
 
+    void releaseClaim(@NonNull String messageId);
+
     @NonNull
     List<PendingMessage> findStaleClaims(@NonNull Instant staleThreshold);
 }
