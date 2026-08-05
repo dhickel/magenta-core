@@ -11,7 +11,7 @@ Source plan `.internal-dev/plans/20260804-212000-home-dhickel-code-java-magenta-
 - phase-03-create-spi-interfaces.md: wave-03, implementation recorded, validation passed (1 attempt(s))
 - phase-04-remove-chatservice-deps.md: wave-04, implementation recorded, validation passed (1 attempt(s))
 - phase-05-delete-app-shell.md: wave-05, implementation recorded, validation passed (1 attempt(s))
-- phase-06-core-types.md: wave-06, implementation not recorded, validation pending (0 attempt(s))
+- phase-06-core-types.md: wave-06, implementation recorded, validation passed (1 attempt(s))
 - phase-07-events-spis.md: wave-07, implementation not recorded, validation pending (0 attempt(s))
 - phase-08-internal-persistence.md: wave-08, implementation not recorded, validation pending (0 attempt(s))
 - phase-09-engine-utilities.md: wave-09, implementation not recorded, validation pending (0 attempt(s))
@@ -47,6 +47,7 @@ Source plan `.internal-dev/plans/20260804-212000-home-dhickel-code-java-magenta-
 - `phase-03-create-spi-interfaces.md`: 2026-08-04T23:59:07.492Z, 7 changed-file observation(s), 7 outside declared targets
 - `phase-04-remove-chatservice-deps.md`: 2026-08-05T00:43:43.775Z, 2 changed-file observation(s), 2 outside declared targets
 - `phase-05-delete-app-shell.md`: 2026-08-05T01:08:33.696Z, 56 changed-file observation(s), 56 outside declared targets
+- `phase-06-core-types.md`: 2026-08-05T01:14:47.882Z, 22 changed-file observation(s), 22 outside declared targets
 
 ## Final Validation
 
@@ -55,8 +56,9 @@ Source plan `.internal-dev/plans/20260804-212000-home-dhickel-code-java-magenta-
 - `phase-03-create-spi-interfaces.md` attempt 1: PASS at 2026-08-04T23:59:13.962Z
 - `phase-04-remove-chatservice-deps.md` attempt 1: PASS at 2026-08-05T00:43:50.388Z
 - `phase-05-delete-app-shell.md` attempt 1: PASS at 2026-08-05T01:08:44.647Z
+- `phase-06-core-types.md` attempt 1: PASS at 2026-08-05T01:14:56.601Z
 Integration validation not recorded.
 
 ## Outcome
 
-Active, revision 10.
+Active, revision 12.
