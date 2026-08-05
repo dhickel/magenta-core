@@ -2,7 +2,7 @@
   "version": 2,
   "runId": "exec-core-refactor-20260804",
   "state": "active",
-  "revision": 20,
+  "revision": 22,
   "source": {
     "projectRoot": "/home/dhickel/Code/Java/Magenta",
     "sourcePlanPath": ".internal-dev/plans/20260804-212000-home-dhickel-code-java-magenta-internal-dev-ha",
@@ -6530,8 +6530,6 @@
             "model": "gpt-5.6-terra",
             "thinking": "high"
           },
-          "attempt": 1,
-          "verdict": "PASS",
           "report": "Phase 10 validation VERDICT: PASS (deepseek-v4-pro:max). All 10 criteria verified: TurnLoop signatures exactly match handoff Appendix A (10 facade + 3 sub-interfaces); DefaultTurnLoop package-private final; TurnLoopBuilder public final with create(ApplicationContext), 22 handoff setters + 3 additive convenience setters, promptContributor cumulative, 6-step build validation; 8 new concrete classes production-quality (not stubs); exception wrapping at every public boundary with stream() gate release exactly once (AtomicBoolean guard); close() idempotent with 7-step order, each step try-caught; answer() flow correct. Deviation rulings: (a) DefaultTurnEngine public ACCEPTABLE (Builder pattern ensures only TurnLoopBuilder constructs; facade remains package-private); (b) close() ChatModel closing was MISSING — VALIDATOR FIXED: added closeChatModels() to ModelRouter interface, implemented in DefaultModelRouter (closes AutoCloseable cache entries), delegated via DefaultTurnEngine.closeChatModels(), wired into DefaultTurnLoop.close() step 7; (c) MessageQueueStore.releaseClaim(String) addition JUSTIFIED (required by DefaultMessageQueue.release() and recoverStaleClaims(); coherent, not contract drift). Commands: mvn compile + verify PASS; zero org.springframework.ai in the 3 facade files (only ApplicationContext import in TurnLoopBuilder, required per handoff). Remaining risks: reflection-based model construction fragility (framework-owned), no programmatic TurnLoopMetrics setter (handoff doesn't require), no tests yet (Phase 12).",
           "changedFiles": [
             "mindspice-core/src/main/java/io/mindspice/core/TurnLoop.java",
@@ -6587,13 +6585,160 @@
             "mindspice-core/src/main/java/io/mindspice/core/internal/ModelRouter.java",
             "mindspice-core/src/main/java/io/mindspice/core/internal/DefaultModelRouter.java"
           ],
-          "timestamp": "2026-08-05T02:48:38.959Z"
+          "timestamp": "2026-08-05T02:48:38.959Z",
+          "attempt": 1,
+          "verdict": "PASS"
         }
       ]
     },
     {
       "phase": "phase-11-autoconfigure.md",
-      "validations": []
+      "implementation": {
+        "agentModel": {
+          "provider": "deepseek",
+          "model": "deepseek-v4-pro",
+          "thinking": "max"
+        },
+        "report": "Phase 11 implementation evidence (deepseek-v4-pro). Created mindspice-core-autoconfigure module (io.mindspice.core.autoconfigure): TurnLoopProperties (@ConfigurationProperties turnloop, 11 nested records per handoff §12, @PostConstruct validate with ConfigurationException on model-reference/URL violations, WARN clamps for bufferPercent 0-50/maxToolRounds>=1/timeout>=1s/bufferCapacity>=1/maxResultChars>=100, drainTimeout>=0 with negative→0 defensive clamp); TurnLoopAutoConfiguration (@AutoConfiguration + @EnableConfigurationProperties; DataSource @ConditionalOnMissingBean SQLiteDataSource jdbc:sqlite::memory:; TurnLoopBuilder wiring 18 ObjectProviders + List<PromptContributor> + properties; TurnLoop @Bean(destroyMethod=close) @Primary; separate ModelRouter bean for health; TurnLoopMetrics @ConditionalOnClass; TurnLoopHealthIndicator; StreamLifecycle); StreamLifecycle (toSseEmitter: onBackpressureBuffer DROP_OLDEST + warn, TurnEventRenderer.sse() map, onErrorResume→Failed, IOException disconnect handling, Long.MAX_VALUE timeout); TurnLoopHealthIndicator (Boot 4.x org.springframework.boot.health.contributor API, CompletableFuture + modelTimeout timeout fallback 30s, UP/DOWN details); MicrometerTurnLoopMetrics (4 metrics: turn duration Timer histogram, tool calls Counter, active turns Gauge, per-session queue depth Gauges); AutoConfiguration.imports FQN; POM (spring-boot-starter-web optional, micrometer-core optional, actuator compile for HealthIndicator, Automatic-Module-Name io.mindspice.core.autoconfigure). Zero mindspice-core changes. Compile + verify PASS (-am).",
+        "changedFiles": [
+          "mindspice-core-autoconfigure/pom.xml",
+          "mindspice-core-autoconfigure/src/main/java/io/mindspice/core/autoconfigure/TurnLoopProperties.java",
+          "mindspice-core-autoconfigure/src/main/java/io/mindspice/core/autoconfigure/TurnLoopAutoConfiguration.java",
+          "mindspice-core-autoconfigure/src/main/java/io/mindspice/core/autoconfigure/StreamLifecycle.java",
+          "mindspice-core-autoconfigure/src/main/java/io/mindspice/core/autoconfigure/TurnLoopHealthIndicator.java",
+          "mindspice-core-autoconfigure/src/main/java/io/mindspice/core/autoconfigure/MicrometerTurnLoopMetrics.java",
+          "mindspice-core-autoconfigure/src/main/resources/META-INF/spring/org.springframework.boot.autoconfigure.AutoConfiguration.imports"
+        ],
+        "changedFileObservations": [
+          {
+            "path": "mindspice-core-autoconfigure/pom.xml",
+            "status": "present",
+            "digest": "2f8467da9697cfbccceac8fa1082d4983083b2b28c59fe3e0eb08b7b94c5a793",
+            "bytes": 2173
+          },
+          {
+            "path": "mindspice-core-autoconfigure/src/main/java/io/mindspice/core/autoconfigure/TurnLoopProperties.java",
+            "status": "present",
+            "digest": "700f3cdcc39fd7c51828e4a6e92a291c0803fc206c8194b8829ca137aed72694",
+            "bytes": 8741
+          },
+          {
+            "path": "mindspice-core-autoconfigure/src/main/java/io/mindspice/core/autoconfigure/TurnLoopAutoConfiguration.java",
+            "status": "present",
+            "digest": "b856c4f01a96f45459f5748763c2e940a54c14ec4d43bf73d297fe383d142f8d",
+            "bytes": 10495
+          },
+          {
+            "path": "mindspice-core-autoconfigure/src/main/java/io/mindspice/core/autoconfigure/StreamLifecycle.java",
+            "status": "present",
+            "digest": "33c226322bac725e6593c4e1b2535175bf4cb28735834baa632e5f3434d93d8d",
+            "bytes": 4287
+          },
+          {
+            "path": "mindspice-core-autoconfigure/src/main/java/io/mindspice/core/autoconfigure/TurnLoopHealthIndicator.java",
+            "status": "present",
+            "digest": "620092a87de170659668fda5c02d0b0868b7ef8cdb7852cfdf765c6e668e3e5d",
+            "bytes": 3986
+          },
+          {
+            "path": "mindspice-core-autoconfigure/src/main/java/io/mindspice/core/autoconfigure/MicrometerTurnLoopMetrics.java",
+            "status": "present",
+            "digest": "ca2aa1010e43a815122ac52d6a89b6af85a1f101fa0805e1db7f3fab71103210",
+            "bytes": 2985
+          },
+          {
+            "path": "mindspice-core-autoconfigure/src/main/resources/META-INF/spring/org.springframework.boot.autoconfigure.AutoConfiguration.imports",
+            "status": "present",
+            "digest": "2fc50a2f4ba6f6955d9d5ee6d4daacb3fef22f64b489101dd59e2a575cb53fa4",
+            "bytes": 58
+          }
+        ],
+        "outsideDeclaredTargets": [
+          "mindspice-core-autoconfigure/pom.xml",
+          "mindspice-core-autoconfigure/src/main/java/io/mindspice/core/autoconfigure/TurnLoopProperties.java",
+          "mindspice-core-autoconfigure/src/main/java/io/mindspice/core/autoconfigure/TurnLoopAutoConfiguration.java",
+          "mindspice-core-autoconfigure/src/main/java/io/mindspice/core/autoconfigure/StreamLifecycle.java",
+          "mindspice-core-autoconfigure/src/main/java/io/mindspice/core/autoconfigure/TurnLoopHealthIndicator.java",
+          "mindspice-core-autoconfigure/src/main/java/io/mindspice/core/autoconfigure/MicrometerTurnLoopMetrics.java",
+          "mindspice-core-autoconfigure/src/main/resources/META-INF/spring/org.springframework.boot.autoconfigure.AutoConfiguration.imports"
+        ],
+        "timestamp": "2026-08-05T03:06:39.721Z"
+      },
+      "validations": [
+        {
+          "agentModel": {
+            "provider": "openai-codex",
+            "model": "gpt-5.6-terra",
+            "thinking": "high"
+          },
+          "attempt": 1,
+          "verdict": "PASS",
+          "report": "Phase 11 validation VERDICT: PASS (deepseek-v4-pro:max). All 10 criteria verified: TurnLoopProperties nested records match handoff §12 exactly with correct clamp-vs-throw validation; TurnLoopAutoConfiguration annotations and wiring correct (all 18 ObjectProvider.ifAvailable calls cross-checked against real TurnLoopBuilder setter names; List<PromptContributor> ordered; TurnLoopMetrics auto-discovered); StreamLifecycle invariants correct (DROP_OLDEST + warn, IOException disconnect, onErrorResume→Failed, Long.MAX_VALUE timeout); TurnLoopHealthIndicator uses correct Boot 4.x API (org.springframework.boot.health.contributor, verified in spring-boot-health-4.0.7.jar) with timeout/UP/DOWN details; MicrometerTurnLoopMetrics implements SPI with all 4 metrics. Deviation rulings: (a) actuator COMPILE scope ACCEPTABLE (HealthIndicator needs compile-time API; excludable by embedding apps); (b) separate ModelRouter bean for health ACCEPTABLE (lazy ChatModel creation, zero cost until health check hit); (c) drainTimeout negative→0 clamp ACCEPTABLE strict superset. Commands: mvn compile + verify -pl mindspice-core-autoconfigure -am BUILD SUCCESS; AutoConfiguration.imports exact FQN; manifest Automatic-Module-Name verified; git scope only autoconfigure module. No validator edits. Remaining risks: StreamLifecycle doesn't dispose Flux subscription on disconnect (matches plan validation scenario 20 — turn continues, events discarded, no crash; future hardening noted); Timer tag cardinality fine for typical deployments.",
+          "changedFiles": [
+            "mindspice-core-autoconfigure/pom.xml",
+            "mindspice-core-autoconfigure/src/main/java/io/mindspice/core/autoconfigure/TurnLoopProperties.java",
+            "mindspice-core-autoconfigure/src/main/java/io/mindspice/core/autoconfigure/TurnLoopAutoConfiguration.java",
+            "mindspice-core-autoconfigure/src/main/java/io/mindspice/core/autoconfigure/StreamLifecycle.java",
+            "mindspice-core-autoconfigure/src/main/java/io/mindspice/core/autoconfigure/TurnLoopHealthIndicator.java",
+            "mindspice-core-autoconfigure/src/main/java/io/mindspice/core/autoconfigure/MicrometerTurnLoopMetrics.java",
+            "mindspice-core-autoconfigure/src/main/resources/META-INF/spring/org.springframework.boot.autoconfigure.AutoConfiguration.imports"
+          ],
+          "changedFileObservations": [
+            {
+              "path": "mindspice-core-autoconfigure/pom.xml",
+              "status": "present",
+              "digest": "2f8467da9697cfbccceac8fa1082d4983083b2b28c59fe3e0eb08b7b94c5a793",
+              "bytes": 2173
+            },
+            {
+              "path": "mindspice-core-autoconfigure/src/main/java/io/mindspice/core/autoconfigure/TurnLoopProperties.java",
+              "status": "present",
+              "digest": "700f3cdcc39fd7c51828e4a6e92a291c0803fc206c8194b8829ca137aed72694",
+              "bytes": 8741
+            },
+            {
+              "path": "mindspice-core-autoconfigure/src/main/java/io/mindspice/core/autoconfigure/TurnLoopAutoConfiguration.java",
+              "status": "present",
+              "digest": "b856c4f01a96f45459f5748763c2e940a54c14ec4d43bf73d297fe383d142f8d",
+              "bytes": 10495
+            },
+            {
+              "path": "mindspice-core-autoconfigure/src/main/java/io/mindspice/core/autoconfigure/StreamLifecycle.java",
+              "status": "present",
+              "digest": "33c226322bac725e6593c4e1b2535175bf4cb28735834baa632e5f3434d93d8d",
+              "bytes": 4287
+            },
+            {
+              "path": "mindspice-core-autoconfigure/src/main/java/io/mindspice/core/autoconfigure/TurnLoopHealthIndicator.java",
+              "status": "present",
+              "digest": "620092a87de170659668fda5c02d0b0868b7ef8cdb7852cfdf765c6e668e3e5d",
+              "bytes": 3986
+            },
+            {
+              "path": "mindspice-core-autoconfigure/src/main/java/io/mindspice/core/autoconfigure/MicrometerTurnLoopMetrics.java",
+              "status": "present",
+              "digest": "ca2aa1010e43a815122ac52d6a89b6af85a1f101fa0805e1db7f3fab71103210",
+              "bytes": 2985
+            },
+            {
+              "path": "mindspice-core-autoconfigure/src/main/resources/META-INF/spring/org.springframework.boot.autoconfigure.AutoConfiguration.imports",
+              "status": "present",
+              "digest": "2fc50a2f4ba6f6955d9d5ee6d4daacb3fef22f64b489101dd59e2a575cb53fa4",
+              "bytes": 58
+            }
+          ],
+          "outsideDeclaredTargets": [
+            "mindspice-core-autoconfigure/pom.xml",
+            "mindspice-core-autoconfigure/src/main/java/io/mindspice/core/autoconfigure/TurnLoopProperties.java",
+            "mindspice-core-autoconfigure/src/main/java/io/mindspice/core/autoconfigure/TurnLoopAutoConfiguration.java",
+            "mindspice-core-autoconfigure/src/main/java/io/mindspice/core/autoconfigure/StreamLifecycle.java",
+            "mindspice-core-autoconfigure/src/main/java/io/mindspice/core/autoconfigure/TurnLoopHealthIndicator.java",
+            "mindspice-core-autoconfigure/src/main/java/io/mindspice/core/autoconfigure/MicrometerTurnLoopMetrics.java",
+            "mindspice-core-autoconfigure/src/main/resources/META-INF/spring/org.springframework.boot.autoconfigure.AutoConfiguration.imports"
+          ],
+          "timestamp": "2026-08-05T03:06:47.308Z"
+        }
+      ]
     },
     {
       "phase": "phase-12-tests.md",
@@ -6610,5 +6755,5 @@
   ],
   "integrationValidations": [],
   "createdAt": "2026-08-04T23:11:03.465Z",
-  "updatedAt": "2026-08-05T02:48:38.959Z"
+  "updatedAt": "2026-08-05T03:06:47.308Z"
 }

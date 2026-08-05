@@ -16,7 +16,7 @@ Source plan `.internal-dev/plans/20260804-212000-home-dhickel-code-java-magenta-
 - phase-08-internal-persistence.md: wave-08, implementation recorded, validation passed (1 attempt(s))
 - phase-09-engine-utilities.md: wave-09, implementation recorded, validation passed (1 attempt(s))
 - phase-10-facade.md: wave-10, implementation recorded, validation passed (1 attempt(s))
-- phase-11-autoconfigure.md: wave-11, implementation not recorded, validation pending (0 attempt(s))
+- phase-11-autoconfigure.md: wave-11, implementation recorded, validation passed (1 attempt(s))
 - phase-12-tests.md: wave-12, implementation not recorded, validation pending (0 attempt(s))
 - phase-13-docs-hardening.md: wave-13, implementation not recorded, validation pending (0 attempt(s))
 - phase-14-magenta-reintegration.md: wave-14, implementation not recorded, validation pending (0 attempt(s))
@@ -52,6 +52,7 @@ Source plan `.internal-dev/plans/20260804-212000-home-dhickel-code-java-magenta-
 - `phase-08-internal-persistence.md`: 2026-08-05T01:34:10.505Z, 16 changed-file observation(s), 16 outside declared targets
 - `phase-09-engine-utilities.md`: 2026-08-05T02:13:36.906Z, 22 changed-file observation(s), 22 outside declared targets
 - `phase-10-facade.md`: 2026-08-05T02:48:31.801Z, 18 changed-file observation(s), 18 outside declared targets
+- `phase-11-autoconfigure.md`: 2026-08-05T03:06:39.721Z, 7 changed-file observation(s), 7 outside declared targets
 
 ## Final Validation
 
@@ -65,8 +66,9 @@ Source plan `.internal-dev/plans/20260804-212000-home-dhickel-code-java-magenta-
 - `phase-08-internal-persistence.md` attempt 1: PASS at 2026-08-05T01:34:16.673Z
 - `phase-09-engine-utilities.md` attempt 1: PASS at 2026-08-05T02:13:45.864Z
 - `phase-10-facade.md` attempt 1: PASS at 2026-08-05T02:48:38.959Z
+- `phase-11-autoconfigure.md` attempt 1: PASS at 2026-08-05T03:06:47.308Z
 Integration validation not recorded.
 
 ## Outcome
 
-Active, revision 20.
+Active, revision 22.
