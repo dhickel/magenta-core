@@ -13,7 +13,7 @@ import java.util.Optional;
  * this phase defines only the interface and its inner {@code ActiveTurn}
  * sub-interface.
  */
-interface ActiveTurnRegistry {
+public interface ActiveTurnRegistry {
 
     @NonNull
     ActiveTurn register(@NonNull String turnId);

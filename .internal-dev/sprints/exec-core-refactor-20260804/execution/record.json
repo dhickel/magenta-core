@@ -2,7 +2,7 @@
   "version": 2,
   "runId": "exec-core-refactor-20260804",
   "state": "active",
-  "revision": 16,
+  "revision": 18,
   "source": {
     "projectRoot": "/home/dhickel/Code/Java/Magenta",
     "sourcePlanPath": ".internal-dev/plans/20260804-212000-home-dhickel-code-java-magenta-internal-dev-ha",
@@ -6032,8 +6032,6 @@
             "model": "gpt-5.6-terra",
             "thinking": "high"
           },
-          "attempt": 1,
-          "verdict": "PASS",
           "report": "Phase 08 validation VERDICT: PASS (deepseek-v4-pro:max). All 10 criteria verified: 3 internal interfaces package-private with correct signatures; ModelRouter the only internal/ file importing Spring AI; ToolLoopGuard exact message formats + synchronized sliding windows; ToolArgumentCoercionModule extends SimpleModule with correct service-loader line; MigrationRunner version-ordered per-migration transactional with plain JDBC finally cleanup; schema.sql character-for-character match with Appendix B (diff zero output); persistence semantics verified (batchUpdate, atomic claim UPDATE rows==1, findStaleClaims, SqliteAuditWriter catch+log never throws, NoOpAuditWriter.instance() singleton); SpringAiConversationMemoryAdapter package-private with correct message mapping (user→UserMessage, assistant→AssistantMessage, system→SystemMessage, tool→ToolResponseMessage via builder) — lastN deviation CONFIRMED correct via javap on the actual Spring AI 2.0.0 ChatMemory interface (get(String) has no lastN). mvn compile + verify PASS; Enforcer PASS; Spring AI imports only in the 2 sanctioned bridge files. No validator edits needed. No remaining risks.",
           "changedFiles": [
             "mindspice-core/src/main/java/io/mindspice/core/internal/ModelRouter.java",
@@ -6081,13 +6079,288 @@
             "mindspice-core/src/main/java/io/mindspice/core/persistence/SpringAiConversationMemoryAdapter.java",
             "mindspice-core/src/main/resources/schema.sql"
           ],
-          "timestamp": "2026-08-05T01:34:16.673Z"
+          "timestamp": "2026-08-05T01:34:16.673Z",
+          "attempt": 1,
+          "verdict": "PASS"
         }
       ]
     },
     {
       "phase": "phase-09-engine-utilities.md",
-      "validations": []
+      "implementation": {
+        "agentModel": {
+          "provider": "deepseek",
+          "model": "deepseek-v4-pro",
+          "thinking": "max"
+        },
+        "report": "Phase 09 implementation evidence (4 subphases, deepseek-v4-pro). A: engine/DefaultTurnEngine (6-state cycle, Builder grouped by concern, Flux stream + execute, interrupt polling, ask_user suspension, ToolLoopGuard, ThinkingExtractor, async compaction via TurnExecutor, capability check), DefaultPromptAssembler (3-layer), ContextManager (window/computeUsage/needsCompaction), ExecutorStrategy (VIRTUAL/FIXED); deviations: internal interfaces promoted to public, TurnLoopException made concrete. B: DefaultToolRegistry (two-stage maps, ask_user framework tool, collision ToolException, @Tool reflection), SerialTurnGate (per-session ReentrantLock state machine, 30s daemon timeout scan, drain), CompositeThinkingExtractor (Ollama/DeepSeek/think-tag), InMemoryInteractionStore. C: MarkdownRenderer (lazy optional-dep degradation, GFM tables), TurnEventRenderer (json/sse), EchoTool/DateTimeTool (not auto-registered), TurnEvent Jackson polymorphism annotations. D: ModelConfig/EndpointType/internal/DefaultModelRouter (reflective providers, SpringAiToolCallbackAdapter)/DefaultToolResultSummarizer (generic truncation no switch); deleted 32 Magenta main files (incl. ChatService entirely, RequestResolver, ResolvedChatRequest, StoredContextUsage, ChatBeanConfig rewritten to TokenCountEstimator only; turn/ tool/ rendering/ repository/ source+test dirs removed; 13 test files; 1 META-INF services file). Validation: mindspice-core compile PASS; magenta-app compile PASS; 20 Magenta tests PASS; context starts 1.6s; zero ThreadLocal in framework; zero magenta2 refs from framework. Deleted-path evidence for the removed Magenta files is covered by the git commit; the listed paths are the surviving/created files.",
+        "changedFiles": [
+          "mindspice-core/src/main/java/io/mindspice/core/engine/DefaultTurnEngine.java",
+          "mindspice-core/src/main/java/io/mindspice/core/engine/DefaultPromptAssembler.java",
+          "mindspice-core/src/main/java/io/mindspice/core/engine/ContextManager.java",
+          "mindspice-core/src/main/java/io/mindspice/core/ExecutorStrategy.java",
+          "mindspice-core/src/main/java/io/mindspice/core/DefaultToolRegistry.java",
+          "mindspice-core/src/main/java/io/mindspice/core/SerialTurnGate.java",
+          "mindspice-core/src/main/java/io/mindspice/core/CompositeThinkingExtractor.java",
+          "mindspice-core/src/main/java/io/mindspice/core/persistence/InMemoryInteractionStore.java",
+          "mindspice-core/src/main/java/io/mindspice/core/MarkdownRenderer.java",
+          "mindspice-core/src/main/java/io/mindspice/core/TurnEventRenderer.java",
+          "mindspice-core/src/main/java/io/mindspice/core/example/EchoTool.java",
+          "mindspice-core/src/main/java/io/mindspice/core/example/DateTimeTool.java",
+          "mindspice-core/src/main/java/io/mindspice/core/ModelConfig.java",
+          "mindspice-core/src/main/java/io/mindspice/core/EndpointType.java",
+          "mindspice-core/src/main/java/io/mindspice/core/internal/DefaultModelRouter.java",
+          "mindspice-core/src/main/java/io/mindspice/core/DefaultToolResultSummarizer.java",
+          "mindspice-core/src/main/java/io/mindspice/core/TurnEvent.java",
+          "mindspice-core/src/main/java/io/mindspice/core/TurnLoopException.java",
+          "mindspice-core/src/main/java/io/mindspice/core/internal/ModelRouter.java",
+          "mindspice-core/src/main/java/io/mindspice/core/internal/TurnExecutor.java",
+          "mindspice-core/src/main/java/io/mindspice/core/internal/ActiveTurnRegistry.java",
+          "magenta-app/src/main/java/io/mindspice/magenta2/ai/chat/config/ChatBeanConfig.java"
+        ],
+        "changedFileObservations": [
+          {
+            "path": "mindspice-core/src/main/java/io/mindspice/core/engine/DefaultTurnEngine.java",
+            "status": "present",
+            "digest": "63ca93c8f0f7651dbb0419eaca577b32095bde5670eaffa0072fef120fe20350",
+            "bytes": 47165
+          },
+          {
+            "path": "mindspice-core/src/main/java/io/mindspice/core/engine/DefaultPromptAssembler.java",
+            "status": "present",
+            "digest": "39f18347a9a57751aabd0c681dad93521166beaafc5979415a0286eb97499784",
+            "bytes": 3767
+          },
+          {
+            "path": "mindspice-core/src/main/java/io/mindspice/core/engine/ContextManager.java",
+            "status": "present",
+            "digest": "09110f4c166af45e39535f481362a524c00862adf0877223ba0ca709177f321a",
+            "bytes": 4517
+          },
+          {
+            "path": "mindspice-core/src/main/java/io/mindspice/core/ExecutorStrategy.java",
+            "status": "present",
+            "digest": "c56c6424048de320cefd1d9f96b2011c6ba20e9b3985a26731322dbe6a4e5354",
+            "bytes": 841
+          },
+          {
+            "path": "mindspice-core/src/main/java/io/mindspice/core/DefaultToolRegistry.java",
+            "status": "present",
+            "digest": "d7cd94654029fdf2ef0f0f318f4d7254a35d5c3b753f0829c373c320d7c352d2",
+            "bytes": 10540
+          },
+          {
+            "path": "mindspice-core/src/main/java/io/mindspice/core/SerialTurnGate.java",
+            "status": "present",
+            "digest": "4ec95b9ccf5a191e8fb1c01890b7699d2c0b037b75cfeff075a8a9c86d4032ae",
+            "bytes": 11869
+          },
+          {
+            "path": "mindspice-core/src/main/java/io/mindspice/core/CompositeThinkingExtractor.java",
+            "status": "present",
+            "digest": "7db26bfbbbb2ee369cde8de0dd1b1bfbcc0b89c7011004dac4757e8d5abc44fb",
+            "bytes": 3570
+          },
+          {
+            "path": "mindspice-core/src/main/java/io/mindspice/core/persistence/InMemoryInteractionStore.java",
+            "status": "present",
+            "digest": "e14d32a8e5ea9b4a44d0210b9904f8848c897b476c114ec5153a947ffde26384",
+            "bytes": 1071
+          },
+          {
+            "path": "mindspice-core/src/main/java/io/mindspice/core/MarkdownRenderer.java",
+            "status": "present",
+            "digest": "152512ed3ddbeabffc8b2ea6bb07e01d6455c897728ab8ef74c819b949b82b36",
+            "bytes": 5161
+          },
+          {
+            "path": "mindspice-core/src/main/java/io/mindspice/core/TurnEventRenderer.java",
+            "status": "present",
+            "digest": "732a5160200b7fef39a13361c354824ae7517b263fa7a84683558b9b9d836d9e",
+            "bytes": 2716
+          },
+          {
+            "path": "mindspice-core/src/main/java/io/mindspice/core/example/EchoTool.java",
+            "status": "present",
+            "digest": "76174898beb104772d4efc1d48f88a1e67e9af2d22162c6df4fa1ab94392fcac",
+            "bytes": 705
+          },
+          {
+            "path": "mindspice-core/src/main/java/io/mindspice/core/example/DateTimeTool.java",
+            "status": "present",
+            "digest": "95da6bcf5afab28d1d420d87602bb72e9c1ae10db2401d2c6856cc4bf366a1d8",
+            "bytes": 1467
+          },
+          {
+            "path": "mindspice-core/src/main/java/io/mindspice/core/ModelConfig.java",
+            "status": "present",
+            "digest": "1ae3714efc8e88c5b9183b151fb16e952067978a0813121ac36d635c6d179a27",
+            "bytes": 755
+          },
+          {
+            "path": "mindspice-core/src/main/java/io/mindspice/core/EndpointType.java",
+            "status": "present",
+            "digest": "82c0b6c3ff28587224a2477ab0875c87e29f46a714976ab7790f7f9413609c55",
+            "bytes": 151
+          },
+          {
+            "path": "mindspice-core/src/main/java/io/mindspice/core/internal/DefaultModelRouter.java",
+            "status": "present",
+            "digest": "dd065e08529dd6c2230669080baf9fe3230357b8c970575e35bdcc76b0af6ba8",
+            "bytes": 17220
+          },
+          {
+            "path": "mindspice-core/src/main/java/io/mindspice/core/DefaultToolResultSummarizer.java",
+            "status": "present",
+            "digest": "a66c81dba6eb09994fd897ba992fad717e96873c89d5e3fb6db19c4f89bb6265",
+            "bytes": 2138
+          },
+          {
+            "path": "mindspice-core/src/main/java/io/mindspice/core/TurnEvent.java",
+            "status": "present",
+            "digest": "b9b3abd6cf1eb14509a32dee6eea9d7e84512c3cf957a36534f8cb14b39995dd",
+            "bytes": 3406
+          },
+          {
+            "path": "mindspice-core/src/main/java/io/mindspice/core/TurnLoopException.java",
+            "status": "present",
+            "digest": "9fc5292dabeca8500f05797475e95cf2b4aaa14ad0e93506ce99db67ba3110b9",
+            "bytes": 385
+          },
+          {
+            "path": "mindspice-core/src/main/java/io/mindspice/core/internal/ModelRouter.java",
+            "status": "present",
+            "digest": "f7760255c6b0afc8fa9be74612e1024ce9a67221d7792f9420571f87961001bf",
+            "bytes": 1021
+          },
+          {
+            "path": "mindspice-core/src/main/java/io/mindspice/core/internal/TurnExecutor.java",
+            "status": "present",
+            "digest": "49c1d57457c5eb65f5bf5eff87b06b55165391787655d694cb94227b3a67e058",
+            "bytes": 546
+          },
+          {
+            "path": "mindspice-core/src/main/java/io/mindspice/core/internal/ActiveTurnRegistry.java",
+            "status": "present",
+            "digest": "95deed5ac4c1a955bffe286a02ecde765b6e6ce5183fcb9a9b69019b6cbdea67",
+            "bytes": 1019
+          },
+          {
+            "path": "magenta-app/src/main/java/io/mindspice/magenta2/ai/chat/config/ChatBeanConfig.java",
+            "status": "present",
+            "digest": "818c0218fb799b46afc27aeeae2539c60d9e306db9543c948ac9300a1098226e",
+            "bytes": 808
+          }
+        ],
+        "outsideDeclaredTargets": [
+          "mindspice-core/src/main/java/io/mindspice/core/engine/DefaultTurnEngine.java",
+          "mindspice-core/src/main/java/io/mindspice/core/engine/DefaultPromptAssembler.java",
+          "mindspice-core/src/main/java/io/mindspice/core/engine/ContextManager.java",
+          "mindspice-core/src/main/java/io/mindspice/core/ExecutorStrategy.java",
+          "mindspice-core/src/main/java/io/mindspice/core/DefaultToolRegistry.java",
+          "mindspice-core/src/main/java/io/mindspice/core/SerialTurnGate.java",
+          "mindspice-core/src/main/java/io/mindspice/core/CompositeThinkingExtractor.java",
+          "mindspice-core/src/main/java/io/mindspice/core/persistence/InMemoryInteractionStore.java",
+          "mindspice-core/src/main/java/io/mindspice/core/MarkdownRenderer.java",
+          "mindspice-core/src/main/java/io/mindspice/core/TurnEventRenderer.java",
+          "mindspice-core/src/main/java/io/mindspice/core/example/EchoTool.java",
+          "mindspice-core/src/main/java/io/mindspice/core/example/DateTimeTool.java",
+          "mindspice-core/src/main/java/io/mindspice/core/ModelConfig.java",
+          "mindspice-core/src/main/java/io/mindspice/core/EndpointType.java",
+          "mindspice-core/src/main/java/io/mindspice/core/internal/DefaultModelRouter.java",
+          "mindspice-core/src/main/java/io/mindspice/core/DefaultToolResultSummarizer.java",
+          "mindspice-core/src/main/java/io/mindspice/core/TurnEvent.java",
+          "mindspice-core/src/main/java/io/mindspice/core/TurnLoopException.java",
+          "mindspice-core/src/main/java/io/mindspice/core/internal/ModelRouter.java",
+          "mindspice-core/src/main/java/io/mindspice/core/internal/TurnExecutor.java",
+          "mindspice-core/src/main/java/io/mindspice/core/internal/ActiveTurnRegistry.java",
+          "magenta-app/src/main/java/io/mindspice/magenta2/ai/chat/config/ChatBeanConfig.java"
+        ],
+        "timestamp": "2026-08-05T02:13:36.906Z"
+      },
+      "validations": [
+        {
+          "agentModel": {
+            "provider": "openai-codex",
+            "model": "gpt-5.6-terra",
+            "thinking": "high"
+          },
+          "attempt": 1,
+          "verdict": "PASS",
+          "report": "Phase 09 validation VERDICT: PASS (deepseek-v4-pro:max). All 21 criteria verified: DefaultTurnEngine 6-state cycle complete and coherent (Flux.create sink contract, interrupt polling after each phase, no Spring AI types in engine public signatures); Deviation A (internal interfaces public) ACCEPTED — internal package naming convention signals non-public API, Javadoc marks framework-internal, contract constraint applies to public API surface only; Deviation B (TurnLoopException concrete) ACCEPTED — directly instantiated in TurnEventRenderer.json(), sealed subclasses intact. DefaultToolRegistry collision message exact; SerialTurnGate state machine/timeout/drain thread-safe; CompositeThinkingExtractor 3 strategies; MarkdownRenderer graceful degradation; TurnEventRenderer json/sse with Jackson annotations on all 8 subtypes; example tools not auto-registered; DefaultToolResultSummarizer no hard-coded switch. Magenta: 32 main + 13 test + 1 META-INF deleted, no references to deleted types remain, ChatBeanConfig coherent. Commands: mvn compile mindspice-core PASS; mvn compile magenta-app PASS; mvn verify mindspice-core PASS (Enforcer); mvn test magenta-app 20/20 PASS; context starts 1.634s. Greps: zero ThreadLocal in framework; zero magenta2 refs from framework. Documented risks (no fixes needed): TurnExecutor has no concrete impl yet (Phase 10 facade); SerialTurnGate drain double-check pattern note; ContextManager hard-coded 128k maxTokens (model-specific refinement deferred); DefaultModelRouter reflection-based (SPI escape hatch exists); dead code model/TurnEvent.java + AgentChatPromptService left for Phase 14; commonmark 0.24.0 (matches reactor, correct choice over handoff 0.21.0). No validator edits needed.",
+          "changedFiles": [
+            "mindspice-core/src/main/java/io/mindspice/core/engine/DefaultTurnEngine.java",
+            "mindspice-core/src/main/java/io/mindspice/core/engine/DefaultPromptAssembler.java",
+            "mindspice-core/src/main/java/io/mindspice/core/engine/ContextManager.java",
+            "mindspice-core/src/main/java/io/mindspice/core/DefaultToolRegistry.java",
+            "mindspice-core/src/main/java/io/mindspice/core/SerialTurnGate.java",
+            "mindspice-core/src/main/java/io/mindspice/core/internal/DefaultModelRouter.java",
+            "mindspice-core/src/main/java/io/mindspice/core/DefaultToolResultSummarizer.java",
+            "magenta-app/src/main/java/io/mindspice/magenta2/ai/chat/config/ChatBeanConfig.java"
+          ],
+          "changedFileObservations": [
+            {
+              "path": "mindspice-core/src/main/java/io/mindspice/core/engine/DefaultTurnEngine.java",
+              "status": "present",
+              "digest": "63ca93c8f0f7651dbb0419eaca577b32095bde5670eaffa0072fef120fe20350",
+              "bytes": 47165
+            },
+            {
+              "path": "mindspice-core/src/main/java/io/mindspice/core/engine/DefaultPromptAssembler.java",
+              "status": "present",
+              "digest": "39f18347a9a57751aabd0c681dad93521166beaafc5979415a0286eb97499784",
+              "bytes": 3767
+            },
+            {
+              "path": "mindspice-core/src/main/java/io/mindspice/core/engine/ContextManager.java",
+              "status": "present",
+              "digest": "09110f4c166af45e39535f481362a524c00862adf0877223ba0ca709177f321a",
+              "bytes": 4517
+            },
+            {
+              "path": "mindspice-core/src/main/java/io/mindspice/core/DefaultToolRegistry.java",
+              "status": "present",
+              "digest": "d7cd94654029fdf2ef0f0f318f4d7254a35d5c3b753f0829c373c320d7c352d2",
+              "bytes": 10540
+            },
+            {
+              "path": "mindspice-core/src/main/java/io/mindspice/core/SerialTurnGate.java",
+              "status": "present",
+              "digest": "4ec95b9ccf5a191e8fb1c01890b7699d2c0b037b75cfeff075a8a9c86d4032ae",
+              "bytes": 11869
+            },
+            {
+              "path": "mindspice-core/src/main/java/io/mindspice/core/internal/DefaultModelRouter.java",
+              "status": "present",
+              "digest": "dd065e08529dd6c2230669080baf9fe3230357b8c970575e35bdcc76b0af6ba8",
+              "bytes": 17220
+            },
+            {
+              "path": "mindspice-core/src/main/java/io/mindspice/core/DefaultToolResultSummarizer.java",
+              "status": "present",
+              "digest": "a66c81dba6eb09994fd897ba992fad717e96873c89d5e3fb6db19c4f89bb6265",
+              "bytes": 2138
+            },
+            {
+              "path": "magenta-app/src/main/java/io/mindspice/magenta2/ai/chat/config/ChatBeanConfig.java",
+              "status": "present",
+              "digest": "818c0218fb799b46afc27aeeae2539c60d9e306db9543c948ac9300a1098226e",
+              "bytes": 808
+            }
+          ],
+          "outsideDeclaredTargets": [
+            "mindspice-core/src/main/java/io/mindspice/core/engine/DefaultTurnEngine.java",
+            "mindspice-core/src/main/java/io/mindspice/core/engine/DefaultPromptAssembler.java",
+            "mindspice-core/src/main/java/io/mindspice/core/engine/ContextManager.java",
+            "mindspice-core/src/main/java/io/mindspice/core/DefaultToolRegistry.java",
+            "mindspice-core/src/main/java/io/mindspice/core/SerialTurnGate.java",
+            "mindspice-core/src/main/java/io/mindspice/core/internal/DefaultModelRouter.java",
+            "mindspice-core/src/main/java/io/mindspice/core/DefaultToolResultSummarizer.java",
+            "magenta-app/src/main/java/io/mindspice/magenta2/ai/chat/config/ChatBeanConfig.java"
+          ],
+          "timestamp": "2026-08-05T02:13:45.864Z"
+        }
+      ]
     },
     {
       "phase": "phase-10-facade.md",
@@ -6112,5 +6385,5 @@
   ],
   "integrationValidations": [],
   "createdAt": "2026-08-04T23:11:03.465Z",
-  "updatedAt": "2026-08-05T01:34:16.673Z"
+  "updatedAt": "2026-08-05T02:13:45.864Z"
 }

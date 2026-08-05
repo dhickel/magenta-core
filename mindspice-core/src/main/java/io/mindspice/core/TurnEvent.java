@@ -1,5 +1,7 @@
 package io.mindspice.core;
 
+import com.fasterxml.jackson.annotation.JsonSubTypes;
+import com.fasterxml.jackson.annotation.JsonTypeInfo;
 import java.time.Instant;
 
 /**
@@ -10,6 +12,17 @@ import java.time.Instant;
  * <p>All 8 subtypes are inner records in this file. Transport rendering
  * (SSE, JSON Lines, etc.) is handled externally via utilities.</p>
  */
+@JsonTypeInfo(use = JsonTypeInfo.Id.NAME, property = "type")
+@JsonSubTypes({
+    @JsonSubTypes.Type(value = TurnEvent.Started.class, name = "started"),
+    @JsonSubTypes.Type(value = TurnEvent.Chunk.class, name = "chunk"),
+    @JsonSubTypes.Type(value = TurnEvent.ToolActivity.class, name = "tool_activity"),
+    @JsonSubTypes.Type(value = TurnEvent.SystemNotice.class, name = "system_notice"),
+    @JsonSubTypes.Type(value = TurnEvent.QuestionPending.class, name = "question_pending"),
+    @JsonSubTypes.Type(value = TurnEvent.Interrupt.class, name = "interrupt"),
+    @JsonSubTypes.Type(value = TurnEvent.Completed.class, name = "completed"),
+    @JsonSubTypes.Type(value = TurnEvent.Failed.class, name = "failed")
+})
 public sealed interface TurnEvent
     permits TurnEvent.Started, TurnEvent.Chunk, TurnEvent.ToolActivity,
             TurnEvent.SystemNotice, TurnEvent.QuestionPending,

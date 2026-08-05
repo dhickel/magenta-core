@@ -10,7 +10,7 @@ import java.util.function.Supplier;
  * turns. The concrete virtual-thread implementation is created in a later
  * phase; this phase defines only the interface.
  */
-interface TurnExecutor extends AutoCloseable {
+public interface TurnExecutor extends AutoCloseable {
 
     <T> CompletableFuture<T> submit(@NonNull String sessionId, @NonNull Supplier<T> task);
 

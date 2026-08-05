@@ -13,7 +13,7 @@ import java.util.List;
  * framework. The interface is package-private so embedding applications never
  * see Spring AI types through any public API surface.
  */
-interface ModelRouter {
+public interface ModelRouter {
 
     @NonNull
     ChatModel springAiChatModel(@NonNull String modelAlias);
