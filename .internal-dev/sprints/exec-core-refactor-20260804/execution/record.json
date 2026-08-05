@@ -2,7 +2,7 @@
   "version": 2,
   "runId": "exec-core-refactor-20260804",
   "state": "active",
-  "revision": 14,
+  "revision": 16,
   "source": {
     "projectRoot": "/home/dhickel/Code/Java/Magenta",
     "sourcePlanPath": ".internal-dev/plans/20260804-212000-home-dhickel-code-java-magenta-internal-dev-ha",
@@ -5827,8 +5827,6 @@
             "model": "gpt-5.6-terra",
             "thinking": "high"
           },
-          "attempt": 1,
-          "verdict": "PASS",
           "report": "Phase 07 validation VERDICT: PASS (deepseek-v4-pro:max). All 37 criteria verified against handoff Appendix A: TurnEvent 8 inner records exact fields; exception hierarchy (TurnFailedException permits note: Java rejects self-reference in sealed permits — implementation correctly omits it, handoff-editorial issue only, verified by compiler); all 20 SPIs method-by-method (nested types, @Nullable placements, 4 @FunctionalInterface annotations exactly as specified); sealed types declare permits in same file; no standalone ThinkingResult/AssistantMessageContent; mvn compile -pl mindspice-core BUILD SUCCESS; zero org.springframework.ai imports; git status only mindspice-core changes. Validator attempted handoff-exact permits on TurnFailedException and reverted (compiler: illegal self-reference). No remaining risks.",
           "changedFiles": [
             "mindspice-core/src/main/java/io/mindspice/core/TurnEvent.java",
@@ -5876,13 +5874,216 @@
             "mindspice-core/src/main/java/io/mindspice/core/spi/TurnGate.java",
             "mindspice-core/src/main/java/io/mindspice/core/spi/MessageQueueStore.java"
           ],
-          "timestamp": "2026-08-05T01:21:47.255Z"
+          "timestamp": "2026-08-05T01:21:47.255Z",
+          "attempt": 1,
+          "verdict": "PASS"
         }
       ]
     },
     {
       "phase": "phase-08-internal-persistence.md",
-      "validations": []
+      "implementation": {
+        "agentModel": {
+          "provider": "deepseek",
+          "model": "deepseek-v4-pro",
+          "thinking": "max"
+        },
+        "report": "Phase 08 implementation evidence (2 subphases, deepseek-v4-pro). A: internal/ModelRouter (package-private, sole Spring AI mapping boundary: ChatModel/ToolCallingChatOptions, 5 methods), internal/TurnExecutor (package-private, AutoCloseable, submit/close), internal/ActiveTurnRegistry (package-private + inner ActiveTurn with phase/interrupt API); ToolLoopGuard public final (constructors 5,8,5 defaults; ToolCallIdentity + ToolExecutionResult inner records; identical-call + error-window sliding-window tracking with exact message formats; synchronized); ToolArgumentCoercionModule extends SimpleModule with contextual coercion deserializer + service-loader registration (io.mindspice.core.ToolArgumentCoercionModule); Migration interface + MigrationRunner (version-ordered, per-migration transactions with commit/rollback, currentVersion); schema.sql diff-verified character-for-character vs handoff Appendix B (5 tables + all indexes); POM: spring-ai-model compile, sqlite-jdbc compile. B: SqliteConversationMemory (batchUpdate inserts, ORDER BY id ASC, Jackson metadata round-trip, DataAccessException log+rethrow); SqliteSessionStore (INSERT OR REPLACE, dynamic SessionFilter list, updated_at maintenance); SqliteMessageQueueStore (claimAtomic UPDATE...WHERE claim_token IS NULL → rows==1, findBySessionId unclaimed ordered, findStaleClaims); NoOpAuditWriter (static instance()); SqliteAuditWriter (fire-and-forget JSON payload inserts, catch+log never throws); SpringAiConversationMemoryAdapter (package-private ChatMemory bridge; deviation: Spring AI 2.0.0 ChatMemory.get(String) has no lastN param — returns all messages, documented in Javadoc). Validation: mvn compile + verify PASS, Enforcer PASS.",
+        "changedFiles": [
+          "mindspice-core/pom.xml",
+          "mindspice-core/src/main/java/io/mindspice/core/internal/ModelRouter.java",
+          "mindspice-core/src/main/java/io/mindspice/core/internal/TurnExecutor.java",
+          "mindspice-core/src/main/java/io/mindspice/core/internal/ActiveTurnRegistry.java",
+          "mindspice-core/src/main/java/io/mindspice/core/ToolLoopGuard.java",
+          "mindspice-core/src/main/java/io/mindspice/core/ToolArgumentCoercionModule.java",
+          "mindspice-core/src/main/java/io/mindspice/core/Migration.java",
+          "mindspice-core/src/main/java/io/mindspice/core/MigrationRunner.java",
+          "mindspice-core/src/main/resources/META-INF/services/com.fasterxml.jackson.databind.Module",
+          "mindspice-core/src/main/resources/schema.sql",
+          "mindspice-core/src/main/java/io/mindspice/core/persistence/SqliteConversationMemory.java",
+          "mindspice-core/src/main/java/io/mindspice/core/persistence/SqliteSessionStore.java",
+          "mindspice-core/src/main/java/io/mindspice/core/persistence/SqliteMessageQueueStore.java",
+          "mindspice-core/src/main/java/io/mindspice/core/persistence/SqliteAuditWriter.java",
+          "mindspice-core/src/main/java/io/mindspice/core/persistence/NoOpAuditWriter.java",
+          "mindspice-core/src/main/java/io/mindspice/core/persistence/SpringAiConversationMemoryAdapter.java"
+        ],
+        "changedFileObservations": [
+          {
+            "path": "mindspice-core/pom.xml",
+            "status": "present",
+            "digest": "91b4647ca9c65a8aced534fc351693da96de2c6642f0afe72fd19e5eaa75c72c",
+            "bytes": 4122
+          },
+          {
+            "path": "mindspice-core/src/main/java/io/mindspice/core/internal/ModelRouter.java",
+            "status": "present",
+            "digest": "29a996cfa6a68848ce1296e185a958e057b1683916aeee1a3b64814fb71e107b",
+            "bytes": 1014
+          },
+          {
+            "path": "mindspice-core/src/main/java/io/mindspice/core/internal/TurnExecutor.java",
+            "status": "present",
+            "digest": "af6449f51dbf26e749d9e8da478fa059acfbd0a379a23e58862c5473d0f89ee0",
+            "bytes": 539
+          },
+          {
+            "path": "mindspice-core/src/main/java/io/mindspice/core/internal/ActiveTurnRegistry.java",
+            "status": "present",
+            "digest": "82a11f4fccbff79586e7f1fb51e10e934c066bef0ce5fa3c890f14adeb0b3128",
+            "bytes": 1012
+          },
+          {
+            "path": "mindspice-core/src/main/java/io/mindspice/core/ToolLoopGuard.java",
+            "status": "present",
+            "digest": "cd751cf804b09c869ec2f0b972423fd305cdd390333dc9fcfe611caa5c3d20b3",
+            "bytes": 5206
+          },
+          {
+            "path": "mindspice-core/src/main/java/io/mindspice/core/ToolArgumentCoercionModule.java",
+            "status": "present",
+            "digest": "f5a1020d4c8cfe102a7faabb70a7637e79e671de21b4eb606701ba4775c8b596",
+            "bytes": 4281
+          },
+          {
+            "path": "mindspice-core/src/main/java/io/mindspice/core/Migration.java",
+            "status": "present",
+            "digest": "aabf13c964a25f0b068c2ccf0fe875f91e8e383994fb346c5e6c14e00b10ff91",
+            "bytes": 733
+          },
+          {
+            "path": "mindspice-core/src/main/java/io/mindspice/core/MigrationRunner.java",
+            "status": "present",
+            "digest": "b8b5da35be6f7fcf3a9c788b080bae94a1c5d8405fb21b717ccbc6d86fc8d5e8",
+            "bytes": 4769
+          },
+          {
+            "path": "mindspice-core/src/main/resources/META-INF/services/com.fasterxml.jackson.databind.Module",
+            "status": "present",
+            "digest": "6db9c410fcd1733a09f63a560a5310e42cdda8ad122b62bb5340deb2a60f3bd3",
+            "bytes": 45
+          },
+          {
+            "path": "mindspice-core/src/main/resources/schema.sql",
+            "status": "present",
+            "digest": "03b041e7040916d1de21ead9c7aa3e22f518909a3e607585d9191b81ffeb0f74",
+            "bytes": 2708
+          },
+          {
+            "path": "mindspice-core/src/main/java/io/mindspice/core/persistence/SqliteConversationMemory.java",
+            "status": "present",
+            "digest": "1131b70448f1b67d10a778e062b8b64c480b3d0996f26c94ca6d216f7bd6afb6",
+            "bytes": 5808
+          },
+          {
+            "path": "mindspice-core/src/main/java/io/mindspice/core/persistence/SqliteSessionStore.java",
+            "status": "present",
+            "digest": "9a2e14ec475b45322c096ae3dfa4d3aeb055158d91d5660257cf92451e23437f",
+            "bytes": 10065
+          },
+          {
+            "path": "mindspice-core/src/main/java/io/mindspice/core/persistence/SqliteMessageQueueStore.java",
+            "status": "present",
+            "digest": "62f9f774595a1c76b35e50a233bd88bcadd0a94a7e2884cae2292f9a4fbf3702",
+            "bytes": 8167
+          },
+          {
+            "path": "mindspice-core/src/main/java/io/mindspice/core/persistence/SqliteAuditWriter.java",
+            "status": "present",
+            "digest": "a177df7fc903934b26fadcae76843bd5021b46044cd5d8a46c96154516a67430",
+            "bytes": 5945
+          },
+          {
+            "path": "mindspice-core/src/main/java/io/mindspice/core/persistence/NoOpAuditWriter.java",
+            "status": "present",
+            "digest": "331225cf27705be33fa38df78dc53cabc947d99c4922da9234a767e97200074d",
+            "bytes": 1127
+          },
+          {
+            "path": "mindspice-core/src/main/java/io/mindspice/core/persistence/SpringAiConversationMemoryAdapter.java",
+            "status": "present",
+            "digest": "1b177cc31fb96acfbea608e62498e2db90a6732d8be225b54a2d0f21cabdf6b1",
+            "bytes": 3703
+          }
+        ],
+        "outsideDeclaredTargets": [
+          "mindspice-core/pom.xml",
+          "mindspice-core/src/main/java/io/mindspice/core/internal/ModelRouter.java",
+          "mindspice-core/src/main/java/io/mindspice/core/internal/TurnExecutor.java",
+          "mindspice-core/src/main/java/io/mindspice/core/internal/ActiveTurnRegistry.java",
+          "mindspice-core/src/main/java/io/mindspice/core/ToolLoopGuard.java",
+          "mindspice-core/src/main/java/io/mindspice/core/ToolArgumentCoercionModule.java",
+          "mindspice-core/src/main/java/io/mindspice/core/Migration.java",
+          "mindspice-core/src/main/java/io/mindspice/core/MigrationRunner.java",
+          "mindspice-core/src/main/resources/META-INF/services/com.fasterxml.jackson.databind.Module",
+          "mindspice-core/src/main/resources/schema.sql",
+          "mindspice-core/src/main/java/io/mindspice/core/persistence/SqliteConversationMemory.java",
+          "mindspice-core/src/main/java/io/mindspice/core/persistence/SqliteSessionStore.java",
+          "mindspice-core/src/main/java/io/mindspice/core/persistence/SqliteMessageQueueStore.java",
+          "mindspice-core/src/main/java/io/mindspice/core/persistence/SqliteAuditWriter.java",
+          "mindspice-core/src/main/java/io/mindspice/core/persistence/NoOpAuditWriter.java",
+          "mindspice-core/src/main/java/io/mindspice/core/persistence/SpringAiConversationMemoryAdapter.java"
+        ],
+        "timestamp": "2026-08-05T01:34:10.505Z"
+      },
+      "validations": [
+        {
+          "agentModel": {
+            "provider": "openai-codex",
+            "model": "gpt-5.6-terra",
+            "thinking": "high"
+          },
+          "attempt": 1,
+          "verdict": "PASS",
+          "report": "Phase 08 validation VERDICT: PASS (deepseek-v4-pro:max). All 10 criteria verified: 3 internal interfaces package-private with correct signatures; ModelRouter the only internal/ file importing Spring AI; ToolLoopGuard exact message formats + synchronized sliding windows; ToolArgumentCoercionModule extends SimpleModule with correct service-loader line; MigrationRunner version-ordered per-migration transactional with plain JDBC finally cleanup; schema.sql character-for-character match with Appendix B (diff zero output); persistence semantics verified (batchUpdate, atomic claim UPDATE rows==1, findStaleClaims, SqliteAuditWriter catch+log never throws, NoOpAuditWriter.instance() singleton); SpringAiConversationMemoryAdapter package-private with correct message mapping (user→UserMessage, assistant→AssistantMessage, system→SystemMessage, tool→ToolResponseMessage via builder) — lastN deviation CONFIRMED correct via javap on the actual Spring AI 2.0.0 ChatMemory interface (get(String) has no lastN). mvn compile + verify PASS; Enforcer PASS; Spring AI imports only in the 2 sanctioned bridge files. No validator edits needed. No remaining risks.",
+          "changedFiles": [
+            "mindspice-core/src/main/java/io/mindspice/core/internal/ModelRouter.java",
+            "mindspice-core/src/main/java/io/mindspice/core/ToolLoopGuard.java",
+            "mindspice-core/src/main/java/io/mindspice/core/persistence/SqliteMessageQueueStore.java",
+            "mindspice-core/src/main/java/io/mindspice/core/persistence/SpringAiConversationMemoryAdapter.java",
+            "mindspice-core/src/main/resources/schema.sql"
+          ],
+          "changedFileObservations": [
+            {
+              "path": "mindspice-core/src/main/java/io/mindspice/core/internal/ModelRouter.java",
+              "status": "present",
+              "digest": "29a996cfa6a68848ce1296e185a958e057b1683916aeee1a3b64814fb71e107b",
+              "bytes": 1014
+            },
+            {
+              "path": "mindspice-core/src/main/java/io/mindspice/core/ToolLoopGuard.java",
+              "status": "present",
+              "digest": "cd751cf804b09c869ec2f0b972423fd305cdd390333dc9fcfe611caa5c3d20b3",
+              "bytes": 5206
+            },
+            {
+              "path": "mindspice-core/src/main/java/io/mindspice/core/persistence/SqliteMessageQueueStore.java",
+              "status": "present",
+              "digest": "62f9f774595a1c76b35e50a233bd88bcadd0a94a7e2884cae2292f9a4fbf3702",
+              "bytes": 8167
+            },
+            {
+              "path": "mindspice-core/src/main/java/io/mindspice/core/persistence/SpringAiConversationMemoryAdapter.java",
+              "status": "present",
+              "digest": "1b177cc31fb96acfbea608e62498e2db90a6732d8be225b54a2d0f21cabdf6b1",
+              "bytes": 3703
+            },
+            {
+              "path": "mindspice-core/src/main/resources/schema.sql",
+              "status": "present",
+              "digest": "03b041e7040916d1de21ead9c7aa3e22f518909a3e607585d9191b81ffeb0f74",
+              "bytes": 2708
+            }
+          ],
+          "outsideDeclaredTargets": [
+            "mindspice-core/src/main/java/io/mindspice/core/internal/ModelRouter.java",
+            "mindspice-core/src/main/java/io/mindspice/core/ToolLoopGuard.java",
+            "mindspice-core/src/main/java/io/mindspice/core/persistence/SqliteMessageQueueStore.java",
+            "mindspice-core/src/main/java/io/mindspice/core/persistence/SpringAiConversationMemoryAdapter.java",
+            "mindspice-core/src/main/resources/schema.sql"
+          ],
+          "timestamp": "2026-08-05T01:34:16.673Z"
+        }
+      ]
     },
     {
       "phase": "phase-09-engine-utilities.md",
@@ -5911,5 +6112,5 @@
   ],
   "integrationValidations": [],
   "createdAt": "2026-08-04T23:11:03.465Z",
-  "updatedAt": "2026-08-05T01:21:47.255Z"
+  "updatedAt": "2026-08-05T01:34:16.673Z"
 }
