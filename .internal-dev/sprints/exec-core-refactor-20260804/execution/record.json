@@ -2,7 +2,7 @@
   "version": 2,
   "runId": "exec-core-refactor-20260804",
   "state": "active",
-  "revision": 12,
+  "revision": 14,
   "source": {
     "projectRoot": "/home/dhickel/Code/Java/Magenta",
     "sourcePlanPath": ".internal-dev/plans/20260804-212000-home-dhickel-code-java-magenta-internal-dev-ha",
@@ -5510,8 +5510,6 @@
             "model": "gpt-5.6-terra",
             "thinking": "high"
           },
-          "attempt": 1,
-          "verdict": "PASS",
           "report": "Phase 06 validation VERDICT: PASS (deepseek-v4-pro:max). All 27 criteria verified against the handoff Appendix A: every file's field names/types/method signatures match exactly (TurnDiagnostic.OutcomeKind 5 values; SessionFilter not ConversationFilter; ConversationSession origin @NonNull; TurnContext full typed-attribute API with ConcurrentHashMap + turn-thread-owned counters; TurnMessage 4 factories; TurnRequest.of(); NoticeKind defaultMessage; ContextUsage.utilizationPercent; ToolPhase 7 values; ToolCallback 2 methods; ToolDefinition record). POM verified: 5 required + 3 optional deps, no duplicates; mvn compile + mvn verify (Enforcer) both PASS; zero org.springframework.ai and zero jakarta.servlet imports; spring-web confirmed only via optional transitive chain (spring-ai-retry→spring-web, optional=true), correctly ignored by Enforcer; no forbidden types created; git status only mindspice-core changes; package io.mindspice.core + Automatic-Module-Name io.mindspice.core per naming override. No validator edits needed. No remaining risks in scope.",
           "changedFiles": [
             "mindspice-core/pom.xml",
@@ -5567,13 +5565,320 @@
             "mindspice-core/src/main/java/io/mindspice/core/TurnDiagnostic.java",
             "mindspice-core/src/main/java/io/mindspice/core/ConversationSession.java"
           ],
-          "timestamp": "2026-08-05T01:14:56.601Z"
+          "timestamp": "2026-08-05T01:14:56.601Z",
+          "attempt": 1,
+          "verdict": "PASS"
         }
       ]
     },
     {
       "phase": "phase-07-events-spis.md",
-      "validations": []
+      "implementation": {
+        "agentModel": {
+          "provider": "deepseek",
+          "model": "deepseek-v4-pro",
+          "thinking": "max"
+        },
+        "report": "Phase 07 implementation evidence (deepseek-v4-pro). Created 29 files in mindspice-core (io.mindspice.core / io.mindspice.core.spi): TurnEvent sealed interface with 8 inner records (Started/Chunk/ToolActivity/SystemNotice/QuestionPending/Interrupt/Completed/Failed, Instant timestamp each, @Nullable only contextUsage); exception hierarchy (TurnLoopException abstract; TurnFailedException sealed + ContextExhaustedException inner with TurnDiagnostic+ContextUsage; ConversationNotFoundException final with sessionId; ToolException sealed + 4 inner subtypes ArgumentCoercionFailed/ExecutionFailed/LoopExceeded/AccessDenied; ConfigurationException with details map); AnswerResult sealed 4 inner records; QuestionPendingContext; ModelCapability enum; 20 SPI interfaces (ToolRegistry 6 methods; ToolAccessPolicy @FunctionalInterface + allowAll/allowList/blockList; ToolResultSummarizer nested records; InteractionHandler + async() static; InteractionStore; ConversationMemory; SessionStore 8; TokenEstimator 2 overloads; CompactionStrategy; CompletionDetector; RepairStrategy + RepairReason enum; TurnGate 5 methods + AcquireResult sealed + TurnGateMode + GateState; MessageQueue 7; MessageQueueStore 7; AuditWriter 5 void + nested records; PromptContributor; ModelCapabilityProvider; TurnLoopMetrics 4; TurnLifecycleListener; ThinkingExtractor with nested records). Verified existing Phase 06 TurnPhase/ToolCallback/ToolDefinition match handoff. Validation: mvn compile -pl mindspice-core PASS; zero org.springframework.ai imports; no standalone nested-type files.",
+        "changedFiles": [
+          "mindspice-core/src/main/java/io/mindspice/core/TurnEvent.java",
+          "mindspice-core/src/main/java/io/mindspice/core/TurnLoopException.java",
+          "mindspice-core/src/main/java/io/mindspice/core/TurnFailedException.java",
+          "mindspice-core/src/main/java/io/mindspice/core/ConversationNotFoundException.java",
+          "mindspice-core/src/main/java/io/mindspice/core/ToolException.java",
+          "mindspice-core/src/main/java/io/mindspice/core/ConfigurationException.java",
+          "mindspice-core/src/main/java/io/mindspice/core/AnswerResult.java",
+          "mindspice-core/src/main/java/io/mindspice/core/QuestionPendingContext.java",
+          "mindspice-core/src/main/java/io/mindspice/core/ModelCapability.java",
+          "mindspice-core/src/main/java/io/mindspice/core/spi/ToolRegistry.java",
+          "mindspice-core/src/main/java/io/mindspice/core/spi/ToolAccessPolicy.java",
+          "mindspice-core/src/main/java/io/mindspice/core/spi/ToolResultSummarizer.java",
+          "mindspice-core/src/main/java/io/mindspice/core/spi/InteractionHandler.java",
+          "mindspice-core/src/main/java/io/mindspice/core/spi/InteractionStore.java",
+          "mindspice-core/src/main/java/io/mindspice/core/spi/ConversationMemory.java",
+          "mindspice-core/src/main/java/io/mindspice/core/spi/SessionStore.java",
+          "mindspice-core/src/main/java/io/mindspice/core/spi/TokenEstimator.java",
+          "mindspice-core/src/main/java/io/mindspice/core/spi/CompactionStrategy.java",
+          "mindspice-core/src/main/java/io/mindspice/core/spi/CompletionDetector.java",
+          "mindspice-core/src/main/java/io/mindspice/core/spi/RepairStrategy.java",
+          "mindspice-core/src/main/java/io/mindspice/core/spi/TurnGate.java",
+          "mindspice-core/src/main/java/io/mindspice/core/spi/MessageQueue.java",
+          "mindspice-core/src/main/java/io/mindspice/core/spi/MessageQueueStore.java",
+          "mindspice-core/src/main/java/io/mindspice/core/spi/AuditWriter.java",
+          "mindspice-core/src/main/java/io/mindspice/core/spi/PromptContributor.java",
+          "mindspice-core/src/main/java/io/mindspice/core/spi/ModelCapabilityProvider.java",
+          "mindspice-core/src/main/java/io/mindspice/core/spi/TurnLoopMetrics.java",
+          "mindspice-core/src/main/java/io/mindspice/core/spi/TurnLifecycleListener.java",
+          "mindspice-core/src/main/java/io/mindspice/core/spi/ThinkingExtractor.java"
+        ],
+        "changedFileObservations": [
+          {
+            "path": "mindspice-core/src/main/java/io/mindspice/core/TurnEvent.java",
+            "status": "present",
+            "digest": "6a836bbab598d16d505fdbdbfe7fa68f21534bb6edea2227a73be0e6b896b76d",
+            "bytes": 2578
+          },
+          {
+            "path": "mindspice-core/src/main/java/io/mindspice/core/TurnLoopException.java",
+            "status": "present",
+            "digest": "0cd337fe40be178cb4a7d1bc5216571e85e851d3360e8de363b116542c2b959e",
+            "bytes": 409
+          },
+          {
+            "path": "mindspice-core/src/main/java/io/mindspice/core/TurnFailedException.java",
+            "status": "present",
+            "digest": "92959be8cd9ee7be3eeae17cdcd075186b2d3d66f59a372d72370eab1056d2da",
+            "bytes": 1263
+          },
+          {
+            "path": "mindspice-core/src/main/java/io/mindspice/core/ConversationNotFoundException.java",
+            "status": "present",
+            "digest": "f5482d61c54056fb7c6467a88f8e545962ff987c640dd3bf0af72aa35bba0631",
+            "bytes": 453
+          },
+          {
+            "path": "mindspice-core/src/main/java/io/mindspice/core/ToolException.java",
+            "status": "present",
+            "digest": "a2b40c09cb524f9c193a24e59313955510f9f6eabd0c125d5304dbaaf3674840",
+            "bytes": 2543
+          },
+          {
+            "path": "mindspice-core/src/main/java/io/mindspice/core/ConfigurationException.java",
+            "status": "present",
+            "digest": "fe0509214ed32c48d77ad55f3c89f4213c03ccef22c3f0f0058a55b8540ac3f1",
+            "bytes": 525
+          },
+          {
+            "path": "mindspice-core/src/main/java/io/mindspice/core/AnswerResult.java",
+            "status": "present",
+            "digest": "c6b25916e3f5c1b0642696d61d43a220e7e79fbbb47dcb7a38c91032764326e7",
+            "bytes": 581
+          },
+          {
+            "path": "mindspice-core/src/main/java/io/mindspice/core/QuestionPendingContext.java",
+            "status": "present",
+            "digest": "2642ce812985bdee19bb13ad2bc8fdc2f788c7c3360120ca21f215c4fe97294e",
+            "bytes": 475
+          },
+          {
+            "path": "mindspice-core/src/main/java/io/mindspice/core/ModelCapability.java",
+            "status": "present",
+            "digest": "e657560afe48a19395c065e3f159bbda017821351bec45d0ab4c92fb4206c011",
+            "bytes": 156
+          },
+          {
+            "path": "mindspice-core/src/main/java/io/mindspice/core/spi/ToolRegistry.java",
+            "status": "present",
+            "digest": "0d299869a3bb09e45f66258dce1f6b2c7b1e53f664542c43c19e501910280f3e",
+            "bytes": 782
+          },
+          {
+            "path": "mindspice-core/src/main/java/io/mindspice/core/spi/ToolAccessPolicy.java",
+            "status": "present",
+            "digest": "046bbbf2e78f4c34be6c68b40084e62cc5881b606a01ed270a4541ae71aff86b",
+            "bytes": 1061
+          },
+          {
+            "path": "mindspice-core/src/main/java/io/mindspice/core/spi/ToolResultSummarizer.java",
+            "status": "present",
+            "digest": "7d903576d86a2783e2cc55831782b8dac1c36b71f95b814cd3eb39a5a84485d2",
+            "bytes": 526
+          },
+          {
+            "path": "mindspice-core/src/main/java/io/mindspice/core/spi/InteractionHandler.java",
+            "status": "present",
+            "digest": "3ff29bfa967b10f494e16ed02b4e88f5e3ebd982e35e39b8db355c22eeb81643",
+            "bytes": 905
+          },
+          {
+            "path": "mindspice-core/src/main/java/io/mindspice/core/spi/InteractionStore.java",
+            "status": "present",
+            "digest": "9249ac46df113fb86d6e2a7b7bfaeaef9dce90f8dea96a9e1c5da153e1af550d",
+            "bytes": 470
+          },
+          {
+            "path": "mindspice-core/src/main/java/io/mindspice/core/spi/ConversationMemory.java",
+            "status": "present",
+            "digest": "e71071d68bf41df2533aefb6a3c1096bef5e57d421493cde319be21bd402e007",
+            "bytes": 505
+          },
+          {
+            "path": "mindspice-core/src/main/java/io/mindspice/core/spi/SessionStore.java",
+            "status": "present",
+            "digest": "4a5adcc93960128a0d3f60e083b07aa265eb0e0235e188cf72678028a511c4d2",
+            "bytes": 821
+          },
+          {
+            "path": "mindspice-core/src/main/java/io/mindspice/core/spi/TokenEstimator.java",
+            "status": "present",
+            "digest": "9db5dea4c9486e2de3f4ae76bb953b9dd16c369b9a8a436ed4a3e145e24f904d",
+            "bytes": 303
+          },
+          {
+            "path": "mindspice-core/src/main/java/io/mindspice/core/spi/CompactionStrategy.java",
+            "status": "present",
+            "digest": "68c838cea43958beaff0652a6c1174bcae9efb0a68ec9c978ed75627892639b4",
+            "bytes": 387
+          },
+          {
+            "path": "mindspice-core/src/main/java/io/mindspice/core/spi/CompletionDetector.java",
+            "status": "present",
+            "digest": "fd4e36b071c2b0a1b62152a6ddcdf9d4374cb8bfef071a70bd3df3ed29af476a",
+            "bytes": 356
+          },
+          {
+            "path": "mindspice-core/src/main/java/io/mindspice/core/spi/RepairStrategy.java",
+            "status": "present",
+            "digest": "3fe99d6f556651c7ae2774965bf5de28bfba098dd387351fc1015282ceb76117",
+            "bytes": 550
+          },
+          {
+            "path": "mindspice-core/src/main/java/io/mindspice/core/spi/TurnGate.java",
+            "status": "present",
+            "digest": "8095c5fe20103f9f1809143c8a6e34009bbe7a4bddba498edff85e2f705ccf76",
+            "bytes": 1060
+          },
+          {
+            "path": "mindspice-core/src/main/java/io/mindspice/core/spi/MessageQueue.java",
+            "status": "present",
+            "digest": "4f83cb03c8135c41ca7de883c597768d7518d2994de56a70356635f39a5c2a61",
+            "bytes": 922
+          },
+          {
+            "path": "mindspice-core/src/main/java/io/mindspice/core/spi/MessageQueueStore.java",
+            "status": "present",
+            "digest": "8c1ffad67a659cea93ba61226a256c45dd60b7d91d3061f8fc399907203e19ca",
+            "bytes": 852
+          },
+          {
+            "path": "mindspice-core/src/main/java/io/mindspice/core/spi/AuditWriter.java",
+            "status": "present",
+            "digest": "671ec1568dda8bcab8263ad7d3d503c4a95f6482bb70950f826400f16999b250",
+            "bytes": 1272
+          },
+          {
+            "path": "mindspice-core/src/main/java/io/mindspice/core/spi/PromptContributor.java",
+            "status": "present",
+            "digest": "564d8236ca8e15c86458f7c088d2691fc58e4199315d08d7908a70c2854a029b",
+            "bytes": 369
+          },
+          {
+            "path": "mindspice-core/src/main/java/io/mindspice/core/spi/ModelCapabilityProvider.java",
+            "status": "present",
+            "digest": "ab98f66556252f488676141024320db9a2dfca90afdb449ee7b0fe3b99dd9785",
+            "bytes": 331
+          },
+          {
+            "path": "mindspice-core/src/main/java/io/mindspice/core/spi/TurnLoopMetrics.java",
+            "status": "present",
+            "digest": "8eb13e83164a645470b6a26883a1cd1020e5d9d4096818c5af100a25e1cd9433",
+            "bytes": 492
+          },
+          {
+            "path": "mindspice-core/src/main/java/io/mindspice/core/spi/TurnLifecycleListener.java",
+            "status": "present",
+            "digest": "c04f80dd24eb4cd2a7c6b2d1001c9b10b925bf1c6d1c690b7ba613014408c0e3",
+            "bytes": 279
+          },
+          {
+            "path": "mindspice-core/src/main/java/io/mindspice/core/spi/ThinkingExtractor.java",
+            "status": "present",
+            "digest": "2d06ab75956d27e0da6533aa80835a7f598453c40acfe15bcba9ff48e04c8e9c",
+            "bytes": 1008
+          }
+        ],
+        "outsideDeclaredTargets": [
+          "mindspice-core/src/main/java/io/mindspice/core/TurnEvent.java",
+          "mindspice-core/src/main/java/io/mindspice/core/TurnLoopException.java",
+          "mindspice-core/src/main/java/io/mindspice/core/TurnFailedException.java",
+          "mindspice-core/src/main/java/io/mindspice/core/ConversationNotFoundException.java",
+          "mindspice-core/src/main/java/io/mindspice/core/ToolException.java",
+          "mindspice-core/src/main/java/io/mindspice/core/ConfigurationException.java",
+          "mindspice-core/src/main/java/io/mindspice/core/AnswerResult.java",
+          "mindspice-core/src/main/java/io/mindspice/core/QuestionPendingContext.java",
+          "mindspice-core/src/main/java/io/mindspice/core/ModelCapability.java",
+          "mindspice-core/src/main/java/io/mindspice/core/spi/ToolRegistry.java",
+          "mindspice-core/src/main/java/io/mindspice/core/spi/ToolAccessPolicy.java",
+          "mindspice-core/src/main/java/io/mindspice/core/spi/ToolResultSummarizer.java",
+          "mindspice-core/src/main/java/io/mindspice/core/spi/InteractionHandler.java",
+          "mindspice-core/src/main/java/io/mindspice/core/spi/InteractionStore.java",
+          "mindspice-core/src/main/java/io/mindspice/core/spi/ConversationMemory.java",
+          "mindspice-core/src/main/java/io/mindspice/core/spi/SessionStore.java",
+          "mindspice-core/src/main/java/io/mindspice/core/spi/TokenEstimator.java",
+          "mindspice-core/src/main/java/io/mindspice/core/spi/CompactionStrategy.java",
+          "mindspice-core/src/main/java/io/mindspice/core/spi/CompletionDetector.java",
+          "mindspice-core/src/main/java/io/mindspice/core/spi/RepairStrategy.java",
+          "mindspice-core/src/main/java/io/mindspice/core/spi/TurnGate.java",
+          "mindspice-core/src/main/java/io/mindspice/core/spi/MessageQueue.java",
+          "mindspice-core/src/main/java/io/mindspice/core/spi/MessageQueueStore.java",
+          "mindspice-core/src/main/java/io/mindspice/core/spi/AuditWriter.java",
+          "mindspice-core/src/main/java/io/mindspice/core/spi/PromptContributor.java",
+          "mindspice-core/src/main/java/io/mindspice/core/spi/ModelCapabilityProvider.java",
+          "mindspice-core/src/main/java/io/mindspice/core/spi/TurnLoopMetrics.java",
+          "mindspice-core/src/main/java/io/mindspice/core/spi/TurnLifecycleListener.java",
+          "mindspice-core/src/main/java/io/mindspice/core/spi/ThinkingExtractor.java"
+        ],
+        "timestamp": "2026-08-05T01:21:40.320Z"
+      },
+      "validations": [
+        {
+          "agentModel": {
+            "provider": "openai-codex",
+            "model": "gpt-5.6-terra",
+            "thinking": "high"
+          },
+          "attempt": 1,
+          "verdict": "PASS",
+          "report": "Phase 07 validation VERDICT: PASS (deepseek-v4-pro:max). All 37 criteria verified against handoff Appendix A: TurnEvent 8 inner records exact fields; exception hierarchy (TurnFailedException permits note: Java rejects self-reference in sealed permits — implementation correctly omits it, handoff-editorial issue only, verified by compiler); all 20 SPIs method-by-method (nested types, @Nullable placements, 4 @FunctionalInterface annotations exactly as specified); sealed types declare permits in same file; no standalone ThinkingResult/AssistantMessageContent; mvn compile -pl mindspice-core BUILD SUCCESS; zero org.springframework.ai imports; git status only mindspice-core changes. Validator attempted handoff-exact permits on TurnFailedException and reverted (compiler: illegal self-reference). No remaining risks.",
+          "changedFiles": [
+            "mindspice-core/src/main/java/io/mindspice/core/TurnEvent.java",
+            "mindspice-core/src/main/java/io/mindspice/core/TurnFailedException.java",
+            "mindspice-core/src/main/java/io/mindspice/core/ToolException.java",
+            "mindspice-core/src/main/java/io/mindspice/core/spi/TurnGate.java",
+            "mindspice-core/src/main/java/io/mindspice/core/spi/MessageQueueStore.java"
+          ],
+          "changedFileObservations": [
+            {
+              "path": "mindspice-core/src/main/java/io/mindspice/core/TurnEvent.java",
+              "status": "present",
+              "digest": "6a836bbab598d16d505fdbdbfe7fa68f21534bb6edea2227a73be0e6b896b76d",
+              "bytes": 2578
+            },
+            {
+              "path": "mindspice-core/src/main/java/io/mindspice/core/TurnFailedException.java",
+              "status": "present",
+              "digest": "92959be8cd9ee7be3eeae17cdcd075186b2d3d66f59a372d72370eab1056d2da",
+              "bytes": 1263
+            },
+            {
+              "path": "mindspice-core/src/main/java/io/mindspice/core/ToolException.java",
+              "status": "present",
+              "digest": "a2b40c09cb524f9c193a24e59313955510f9f6eabd0c125d5304dbaaf3674840",
+              "bytes": 2543
+            },
+            {
+              "path": "mindspice-core/src/main/java/io/mindspice/core/spi/TurnGate.java",
+              "status": "present",
+              "digest": "8095c5fe20103f9f1809143c8a6e34009bbe7a4bddba498edff85e2f705ccf76",
+              "bytes": 1060
+            },
+            {
+              "path": "mindspice-core/src/main/java/io/mindspice/core/spi/MessageQueueStore.java",
+              "status": "present",
+              "digest": "8c1ffad67a659cea93ba61226a256c45dd60b7d91d3061f8fc399907203e19ca",
+              "bytes": 852
+            }
+          ],
+          "outsideDeclaredTargets": [
+            "mindspice-core/src/main/java/io/mindspice/core/TurnEvent.java",
+            "mindspice-core/src/main/java/io/mindspice/core/TurnFailedException.java",
+            "mindspice-core/src/main/java/io/mindspice/core/ToolException.java",
+            "mindspice-core/src/main/java/io/mindspice/core/spi/TurnGate.java",
+            "mindspice-core/src/main/java/io/mindspice/core/spi/MessageQueueStore.java"
+          ],
+          "timestamp": "2026-08-05T01:21:47.255Z"
+        }
+      ]
     },
     {
       "phase": "phase-08-internal-persistence.md",
@@ -5606,5 +5911,5 @@
   ],
   "integrationValidations": [],
   "createdAt": "2026-08-04T23:11:03.465Z",
-  "updatedAt": "2026-08-05T01:14:56.601Z"
+  "updatedAt": "2026-08-05T01:21:47.255Z"
 }
