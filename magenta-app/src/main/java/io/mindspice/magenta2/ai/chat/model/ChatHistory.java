@@ -8,16 +8,14 @@ public record ChatHistory(
     String titleJobStatus,
     String model,
     List<ChatMessage> messages,
-    ContextUsage contextUsage,
-    ChatPlanState planState
+    ContextUsage contextUsage
 ) {
     public ChatHistory(
         String conversationId,
         String model,
         List<ChatMessage> messages,
-        ContextUsage contextUsage,
-        ChatPlanState planState
+        ContextUsage contextUsage
     ) {
-        this(conversationId, null, null, model, messages, contextUsage, planState);
+        this(conversationId, null, null, model, messages, contextUsage);
     }
 }

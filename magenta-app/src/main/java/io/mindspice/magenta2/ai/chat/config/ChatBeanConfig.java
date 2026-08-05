@@ -1,13 +1,19 @@
 package io.mindspice.magenta2.ai.chat.config;
 
 import io.mindspice.magenta2.ai.chat.repository.AuditRepository;
+import io.mindspice.magenta2.ai.chat.repository.ChatSessionMetadataRepository;
 import io.mindspice.magenta2.ai.chat.repository.RepositoryBackedChatMemory;
 import io.mindspice.magenta2.ai.chat.service.ChatModelRouter;
+import io.mindspice.magenta2.ai.chat.service.AuditService;
 import io.mindspice.magenta2.ai.chat.service.ContextManagementAdvisor;
 import io.mindspice.magenta2.ai.chat.service.ContextUsageTracker;
+import io.mindspice.magenta2.ai.chat.service.turn.PromptContextAssembler;
+import io.mindspice.magenta2.ai.chat.service.turn.TerminalTurnRepair;
+import io.mindspice.magenta2.ai.chat.service.turn.ToolAccessPolicy;
+import io.mindspice.magenta2.ai.chat.service.turn.TurnAuditWriter;
+import io.mindspice.magenta2.ai.chat.tool.ChatToolRegistry;
 import io.mindspice.magenta2.ai.chat.tool.ToolTranscriptService;
 import io.mindspice.magenta2.ai.config.user.AiConfig;
-import io.mindspice.magenta2.ai.orchestration.settings.RuntimeSettingsService;
 import org.springframework.ai.chat.memory.ChatMemory;
 import org.springframework.ai.chat.memory.ChatMemoryRepository;
 import org.springframework.ai.tokenizer.JTokkitTokenCountEstimator;
@@ -30,6 +36,29 @@ public class ChatBeanConfig {
     }
 
     @Bean
+    PromptContextAssembler promptContextAssembler(AiConfig aiConfig) {
+        return new PromptContextAssembler(aiConfig);
+    }
+
+    @Bean
+    ToolAccessPolicy toolAccessPolicy(ChatToolRegistry chatToolRegistry) {
+        return new ToolAccessPolicy(chatToolRegistry);
+    }
+
+    @Bean
+    TerminalTurnRepair terminalTurnRepair() {
+        return new TerminalTurnRepair();
+    }
+
+    @Bean
+    TurnAuditWriter turnAuditWriter(
+        AuditService auditService,
+        @Autowired(required = false) AuditRepository auditRepository
+    ) {
+        return new TurnAuditWriter(auditService, auditRepository);
+    }
+
+    @Bean
     ContextManagementAdvisor contextManagementAdvisor(
         ChatMemoryRepository chatMemoryRepository,
         AiConfig aiConfig,
@@ -37,8 +66,7 @@ public class ChatBeanConfig {
         TokenCountEstimator tokenCountEstimator,
         ContextUsageTracker usageTracker,
         ToolTranscriptService toolTranscriptService,
-        @Autowired(required = false) AuditRepository auditRepository,
-        RuntimeSettingsService runtimeSettingsService
+        @Autowired(required = false) AuditRepository auditRepository
     ) {
         return new ContextManagementAdvisor(
             chatMemoryRepository,
@@ -47,8 +75,7 @@ public class ChatBeanConfig {
             tokenCountEstimator,
             usageTracker,
             toolTranscriptService,
-            auditRepository,
-            runtimeSettingsService
+            auditRepository
         );
     }
 }

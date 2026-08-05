@@ -4,8 +4,6 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 
-import io.mindspice.magenta2.ai.chat.model.ChatSessionOrigin;
-import io.mindspice.magenta2.ai.chat.model.ChatSessionSurface;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 import org.springframework.util.StringUtils;
@@ -266,163 +264,6 @@ public class ChatSessionMetadataRepository {
         );
     }
 
-    public void saveOriginIfAbsent(String conversationId, ChatSessionOrigin origin, String agentId) {
-        if (!StringUtils.hasText(conversationId) || origin == null) {
-            return;
-        }
-        jdbcTemplate.update(
-            """
-                insert into ai_chat_session_metadata (conversation_id, origin, agent_id, updated_at)
-                values (?, ?, ?, ?)
-                on conflict(conversation_id) do update set
-                    origin = coalesce(ai_chat_session_metadata.origin, excluded.origin),
-                    agent_id = coalesce(ai_chat_session_metadata.agent_id, excluded.agent_id),
-                    updated_at = excluded.updated_at
-                """,
-            conversationId, origin.name(), agentId, now()
-        );
-    }
-
-    /**
-     * Creates one immutable server-owned project-chat identity. A conflicting
-     * existing conversation is never retargeted.
-     */
-    public boolean createProjectChatSession(ProjectChatSession session) {
-        if (session == null || !session.isComplete()) {
-            return false;
-        }
-        jdbcTemplate.update(
-            """
-                insert into ai_chat_session_metadata (
-                    conversation_id, origin, agent_id, project_id, member_agent_id,
-                    materialization_key, materialization_generation, owner_binding_key, updated_at)
-                values (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                on conflict(conversation_id) do nothing
-                """,
-            session.conversationId(), ChatSessionOrigin.PROJECT_CHAT.name(), session.memberAgentId(),
-            session.projectId(), session.memberAgentId(), session.materializationKey(),
-            session.materializationGeneration(), session.ownerBindingKey(), now());
-        return findProjectChatSession(session.conversationId()).map(session::equals).orElse(false);
-    }
-
-    public Optional<ProjectChatSession> findProjectChatSession(String conversationId) {
-        if (!StringUtils.hasText(conversationId)) {
-            return Optional.empty();
-        }
-        return jdbcTemplate.query(
-            """
-                select conversation_id, project_id, member_agent_id, materialization_key,
-                       materialization_generation, owner_binding_key
-                from ai_chat_session_metadata
-                where conversation_id = ? and origin = ?
-                """,
-            rs -> rs.next() ? Optional.of(new ProjectChatSession(
-                rs.getString("conversation_id"), rs.getString("project_id"),
-                rs.getString("member_agent_id"), rs.getString("materialization_key"),
-                rs.getInt("materialization_generation"), rs.getString("owner_binding_key")))
-                : Optional.empty(),
-            conversationId, ChatSessionOrigin.PROJECT_CHAT.name());
-    }
-
-    public Optional<String> findProjectId(String conversationId) {
-        if (!StringUtils.hasText(conversationId)) {
-            return Optional.empty();
-        }
-        return jdbcTemplate.query(
-            "select project_id from ai_chat_session_metadata where conversation_id = ?",
-            rs -> {
-                if (!rs.next()) return Optional.empty();
-                String projectId = rs.getString("project_id");
-                return StringUtils.hasText(projectId) ? Optional.of(projectId) : Optional.empty();
-            },
-            conversationId
-        );
-    }
-
-    public Optional<String> findMemberAgentId(String conversationId) {
-        if (!StringUtils.hasText(conversationId)) {
-            return Optional.empty();
-        }
-        return jdbcTemplate.query(
-            "select member_agent_id from ai_chat_session_metadata where conversation_id = ?",
-            rs -> {
-                if (!rs.next()) return Optional.empty();
-                String agentId = rs.getString("member_agent_id");
-                return StringUtils.hasText(agentId) ? Optional.of(agentId) : Optional.empty();
-            },
-            conversationId
-        );
-    }
-
-    public void saveAgentOrigin(String conversationId, String agentId) {
-        if (!StringUtils.hasText(conversationId) || !StringUtils.hasText(agentId)) {
-            return;
-        }
-        jdbcTemplate.update(
-            """
-                insert into ai_chat_session_metadata (conversation_id, origin, agent_id, updated_at)
-                values (?, ?, ?, ?)
-                on conflict(conversation_id) do update set
-                    origin = excluded.origin,
-                    agent_id = excluded.agent_id,
-                    updated_at = excluded.updated_at
-                """,
-            conversationId, ChatSessionOrigin.AGENT_CHAT.name(), agentId, now()
-        );
-    }
-
-    public void saveSurfaceIfAbsent(String conversationId, ChatSessionSurface surface) {
-        if (!StringUtils.hasText(conversationId) || surface == null) {
-            return;
-        }
-        jdbcTemplate.update(
-            """
-                insert into ai_chat_session_metadata (conversation_id, surface, updated_at)
-                values (?, ?, ?)
-                on conflict(conversation_id) do update set
-                    surface = coalesce(ai_chat_session_metadata.surface, excluded.surface),
-                    updated_at = excluded.updated_at
-                """,
-            conversationId, surface.name(), now()
-        );
-    }
-
-    public Optional<ChatSessionOrigin> findOrigin(String conversationId) {
-        if (!StringUtils.hasText(conversationId)) {
-            return Optional.empty();
-        }
-        return jdbcTemplate.query(
-            "select origin from ai_chat_session_metadata where conversation_id = ?",
-            rs -> {
-                if (!rs.next() || !StringUtils.hasText(rs.getString("origin"))) {
-                    return Optional.empty();
-                }
-                return Optional.of(ChatSessionOrigin.valueOf(rs.getString("origin")));
-            },
-            conversationId
-        );
-    }
-
-    public Optional<ChatSessionSurface> findSurface(String conversationId) {
-        if (!StringUtils.hasText(conversationId)) {
-            return Optional.empty();
-        }
-        return jdbcTemplate.query(
-            "select surface from ai_chat_session_metadata where conversation_id = ?",
-            rs -> {
-                if (!rs.next() || !StringUtils.hasText(rs.getString("surface"))) {
-                    return Optional.empty();
-                }
-                try {
-                    return Optional.of(ChatSessionSurface.valueOf(rs.getString("surface")));
-                } catch (IllegalArgumentException exception) {
-                    return Optional.empty();
-                }
-            },
-            conversationId
-        );
-    }
-
     public Optional<String> findAgentId(String conversationId) {
         if (!StringUtils.hasText(conversationId)) {
             return Optional.empty();
@@ -440,36 +281,6 @@ public class ChatSessionMetadataRepository {
         );
     }
 
-    public List<String> findAgentConversationIds(String agentId) {
-        if (!StringUtils.hasText(agentId)) {
-            return List.of();
-        }
-        return jdbcTemplate.queryForList(
-            """
-                select conversation_id
-                from ai_chat_session_metadata
-                where origin = ? and agent_id = ?
-                order by coalesce(updated_at, '') desc, conversation_id asc
-                """,
-            String.class,
-            ChatSessionOrigin.AGENT_CHAT.name(),
-            agentId
-        );
-    }
-
-    public List<String> findBrowserConversationIds() {
-        return jdbcTemplate.queryForList(
-            """
-                select conversation_id
-                from ai_chat_session_metadata
-                where surface = ?
-                order by coalesce(updated_at, '') desc, conversation_id asc
-                """,
-            String.class,
-            ChatSessionSurface.BROWSER.name()
-        );
-    }
-
     private void ensureSchema() {
         jdbcTemplate.execute("""
             create table if not exists ai_chat_session_metadata (
@@ -479,10 +290,9 @@ public class ChatSessionMetadataRepository {
                 active_task_run_id text,
                 favorite integer not null default 0,
                 archived integer not null default 0,
-                origin text,
-                surface text,
-                agent_id text,
-                updated_at text
+                updated_at text,
+                planning_model text,
+                agent_id text
             )
             """);
         java.util.List<String> columns = jdbcTemplate.queryForList(
@@ -507,29 +317,8 @@ public class ChatSessionMetadataRepository {
         if (!columns.contains("active_task_run_id")) {
             jdbcTemplate.execute("alter table ai_chat_session_metadata add column active_task_run_id text");
         }
-        if (!columns.contains("origin")) {
-            jdbcTemplate.execute("alter table ai_chat_session_metadata add column origin text");
-        }
-        if (!columns.contains("surface")) {
-            jdbcTemplate.execute("alter table ai_chat_session_metadata add column surface text");
-        }
         if (!columns.contains("agent_id")) {
             jdbcTemplate.execute("alter table ai_chat_session_metadata add column agent_id text");
-        }
-        if (!columns.contains("project_id")) {
-            jdbcTemplate.execute("alter table ai_chat_session_metadata add column project_id text");
-        }
-        if (!columns.contains("member_agent_id")) {
-            jdbcTemplate.execute("alter table ai_chat_session_metadata add column member_agent_id text");
-        }
-        if (!columns.contains("materialization_key")) {
-            jdbcTemplate.execute("alter table ai_chat_session_metadata add column materialization_key text");
-        }
-        if (!columns.contains("materialization_generation")) {
-            jdbcTemplate.execute("alter table ai_chat_session_metadata add column materialization_generation integer");
-        }
-        if (!columns.contains("owner_binding_key")) {
-            jdbcTemplate.execute("alter table ai_chat_session_metadata add column owner_binding_key text");
         }
     }
 
@@ -558,15 +347,5 @@ public class ChatSessionMetadataRepository {
 
     private String now() {
         return Instant.now().toString();
-    }
-
-    public record ProjectChatSession(String conversationId, String projectId, String memberAgentId,
-                                     String materializationKey, int materializationGeneration,
-                                     String ownerBindingKey) {
-        public boolean isComplete() {
-            return StringUtils.hasText(conversationId) && StringUtils.hasText(projectId)
-                    && StringUtils.hasText(memberAgentId) && StringUtils.hasText(materializationKey)
-                    && materializationGeneration > 0 && StringUtils.hasText(ownerBindingKey);
-        }
     }
 }

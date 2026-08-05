@@ -1,6 +1,5 @@
 package io.mindspice.magenta2.ai.chat.service;
 
-import io.mindspice.magenta2.ai.chat.model.ChatSessionSurface;
 import io.mindspice.magenta2.ai.chat.repository.ChatPendingMessageRepository;
 import org.junit.jupiter.api.Test;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -19,15 +18,14 @@ class ChatPendingMessageServiceTest {
             " conversation-1 ",
             "  queued text  ",
             " main ",
-            " planner ",
-            ChatSessionSurface.BROWSER
+            " planner "
         );
 
         assertThat(message.conversationId()).isEqualTo("conversation-1");
         assertThat(message.messageText()).isEqualTo("queued text");
         assertThat(message.model()).isEqualTo("main");
         assertThat(message.planningModel()).isEqualTo("planner");
-        assertThatThrownBy(() -> service.enqueue("conversation-1", " ", null, null, null))
+        assertThatThrownBy(() -> service.enqueue("conversation-1", " ", null, null))
             .isInstanceOf(IllegalArgumentException.class)
             .hasMessage("message is required");
     }
@@ -35,7 +33,7 @@ class ChatPendingMessageServiceTest {
     @Test
     void claimAckReleaseAndDeleteDelegateQueueUseCases() {
         ChatPendingMessageService service = service();
-        service.enqueue("conversation-1", "first", null, null, null);
+        service.enqueue("conversation-1", "first", null, null);
 
         var claimed = service.claim("conversation-1").orElseThrow();
         assertThat(service.release("conversation-1", claimed.message().id(), "wrong-token")).isFalse();
@@ -45,7 +43,7 @@ class ChatPendingMessageServiceTest {
         assertThat(service.ack("conversation-1", claimedAgain.message().id(), claimedAgain.claimToken())).isTrue();
         assertThat(service.list("conversation-1")).isEmpty();
 
-        service.enqueue("conversation-1", "delete me", null, null, null);
+        service.enqueue("conversation-1", "delete me", null, null);
         service.deleteByConversationId("conversation-1");
         assertThat(service.list("conversation-1")).isEmpty();
     }

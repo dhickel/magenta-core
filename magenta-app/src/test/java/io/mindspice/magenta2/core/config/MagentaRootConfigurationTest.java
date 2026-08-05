@@ -13,7 +13,6 @@ import javax.sql.DataSource;
 
 import io.mindspice.magenta2.Magenta2Application;
 import io.mindspice.magenta2.ai.config.user.AiConfig;
-import io.mindspice.magenta2.ai.orchestration.workspaces.WorkspaceDirectoryService;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.springframework.boot.WebApplicationType;
@@ -144,7 +143,7 @@ class MagentaRootConfigurationTest {
             assertThat(magentaRoot.resolve("avatar.sqlite")).doesNotExist();
             assertNoRetiredWorkspaceBeans(context);
             assertThat(context.getBean(AiConfig.class).dataRoot()).isEqualTo(dataRoot);
-            assertThat(context.getBean(WorkspaceDirectoryService.class).dataRoot()).isEqualTo(dataRoot.toRealPath());
+            assertThat(context.getBean(AiConfig.class).dataRoot()).isEqualTo(dataRoot);
 
             Integer tableCount = context.getBean(JdbcTemplate.class).queryForObject(
                 "select count(*) from sqlite_master where type = 'table' and name = 'ai_chat_memory'",
@@ -212,27 +211,15 @@ class MagentaRootConfigurationTest {
         Path config = configDir.resolve("ai-config.json");
         Files.writeString(config, """
             {
-              "defaultAgent": "magenta",
               "defaultModel": "local-qwen",
               "summaryModel": "local-qwen",
-              "planningModel": "local-qwen",
-              "compactionModel": "local-qwen",
               "contextBufferPercent": 33,
-              "unsafeAllowWildcardShellCommands": false,
               "models": {
                 "local-qwen": {
                   "remoteModelName": "qwen3",
                   "remoteEndpoint": "http://localhost:11434",
                   "endpointType": "OLLAMA",
                   "contextLength": 8192
-                }
-              },
-              "agents": {
-                "magenta": {
-                  "model": "local-qwen",
-                  "systemPrompt": "prompts/system.md",
-                  "approvedTools": [],
-                  "allowedShellCommands": []
                 }
               }
             }

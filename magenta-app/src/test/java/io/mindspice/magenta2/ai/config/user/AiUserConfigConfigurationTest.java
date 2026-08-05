@@ -1,7 +1,6 @@
 package io.mindspice.magenta2.ai.config.user;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -21,7 +20,6 @@ class AiUserConfigConfigurationTest {
         AiConfig aiConfig = load(config, magentaRoot);
 
         assertEquals(magentaRoot.resolve("root").normalize(), aiConfig.dataRoot());
-        assertEquals("Prompt beside config.", aiConfig.agents().get("magenta").systemPrompt());
     }
 
     @Test
@@ -33,7 +31,6 @@ class AiUserConfigConfigurationTest {
         AiConfig aiConfig = load(config, magentaRoot);
 
         assertEquals(magentaRoot.resolve("custom-data").normalize(), aiConfig.dataRoot());
-        assertFalse(aiConfig.dataRoot().equals(configDir.resolve("custom-data").normalize()));
     }
 
     @Test
@@ -58,18 +55,13 @@ class AiUserConfigConfigurationTest {
     }
 
     private static Path writeConfig(Path configDir, String dataRootLine) throws IOException {
-        Files.createDirectories(configDir.resolve("prompts"));
-        Files.writeString(configDir.resolve("prompts/system.md"), "Prompt beside config.");
         Path config = configDir.resolve("ai-config.json");
+        Files.createDirectories(configDir);
         Files.writeString(config, """
             {
-              "defaultAgent": "magenta",
               "defaultModel": "local-qwen",
               "summaryModel": "local-qwen",
-              "planningModel": "local-qwen",
-              "compactionModel": "local-qwen",
-              "contextBufferPercent": 33,
-              "unsafeAllowWildcardShellCommands": false,
+              "contextBufferPercent": 10,
               %s
               "models": {
                 "local-qwen": {
@@ -77,14 +69,6 @@ class AiUserConfigConfigurationTest {
                   "remoteEndpoint": "http://localhost:11434",
                   "endpointType": "OLLAMA",
                   "contextLength": 8192
-                }
-              },
-              "agents": {
-                "magenta": {
-                  "model": "local-qwen",
-                  "systemPrompt": "prompts/system.md",
-                  "approvedTools": [],
-                  "allowedShellCommands": []
                 }
               }
             }

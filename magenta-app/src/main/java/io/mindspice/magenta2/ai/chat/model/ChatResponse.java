@@ -8,17 +8,15 @@ public sealed interface ChatResponse {
         String model,
         String response,
         ContextUsage contextUsage,
-        ChatPlanState planState,
         List<ChatToolActivity> toolActivities
     ) implements ChatResponse {
         public MsgResponse(
             String conversationId,
             String model,
             String response,
-            ContextUsage contextUsage,
-            ChatPlanState planState
+            ContextUsage contextUsage
         ) {
-            this(conversationId, model, response, contextUsage, planState, List.of());
+            this(conversationId, model, response, contextUsage, List.of());
         }
     }
 
@@ -30,7 +28,6 @@ public sealed interface ChatResponse {
             List<ChatSession> sessions,
             List<ChatMessage> history,
             ContextUsage contextUsage,
-            ChatPlanState planState,
             List<ChatToolActivity> toolActivities
     ) implements ChatResponse {
         public CmdResponse(
@@ -39,8 +36,7 @@ public sealed interface ChatResponse {
             String message,
             List<String> conversationIds,
             List<ChatMessage> history,
-            ContextUsage contextUsage,
-            ChatPlanState planState
+            ContextUsage contextUsage
         ) {
             this(
                 conversationId,
@@ -52,7 +48,6 @@ public sealed interface ChatResponse {
                     : conversationIds.stream().map(id -> new ChatSession(id, null, null)).toList(),
                 history,
                 contextUsage,
-                planState,
                 List.of()
             );
         }
@@ -64,7 +59,6 @@ public sealed interface ChatResponse {
             List<String> conversationIds,
             List<ChatMessage> history,
             ContextUsage contextUsage,
-            ChatPlanState planState,
             List<ChatToolActivity> toolActivities
         ) {
             this(
@@ -77,7 +71,6 @@ public sealed interface ChatResponse {
                     : conversationIds.stream().map(id -> new ChatSession(id, null, null)).toList(),
                 history,
                 contextUsage,
-                planState,
                 toolActivities
             );
         }

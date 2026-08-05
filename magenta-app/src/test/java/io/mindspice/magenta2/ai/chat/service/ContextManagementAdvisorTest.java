@@ -7,11 +7,9 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import io.mindspice.magenta2.ai.chat.model.ContextUsage;
 import io.mindspice.magenta2.ai.chat.repository.ChatMemoryRepository;
 import io.mindspice.magenta2.ai.chat.tool.ToolTranscriptService;
-import io.mindspice.magenta2.ai.config.user.AgentConfig;
 import io.mindspice.magenta2.ai.config.user.AiConfig;
 import io.mindspice.magenta2.ai.config.user.EndpointType;
 import io.mindspice.magenta2.ai.config.user.ModelConfig;
-import io.mindspice.magenta2.ai.orchestration.settings.RuntimeSettingsService;
 import org.junit.jupiter.api.Test;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.messages.AssistantMessage;
@@ -37,10 +35,11 @@ class ContextManagementAdvisorTest {
     void omitStoredMessagesBuildsCleanPromptWithoutDeletingStoredTranscript() {
         JdbcTemplate jdbcTemplate = new JdbcTemplate(new SingleConnectionDataSource("jdbc:sqlite::memory:?foreign_keys=true", true));
         ChatMemoryRepository memoryRepository = new ChatMemoryRepository(jdbcTemplate, new ObjectMapper());
+        AiConfig config = aiConfig();
         ContextManagementAdvisor advisor = new ContextManagementAdvisor(
             memoryRepository,
-            aiConfig(),
-            new SummaryRouter(new SummaryChatModel(), aiConfig()),
+            config,
+            new SummaryRouter(new SummaryChatModel(), config),
             new CharacterTokenEstimator(),
             new ContextUsageTracker(),
             new ToolTranscriptService(new ObjectMapper()),
@@ -69,10 +68,11 @@ class ContextManagementAdvisorTest {
     void omitStoredMessagesToolLoopKeepsCurrentExecutionInstruction() {
         JdbcTemplate jdbcTemplate = new JdbcTemplate(new SingleConnectionDataSource("jdbc:sqlite::memory:?foreign_keys=true", true));
         ChatMemoryRepository memoryRepository = new ChatMemoryRepository(jdbcTemplate, new ObjectMapper());
+        AiConfig config = aiConfig();
         ContextManagementAdvisor advisor = new ContextManagementAdvisor(
             memoryRepository,
-            aiConfig(),
-            new SummaryRouter(new SummaryChatModel(), aiConfig()),
+            config,
+            new SummaryRouter(new SummaryChatModel(), config),
             new CharacterTokenEstimator(),
             new ContextUsageTracker(),
             new ToolTranscriptService(new ObjectMapper()),
@@ -104,10 +104,11 @@ class ContextManagementAdvisorTest {
         JdbcTemplate jdbcTemplate = new JdbcTemplate(new SingleConnectionDataSource("jdbc:sqlite::memory:?foreign_keys=true", true));
         ChatMemoryRepository memoryRepository = new ChatMemoryRepository(jdbcTemplate, new ObjectMapper());
         SummaryChatModel summaryModel = new SummaryChatModel();
-        SummaryRouter summaryRouter = new SummaryRouter(summaryModel, aiConfig());
+        AiConfig config = aiConfig();
+        SummaryRouter summaryRouter = new SummaryRouter(summaryModel, config);
         ContextManagementAdvisor advisor = new ContextManagementAdvisor(
             memoryRepository,
-            aiConfig(),
+            config,
             summaryRouter,
             new CharacterTokenEstimator(),
             new ContextUsageTracker(),
@@ -138,48 +139,15 @@ class ContextManagementAdvisorTest {
     }
 
     @Test
-    void compactionUsesConfiguredCompactionModelWhenPresent() {
-        JdbcTemplate jdbcTemplate = new JdbcTemplate(new SingleConnectionDataSource("jdbc:sqlite::memory:?foreign_keys=true", true));
-        ChatMemoryRepository memoryRepository = new ChatMemoryRepository(jdbcTemplate, new ObjectMapper());
-        SummaryChatModel summaryModel = new SummaryChatModel();
-        AiConfig config = aiConfigWithCompactionModel();
-        SummaryRouter summaryRouter = new SummaryRouter(summaryModel, config);
-        ContextManagementAdvisor advisor = new ContextManagementAdvisor(
-            memoryRepository,
-            config,
-            summaryRouter,
-            new CharacterTokenEstimator(),
-            new ContextUsageTracker(),
-            new ToolTranscriptService(new ObjectMapper()),
-            null
-        );
-        memoryRepository.saveAll("conversation-1", List.of(
-            new UserMessage("older message " + "x".repeat(250)),
-            new AssistantMessage("older answer " + "x".repeat(250)),
-            new UserMessage("older message " + "x".repeat(250)),
-            new AssistantMessage("older answer " + "x".repeat(250)),
-            new UserMessage("tail one " + "x".repeat(60)),
-            new AssistantMessage("tail two " + "x".repeat(60)),
-            new UserMessage("tail three " + "x".repeat(60)),
-            new AssistantMessage("tail four " + "x".repeat(60)),
-            new UserMessage("tail five " + "x".repeat(60)),
-            new AssistantMessage("tail six " + "x".repeat(60))
-        ));
-
-        advisor.preparePrompt("conversation-1", List.of(new SystemMessage("system"), new UserMessage("current")), "qwen3");
-
-        assertThat(summaryRouter.lastModelRef).isEqualTo("compact");
-    }
-
-    @Test
     void toolLoopCheckpointCompactsActiveToolMessagesBeforeContinuing() {
         JdbcTemplate jdbcTemplate = new JdbcTemplate(new SingleConnectionDataSource("jdbc:sqlite::memory:?foreign_keys=true", true));
         ChatMemoryRepository memoryRepository = new ChatMemoryRepository(jdbcTemplate, new ObjectMapper());
         SummaryChatModel summaryModel = new SummaryChatModel();
+        AiConfig config = aiConfig();
         ContextManagementAdvisor advisor = new ContextManagementAdvisor(
             memoryRepository,
-            aiConfig(),
-            new SummaryRouter(summaryModel, aiConfig()),
+            config,
+            new SummaryRouter(summaryModel, config),
             new CharacterTokenEstimator(),
             new ContextUsageTracker(),
             new ToolTranscriptService(new ObjectMapper()),
@@ -215,10 +183,11 @@ class ContextManagementAdvisorTest {
         JdbcTemplate jdbcTemplate = new JdbcTemplate(new SingleConnectionDataSource("jdbc:sqlite::memory:?foreign_keys=true", true));
         ChatMemoryRepository memoryRepository = new ChatMemoryRepository(jdbcTemplate, new ObjectMapper());
         SummaryChatModel summaryModel = new SummaryChatModel();
+        AiConfig config = aiConfig();
         ContextManagementAdvisor advisor = new ContextManagementAdvisor(
             memoryRepository,
-            aiConfig(),
-            new SummaryRouter(summaryModel, aiConfig()),
+            config,
+            new SummaryRouter(summaryModel, config),
             new CharacterTokenEstimator(),
             new ContextUsageTracker(),
             new ToolTranscriptService(new ObjectMapper()),
@@ -253,10 +222,11 @@ class ContextManagementAdvisorTest {
     void maintainStoredContextDegradesWhenCompactionModelFails() {
         JdbcTemplate jdbcTemplate = new JdbcTemplate(new SingleConnectionDataSource("jdbc:sqlite::memory:?foreign_keys=true", true));
         ChatMemoryRepository memoryRepository = new ChatMemoryRepository(jdbcTemplate, new ObjectMapper());
+        AiConfig config = aiConfig();
         ContextManagementAdvisor advisor = new ContextManagementAdvisor(
             memoryRepository,
-            aiConfig(),
-            new SummaryRouter(new FailingSummaryChatModel(), aiConfig()),
+            config,
+            new SummaryRouter(new FailingSummaryChatModel(), config),
             new CharacterTokenEstimator(),
             new ContextUsageTracker(),
             new ToolTranscriptService(new ObjectMapper()),
@@ -291,56 +261,15 @@ class ContextManagementAdvisorTest {
     }
 
     @Test
-    void runtimeSettingsControlContextBufferPercent() {
+    void defaultContextBufferAppliesWhenNoRuntimeSettings() {
         JdbcTemplate jdbcTemplate = new JdbcTemplate(new SingleConnectionDataSource("jdbc:sqlite::memory:?foreign_keys=true", true));
         ChatMemoryRepository memoryRepository = new ChatMemoryRepository(jdbcTemplate, new ObjectMapper());
         SummaryChatModel summaryModel = new SummaryChatModel();
-        AiConfig aiConfig = aiConfig(); // contextBufferPercent=10 → trigger=1080 for qwen3
-
-        // Runtime overrides buffer to 50% → trigger=600 for qwen3 (contextLength=1200)
-        RuntimeSettingsService runtimeSettings = new FakeRuntimeSettingsService("summary-model", 50);
+        AiConfig config = aiConfig();
         ContextManagementAdvisor advisor = new ContextManagementAdvisor(
             memoryRepository,
-            aiConfig,
-            new SummaryRouter(summaryModel, aiConfig()),
-            new CharacterTokenEstimator(),
-            new ContextUsageTracker(),
-            new ToolTranscriptService(new ObjectMapper()),
-            null,
-            runtimeSettings
-        );
-
-        memoryRepository.saveAll("conversation-1", List.of(
-            new UserMessage("x".repeat(120)),
-            new AssistantMessage("x".repeat(120)),
-            new UserMessage("x".repeat(120)),
-            new AssistantMessage("x".repeat(120)),
-            new UserMessage("x".repeat(120))
-        ));
-
-        // ~780-820 estimated tokens (between 600 runtime trigger and 1080 default trigger)
-        // With runtime's 50% buffer, trigger=600 < usedTokens → triggers compaction
-        // Without runtime, default 10% buffer gives trigger=1080 > usedTokens → no compaction
-        ContextUsage usage = advisor.estimateStoredUsage("conversation-1", "qwen3");
-
-        assertThat(usage.triggerTokens()).as("trigger uses runtime 50%% buffer: 1200-600=600")
-            .isEqualTo(600);
-        assertThat(usage.usedTokens()).as("used tokens exceed tighter runtime trigger")
-            .isGreaterThan(usage.triggerTokens());
-    }
-
-    @Test
-    void defaultContextBufferAndCompactionModelApplyWhenNoRuntimeSettings() {
-        JdbcTemplate jdbcTemplate = new JdbcTemplate(new SingleConnectionDataSource("jdbc:sqlite::memory:?foreign_keys=true", true));
-        ChatMemoryRepository memoryRepository = new ChatMemoryRepository(jdbcTemplate, new ObjectMapper());
-        SummaryChatModel summaryModel = new SummaryChatModel();
-        AiConfig aiConfig = aiConfig(); // contextBufferPercent=10, compaction model key="summary"
-
-        // Construct with 7-arg constructor → runtimeSettingsService=null → uses aiConfig defaults
-        ContextManagementAdvisor advisor = new ContextManagementAdvisor(
-            memoryRepository,
-            aiConfig,
-            new SummaryRouter(summaryModel, aiConfig()),
+            config,
+            new SummaryRouter(summaryModel, config),
             new CharacterTokenEstimator(),
             new ContextUsageTracker(),
             new ToolTranscriptService(new ObjectMapper()),
@@ -355,8 +284,6 @@ class ContextManagementAdvisorTest {
             new UserMessage("x".repeat(100))
         ));
 
-        // With default 10% buffer: trigger = 1200 - 120 = 1080
-        // ~650-750 tokens < 1080 → no compaction triggered
         ContextUsage usage = advisor.estimateStoredUsage("conversation-1", "qwen3");
 
         assertThat(usage.triggerTokens()).as("default 10%% buffer: 1200-120=1080")
@@ -365,38 +292,18 @@ class ContextManagementAdvisorTest {
             .isLessThanOrEqualTo(usage.triggerTokens());
     }
 
-    private AiConfig aiConfig() {
+    private static AiConfig aiConfig() {
         return new AiConfig(
-            "magenta",
+            "main",
             "summary",
+            null,
             10,
+            null,
             null,
             Map.of(
                 "main", new ModelConfig("qwen3", "http://localhost:11434", EndpointType.OLLAMA, 1200, null, null),
                 "summary", new ModelConfig("summary-model", "http://localhost:11434", EndpointType.OLLAMA, 512, null, null)
-            ),
-            Map.of("magenta", new AgentConfig("main", "You are Magenta.", List.of()))
-        );
-    }
-
-    private AiConfig aiConfigWithCompactionModel() {
-        return new AiConfig(
-            "magenta",
-            null,
-            "summary",
-            null,
-            null,
-            "compact",
-            10,
-            null,
-            null,
-            Map.of(
-                "main", new ModelConfig("qwen3", "http://localhost:11434", EndpointType.OLLAMA, 1200, null, null),
-                "summary", new ModelConfig("summary-model", "http://localhost:11434", EndpointType.OLLAMA, 512, null, null),
-                "compact", new ModelConfig("compaction-model", "http://localhost:11434", EndpointType.OLLAMA, 512, null, null)
-            ),
-            Map.of("magenta", new AgentConfig("main", "You are Magenta.", List.of())),
-            false
+            )
         );
     }
 
@@ -489,37 +396,6 @@ class ContextManagementAdvisorTest {
         @Override
         public ChatResponse call(Prompt prompt) {
             throw new RuntimeException("compaction endpoint unavailable");
-        }
-    }
-
-    private static final class FakeRuntimeSettingsService extends RuntimeSettingsService {
-        private final String compactionModelRemoteName;
-        private final int contextBufferPercent;
-
-        FakeRuntimeSettingsService(String compactionModelRemoteName, int contextBufferPercent) {
-            super(null, null, null);
-            this.compactionModelRemoteName = compactionModelRemoteName;
-            this.contextBufferPercent = contextBufferPercent;
-        }
-
-        @Override
-        public String compactionModel() {
-            return compactionModelRemoteName;
-        }
-
-        @Override
-        public int contextBufferPercent() {
-            return contextBufferPercent;
-        }
-
-        @Override
-        public String defaultModel() {
-            return "qwen3";
-        }
-
-        @Override
-        public String defaultSystemPrompt() {
-            return null;
         }
     }
 }

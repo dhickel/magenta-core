@@ -11,9 +11,7 @@ import java.util.stream.Collectors;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.mindspice.magenta2.ai.chat.model.ChatResponse;
 import io.mindspice.magenta2.ai.chat.model.ChatSession;
-import io.mindspice.magenta2.ai.chat.model.ChatSessionSurface;
 import io.mindspice.magenta2.ai.chat.model.ContextUsage;
-
 import io.mindspice.magenta2.ai.chat.repository.ChatMemoryRepository;
 import io.mindspice.magenta2.ai.chat.repository.ChatSessionMetadataRepository;
 import io.mindspice.magenta2.ai.chat.repository.RepositoryBackedChatMemory;
@@ -24,7 +22,6 @@ import io.mindspice.magenta2.ai.chat.service.turn.TerminalTurnRepair;
 import io.mindspice.magenta2.ai.chat.service.turn.ToolAccessPolicy;
 import io.mindspice.magenta2.ai.chat.service.turn.TurnAuditWriter;
 import io.mindspice.magenta2.ai.chat.tool.ToolTranscriptService;
-import io.mindspice.magenta2.ai.config.user.AgentConfig;
 import io.mindspice.magenta2.ai.config.user.AiConfig;
 import io.mindspice.magenta2.ai.config.user.EndpointType;
 import io.mindspice.magenta2.ai.config.user.ModelConfig;
@@ -71,8 +68,6 @@ class ChatServiceTest {
     @TempDir
     Path tempDir;
 
-
-
     @Test
     void modelSelectionKeyPrefersConfiguredDefaultAliasForAmbiguousRemoteNames() {
         Map<String, ModelConfig> models = new LinkedHashMap<>();
@@ -83,25 +78,19 @@ class ChatServiceTest {
             "deepseek-v4-pro", "https://api.deepseek.com", EndpointType.DEEPSEEK, 128000, 4, "sk-test"
         ));
         AiConfig aiConfig = new AiConfig(
-            "default-agent",
             "deepseek-v4-max",
-            "deepseek-v4",
             "deepseek-v4",
             null,
             10,
             Path.of("."),
             null,
-            models,
-            Map.of("default-agent", new AgentConfig("deepseek-v4", "You are Magenta.", List.of()))
+            models
         );
         ChatService chatService = new ChatService(null, null, null, null, aiConfig, null, null, null, null, null, null, null, null, null, null, null, null);
 
         assertThat(chatService.defaultModel()).isEqualTo("deepseek-v4-max");
         assertThat(chatService.modelSelectionKey("deepseek-v4-pro")).isEqualTo("deepseek-v4-max");
     }
-
-
-
 
     @Test
     void maintainContextUsageReturnsDegradedUsageWhenMaintenanceThrows() {
@@ -139,10 +128,8 @@ class ChatServiceTest {
         assertThat(usageTracker.find("conversation-1")).isEqualTo(usage.usage());
     }
 
-
-
     @Test
-    void listSessionsOnlyIncludesBrowserSurfaceNormalChats() {
+    void listSessionsReturnsAllNonArchivedConversations() {
         JdbcTemplate jdbcTemplate = jdbcTemplate();
         ObjectMapper objectMapper = new ObjectMapper();
         ChatMemoryRepository memoryRepository = new ChatMemoryRepository(jdbcTemplate, objectMapper);
@@ -167,26 +154,15 @@ class ChatServiceTest {
             null
         );
 
-        String browserConversationId = "00000000-0000-0000-0000-000000000010";
-        String internalConversationId = "00000000-0000-0000-0000-000000000011";
-        String agentConversationId = "00000000-0000-0000-0000-000000000012";
-        String planningConversationId = "00000000-0000-0000-0000-000000000013";
+        String conv1 = "00000000-0000-0000-0000-000000000010";
+        String conv2 = "00000000-0000-0000-0000-000000000011";
 
-        memoryRepository.saveAll(browserConversationId, List.of(new UserMessage("browser")));
-        metadataRepository.saveSurfaceIfAbsent(browserConversationId, ChatSessionSurface.BROWSER);
-
-        memoryRepository.saveAll(internalConversationId, List.of(new UserMessage("internal")));
-        metadataRepository.saveSurfaceIfAbsent(internalConversationId, ChatSessionSurface.INTERNAL);
-
-        memoryRepository.saveAll(agentConversationId, List.of(new UserMessage("agent")));
-        metadataRepository.saveOriginIfAbsent(agentConversationId, io.mindspice.magenta2.ai.chat.model.ChatSessionOrigin.AGENT_CHAT, "agent-1");
-
-        memoryRepository.saveAll(planningConversationId, List.of(new UserMessage("plan")));
-        metadataRepository.saveOriginIfAbsent(planningConversationId, io.mindspice.magenta2.ai.chat.model.ChatSessionOrigin.SYSTEM_CHAT, null);
+        memoryRepository.saveAll(conv1, List.of(new UserMessage("hello")));
+        memoryRepository.saveAll(conv2, List.of(new UserMessage("world")));
 
         assertThat(chatService.listSessions())
             .extracting(ChatSession::conversationId)
-            .containsExactly(browserConversationId);
+            .containsExactlyInAnyOrder(conv1, conv2);
     }
 
     @Test
@@ -201,7 +177,7 @@ class ChatServiceTest {
         ToolCallingManager toolCallingManager = mock(ToolCallingManager.class);
         ChatToolRegistry toolRegistry = new ChatToolRegistry(List.of(new SampleToolCallback()), List.of());
         ChatModelRouter router = new TestChatModelRouter(chatModel);
-        AiConfig config = aiConfig(Path.of("."), List.of("sample_tool"));
+        AiConfig config = aiConfig(Path.of("."));
         ContextManagementAdvisor contextAdvisor = new ContextManagementAdvisor(
             memoryRepository,
             config,
@@ -211,8 +187,8 @@ class ChatServiceTest {
             transcriptService,
             null
         );
-        PromptContextAssembler promptAssembler = new PromptContextAssembler(config, null, null, null, null, null, null);
-        ToolAccessPolicy toolAccessPolicy = new ToolAccessPolicy(toolRegistry, null, null);
+        PromptContextAssembler promptAssembler = new PromptContextAssembler(config);
+        ToolAccessPolicy toolAccessPolicy = new ToolAccessPolicy(toolRegistry);
         ChatService chatService = new ChatService(
             new RepositoryBackedChatMemory(memoryRepository),
             memoryRepository,
@@ -229,7 +205,7 @@ class ChatServiceTest {
             null,
             promptAssembler,
             toolAccessPolicy,
-            new TerminalTurnRepair(null, null),
+            new TerminalTurnRepair(),
             new TurnAuditWriter(null, null)
         );
 
@@ -270,7 +246,7 @@ class ChatServiceTest {
             )));
         ChatToolRegistry toolRegistry = new ChatToolRegistry(List.of(new SampleToolCallback()), List.of());
         ChatModelRouter router = new TestChatModelRouter(chatModel);
-        AiConfig config = aiConfig(Path.of("."), List.of("sample_tool"));
+        AiConfig config = aiConfig(Path.of("."));
         ContextManagementAdvisor contextAdvisor = new ContextManagementAdvisor(
             memoryRepository,
             config,
@@ -280,8 +256,8 @@ class ChatServiceTest {
             transcriptService,
             null
         );
-        PromptContextAssembler promptAssembler = new PromptContextAssembler(config, null, null, null, null, null, null);
-        ToolAccessPolicy toolAccessPolicy = new ToolAccessPolicy(toolRegistry, null, null);
+        PromptContextAssembler promptAssembler = new PromptContextAssembler(config);
+        ToolAccessPolicy toolAccessPolicy = new ToolAccessPolicy(toolRegistry);
         ChatService chatService = new ChatService(
             new RepositoryBackedChatMemory(memoryRepository),
             memoryRepository,
@@ -298,7 +274,7 @@ class ChatServiceTest {
             null,
             promptAssembler,
             toolAccessPolicy,
-            new TerminalTurnRepair(null, null),
+            new TerminalTurnRepair(),
             new TurnAuditWriter(null, null)
         );
 
@@ -319,8 +295,6 @@ class ChatServiceTest {
             .anySatisfy(text -> assertThat(text).contains("failed before Magenta could apply them"));
     }
 
-
-
     @Test
     void wrappedIoFailuresAreRetriedAsTransientModelFailures() {
         JdbcTemplate jdbcTemplate = jdbcTemplate();
@@ -332,7 +306,7 @@ class ChatServiceTest {
         WrappedIoFailureThenFinalChatModel chatModel = new WrappedIoFailureThenFinalChatModel();
         ChatToolRegistry toolRegistry = new ChatToolRegistry(List.of(new SampleToolCallback()), List.of());
         ChatModelRouter router = new TestChatModelRouter(chatModel);
-        AiConfig config = aiConfig(Path.of("."), List.of("sample_tool"));
+        AiConfig config = aiConfig(Path.of("."));
         ContextManagementAdvisor contextAdvisor = new ContextManagementAdvisor(
             memoryRepository,
             config,
@@ -342,8 +316,8 @@ class ChatServiceTest {
             transcriptService,
             null
         );
-        PromptContextAssembler promptAssembler = new PromptContextAssembler(config, null, null, null, null, null, null);
-        ToolAccessPolicy toolAccessPolicy = new ToolAccessPolicy(toolRegistry, null, null);
+        PromptContextAssembler promptAssembler = new PromptContextAssembler(config);
+        ToolAccessPolicy toolAccessPolicy = new ToolAccessPolicy(toolRegistry);
         ChatService chatService = new ChatService(
             new RepositoryBackedChatMemory(memoryRepository),
             memoryRepository,
@@ -360,7 +334,7 @@ class ChatServiceTest {
             null,
             promptAssembler,
             toolAccessPolicy,
-            new TerminalTurnRepair(null, null),
+            new TerminalTurnRepair(),
             new TurnAuditWriter(null, null)
         );
 
@@ -373,8 +347,6 @@ class ChatServiceTest {
             .containsExactly("recover from closed stream", "Recovered after transient provider close.");
     }
 
-
-
     private JdbcTemplate jdbcTemplate() {
         SingleConnectionDataSource dataSource = new SingleConnectionDataSource("jdbc:sqlite::memory:?foreign_keys=true", true);
         return new JdbcTemplate(dataSource);
@@ -385,21 +357,14 @@ class ChatServiceTest {
     }
 
     private AiConfig aiConfig(Path dataRoot) {
-        return aiConfig(dataRoot, List.of());
-    }
-
-    private AiConfig aiConfig(Path dataRoot, List<String> approvedTools) {
         return new AiConfig(
-            "default-agent",
-            "main",
             "main",
             "main",
             null,
             10,
             dataRoot,
             null,
-            Map.of("main", new ModelConfig("qwen3", "http://localhost:11434", EndpointType.OLLAMA, 8192, null, null)),
-            Map.of("default-agent", new AgentConfig("main", "You are Magenta.", approvedTools))
+            Map.of("main", new ModelConfig("qwen3", "http://localhost:11434", EndpointType.OLLAMA, 8192, null, null))
         );
     }
 
@@ -465,8 +430,6 @@ class ChatServiceTest {
         }
     }
 
-
-
     private static final class WrappedIoFailureThenFinalChatModel implements ChatModel {
         private final AtomicInteger calls = new AtomicInteger();
 
@@ -508,8 +471,6 @@ class ChatServiceTest {
         }
     }
 
-
-
     private static final class ThrowingMaintenanceAdvisor extends ContextManagementAdvisor {
         private ThrowingMaintenanceAdvisor() {
             super(null, null, null, null, null, null, null);
@@ -543,8 +504,6 @@ class ChatServiceTest {
             return "{\"ok\":true}";
         }
     }
-
-
 
     private static final class CharacterTokenEstimator implements TokenCountEstimator {
         @Override

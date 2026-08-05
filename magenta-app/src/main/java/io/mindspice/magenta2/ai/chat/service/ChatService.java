@@ -19,11 +19,9 @@ import org.springframework.web.client.ResourceAccessException;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.mindspice.magenta2.ai.chat.model.ChatMessage;
-import io.mindspice.magenta2.ai.chat.model.ChatPlanState;
 import io.mindspice.magenta2.ai.chat.model.ChatRequest;
 import io.mindspice.magenta2.ai.chat.model.ChatResponse;
 import io.mindspice.magenta2.ai.chat.model.ChatSession;
-import io.mindspice.magenta2.ai.chat.model.ChatSessionOrigin;
 import io.mindspice.magenta2.ai.chat.model.ChatToolActivity;
 import io.mindspice.magenta2.ai.chat.model.ContextUsage;
 import io.mindspice.magenta2.ai.chat.rendering.ChatMarkdownRenderer;
@@ -39,7 +37,6 @@ import io.mindspice.magenta2.ai.chat.service.turn.TurnPhase;
 import io.mindspice.magenta2.ai.chat.tool.ChatToolRegistry;
 import io.mindspice.magenta2.ai.chat.tool.ToolTranscriptService;
 import io.mindspice.magenta2.ai.chat.tool.ToolTranscriptService.ToolTranscriptEntry;
-import io.mindspice.magenta2.ai.config.user.AgentConfig;
 import io.mindspice.magenta2.ai.config.user.AiConfig;
 import io.mindspice.magenta2.ai.config.user.ModelConfig;
 import org.springframework.ai.chat.client.ChatClient;
@@ -244,8 +241,7 @@ public class ChatService {
             resolvedRequest.conversationId(),
             resolvedRequest.model(),
             response,
-            maintenance.usage(),
-            ChatPlanState.normal()
+            maintenance.usage()
         );
     }
 
@@ -279,15 +275,8 @@ public class ChatService {
     }
 
     private void rejectSystemChatConversation(String conversationId) {
-        if (conversationId == null || !StringUtils.hasText(conversationId)) {
-            return;
-        }
-        var origin = chatSessionMetadataRepository.findOrigin(conversationId);
-        if (origin.isPresent() && (origin.get() == ChatSessionOrigin.SYSTEM_CHAT
-                || origin.get() == ChatSessionOrigin.PROJECT_CHAT)) {
-            throw new IllegalArgumentException(
-                    "Restricted chat conversations cannot be used through public chat endpoints");
-        }
+        // Origin-based gating removed — origin/surface types deleted.
+        // All conversations are considered public chat.
     }
 
     // ── Session / history ──
@@ -306,11 +295,8 @@ public class ChatService {
         if (chatSessionMetadataRepository == null) {
             return List.of();
         }
-        return chatSessionMetadataRepository.findBrowserConversationIds().stream()
+        return rawConversationIds().stream()
             .map(this::session)
-            .filter(session -> session.origin() != ChatSessionOrigin.AGENT_CHAT)
-            .filter(session -> session.origin() != ChatSessionOrigin.SYSTEM_CHAT)
-            .filter(session -> session.origin() != ChatSessionOrigin.PROJECT_CHAT)
             .filter(session -> !session.archived())
             .sorted(java.util.Comparator
                 .comparing(ChatSession::favorite).reversed()
@@ -357,7 +343,6 @@ public class ChatService {
             chatSessionMetadataRepository.isFavorite(conversationId),
             chatSessionMetadataRepository.isArchived(conversationId),
             chatSessionMetadataRepository.findUpdatedAt(conversationId).orElse(null),
-            chatSessionMetadataRepository.findOrigin(conversationId).orElse(null),
             chatSessionMetadataRepository.findAgentId(conversationId).orElse(null),
             0
         );
@@ -412,8 +397,7 @@ public class ChatService {
         if (aiConfig != null && StringUtils.hasText(aiConfig.resolvedDefaultModelKey())) {
             return aiConfig.resolvedDefaultModelKey();
         }
-        String defaultAgentName = aiConfig.defaultAgent();
-        return aiConfig.agents().get(defaultAgentName).model();
+        return null;
     }
 
     public List<String> availableModels() {
@@ -950,7 +934,6 @@ public class ChatService {
             s.request.conversationId(), s.request.model(),
             finalAssistantMessage == null ? "" : finalAssistantMessage.getText(),
             maintenance.usage(),
-            ChatPlanState.normal(),
             List.copyOf(s.toolActivities));
 
         ChatMessage finalMessage = renderAssistantMessage(assistantMessageParts(
@@ -1097,23 +1080,9 @@ public class ChatService {
             return List.of();
         }
         if (approvedToolNames != null) {
-            return filterApprovedTools(approvedToolNames, request);
+            return toolAccessPolicy.filterToolsByMode(approvedToolNames, request.conversationId());
         }
-        if (aiConfig == null || !StringUtils.hasText(aiConfig.defaultAgent())) {
-            return List.of();
-        }
-        AgentConfig defaultAgent = aiConfig.agents().get(aiConfig.defaultAgent());
-        if (defaultAgent == null) {
-            return List.of();
-        }
-        return filterApprovedTools(defaultAgent.approvedTools(), request);
-    }
-
-    private List<ToolCallback> filterApprovedTools(List<String> approvedToolNames, ResolvedChatRequest request) {
-        return toolAccessPolicy.filterToolsByMode(
-            approvedToolNames,
-            toolAccessPolicy.interactionMode(request.conversationId()),
-            request.conversationId());
+        return toolAccessPolicy.filterToolsByMode(List.of("*"), request.conversationId());
     }
 
     // ── Tool support detection ──

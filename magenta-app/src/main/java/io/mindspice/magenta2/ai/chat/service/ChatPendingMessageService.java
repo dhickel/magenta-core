@@ -3,7 +3,6 @@ package io.mindspice.magenta2.ai.chat.service;
 import java.util.List;
 import java.util.Optional;
 
-import io.mindspice.magenta2.ai.chat.model.ChatSessionSurface;
 import io.mindspice.magenta2.ai.chat.model.ClaimedPendingChatMessage;
 import io.mindspice.magenta2.ai.chat.model.PendingChatMessage;
 import io.mindspice.magenta2.ai.chat.repository.ChatPendingMessageRepository;
@@ -22,8 +21,7 @@ public class ChatPendingMessageService {
         String conversationId,
         String message,
         String model,
-        String planningModel,
-        ChatSessionSurface surface
+        String planningModel
     ) {
         String normalizedConversationId = requireText(conversationId, "conversationId is required");
         String normalizedMessage = requireText(message, "message is required");
@@ -31,8 +29,7 @@ public class ChatPendingMessageService {
             normalizedConversationId,
             normalizedMessage,
             normalize(model),
-            normalize(planningModel),
-            surface
+            normalize(planningModel)
         );
     }
 

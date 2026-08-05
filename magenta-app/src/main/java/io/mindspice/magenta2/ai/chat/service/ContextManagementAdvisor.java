@@ -7,10 +7,8 @@ import java.util.Map;
 import io.mindspice.magenta2.ai.chat.model.ContextUsage;
 import io.mindspice.magenta2.ai.chat.repository.AuditRepository;
 import io.mindspice.magenta2.ai.chat.tool.ToolTranscriptService;
-import io.mindspice.magenta2.ai.config.user.AgentConfig;
 import io.mindspice.magenta2.ai.config.user.AiConfig;
 import io.mindspice.magenta2.ai.config.user.ModelConfig;
-import io.mindspice.magenta2.ai.orchestration.settings.RuntimeSettingsService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.client.ChatClientRequest;
@@ -30,7 +28,6 @@ import org.springframework.ai.chat.model.Generation;
 import org.springframework.ai.chat.prompt.ChatOptions;
 import org.springframework.ai.chat.prompt.Prompt;
 import org.springframework.ai.tokenizer.TokenCountEstimator;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.util.StringUtils;
 import reactor.core.publisher.Flux;
 
@@ -57,7 +54,6 @@ public class ContextManagementAdvisor implements CallAdvisor, StreamAdvisor {
     private final ContextUsageTracker usageTracker;
     private final ToolTranscriptService toolTranscriptService;
     private final AuditRepository auditRepository;
-    private final RuntimeSettingsService runtimeSettingsService;
 
     public ContextManagementAdvisor(
         ChatMemoryRepository chatMemoryRepository,
@@ -68,29 +64,6 @@ public class ContextManagementAdvisor implements CallAdvisor, StreamAdvisor {
         ToolTranscriptService toolTranscriptService,
         AuditRepository auditRepository
     ) {
-        this(
-            chatMemoryRepository,
-            aiConfig,
-            chatModelRouter,
-            tokenCountEstimator,
-            usageTracker,
-            toolTranscriptService,
-            auditRepository,
-            null
-        );
-    }
-
-    @Autowired
-    public ContextManagementAdvisor(
-        ChatMemoryRepository chatMemoryRepository,
-        AiConfig aiConfig,
-        ChatModelRouter chatModelRouter,
-        TokenCountEstimator tokenCountEstimator,
-        ContextUsageTracker usageTracker,
-        ToolTranscriptService toolTranscriptService,
-        AuditRepository auditRepository,
-        @Autowired(required = false) RuntimeSettingsService runtimeSettingsService
-    ) {
         this.chatMemoryRepository = chatMemoryRepository;
         this.aiConfig = aiConfig;
         this.chatModelRouter = chatModelRouter;
@@ -98,7 +71,6 @@ public class ContextManagementAdvisor implements CallAdvisor, StreamAdvisor {
         this.usageTracker = usageTracker;
         this.toolTranscriptService = toolTranscriptService;
         this.auditRepository = auditRepository;
-        this.runtimeSettingsService = runtimeSettingsService;
     }
 
     @Override
@@ -707,22 +679,19 @@ public class ContextManagementAdvisor implements CallAdvisor, StreamAdvisor {
             .map(ModelConfig::contextLength)
             .filter(value -> value != null && value > 0)
             .orElseGet(() -> {
-                if (runtimeSettingsService != null) {
-                    String defaultRemoteModel = runtimeSettingsService.defaultModel();
-                    return aiConfig.models().values().stream()
-                        .filter(model -> defaultRemoteModel.equals(model.remoteModelName()))
-                        .findFirst()
-                        .map(ModelConfig::contextLength)
-                        .orElseThrow();
+                String defaultModelKey = aiConfig.resolvedDefaultModelKey();
+                if (StringUtils.hasText(defaultModelKey)) {
+                    ModelConfig defaultConfig = aiConfig.models().get(defaultModelKey);
+                    if (defaultConfig != null && defaultConfig.contextLength() != null) {
+                        return defaultConfig.contextLength();
+                    }
                 }
-                return aiConfig.models().get(aiConfig.agents().get(aiConfig.defaultAgent()).model()).contextLength();
+                throw new IllegalStateException("Cannot determine context length for model: " + remoteModelName);
             });
     }
 
     private int triggerTokens(int maxTokens) {
-        int bufferPercent = runtimeSettingsService == null
-            ? aiConfig.resolvedContextBufferPercent()
-            : runtimeSettingsService.contextBufferPercent();
+        int bufferPercent = aiConfig.resolvedContextBufferPercent();
         return Math.max(1, maxTokens - (int) Math.ceil(maxTokens * (bufferPercent / 100.0)));
     }
 
@@ -731,44 +700,22 @@ public class ContextManagementAdvisor implements CallAdvisor, StreamAdvisor {
         if (options != null && StringUtils.hasText(options.getModel())) {
             return options.getModel();
         }
-        if (runtimeSettingsService != null) {
-            return runtimeSettingsService.defaultModel();
+        String defaultModelKey = aiConfig.resolvedDefaultModelKey();
+        if (StringUtils.hasText(defaultModelKey)) {
+            ModelConfig defaultConfig = aiConfig.models().get(defaultModelKey);
+            if (defaultConfig != null) {
+                return defaultConfig.remoteModelName();
+            }
         }
-        AgentConfig defaultAgent = aiConfig.agents().get(aiConfig.defaultAgent());
-        return aiConfig.models().get(defaultAgent.model()).remoteModelName();
+        return null;
     }
 
     private String defaultSystemPrompt() {
-        if (runtimeSettingsService != null) {
-            return runtimeSettingsService.defaultSystemPrompt();
-        }
-        if (aiConfig == null || !StringUtils.hasText(aiConfig.defaultAgent()) || aiConfig.agents() == null) {
-            return null;
-        }
-        AgentConfig defaultAgent = aiConfig.agents().get(aiConfig.defaultAgent());
-        return defaultAgent == null ? null : defaultAgent.systemPrompt();
-    }
-
-    private String keyForRemoteModel(String remoteModelName) {
-        if (!StringUtils.hasText(remoteModelName)) {
-            return null;
-        }
-        return aiConfig.models().entrySet().stream()
-            .filter(entry -> remoteModelName.equals(entry.getValue().remoteModelName()))
-            .map(Map.Entry::getKey)
-            .findFirst()
-            .orElse(remoteModelName);
+        return null;
     }
 
     private String resolveCompactionModelReference() {
-        if (runtimeSettingsService == null) {
-            return aiConfig.resolvedCompactionModelKey();
-        }
-        String runtimeCompaction = keyForRemoteModel(runtimeSettingsService.compactionModel());
-        if (StringUtils.hasText(runtimeCompaction)) {
-            return runtimeCompaction;
-        }
-        return aiConfig.resolvedCompactionModelKey();
+        return aiConfig.resolvedSummaryModelKey();
     }
 
     private String rootCauseMessage(Throwable throwable) {

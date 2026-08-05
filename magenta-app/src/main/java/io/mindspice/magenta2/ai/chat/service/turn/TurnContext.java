@@ -3,18 +3,14 @@ package io.mindspice.magenta2.ai.chat.service.turn;
 import io.mindspice.magenta2.ai.chat.model.ChatMessage;
 import io.mindspice.magenta2.ai.chat.model.ChatToolActivity;
 import io.mindspice.magenta2.ai.chat.model.ContextUsage;
-import io.mindspice.magenta2.ai.chat.model.PlanMode;
 import io.mindspice.magenta2.ai.chat.service.ResolvedChatRequest;
-import io.mindspice.magenta2.ai.execution.ActiveTurnRegistry.ActiveTurn;
 import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.messages.Message;
 import org.springframework.ai.chat.messages.SystemMessage;
-import org.springframework.ai.model.tool.ToolCallingChatOptions;
 import org.springframework.ai.tool.ToolCallback;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.stream.Collectors;
 
 /**
  * Mutable carrier holding all data flowing between turn execution stages.
@@ -24,8 +20,6 @@ public class TurnContext {
 
     // ── Inputs (set during assembly) ──
     private ResolvedChatRequest resolvedRequest;
-    private ActiveTurn activeTurn;
-    private PlanMode interactionMode;
     private String systemPrompt;
     private List<Message> turnInstructions;
     private List<ToolCallback> approvedTools;
@@ -67,12 +61,6 @@ public class TurnContext {
 
     public ResolvedChatRequest resolvedRequest() { return resolvedRequest; }
     public void resolvedRequest(ResolvedChatRequest v) { this.resolvedRequest = v; }
-
-    public ActiveTurn activeTurn() { return activeTurn; }
-    public void activeTurn(ActiveTurn v) { this.activeTurn = v; }
-
-    public PlanMode interactionMode() { return interactionMode; }
-    public void interactionMode(PlanMode v) { this.interactionMode = v; }
 
     public String systemPrompt() { return systemPrompt; }
     public void systemPrompt(String v) { this.systemPrompt = v; }
@@ -127,6 +115,6 @@ public class TurnContext {
     public List<Message> systemInstructions() {
         return turnInstructions.stream()
             .filter(SystemMessage.class::isInstance)
-            .collect(java.util.stream.Collectors.toList());
+            .toList();
     }
 }

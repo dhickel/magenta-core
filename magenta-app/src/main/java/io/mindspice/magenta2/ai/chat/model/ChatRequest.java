@@ -9,16 +9,10 @@ public sealed interface ChatRequest {
         @NotBlank String message,
         String model,
         String planningModel,
-        ChatSessionSurface surface,
         String contextCapture
     ) implements ChatRequest {
         public MsgRequest(String conversationId, String message, String model, String planningModel) {
-            this(conversationId, message, model, planningModel, null, null);
-        }
-
-        public MsgRequest(String conversationId, String message, String model, String planningModel,
-                          ChatSessionSurface surface) {
-            this(conversationId, message, model, planningModel, surface, null);
+            this(conversationId, message, model, planningModel, null);
         }
     }
 

@@ -6,7 +6,6 @@ import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
-import io.mindspice.magenta2.ai.chat.model.ChatSessionSurface;
 import io.mindspice.magenta2.ai.chat.model.ClaimedPendingChatMessage;
 import io.mindspice.magenta2.ai.chat.model.PendingChatMessage;
 import org.springframework.dao.EmptyResultDataAccessException;
@@ -32,8 +31,7 @@ public class ChatPendingMessageRepository {
         String conversationId,
         String messageText,
         String model,
-        String planningModel,
-        ChatSessionSurface surface
+        String planningModel
     ) {
         recoverStaleClaims(conversationId);
         String id = UUID.randomUUID().toString();
@@ -51,9 +49,9 @@ public class ChatPendingMessageRepository {
             """
                 insert into ai_chat_pending_messages (
                     id, conversation_id, message_order, message_text, model, planning_model,
-                    surface, status, claim_token, claimed_at, created_at, updated_at
+                    status, claim_token, claimed_at, created_at, updated_at
                 )
-                values (?, ?, ?, ?, ?, ?, ?, ?, null, null, ?, ?)
+                values (?, ?, ?, ?, ?, ?, ?, null, null, ?, ?)
                 """,
             id,
             conversationId,
@@ -61,7 +59,6 @@ public class ChatPendingMessageRepository {
             messageText,
             model,
             planningModel,
-            surface == null ? null : surface.name(),
             STATUS_PENDING,
             now,
             now
@@ -76,7 +73,7 @@ public class ChatPendingMessageRepository {
         recoverStaleClaims(conversationId);
         List<PendingChatMessageRow> rows = jdbcTemplate.query(
             """
-                select id, conversation_id, message_text, model, planning_model, surface,
+                select id, conversation_id, message_text, model, planning_model,
                        status, created_at, updated_at
                 from ai_chat_pending_messages
                 where conversation_id = ?
@@ -89,7 +86,6 @@ public class ChatPendingMessageRepository {
                 rs.getString("message_text"),
                 rs.getString("model"),
                 rs.getString("planning_model"),
-                surface(rs.getString("surface")),
                 rs.getString("status"),
                 rs.getString("created_at"),
                 rs.getString("updated_at")
@@ -241,7 +237,6 @@ public class ChatPendingMessageRepository {
                 message_text text not null,
                 model text,
                 planning_model text,
-                surface text,
                 status text not null,
                 claim_token text,
                 claimed_at text,
@@ -259,17 +254,6 @@ public class ChatPendingMessageRepository {
             """);
     }
 
-    private ChatSessionSurface surface(String value) {
-        if (value == null || value.isBlank()) {
-            return null;
-        }
-        try {
-            return ChatSessionSurface.valueOf(value);
-        } catch (IllegalArgumentException ignored) {
-            return null;
-        }
-    }
-
     private String now() {
         return Instant.now().toString();
     }
@@ -280,7 +264,6 @@ public class ChatPendingMessageRepository {
         String messageText,
         String model,
         String planningModel,
-        ChatSessionSurface surface,
         String status,
         String createdAt,
         String updatedAt
@@ -292,7 +275,6 @@ public class ChatPendingMessageRepository {
                 messageText,
                 model,
                 planningModel,
-                surface,
                 status,
                 position,
                 total,

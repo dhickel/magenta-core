@@ -34,18 +34,13 @@ public class AiUserConfigConfiguration {
         resolvedDataRoot = resolvedDataRoot.normalize();
 
         return new AiConfig(
-            config.defaultAgent(),
             config.defaultModel(),
             config.summaryModel(),
             config.summeryModel(),
-            config.planningModel(),
-            config.compactionModel(),
             config.contextBufferPercent(),
             resolvedDataRoot,
             config.webSearch(),
-            config.models(),
-            config.agents(),
-            config.unsafeAllowWildcardShellCommands()
+            config.models()
         );
     }
 }

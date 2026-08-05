@@ -9,7 +9,7 @@ import io.micrometer.observation.ObservationRegistry;
 import io.mindspice.magenta2.ai.config.user.AiConfig;
 import io.mindspice.magenta2.ai.config.user.EndpointType;
 import io.mindspice.magenta2.ai.config.user.ModelConfig;
-import io.mindspice.magenta2.ai.orchestration.settings.RuntimeSettingsService;
+
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.deepseek.DeepSeekChatModel;
@@ -37,14 +37,13 @@ public class ChatModelRouter {
     private final ObservationRegistry observationRegistry;
     private final Map<String, ChatModel> modelsByKey = new ConcurrentHashMap<>();
     private final Duration openAiCompatibleReadTimeout;
-    private final RuntimeSettingsService runtimeSettingsService;
 
     public ChatModelRouter(
         AiConfig aiConfig,
         ToolCallingManager toolCallingManager,
         ObservationRegistry observationRegistry
     ) {
-        this(aiConfig, toolCallingManager, observationRegistry, 360, null);
+        this(aiConfig, toolCallingManager, observationRegistry, 360);
     }
 
     @Autowired
@@ -52,14 +51,12 @@ public class ChatModelRouter {
         AiConfig aiConfig,
         ToolCallingManager toolCallingManager,
         ObservationRegistry observationRegistry,
-        @Value("${magenta.ai.openai-compatible-read-timeout-seconds:360}") long openAiCompatibleReadTimeoutSeconds,
-        @Autowired(required = false) RuntimeSettingsService runtimeSettingsService
+        @Value("${magenta.ai.openai-compatible-read-timeout-seconds:360}") long openAiCompatibleReadTimeoutSeconds
     ) {
         this.aiConfig = aiConfig;
         this.toolCallingManager = toolCallingManager;
         this.observationRegistry = observationRegistry == null ? ObservationRegistry.NOOP : observationRegistry;
         this.openAiCompatibleReadTimeout = Duration.ofSeconds(Math.max(1, openAiCompatibleReadTimeoutSeconds));
-        this.runtimeSettingsService = runtimeSettingsService;
     }
 
     public ChatModel chatModel(String model) {
@@ -279,16 +276,13 @@ public class ChatModelRouter {
     }
 
     private String defaultRemoteModelName() {
-        if (runtimeSettingsService != null) {
-            return runtimeSettingsService.defaultModel();
+        String defaultModelKey = aiConfig != null ? aiConfig.resolvedDefaultModelKey() : null;
+        if (!StringUtils.hasText(defaultModelKey)) {
+            throw new IllegalStateException("AI config must define defaultModel");
         }
-        if (!StringUtils.hasText(aiConfig.defaultAgent()) || aiConfig.agents() == null) {
-            throw new IllegalStateException("AI config must define defaultAgent");
-        }
-        String defaultModelKey = aiConfig.agents().get(aiConfig.defaultAgent()).model();
         ModelConfig defaultModel = aiConfig.models().get(defaultModelKey);
         if (defaultModel == null) {
-            throw new IllegalStateException("defaultAgent references missing model: " + defaultModelKey);
+            throw new IllegalStateException("defaultModel references missing model: " + defaultModelKey);
         }
         return defaultModel.remoteModelName();
     }

@@ -6,7 +6,6 @@ public record PendingChatMessage(
     String messageText,
     String model,
     String planningModel,
-    ChatSessionSurface surface,
     String status,
     int position,
     int total,

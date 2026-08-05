@@ -2,7 +2,7 @@
   "version": 2,
   "runId": "exec-core-refactor-20260804",
   "state": "active",
-  "revision": 8,
+  "revision": 10,
   "source": {
     "projectRoot": "/home/dhickel/Code/Java/Magenta",
     "sourcePlanPath": ".internal-dev/plans/20260804-212000-home-dhickel-code-java-magenta-internal-dev-ha",
@@ -4806,8 +4806,6 @@
             "model": "gpt-5.6-terra",
             "thinking": "high"
           },
-          "attempt": 1,
-          "verdict": "PASS",
           "report": "Phase 04 validation VERDICT: PASS (deepseek-v4-pro:max). All 17 criteria verified: exactly one 17-param constructor; zero @Autowired(required=false); zero ThreadLocal; zero orchestration/execution/skills/agent/PlanService/TaskService imports; 6-state turn loop preserved with no mode branches; FILE_MUTATING_TOOL_NAMES and plan message constants gone; REPAIR_RETRY_LIMIT present. SPI substitution coherence confirmed: the phase file's turnRepair.needsRepair() reference doesn't exist on the Phase 03 TerminalTurnRepair; implementer's substitution (removing needsPlanTurnRepair/needsExecutionCompletionRepair calls which always return false for NORMAL turns; keeping toolUseAbortControlMessage + emptyFinalResponseControlMessage) is behaviorally equivalent and correct; RepairStrategy.repair()/CompletionDetector.isComplete() deferral to Phase 06+ confirmed correct since ToolLoopState no longer carries mode. Validator repairs: removed residual PlanMode import from ChatService.java (inlined filterApprovedTools call chain and NORMAL empty-response message). mvn compile: only the 2 known Phase 05 deletion files fail; ChatServiceTest 7/7 PASS. Risks: ChatPlanState import persists (model-level, required by ChatResponse.MsgResponse, Phase 06-07 target); planCompletionDetected flag dead code in NORMAL mode; TerminalTurnRepair still constructor-depends on PlanService/TaskService (passed null; Phase 05 cleans); ToolAccessPolicy still exposes PlanMode in interactionMode()/filterToolsByMode() API (Phase 06 makes mode-unaware); Spring context won't start until Phase 05 provides SPI bean definitions (not an in-scope defect for Phase 04).",
           "changedFiles": [
             "magenta-app/src/main/java/io/mindspice/magenta2/ai/chat/service/ChatService.java",
@@ -4831,13 +4829,486 @@
             "magenta-app/src/main/java/io/mindspice/magenta2/ai/chat/service/ChatService.java",
             "magenta-app/src/test/java/io/mindspice/magenta2/ai/chat/service/ChatServiceTest.java"
           ],
-          "timestamp": "2026-08-05T00:43:50.388Z"
+          "timestamp": "2026-08-05T00:43:50.388Z",
+          "attempt": 1,
+          "verdict": "PASS"
         }
       ]
     },
     {
       "phase": "phase-05-delete-app-shell.md",
-      "validations": []
+      "implementation": {
+        "agentModel": {
+          "provider": "deepseek",
+          "model": "deepseek-v4-pro",
+          "thinking": "max"
+        },
+        "report": "Phase 05 implementation evidence (2 subphases, deepseek-v4-pro). A: deleted ~373 files (8 app-shell source trees = 247 files; 8 tool sub-packages = 23; 7 individual type files; migrations dir 20 SQL + SchemaMigrationRunner; 6 test trees = 64; 5 test tool subdirs = 7; 4 individual test files); cataloged 200 compile errors / 19 surviving main files. B: adapted all survivors: AiConfig → 7-component canonical constructor (+@JsonIgnoreProperties(ignoreUnknown=true)); AiUserConfigConfiguration/ExternalAiConfigLoader simplified (no agents); ChatHistory/ChatRequest/ChatResponse/ChatSession/PendingChatMessage/PendingMessageRequest stripped of deleted model fields (ChatRequest surface→contextCapture ghost field); ChatSessionMetadataRepository −11 methods −ProjectChatSession −schema columns (kept agent_id for findAgentId); ChatPendingMessageRepository/Service surface removed; RequestResolver stripped to core resolution; AuditService AgentJobService removed; ChatService removed ChatPlanState/ChatSessionOrigin (explicit MsgResponse constructors, simplified rejectSystemChatConversation/listSessions/session/approvedTools); deleted ChatInvocationProfile/TaskExecutionEvent/TaskExecutionResult/SchemaMigrationConfiguration (zero surviving refs); PromptContextAssembler → 1-arg (AiConfig) minimal; ToolAccessPolicy mode-unaware (NORMAL_BLOCKED_TOOLS); TerminalTurnRepair zero-arg (empty-response + tool-abort only); TurnContext stripped of PlanMode/ActiveTurn; ChatBeanConfig added the 4 SPI beans; ChatModelRouter/ContextManagementAdvisor AiConfig-only. Tests: 8 adapted, 3 deleted (RequestResolverAgentBindingTest, ChatToolRegistryTest, PromptContextAssemblerTest). Validation: compile PASS; mvn test 90/0 PASS; context starts 1.825s; zero deleted-type refs in main+test code (PlanMode only in non-code AGENTS.md).",
+        "changedFiles": [
+          "magenta-app/src/main/java/io/mindspice/magenta2/ai/config/user/AiConfig.java",
+          "magenta-app/src/main/java/io/mindspice/magenta2/ai/config/user/AiUserConfigConfiguration.java",
+          "magenta-app/src/main/java/io/mindspice/magenta2/ai/config/user/ExternalAiConfigLoader.java",
+          "magenta-app/src/main/java/io/mindspice/magenta2/ai/chat/model/ChatHistory.java",
+          "magenta-app/src/main/java/io/mindspice/magenta2/ai/chat/model/ChatRequest.java",
+          "magenta-app/src/main/java/io/mindspice/magenta2/ai/chat/model/ChatResponse.java",
+          "magenta-app/src/main/java/io/mindspice/magenta2/ai/chat/model/ChatSession.java",
+          "magenta-app/src/main/java/io/mindspice/magenta2/ai/chat/model/PendingChatMessage.java",
+          "magenta-app/src/main/java/io/mindspice/magenta2/ai/chat/model/PendingMessageRequest.java",
+          "magenta-app/src/main/java/io/mindspice/magenta2/ai/chat/repository/ChatSessionMetadataRepository.java",
+          "magenta-app/src/main/java/io/mindspice/magenta2/ai/chat/repository/ChatPendingMessageRepository.java",
+          "magenta-app/src/main/java/io/mindspice/magenta2/ai/chat/service/ChatPendingMessageService.java",
+          "magenta-app/src/main/java/io/mindspice/magenta2/ai/chat/service/RequestResolver.java",
+          "magenta-app/src/main/java/io/mindspice/magenta2/ai/chat/service/AuditService.java",
+          "magenta-app/src/main/java/io/mindspice/magenta2/ai/chat/service/ChatService.java",
+          "magenta-app/src/main/java/io/mindspice/magenta2/ai/chat/service/turn/PromptContextAssembler.java",
+          "magenta-app/src/main/java/io/mindspice/magenta2/ai/chat/service/turn/ToolAccessPolicy.java",
+          "magenta-app/src/main/java/io/mindspice/magenta2/ai/chat/service/turn/TerminalTurnRepair.java",
+          "magenta-app/src/main/java/io/mindspice/magenta2/ai/chat/service/turn/TurnContext.java",
+          "magenta-app/src/main/java/io/mindspice/magenta2/ai/chat/config/ChatBeanConfig.java",
+          "magenta-app/src/main/java/io/mindspice/magenta2/ai/chat/service/ChatModelRouter.java",
+          "magenta-app/src/main/java/io/mindspice/magenta2/ai/chat/service/ContextManagementAdvisor.java",
+          "magenta-app/src/main/java/io/mindspice/magenta2/ai/chat/service/ChatInvocationProfile.java",
+          "magenta-app/src/main/java/io/mindspice/magenta2/ai/chat/service/TaskExecutionEvent.java",
+          "magenta-app/src/main/java/io/mindspice/magenta2/ai/chat/service/TaskExecutionResult.java",
+          "magenta-app/src/main/java/io/mindspice/magenta2/core/persistence/SchemaMigrationConfiguration.java",
+          "magenta-app/src/main/java/io/mindspice/magenta2/ai/orchestration",
+          "magenta-app/src/main/java/io/mindspice/magenta2/ai/skills",
+          "magenta-app/src/main/java/io/mindspice/magenta2/ai/chat/plan",
+          "magenta-app/src/main/java/io/mindspice/magenta2/ai/chat/task",
+          "magenta-app/src/main/java/io/mindspice/magenta2/ai/chat/project",
+          "magenta-app/src/main/java/io/mindspice/magenta2/ai/chat/system",
+          "magenta-app/src/main/java/io/mindspice/magenta2/ai/agent/job",
+          "magenta-app/src/main/java/io/mindspice/magenta2/ai/execution",
+          "magenta-app/src/main/java/io/mindspice/magenta2/ai/chat/tool/file",
+          "magenta-app/src/main/java/io/mindspice/magenta2/ai/chat/tool/shell",
+          "magenta-app/src/main/java/io/mindspice/magenta2/ai/chat/tool/web",
+          "magenta-app/src/main/java/io/mindspice/magenta2/ai/chat/tool/skills",
+          "magenta-app/src/main/java/io/mindspice/magenta2/ai/chat/tool/orchestration",
+          "magenta-app/src/main/java/io/mindspice/magenta2/ai/chat/tool/plan",
+          "magenta-app/src/main/java/io/mindspice/magenta2/ai/chat/tool/savedplan",
+          "magenta-app/src/main/java/io/mindspice/magenta2/ai/chat/tool/task",
+          "magenta-app/src/main/resources/db/migrations",
+          "magenta-app/src/main/java/io/mindspice/magenta2/core/persistence/SchemaMigrationRunner.java",
+          "magenta-app/src/test/java/io/mindspice/magenta2/ai/chat/service/ChatServiceTest.java",
+          "magenta-app/src/test/java/io/mindspice/magenta2/ai/chat/service/ChatPendingMessageServiceTest.java",
+          "magenta-app/src/test/java/io/mindspice/magenta2/ai/chat/repository/ChatPendingMessageRepositoryTest.java",
+          "magenta-app/src/test/java/io/mindspice/magenta2/ai/chat/service/turn/ToolAccessPolicyTest.java",
+          "magenta-app/src/test/java/io/mindspice/magenta2/ai/chat/service/ContextManagementAdvisorTest.java",
+          "magenta-app/src/test/java/io/mindspice/magenta2/ai/chat/service/ChatModelRouterTest.java",
+          "magenta-app/src/test/java/io/mindspice/magenta2/core/config/MagentaRootConfigurationTest.java",
+          "magenta-app/src/test/java/io/mindspice/magenta2/ai/config/user/AiUserConfigConfigurationTest.java",
+          "magenta-app/src/test/java/io/mindspice/magenta2/ai/config/user/ExternalAiConfigLoaderTest.java",
+          "magenta-app/src/test/java/io/mindspice/magenta2/ai/chat/service/RequestResolverAgentBindingTest.java",
+          "magenta-app/src/test/java/io/mindspice/magenta2/ai/chat/tool/ChatToolRegistryTest.java",
+          "magenta-app/src/test/java/io/mindspice/magenta2/ai/chat/service/turn/PromptContextAssemblerTest.java"
+        ],
+        "changedFileObservations": [
+          {
+            "path": "magenta-app/src/main/java/io/mindspice/magenta2/ai/config/user/AiConfig.java",
+            "status": "present",
+            "digest": "117d9807189b94f6179454dd7311cf7b37bd2dd9e22072435824cf3bfde823e3",
+            "bytes": 944
+          },
+          {
+            "path": "magenta-app/src/main/java/io/mindspice/magenta2/ai/config/user/AiUserConfigConfiguration.java",
+            "status": "present",
+            "digest": "f3dd97087e61a72227b515c19cedd9135bf13ac6c18983abc915c5c644ae7629",
+            "bytes": 1600
+          },
+          {
+            "path": "magenta-app/src/main/java/io/mindspice/magenta2/ai/config/user/ExternalAiConfigLoader.java",
+            "status": "present",
+            "digest": "38869c88ed1a0ea0f3aa5b714cea4a47721f7e02ee3059626ec4f8626431333b",
+            "bytes": 2588
+          },
+          {
+            "path": "magenta-app/src/main/java/io/mindspice/magenta2/ai/chat/model/ChatHistory.java",
+            "status": "present",
+            "digest": "815510b8aaebafb1cf601f93a06c049908fa2177ed63528d830397b0a48f4e20",
+            "bytes": 489
+          },
+          {
+            "path": "magenta-app/src/main/java/io/mindspice/magenta2/ai/chat/model/ChatRequest.java",
+            "status": "present",
+            "digest": "a545da3e0aba44d7a140b88d46f73826797a3a1bb367404f2302a0bbfbc2f221",
+            "bytes": 1324
+          },
+          {
+            "path": "magenta-app/src/main/java/io/mindspice/magenta2/ai/chat/model/ChatResponse.java",
+            "status": "present",
+            "digest": "43b627087d1f95714d4351c393237e377af67d600d134a317c1c979db4460c92",
+            "bytes": 2319
+          },
+          {
+            "path": "magenta-app/src/main/java/io/mindspice/magenta2/ai/chat/model/ChatSession.java",
+            "status": "present",
+            "digest": "110708a335a477bb3fa995c7021f286def528539bd3b048342a442aec0e938f6",
+            "bytes": 1043
+          },
+          {
+            "path": "magenta-app/src/main/java/io/mindspice/magenta2/ai/chat/model/PendingChatMessage.java",
+            "status": "present",
+            "digest": "8ae77f99d4fab9fe850d2bc9be3b76152cd123ace7c183f985e4ea1d8b14ceb0",
+            "bytes": 291
+          },
+          {
+            "path": "magenta-app/src/main/java/io/mindspice/magenta2/ai/chat/model/PendingMessageRequest.java",
+            "status": "present",
+            "digest": "60eea685061ff042a0e52b3b073309a3da6de7d967be01db9e53d11e771b1dae",
+            "bytes": 211
+          },
+          {
+            "path": "magenta-app/src/main/java/io/mindspice/magenta2/ai/chat/repository/ChatSessionMetadataRepository.java",
+            "status": "present",
+            "digest": "4bf90fa105ff3137f396a9c572acf91a535e6999ae07ea87680d1c2cc16ee683",
+            "bytes": 12178
+          },
+          {
+            "path": "magenta-app/src/main/java/io/mindspice/magenta2/ai/chat/repository/ChatPendingMessageRepository.java",
+            "status": "present",
+            "digest": "43481b5fc69f3e3a85b50132301c59286cfea40850091b7f44f2da412476175f",
+            "bytes": 9496
+          },
+          {
+            "path": "magenta-app/src/main/java/io/mindspice/magenta2/ai/chat/service/ChatPendingMessageService.java",
+            "status": "present",
+            "digest": "fe8b182491128dd0ebdde82de50293bbce4c9889f7f4748b6e22eff84adf720b",
+            "bytes": 2801
+          },
+          {
+            "path": "magenta-app/src/main/java/io/mindspice/magenta2/ai/chat/service/RequestResolver.java",
+            "status": "present",
+            "digest": "58d4aa20d8dfbc3c995559a48f9b61abf8d4a0a62ad67fa0fc56c850f0dbf693",
+            "bytes": 3539
+          },
+          {
+            "path": "magenta-app/src/main/java/io/mindspice/magenta2/ai/chat/service/AuditService.java",
+            "status": "present",
+            "digest": "3c5c01289d56ef5462ba8d458dbc4b8336fb12ecc25c30be382afe0cc0c70fe8",
+            "bytes": 4622
+          },
+          {
+            "path": "magenta-app/src/main/java/io/mindspice/magenta2/ai/chat/service/ChatService.java",
+            "status": "present",
+            "digest": "8abd311ab5158c5622a5684a94145c28632e5baf685e32376c919e15e0b49d4c",
+            "bytes": 66782
+          },
+          {
+            "path": "magenta-app/src/main/java/io/mindspice/magenta2/ai/chat/service/turn/PromptContextAssembler.java",
+            "status": "present",
+            "digest": "10aeb6d7addf8b4069e7cf2aad635f98a7ec73cbbc4a88f22ed7b0bb94fcea2c",
+            "bytes": 2272
+          },
+          {
+            "path": "magenta-app/src/main/java/io/mindspice/magenta2/ai/chat/service/turn/ToolAccessPolicy.java",
+            "status": "present",
+            "digest": "89e07da4262b584fbc51a2035ce9a70e48b76bc431b0082626753cf7a489b695",
+            "bytes": 2381
+          },
+          {
+            "path": "magenta-app/src/main/java/io/mindspice/magenta2/ai/chat/service/turn/TerminalTurnRepair.java",
+            "status": "present",
+            "digest": "5f7f4b4e645eb891b52970aaa287aa7458359356a474618987c6f351b934f07e",
+            "bytes": 2805
+          },
+          {
+            "path": "magenta-app/src/main/java/io/mindspice/magenta2/ai/chat/service/turn/TurnContext.java",
+            "status": "present",
+            "digest": "c06a3a397ea8c4afccbdddf5b99c9d5cece77a1ea982f7ba5e4507e8e72555dc",
+            "bytes": 5244
+          },
+          {
+            "path": "magenta-app/src/main/java/io/mindspice/magenta2/ai/chat/config/ChatBeanConfig.java",
+            "status": "present",
+            "digest": "4cd45af608fc2d360e17afe8063e2211785b8efa3b043331ca70d78eaa4b587d",
+            "bytes": 3025
+          },
+          {
+            "path": "magenta-app/src/main/java/io/mindspice/magenta2/ai/chat/service/ChatModelRouter.java",
+            "status": "present",
+            "digest": "fe21b8b65eeebc742286ca18d572de4bf27d6f835558fba0a4e515dcae6a3439",
+            "bytes": 12813
+          },
+          {
+            "path": "magenta-app/src/main/java/io/mindspice/magenta2/ai/chat/service/ContextManagementAdvisor.java",
+            "status": "present",
+            "digest": "96885547ced80eb3f1095b0c4d1760358125ddd60564a9ed702ed10288172365",
+            "bytes": 35244
+          },
+          {
+            "path": "magenta-app/src/main/java/io/mindspice/magenta2/ai/chat/service/ChatInvocationProfile.java",
+            "status": "deleted"
+          },
+          {
+            "path": "magenta-app/src/main/java/io/mindspice/magenta2/ai/chat/service/TaskExecutionEvent.java",
+            "status": "deleted"
+          },
+          {
+            "path": "magenta-app/src/main/java/io/mindspice/magenta2/ai/chat/service/TaskExecutionResult.java",
+            "status": "deleted"
+          },
+          {
+            "path": "magenta-app/src/main/java/io/mindspice/magenta2/core/persistence/SchemaMigrationConfiguration.java",
+            "status": "deleted"
+          },
+          {
+            "path": "magenta-app/src/main/java/io/mindspice/magenta2/ai/orchestration",
+            "status": "deleted"
+          },
+          {
+            "path": "magenta-app/src/main/java/io/mindspice/magenta2/ai/skills",
+            "status": "deleted"
+          },
+          {
+            "path": "magenta-app/src/main/java/io/mindspice/magenta2/ai/chat/plan",
+            "status": "deleted"
+          },
+          {
+            "path": "magenta-app/src/main/java/io/mindspice/magenta2/ai/chat/task",
+            "status": "deleted"
+          },
+          {
+            "path": "magenta-app/src/main/java/io/mindspice/magenta2/ai/chat/project",
+            "status": "deleted"
+          },
+          {
+            "path": "magenta-app/src/main/java/io/mindspice/magenta2/ai/chat/system",
+            "status": "deleted"
+          },
+          {
+            "path": "magenta-app/src/main/java/io/mindspice/magenta2/ai/agent/job",
+            "status": "deleted"
+          },
+          {
+            "path": "magenta-app/src/main/java/io/mindspice/magenta2/ai/execution",
+            "status": "deleted"
+          },
+          {
+            "path": "magenta-app/src/main/java/io/mindspice/magenta2/ai/chat/tool/file",
+            "status": "deleted"
+          },
+          {
+            "path": "magenta-app/src/main/java/io/mindspice/magenta2/ai/chat/tool/shell",
+            "status": "deleted"
+          },
+          {
+            "path": "magenta-app/src/main/java/io/mindspice/magenta2/ai/chat/tool/web",
+            "status": "deleted"
+          },
+          {
+            "path": "magenta-app/src/main/java/io/mindspice/magenta2/ai/chat/tool/skills",
+            "status": "deleted"
+          },
+          {
+            "path": "magenta-app/src/main/java/io/mindspice/magenta2/ai/chat/tool/orchestration",
+            "status": "deleted"
+          },
+          {
+            "path": "magenta-app/src/main/java/io/mindspice/magenta2/ai/chat/tool/plan",
+            "status": "deleted"
+          },
+          {
+            "path": "magenta-app/src/main/java/io/mindspice/magenta2/ai/chat/tool/savedplan",
+            "status": "deleted"
+          },
+          {
+            "path": "magenta-app/src/main/java/io/mindspice/magenta2/ai/chat/tool/task",
+            "status": "deleted"
+          },
+          {
+            "path": "magenta-app/src/main/resources/db/migrations",
+            "status": "deleted"
+          },
+          {
+            "path": "magenta-app/src/main/java/io/mindspice/magenta2/core/persistence/SchemaMigrationRunner.java",
+            "status": "deleted"
+          },
+          {
+            "path": "magenta-app/src/test/java/io/mindspice/magenta2/ai/chat/service/ChatServiceTest.java",
+            "status": "present",
+            "digest": "cd55aa90c506d3f39247a7c9cb3aeb612644cc996dce85502d0ede344c877aac",
+            "bytes": 22249
+          },
+          {
+            "path": "magenta-app/src/test/java/io/mindspice/magenta2/ai/chat/service/ChatPendingMessageServiceTest.java",
+            "status": "present",
+            "digest": "d35d8706685cc17ccdd3c9a55a3ce72a5a2f36826536ae758ee7dcdebbfbd06f",
+            "bytes": 2411
+          },
+          {
+            "path": "magenta-app/src/test/java/io/mindspice/magenta2/ai/chat/repository/ChatPendingMessageRepositoryTest.java",
+            "status": "present",
+            "digest": "3bf554bc266a525a78cec6eb1568cfbae2f9e31d490ee6c38954eb4d7cd76c1a",
+            "bytes": 3849
+          },
+          {
+            "path": "magenta-app/src/test/java/io/mindspice/magenta2/ai/chat/service/turn/ToolAccessPolicyTest.java",
+            "status": "present",
+            "digest": "d8da0b05c2e625f35fd52f0ac5ddf97b84f373122d2f240939ed6f2ceddde7e0",
+            "bytes": 2759
+          },
+          {
+            "path": "magenta-app/src/test/java/io/mindspice/magenta2/ai/chat/service/ContextManagementAdvisorTest.java",
+            "status": "present",
+            "digest": "e20654ddbcd8741638d4bb8ae01bec0fa3548c7a5ee2f213d42834bc2ff6b70e",
+            "bytes": 17966
+          },
+          {
+            "path": "magenta-app/src/test/java/io/mindspice/magenta2/ai/chat/service/ChatModelRouterTest.java",
+            "status": "present",
+            "digest": "c10cf6314d2799d0f593dc42ab01f7eeea26dd871ae4c904c6c2702a8bedc887",
+            "bytes": 10953
+          },
+          {
+            "path": "magenta-app/src/test/java/io/mindspice/magenta2/core/config/MagentaRootConfigurationTest.java",
+            "status": "present",
+            "digest": "8a4d603c6734f9a1ac9da58ce4198be078db95a9b0eedcd746c78a70bbdc4ced",
+            "bytes": 10937
+          },
+          {
+            "path": "magenta-app/src/test/java/io/mindspice/magenta2/ai/config/user/AiUserConfigConfigurationTest.java",
+            "status": "present",
+            "digest": "dbdc1d44270b7f178329cbf8352653bf3b55754419d87818edfc5106b6dbf571",
+            "bytes": 2907
+          },
+          {
+            "path": "magenta-app/src/test/java/io/mindspice/magenta2/ai/config/user/ExternalAiConfigLoaderTest.java",
+            "status": "present",
+            "digest": "9fa37b85a298cd39cefa069efcd52b0884ac00dff1320fdff49efd5095edd793",
+            "bytes": 7356
+          },
+          {
+            "path": "magenta-app/src/test/java/io/mindspice/magenta2/ai/chat/service/RequestResolverAgentBindingTest.java",
+            "status": "deleted"
+          },
+          {
+            "path": "magenta-app/src/test/java/io/mindspice/magenta2/ai/chat/tool/ChatToolRegistryTest.java",
+            "status": "deleted"
+          },
+          {
+            "path": "magenta-app/src/test/java/io/mindspice/magenta2/ai/chat/service/turn/PromptContextAssemblerTest.java",
+            "status": "deleted"
+          }
+        ],
+        "outsideDeclaredTargets": [
+          "magenta-app/src/main/java/io/mindspice/magenta2/ai/config/user/AiConfig.java",
+          "magenta-app/src/main/java/io/mindspice/magenta2/ai/config/user/AiUserConfigConfiguration.java",
+          "magenta-app/src/main/java/io/mindspice/magenta2/ai/config/user/ExternalAiConfigLoader.java",
+          "magenta-app/src/main/java/io/mindspice/magenta2/ai/chat/model/ChatHistory.java",
+          "magenta-app/src/main/java/io/mindspice/magenta2/ai/chat/model/ChatRequest.java",
+          "magenta-app/src/main/java/io/mindspice/magenta2/ai/chat/model/ChatResponse.java",
+          "magenta-app/src/main/java/io/mindspice/magenta2/ai/chat/model/ChatSession.java",
+          "magenta-app/src/main/java/io/mindspice/magenta2/ai/chat/model/PendingChatMessage.java",
+          "magenta-app/src/main/java/io/mindspice/magenta2/ai/chat/model/PendingMessageRequest.java",
+          "magenta-app/src/main/java/io/mindspice/magenta2/ai/chat/repository/ChatSessionMetadataRepository.java",
+          "magenta-app/src/main/java/io/mindspice/magenta2/ai/chat/repository/ChatPendingMessageRepository.java",
+          "magenta-app/src/main/java/io/mindspice/magenta2/ai/chat/service/ChatPendingMessageService.java",
+          "magenta-app/src/main/java/io/mindspice/magenta2/ai/chat/service/RequestResolver.java",
+          "magenta-app/src/main/java/io/mindspice/magenta2/ai/chat/service/AuditService.java",
+          "magenta-app/src/main/java/io/mindspice/magenta2/ai/chat/service/ChatService.java",
+          "magenta-app/src/main/java/io/mindspice/magenta2/ai/chat/service/turn/PromptContextAssembler.java",
+          "magenta-app/src/main/java/io/mindspice/magenta2/ai/chat/service/turn/ToolAccessPolicy.java",
+          "magenta-app/src/main/java/io/mindspice/magenta2/ai/chat/service/turn/TerminalTurnRepair.java",
+          "magenta-app/src/main/java/io/mindspice/magenta2/ai/chat/service/turn/TurnContext.java",
+          "magenta-app/src/main/java/io/mindspice/magenta2/ai/chat/config/ChatBeanConfig.java",
+          "magenta-app/src/main/java/io/mindspice/magenta2/ai/chat/service/ChatModelRouter.java",
+          "magenta-app/src/main/java/io/mindspice/magenta2/ai/chat/service/ContextManagementAdvisor.java",
+          "magenta-app/src/main/java/io/mindspice/magenta2/ai/chat/service/ChatInvocationProfile.java",
+          "magenta-app/src/main/java/io/mindspice/magenta2/ai/chat/service/TaskExecutionEvent.java",
+          "magenta-app/src/main/java/io/mindspice/magenta2/ai/chat/service/TaskExecutionResult.java",
+          "magenta-app/src/main/java/io/mindspice/magenta2/core/persistence/SchemaMigrationConfiguration.java",
+          "magenta-app/src/main/java/io/mindspice/magenta2/ai/orchestration",
+          "magenta-app/src/main/java/io/mindspice/magenta2/ai/skills",
+          "magenta-app/src/main/java/io/mindspice/magenta2/ai/chat/plan",
+          "magenta-app/src/main/java/io/mindspice/magenta2/ai/chat/task",
+          "magenta-app/src/main/java/io/mindspice/magenta2/ai/chat/project",
+          "magenta-app/src/main/java/io/mindspice/magenta2/ai/chat/system",
+          "magenta-app/src/main/java/io/mindspice/magenta2/ai/agent/job",
+          "magenta-app/src/main/java/io/mindspice/magenta2/ai/execution",
+          "magenta-app/src/main/java/io/mindspice/magenta2/ai/chat/tool/file",
+          "magenta-app/src/main/java/io/mindspice/magenta2/ai/chat/tool/shell",
+          "magenta-app/src/main/java/io/mindspice/magenta2/ai/chat/tool/web",
+          "magenta-app/src/main/java/io/mindspice/magenta2/ai/chat/tool/skills",
+          "magenta-app/src/main/java/io/mindspice/magenta2/ai/chat/tool/orchestration",
+          "magenta-app/src/main/java/io/mindspice/magenta2/ai/chat/tool/plan",
+          "magenta-app/src/main/java/io/mindspice/magenta2/ai/chat/tool/savedplan",
+          "magenta-app/src/main/java/io/mindspice/magenta2/ai/chat/tool/task",
+          "magenta-app/src/main/resources/db/migrations",
+          "magenta-app/src/main/java/io/mindspice/magenta2/core/persistence/SchemaMigrationRunner.java",
+          "magenta-app/src/test/java/io/mindspice/magenta2/ai/chat/service/ChatServiceTest.java",
+          "magenta-app/src/test/java/io/mindspice/magenta2/ai/chat/service/ChatPendingMessageServiceTest.java",
+          "magenta-app/src/test/java/io/mindspice/magenta2/ai/chat/repository/ChatPendingMessageRepositoryTest.java",
+          "magenta-app/src/test/java/io/mindspice/magenta2/ai/chat/service/turn/ToolAccessPolicyTest.java",
+          "magenta-app/src/test/java/io/mindspice/magenta2/ai/chat/service/ContextManagementAdvisorTest.java",
+          "magenta-app/src/test/java/io/mindspice/magenta2/ai/chat/service/ChatModelRouterTest.java",
+          "magenta-app/src/test/java/io/mindspice/magenta2/core/config/MagentaRootConfigurationTest.java",
+          "magenta-app/src/test/java/io/mindspice/magenta2/ai/config/user/AiUserConfigConfigurationTest.java",
+          "magenta-app/src/test/java/io/mindspice/magenta2/ai/config/user/ExternalAiConfigLoaderTest.java",
+          "magenta-app/src/test/java/io/mindspice/magenta2/ai/chat/service/RequestResolverAgentBindingTest.java",
+          "magenta-app/src/test/java/io/mindspice/magenta2/ai/chat/tool/ChatToolRegistryTest.java",
+          "magenta-app/src/test/java/io/mindspice/magenta2/ai/chat/service/turn/PromptContextAssemblerTest.java"
+        ],
+        "timestamp": "2026-08-05T01:08:33.696Z"
+      },
+      "validations": [
+        {
+          "agentModel": {
+            "provider": "openai-codex",
+            "model": "gpt-5.6-terra",
+            "thinking": "high"
+          },
+          "attempt": 1,
+          "verdict": "PASS",
+          "report": "Phase 05 validation VERDICT: PASS (deepseek-v4-pro:max). All 23 criteria verified: all deletion targets gone from disk; AiConfig exactly 7 components single canonical constructor without deleted fields; AiUserConfigConfiguration no agent/skill beans; mvn compile PASS; mvn test 90/0 PASS; context starts 1.806s; zero refs to 16 deleted package prefixes and 10 deleted type names in main code (PlanMode only in non-code AGENTS.md doc); zero deleted-type refs in surviving tests; ChatBeanConfig provides the 4 SPI beans; TurnAuditWriter compiles and wired; ChatMemory/repository layer intact; ChatService 17-param constructor matches SPI deps; no ConversationTurnCoordinator refs; surviving tool infra + test files preserved. Deviation rulings: (1) PromptContextAssemblerTest deletion JUSTIFIED — stripped assembler has zero independently testable behavior, all tests exercised deleted plan-mode paths; (2) defaultSystemPrompt() null SAFE — every consumer uses StringUtils.hasText guard; (3) ChatSession coherent — 8-component canonical, agentId not a dead param; (4) contextCapture ghost field on MsgRequest harmless, clean in later phase; (5) @JsonIgnoreProperties(ignoreUnknown=true) ACCEPTABLE — fast-fails on missing models/defaultModel; (6) approvedTools() semantics preserved (NORMAL_BLOCKED_TOOLS). Findings: agent_id column retained (coherent, findAgentId still used); extra deletions (TaskExecutionEvent/Result/SchemaMigrationConfiguration/ChatInvocationProfile) correct; stale AGENTS.md PlanMode mention + dead TurnContext fields (planCompletionDetected/validatedFinalMessage/forcedPlanningQuestion) cleaned in Phase 07. No validator edits needed.",
+          "changedFiles": [
+            "magenta-app/src/main/java/io/mindspice/magenta2/ai/config/user/AiConfig.java",
+            "magenta-app/src/main/java/io/mindspice/magenta2/ai/chat/service/turn/PromptContextAssembler.java",
+            "magenta-app/src/main/java/io/mindspice/magenta2/ai/chat/service/turn/ToolAccessPolicy.java",
+            "magenta-app/src/main/java/io/mindspice/magenta2/ai/chat/service/turn/TerminalTurnRepair.java",
+            "magenta-app/src/main/java/io/mindspice/magenta2/ai/chat/config/ChatBeanConfig.java"
+          ],
+          "changedFileObservations": [
+            {
+              "path": "magenta-app/src/main/java/io/mindspice/magenta2/ai/config/user/AiConfig.java",
+              "status": "present",
+              "digest": "117d9807189b94f6179454dd7311cf7b37bd2dd9e22072435824cf3bfde823e3",
+              "bytes": 944
+            },
+            {
+              "path": "magenta-app/src/main/java/io/mindspice/magenta2/ai/chat/service/turn/PromptContextAssembler.java",
+              "status": "present",
+              "digest": "10aeb6d7addf8b4069e7cf2aad635f98a7ec73cbbc4a88f22ed7b0bb94fcea2c",
+              "bytes": 2272
+            },
+            {
+              "path": "magenta-app/src/main/java/io/mindspice/magenta2/ai/chat/service/turn/ToolAccessPolicy.java",
+              "status": "present",
+              "digest": "89e07da4262b584fbc51a2035ce9a70e48b76bc431b0082626753cf7a489b695",
+              "bytes": 2381
+            },
+            {
+              "path": "magenta-app/src/main/java/io/mindspice/magenta2/ai/chat/service/turn/TerminalTurnRepair.java",
+              "status": "present",
+              "digest": "5f7f4b4e645eb891b52970aaa287aa7458359356a474618987c6f351b934f07e",
+              "bytes": 2805
+            },
+            {
+              "path": "magenta-app/src/main/java/io/mindspice/magenta2/ai/chat/config/ChatBeanConfig.java",
+              "status": "present",
+              "digest": "4cd45af608fc2d360e17afe8063e2211785b8efa3b043331ca70d78eaa4b587d",
+              "bytes": 3025
+            }
+          ],
+          "outsideDeclaredTargets": [
+            "magenta-app/src/main/java/io/mindspice/magenta2/ai/config/user/AiConfig.java",
+            "magenta-app/src/main/java/io/mindspice/magenta2/ai/chat/service/turn/PromptContextAssembler.java",
+            "magenta-app/src/main/java/io/mindspice/magenta2/ai/chat/service/turn/ToolAccessPolicy.java",
+            "magenta-app/src/main/java/io/mindspice/magenta2/ai/chat/service/turn/TerminalTurnRepair.java",
+            "magenta-app/src/main/java/io/mindspice/magenta2/ai/chat/config/ChatBeanConfig.java"
+          ],
+          "timestamp": "2026-08-05T01:08:44.647Z"
+        }
+      ]
     },
     {
       "phase": "phase-06-core-types.md",
@@ -4878,5 +5349,5 @@
   ],
   "integrationValidations": [],
   "createdAt": "2026-08-04T23:11:03.465Z",
-  "updatedAt": "2026-08-05T00:43:50.388Z"
+  "updatedAt": "2026-08-05T01:08:44.647Z"
 }
