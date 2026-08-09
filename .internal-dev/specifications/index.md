@@ -31,6 +31,7 @@ The store is flat. Do not create nested directories for architecture, API, servi
 | `decisions.md` | active | internal-dev | Durable architecture, design, product, and workflow decisions. | Review before making or revising durable decisions. |
 | `deferred-features.md` | active | product | Accepted future product capability that is out of current scope. | Review when deferring accepted capability or planning deferred work. |
 | `horizon-ideas.md` | active | product | Future product direction that is not accepted deferred capability. | Review when triaging "future/eventually/later" context. |
+| `product-model.md` | target | product | Accepted target product model: terminology contract, workspace/filesystem layout, task/plan/workflow model, non-cron scheduling, project ownership and run authority, agent home workspaces, and dashboard editing of `agents.md` and skills. | Review when the rectification sprint scope changes or the model is revised. |
 
 ## New File Policy
 
