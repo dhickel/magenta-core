@@ -31,5 +31,5 @@ Repository state gotcha: the Magenta working tree (branch `core`, 2026-08) is a 
 
 ## Open Questions
 
-- Whether the rectification sprint rebuilds on `core` (recommended, Option A in the handoff) or resumes the sprint branch — pending user confirmation.
-- Whether the app schema is revived wholesale or slimmed during rectification.
+- RESOLVED 2026-08-09: the rectification sprint starts from a new branch created at `336eb5f0` (tip of `sprint/20260729-163244-project-dashboard`); `core` remains standalone and is addressed later. See `DECISION-20260809-02` in `.internal-dev/specifications/decisions.md`.
+- Schema/migration approach on the new base is settled: the full schema and `db/migrations/` are live; rectification changes come as new ordered `NNN-kebab.sql` migrations.

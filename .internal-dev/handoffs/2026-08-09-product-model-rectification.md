@@ -179,31 +179,28 @@ All current-state evidence below is recovered from `sprint/20260729-163244-proje
 
 ## Recommended Direction
 
-### Branch Strategy (must be confirmed by the user before planning)
+### Branch Strategy — SETTLED (user decision, 2026-08-09)
 
-**⚠️ The branch choice determines every subsequent phase's recovery path, schema baseline, and whether the extraction sprint completes or is folded in.**
+**Decision: create a new sprint branch from `336eb5f0`** — the tip of `sprint/20260729-163244-project-dashboard` (the pre-extraction full product, and the exact commit `core` was created from). **Branch `core` is left as a standalone branch to be addressed later; the `mindspice-core` framework extraction is out of scope for this sprint.**
 
-The target model implies a full product rebuild. `core` provides the new `mindspice-core` turn-loop foundation but has no runnable application shell. The sprint branch provides the last complete implementation to salvage (services, fragments, tests, schema, CSS, JS).
+Consequences for planning:
 
-**Option A: Rebuild on `core` (Recommended).** Base: branch `core` (`magenta-app` + `mindspice-core` + `mindspice-core-autoconfigure`). Recover deleted code selectively from `sprint/20260729-163244-project-dashboard` (only what the target model requires, adapted to the new framework); the framework is the enforced foundation (SPIs `PromptContextAssembler`, `ToolAccessPolicy`, `TerminalTurnRepair`, `TurnAuditWriter`, `TurnLoopBuilder`); revive the 83-table `schema.sql` but slim it as the rectification proceeds; recover applicable test suites and adapt. Tradeoffs: (+) cleanest, framework integration from day one, schema cleaned in-place; avoids rebasing extraction phases onto a diverging layer; (−) most initial recovery work; requires a decision on whether phase-14 reintegration is subsumed or completed first.
+- The base is the complete, runnable product: controllers, services, fragments, tools, tests, 20-file `db/migrations/` + `SchemaMigrationRunner`, `static/js/*`, CSS. **No code recovery is needed**; `git show`/`git diff` against `core` are only relevant for cross-checking framework-era changes.
+- `schema.sql` and the ordered migration infrastructure are **live on the base**. Schema changes follow the existing `NNN-kebab.sql` ordered-migration pattern; keep `SchemaMigrationRunner`.
+- The extraction sprint's pending phases 12–14 (tests, docs hardening, reintegration) and any future framework port are deferred to the later `core` effort; this sprint must not touch `core` or the framework.
+- Spec supersession, drift entries, and the gap map from this handoff remain fully applicable: the spec corpus describes this product, and its conflicts with the target model are the sprint's work.
 
-**Option B: Resume `sprint/20260729-163244-project-dashboard`.** Rectify on the old application stack, then rebase onto `core` afterward (or port in a separate sprint). Tradeoffs: (+) faster start, models/services/UI/tests intact; (−) framework integration becomes a separate high-risk follow-on sprint; resurrects the 20-file `db/migrations/` infrastructure that was intentionally deleted; parallel framework work on `core` would diverge into a merge nightmare.
-
-**Option C: Rebuild on `master`.** Strictly worse than Option B (same old-architecture problem, minus the project console modernization and 18 commits). Rejected as inferior without further justification.
-
-**Recommendation: Option A** — rebuild on `core`, salvaging from `sprint/20260729-163244-project-dashboard`. The framework foundation is the intended direction; integrate now rather than building on the old stack and porting later.
-
-**Items requiring user confirmation:**
-1. **Base branch** — confirm Option A (or choose B/C with rationale).
-2. **Extraction sprint disposition** — should phases 12–14 (tests, docs hardening, reintegration) finish first on `core`, or be folded into the rectification sprint? The exploration review notes phase-14's `MagentaPromptContributor` expects `AgentsMdResolver`, which was already deleted — this latent gap favors folding.
-3. **Schema baseline** — revive the 83-table `schema.sql` wholesale and slim during rectification, or start from minimal target-model DDL and progressively add tables? Recommended: revive and slim iteratively to preserve the mature fencing/idempotency/lifecycle schema.
-4. **Migration infrastructure** — restore `db/migrations/` (20 files, `SchemaMigrationRunner`) or fold the migration order into the revived `schema.sql` as a single baseline? `schema.sql` was verified sha256-identical between the sprint branch and `core`, so a single fresh baseline is defensible.
+**Confirmation items resolution (previously listed as pending):**
+1. **Base branch** — ✅ SETTLED: new branch created from `336eb5f0` (user directive 2026-08-09).
+2. **Extraction sprint disposition** — ✅ SETTLED: `core` is standalone and addressed later; its phases 12–14 are out of scope for this sprint.
+3. **Schema baseline** — ✅ SETTLED: the full schema and migration infrastructure are already live on the base; evolve via new ordered migrations (no revive, no minimal restart).
+4. **Migration infrastructure** — ✅ SETTLED: keep `db/migrations/` + `SchemaMigrationRunner`; add new `NNN-kebab.sql` migrations for rectification changes.
 
 ### Recommended Sprint Scope & Phasing
 
 Workstream recommendations in dependency order. The planner may reshape them, but the dependency chain should not be broken. Each workstream is a collection of phases; the planner owns the final phase decomposition.
 
-**WS-0: Baseline & Branch Consolidation.** Goal: establish the working branch, revive the product skeleton, record spec supersession entries. Deliverables: chosen base branch (user-confirmed); recovered `magenta-app` product skeleton (controllers, services, fragments, tools, configuration); `sql.init.mode` re-enabled with `schema.sql` revived and migration-infrastructure decision applied; drift entry for the 2026-08-04 extraction; supersession entries for `DECISION-20260719-02` closed-kind clause, "projects have no filesystem root authority," and cron scheduling contracts. Key evidence: `.internal-dev/sprints/exec-core-refactor-20260804/manifest.md`, phase-05 and phase-14 plans, `decisions.md`, `architecture.md`. Validation: bounded Spring Boot startup, recovered/framework tests passing.
+**WS-0: Baseline & Branch Setup.** Goal: create the sprint branch from `336eb5f0`, record spec supersession entries. Deliverables: sprint branch created from `336eb5f0` (base already complete and runnable — no recovery); drift entry for the 2026-08-04 extraction; supersession entries for `DECISION-20260719-02` closed-kind clause, "projects have no filesystem root authority," and cron scheduling contracts; decision entry `DECISION-20260809-02` recorded. Key evidence: this handoff's Branch Strategy section, `decisions.md`, `architecture.md`. Validation: bounded Spring Boot startup on the branch (baseline green before phase work).
 
 **WS-1: Terminology & Concept-Model Unification.** Goal: unify task/plan/workflow/job into the target taxonomy; consolidate schema; map job concepts. Deliverables: canonical task-definition table (synthesize `plan_definitions` + `work_task_definitions`); schema-in/out/criteria on all task families; discriminators aligned to `TASK`/`WORKFLOW` terminology; `job_definitions` → workflow/task definitions; `orchestration_jobs`/`orchestration_job_items` removed or mapped; `agent_jobs` renamed or removed; `job_recurrences` removed (replaced by WS-3); `deliverables_json` dropped; `prompt_profile`/`planning_task`/`WorkTypeProfileService` consolidated; code naming sweep; API route naming aligned (backward-compatible redirects where needed). Key evidence: `schema.sql` L60-130, L285-366, L611-624, L1772-1841; `PlanService`, `WorkTaskService`, `TaskService` (recoverable). Validation: full Maven suite, bounded startup, schema equivalence.
 
@@ -275,7 +272,7 @@ A new `DRIFT-20260804-01` (or similar) entry must be recorded in `architecture.m
 
 ## Risks
 
-1. **Branch strategy risk (HIGH)**: The wrong base branch invalidates phase detail. User must confirm Option A/B/C before planning.
+1. **Branch strategy risk (HIGH)**: RESOLVED 2026-08-09 — base is a new branch from `336eb5f0`; `core` is standalone and out of scope. Residual risk: implementers accidentally touching `core`/framework code or assuming the headless working tree; mitigation: branch creation is WS-0 and all phases operate on the new branch.
 2. **Spec corpus describes a deleted system (HIGH)**: All 12 spec files reference anchor classes deleted on `core`. The planner must decide whether specs become "product contract to re-achieve" or are rewritten wholesale; either way, they cannot be used as-is for planning reference without confusion.
 3. **Target model reverses settled decisions (MEDIUM)**: The open three-kind workspace model, cron scheduling, plan≡task unification, and project-root absence were all deliberately settled architecture decisions. Rectification must explicitly supersede them with new decision entries, or planners will fight the existing contract.
 4. **Concurrency/idempotency machinery preservation (MEDIUM)**: `schedule_firings` operation keys, `assignment_fence_generations`, `writer_claim_generations`, `task_run_idempotent_ops`, `scheduler_claims` are mature and battle-tested. The rectification must extend — not regress — these. Any schema replacement that drops these tables without equivalent replacement is a regression.
@@ -307,7 +304,7 @@ These are the genuine open items the planning session must resolve, with recomme
 
 | # | Question | Recommended Default | Rationale |
 |---|----------|---------------------|-----------|
-| 1 | **Base branch** (see Recommended Direction §Branch Strategy) | Option A — rebuild on `core`, salvage from sprint branch | Framework integration is harder later; schema can be slimmed in-place |
+| 1 | **Base branch** (see Recommended Direction §Branch Strategy) | ✅ SETTLED 2026-08-09: new sprint branch from `336eb5f0`; `core` standalone, addressed later | Full product is live on the base; no recovery; framework out of scope |
 | 2 | **Extraction sprint phase-12..14 disposition** | Fold into rectification sprint | Phase-14 expects deleted `AgentsMdResolver`; phases 12-13 (tests/docs hardening) apply to a deleted product — better to fold into rectification and validate the real product |
 | 3 | **Schema baseline** | Revive 83-table `schema.sql` wholesale, slim iteratively | Preserves mature fencing/idempotency/lifecycle schema. Starting from scratch risks regressions on `schedule_firings` operation keys, `assignment_fence_generations`, `writer_claim_generations`, `task_run_idempotent_ops` |
 | 4 | **Job concept mapping** | Unify into task/workflow family; remove `job` as user-facing term | The three job meanings (`job_definitions`, `orchestration_jobs`, `agent_jobs`) map to tasks, workflows, and background chat constructs respectively. Keeping "job" as a distinct term perpetuates the conflation |
