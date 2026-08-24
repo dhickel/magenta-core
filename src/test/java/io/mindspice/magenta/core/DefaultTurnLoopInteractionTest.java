@@ -243,6 +243,8 @@ class DefaultTurnLoopInteractionTest {
         DefaultTurnLoop restarted = createLoop(model, memory, interactions,
             new RecordingAudit(), new RecordingMetrics(), result -> { });
 
+        assertThrows(TurnLoopException.class,
+            () -> restarted.answer("claimed-session", "different answer"));
         assertEquals("after clear",
             restarted.answer("claimed-session", "durable answer").message());
         assertNull(interactions.load("claimed-session"));

@@ -376,6 +376,11 @@ final class DefaultTurnLoop implements TurnLoop {
                 QuestionPendingContext pending = restorePending(sessionId);
                 if (pending != null && pending.state() == QuestionPendingContext.State.ANSWERED
                     && coordinatorClaimed) {
+                    if (!Objects.equals(pending.answer(), answer)) {
+                        throw new TurnLoopException(
+                            "A different answer is already persisted for session " + sessionId);
+                    }
+                    answer = pending.answer();
                     pending = rearmAnsweredInteraction(sessionId, pending);
                 }
                 if (pending == null || pending.state() != QuestionPendingContext.State.PENDING
