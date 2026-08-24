@@ -4,31 +4,34 @@
          xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
     <modelVersion>4.0.0</modelVersion>
 
-    <parent>
-        <groupId>org.springframework.boot</groupId>
-        <artifactId>spring-boot-starter-parent</artifactId>
-        <version>4.0.7</version>
-        <relativePath/>
-    </parent>
-
     <groupId>io.mindspice</groupId>
-    <artifactId>magenta2</artifactId>
+    <artifactId>magenta-core</artifactId>
     <version>0.0.1-SNAPSHOT</version>
-    <packaging>pom</packaging>
-    <name>magenta2</name>
-    <description>Minimal Spring AI + Ollama chat scaffold</description>
+    <packaging>jar</packaging>
+
+    <name>Magenta Core</name>
+    <description>Programmatic Spring AI turn-loop framework</description>
 
     <properties>
         <java.version>25</java.version>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
+        <maven.compiler.release>${java.version}</maven.compiler.release>
         <spring-ai.version>2.0.0</spring-ai.version>
-        <spring-ai-deepseek.version>2.0.1-SNAPSHOT</spring-ai-deepseek.version>
+        <spring-framework.version>7.0.8</spring-framework.version>
+        <jackson.version>2.21.4</jackson.version>
+        <reactor.version>3.8.6</reactor.version>
+        <sqlite.version>3.50.3.0</sqlite.version>
+        <jtokkit.version>1.1.0</jtokkit.version>
+        <commonmark.version>0.24.0</commonmark.version>
+        <owasp-sanitizer.version>20240325.1</owasp-sanitizer.version>
+        <slf4j.version>2.0.18</slf4j.version>
+        <junit.version>5.12.2</junit.version>
+        <maven-compiler-plugin.version>3.14.1</maven-compiler-plugin.version>
+        <maven-enforcer-plugin.version>3.6.3</maven-enforcer-plugin.version>
+        <maven-jar-plugin.version>3.4.2</maven-jar-plugin.version>
+        <maven-surefire-plugin.version>3.5.3</maven-surefire-plugin.version>
     </properties>
-
-    <modules>
-        <module>mindspice-core</module>
-        <module>mindspice-core-autoconfigure</module>
-        <module>magenta-app</module>
-    </modules>
 
     <dependencyManagement>
         <dependencies>
@@ -39,6 +42,165 @@
                 <type>pom</type>
                 <scope>import</scope>
             </dependency>
+            <dependency>
+                <groupId>org.springframework</groupId>
+                <artifactId>spring-framework-bom</artifactId>
+                <version>${spring-framework.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+            <dependency>
+                <groupId>com.fasterxml.jackson</groupId>
+                <artifactId>jackson-bom</artifactId>
+                <version>${jackson.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+            <dependency>
+                <groupId>org.junit</groupId>
+                <artifactId>junit-bom</artifactId>
+                <version>${junit.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
         </dependencies>
     </dependencyManagement>
+
+    <dependencies>
+        <!-- Framework runtime -->
+        <dependency>
+            <groupId>com.fasterxml.jackson.core</groupId>
+            <artifactId>jackson-databind</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>io.projectreactor</groupId>
+            <artifactId>reactor-core</artifactId>
+            <version>${reactor.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework</groupId>
+            <artifactId>spring-context</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework</groupId>
+            <artifactId>spring-jdbc</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.ai</groupId>
+            <artifactId>spring-ai-model</artifactId>
+        </dependency>
+
+        <!-- Supported provider implementations are transitive library dependencies. -->
+        <dependency>
+            <groupId>org.springframework.ai</groupId>
+            <artifactId>spring-ai-ollama</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.ai</groupId>
+            <artifactId>spring-ai-openai</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.ai</groupId>
+            <artifactId>spring-ai-deepseek</artifactId>
+        </dependency>
+
+        <dependency>
+            <groupId>org.xerial</groupId>
+            <artifactId>sqlite-jdbc</artifactId>
+            <version>${sqlite.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>com.knuddels</groupId>
+            <artifactId>jtokkit</artifactId>
+            <version>${jtokkit.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.slf4j</groupId>
+            <artifactId>slf4j-api</artifactId>
+            <version>${slf4j.version}</version>
+        </dependency>
+
+        <!-- Optional rendering enhancements retained from the core implementation. -->
+        <dependency>
+            <groupId>org.commonmark</groupId>
+            <artifactId>commonmark</artifactId>
+            <version>${commonmark.version}</version>
+            <optional>true</optional>
+        </dependency>
+        <dependency>
+            <groupId>com.googlecode.owasp-java-html-sanitizer</groupId>
+            <artifactId>owasp-java-html-sanitizer</artifactId>
+            <version>${owasp-sanitizer.version}</version>
+            <optional>true</optional>
+        </dependency>
+
+        <!-- Test support stays transport-neutral. -->
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <version>${maven-compiler-plugin.version}</version>
+                <configuration>
+                    <release>${maven.compiler.release}</release>
+                </configuration>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <version>${maven-surefire-plugin.version}</version>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-enforcer-plugin</artifactId>
+                <version>${maven-enforcer-plugin.version}</version>
+                <executions>
+                    <execution>
+                        <id>ban-web-dependencies</id>
+                        <goals>
+                            <goal>enforce</goal>
+                        </goals>
+                        <configuration>
+                            <rules>
+                                <bannedDependencies>
+                                    <excludes>
+                                        <exclude>org.springframework.boot:spring-boot-starter-web</exclude>
+                                        <exclude>org.springframework.boot:spring-boot-starter-webflux</exclude>
+                                        <exclude>org.springframework.boot:spring-boot-starter-webclient</exclude>
+                                        <exclude>org.springframework.boot:spring-boot-starter-restclient</exclude>
+                                        <exclude>org.springframework.boot:spring-boot-starter-actuator</exclude>
+                                        <exclude>org.springframework.boot:spring-boot-actuator</exclude>
+                                        <exclude>org.springframework.boot:spring-boot-actuator-autoconfigure</exclude>
+                                        <exclude>org.springframework.boot:spring-boot-autoconfigure</exclude>
+                                        <exclude>org.springframework:spring-webmvc</exclude>
+                                        <exclude>jakarta.servlet:jakarta.servlet-api</exclude>
+                                        <exclude>org.springframework.boot:spring-boot-starter-webmvc-test</exclude>
+                                    </excludes>
+                                </bannedDependencies>
+                            </rules>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-jar-plugin</artifactId>
+                <version>${maven-jar-plugin.version}</version>
+                <configuration>
+                    <archive>
+                        <manifestEntries>
+                            <Automatic-Module-Name>io.mindspice.magenta.core</Automatic-Module-Name>
+                        </manifestEntries>
+                    </archive>
+                </configuration>
+            </plugin>
+        </plugins>
+    </build>
 </project>
