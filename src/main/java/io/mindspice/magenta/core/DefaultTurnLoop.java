@@ -40,6 +40,7 @@ final class DefaultTurnLoop implements TurnLoop {
     private static final String PENDING_TYPE = "turnloop.pending_interaction";
     private static final TypeReference<List<String>> STRING_LIST = new TypeReference<>() {};
     private static final TypeReference<Map<String, String>> STRING_MAP = new TypeReference<>() {};
+    private static final ConcurrentHashMap<String, Boolean> ACTIVE_ANSWER_CLAIMS = new ConcurrentHashMap<>();
 
     private final DefaultTurnEngine engine;
     private final TurnGate gate;
@@ -162,6 +163,11 @@ final class DefaultTurnLoop implements TurnLoop {
             validateClosed();
             try {
                 QuestionPendingContext pending = restorePending(sessionId);
+                if (pending != null && pending.state() == QuestionPendingContext.State.ANSWERED
+                    && !ACTIVE_ANSWER_CLAIMS.containsKey(sessionId)) {
+                    recoverAnsweredInteraction(sessionId, pending);
+                    pending = null;
+                }
                 if (pending != null || gate.state(sessionId) == TurnGate.GateState.AWAITING_ANSWER) {
                     return queueResult(request, enqueueInternal(request));
                 }
@@ -252,6 +258,11 @@ final class DefaultTurnLoop implements TurnLoop {
             validateClosed();
             try {
                 QuestionPendingContext pending = restorePending(sessionId);
+                if (pending != null && pending.state() == QuestionPendingContext.State.ANSWERED
+                    && !ACTIVE_ANSWER_CLAIMS.containsKey(sessionId)) {
+                    recoverAnsweredInteraction(sessionId, pending);
+                    pending = null;
+                }
                 if (pending != null || gate.state(sessionId) == TurnGate.GateState.AWAITING_ANSWER) {
                     return Flux.just(queuedEvent(request, enqueueInternal(request)));
                 }
@@ -358,6 +369,10 @@ final class DefaultTurnLoop implements TurnLoop {
             validateClosed();
             try {
                 QuestionPendingContext pending = restorePending(sessionId);
+                if (pending != null && pending.state() == QuestionPendingContext.State.ANSWERED
+                    && !ACTIVE_ANSWER_CLAIMS.containsKey(sessionId)) {
+                    pending = rearmAnsweredInteraction(sessionId, pending);
+                }
                 if (pending == null || pending.state() != QuestionPendingContext.State.PENDING
                     || gate.state(sessionId) != TurnGate.GateState.AWAITING_ANSWER) {
                     throw new TurnLoopException("No question pending for session " + sessionId);
@@ -371,6 +386,7 @@ final class DefaultTurnLoop implements TurnLoop {
                         + sessionId);
                 }
                 answerClaimed = true;
+                ACTIVE_ANSWER_CLAIMS.put(sessionId, Boolean.TRUE);
 
                 TurnGate.AcquireResult acquired = gate.acquire(
                     sessionId, TurnGate.TurnGateMode.ANSWER);
@@ -447,6 +463,7 @@ final class DefaultTurnLoop implements TurnLoop {
             }
             throw publicFailure("Answer turn execution failed", failure);
         } finally {
+            if (answerClaimed) ACTIVE_ANSWER_CLAIMS.remove(sessionId);
             setActiveMetric();
         }
     }
@@ -1091,9 +1108,11 @@ final class DefaultTurnLoop implements TurnLoop {
             }
         }
         if (pending == null) return null;
-        if (pending.state() != QuestionPendingContext.State.PENDING) {
-            // ANSWERED is a durable in-flight answer claim. Fail closed by
-            // keeping later submissions queued until the owner clears it.
+        if (pending.state() == QuestionPendingContext.State.CANCELLED) {
+            clearPendingState(sessionId);
+            return null;
+        }
+        if (pending.state() == QuestionPendingContext.State.ANSWERED) {
             return pending;
         }
         if (gate.state(sessionId) == TurnGate.GateState.IDLE) {
@@ -1103,6 +1122,30 @@ final class DefaultTurnLoop implements TurnLoop {
             }
         }
         return pending;
+    }
+
+    private QuestionPendingContext rearmAnsweredInteraction(
+        String sessionId, QuestionPendingContext answered) {
+        QuestionPendingContext pending = new QuestionPendingContext(
+            sessionId, answered.turnId(), answered.questions(), answered.model(),
+            answered.continuationContext());
+        interactionStore.save(sessionId, pending);
+        if (gate.state(sessionId) == TurnGate.GateState.IDLE) {
+            TurnGate.AcquireResult acquired = gate.acquire(sessionId, TurnGate.TurnGateMode.SEND);
+            if (acquired instanceof TurnGate.AcquireResult.Acquired) {
+                gate.transitionToAwaitingAnswer(sessionId);
+            }
+        }
+        return pending;
+    }
+
+    private void recoverAnsweredInteraction(String sessionId, QuestionPendingContext answered) {
+        if (answered.answer() == null || answered.answer().isBlank()) {
+            clearPendingState(sessionId);
+            return;
+        }
+        rearmAnsweredInteraction(sessionId, answered);
+        answer(sessionId, answered.answer());
     }
 
     private QuestionPendingContext activePending(String sessionId) {

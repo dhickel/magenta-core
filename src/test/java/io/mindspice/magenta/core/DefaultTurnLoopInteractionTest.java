@@ -230,7 +230,7 @@ class DefaultTurnLoopInteractionTest {
     }
 
     @Test
-    void answeredClaimAfterRestartFailsClosedUntilExplicitSessionClear() {
+    void answeredClaimAfterRestartResumesIdempotently() {
         SQLiteDataSource dataSource = new SQLiteDataSource();
         dataSource.setUrl("jdbc:sqlite:" + tempDir.resolve("claimed-answer-restart.db"));
         new MigrationRunner(dataSource).apply(List.of());
@@ -243,13 +243,9 @@ class DefaultTurnLoopInteractionTest {
         DefaultTurnLoop restarted = createLoop(model, memory, interactions,
             new RecordingAudit(), new RecordingMetrics(), result -> { });
 
-        assertEquals(TurnDiagnostic.OutcomeKind.QUEUED,
-            restarted.send(TurnRequest.of("claimed-session", "must not overlap"))
-                .diagnostic().outcomeKind());
-        assertEquals(0, model.calls.get());
-        restarted.clearSession("claimed-session");
         assertEquals("after clear",
-            restarted.send(TurnRequest.of("claimed-session", "safe retry")).message());
+            restarted.answer("claimed-session", "durable answer").message());
+        assertNull(interactions.load("claimed-session"));
     }
 
     @Test
