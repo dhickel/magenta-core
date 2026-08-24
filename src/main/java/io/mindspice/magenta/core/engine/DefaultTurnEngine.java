@@ -706,38 +706,22 @@ public final class DefaultTurnEngine {
             return;
         }
         try {
-            turnExecutor.submit(ctx.sessionId(), () -> {
-                try {
-                    List<TurnMessage> messages = conversationMemory.getMessages(ctx.sessionId()).stream()
-                        .filter(message -> !isPendingMarker(message))
-                        .toList();
-                    if (messages.size() < 2) {
-                        return null;
-                    }
-                    int count = Math.min(messages.size(), 50);
-                    CompactionResult result = toolCompaction(messages, count, usage, ctx.sessionId());
-                    if (result != null && !result.summary().isBlank()) {
-                        TurnMessage summary = withMetadata(
-                            TurnMessage.system(result.summary()),
-                            Map.of("type", "compaction_summary"));
-                        List<TurnMessage> tail = messages.subList(count, messages.size());
-                        active.runIfActive(() -> {
-                            conversationMemory.clear(ctx.sessionId());
-                            List<TurnMessage> replacement = new ArrayList<>(tail.size() + 1);
-                            replacement.add(summary);
-                            replacement.addAll(tail);
-                            conversationMemory.addMessages(ctx.sessionId(), replacement);
-                        });
-                    }
-                } catch (Throwable e) {
-                    log.warn("Async compaction failed for session {}: {}",
-                        ctx.sessionId(), e.getMessage());
-                }
-                return null;
-            });
+            List<TurnMessage> messages = conversationMemory.getMessages(ctx.sessionId()).stream()
+                .filter(message -> !isPendingMarker(message))
+                .toList();
+            if (messages.size() < 2) return;
+            int count = Math.min(messages.size(), 50);
+            CompactionResult result = toolCompaction(messages, count, usage, ctx.sessionId());
+            if (result == null || result.summary().isBlank()) return;
+            TurnMessage summary = withMetadata(
+                TurnMessage.system(result.summary()), Map.of("type", "compaction_summary"));
+            List<TurnMessage> replacement = new ArrayList<>(messages.size() - count + 1);
+            replacement.add(summary);
+            replacement.addAll(messages.subList(count, messages.size()));
+            active.runIfActive(() -> conversationMemory.replaceMessages(
+                ctx.sessionId(), List.copyOf(replacement)));
         } catch (Throwable e) {
-            log.warn("Unable to schedule compaction for session {}: {}",
-                ctx.sessionId(), e.getMessage());
+            log.warn("Compaction failed for session {}: {}", ctx.sessionId(), e.getMessage());
         }
     }
 

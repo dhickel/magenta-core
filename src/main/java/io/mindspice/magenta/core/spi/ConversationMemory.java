@@ -17,4 +17,10 @@ public interface ConversationMemory {
     void addMessages(@NonNull String sessionId, @NonNull List<TurnMessage> messages);
 
     void clear(@NonNull String sessionId);
+
+    /** Replaces a session transcript as one logical memory operation. */
+    default void replaceMessages(@NonNull String sessionId, @NonNull List<TurnMessage> messages) {
+        clear(sessionId);
+        addMessages(sessionId, messages);
+    }
 }

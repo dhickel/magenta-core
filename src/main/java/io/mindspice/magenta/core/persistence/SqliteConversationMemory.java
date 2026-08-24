@@ -99,6 +99,35 @@ public class SqliteConversationMemory implements ConversationMemory {
     }
 
     @Override
+    public void replaceMessages(String sessionId, List<TurnMessage> messages) {
+        Objects.requireNonNull(sessionId, "sessionId");
+        Objects.requireNonNull(messages, "messages");
+        try {
+            PersistenceSupport.transaction(dataSource, connection -> {
+                PersistenceSupport.ensureSession(connection, sessionId);
+                try (PreparedStatement delete = connection.prepareStatement(
+                    "DELETE FROM magenta_core_conversation_memory WHERE session_id = ?")) {
+                    delete.setString(1, sessionId);
+                    delete.executeUpdate();
+                }
+                if (!messages.isEmpty()) {
+                    try (PreparedStatement insert = connection.prepareStatement(INSERT_MESSAGE)) {
+                        for (TurnMessage message : messages) {
+                            bindMessage(insert, sessionId, message);
+                            insert.addBatch();
+                        }
+                        insert.executeBatch();
+                    }
+                }
+                return null;
+            });
+        } catch (RuntimeException e) {
+            LOG.error("Failed to replace conversation for session {}", sessionId, e);
+            throw new RuntimeException("Failed to replace messages for session " + sessionId, e);
+        }
+    }
+
+    @Override
     public void clear(String sessionId) {
         Objects.requireNonNull(sessionId, "sessionId");
         try {
