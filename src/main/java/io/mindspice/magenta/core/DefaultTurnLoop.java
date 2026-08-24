@@ -41,6 +41,7 @@ final class DefaultTurnLoop implements TurnLoop {
     private static final TypeReference<List<String>> STRING_LIST = new TypeReference<>() {};
     private static final TypeReference<Map<String, String>> STRING_MAP = new TypeReference<>() {};
     private static final ConcurrentHashMap<String, Boolean> ACTIVE_ANSWER_CLAIMS = new ConcurrentHashMap<>();
+    private static final ThreadLocal<Boolean> RECOVERY_ANSWER_OWNER = new ThreadLocal<>();
 
     private final DefaultTurnEngine engine;
     private final TurnGate gate;
@@ -165,8 +166,9 @@ final class DefaultTurnLoop implements TurnLoop {
                 QuestionPendingContext pending = restorePending(sessionId);
                 if (pending != null && pending.state() == QuestionPendingContext.State.ANSWERED
                     && !ACTIVE_ANSWER_CLAIMS.containsKey(sessionId)) {
-                    recoverAnsweredInteraction(sessionId, pending);
-                    pending = null;
+                    if (recoverAnsweredInteraction(sessionId, pending)) {
+                        pending = null;
+                    }
                 }
                 if (pending != null || gate.state(sessionId) == TurnGate.GateState.AWAITING_ANSWER) {
                     return queueResult(request, enqueueInternal(request));
@@ -260,8 +262,9 @@ final class DefaultTurnLoop implements TurnLoop {
                 QuestionPendingContext pending = restorePending(sessionId);
                 if (pending != null && pending.state() == QuestionPendingContext.State.ANSWERED
                     && !ACTIVE_ANSWER_CLAIMS.containsKey(sessionId)) {
-                    recoverAnsweredInteraction(sessionId, pending);
-                    pending = null;
+                    if (recoverAnsweredInteraction(sessionId, pending)) {
+                        pending = null;
+                    }
                 }
                 if (pending != null || gate.state(sessionId) == TurnGate.GateState.AWAITING_ANSWER) {
                     return Flux.just(queuedEvent(request, enqueueInternal(request)));
@@ -369,10 +372,13 @@ final class DefaultTurnLoop implements TurnLoop {
         synchronized (lockFor(sessionId)) {
             validateClosed();
             try {
-                if (ACTIVE_ANSWER_CLAIMS.putIfAbsent(sessionId, Boolean.TRUE) != null) {
-                    throw new TurnLoopException("An answer is already executing for session " + sessionId);
+                coordinatorClaimed = Boolean.TRUE.equals(RECOVERY_ANSWER_OWNER.get());
+                if (!coordinatorClaimed) {
+                    if (ACTIVE_ANSWER_CLAIMS.putIfAbsent(sessionId, Boolean.TRUE) != null) {
+                        throw new TurnLoopException("An answer is already executing for session " + sessionId);
+                    }
+                    coordinatorClaimed = true;
                 }
-                coordinatorClaimed = true;
                 QuestionPendingContext pending = restorePending(sessionId);
                 if (pending != null && pending.state() == QuestionPendingContext.State.ANSWERED
                     && coordinatorClaimed) {
@@ -1150,13 +1156,23 @@ final class DefaultTurnLoop implements TurnLoop {
         return pending;
     }
 
-    private void recoverAnsweredInteraction(String sessionId, QuestionPendingContext answered) {
+    private boolean recoverAnsweredInteraction(String sessionId, QuestionPendingContext answered) {
         if (answered.answer() == null || answered.answer().isBlank()) {
             clearPendingState(sessionId);
-            return;
+            return true;
         }
-        rearmAnsweredInteraction(sessionId, answered);
-        answer(sessionId, answered.answer());
+        if (ACTIVE_ANSWER_CLAIMS.putIfAbsent(sessionId, Boolean.TRUE) != null) {
+            return false;
+        }
+        try {
+            rearmAnsweredInteraction(sessionId, answered);
+            RECOVERY_ANSWER_OWNER.set(Boolean.TRUE);
+            answer(sessionId, answered.answer());
+            return true;
+        } finally {
+            RECOVERY_ANSWER_OWNER.remove();
+            ACTIVE_ANSWER_CLAIMS.remove(sessionId, Boolean.TRUE);
+        }
     }
 
     private QuestionPendingContext activePending(String sessionId) {
