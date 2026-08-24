@@ -22,6 +22,9 @@ public final class TurnContext {
     private final String model;
     private final boolean streaming;
 
+    static final AttributeKey<ExecutionOrigin> EXECUTION_ORIGIN =
+        AttributeKey.of("magenta.execution.origin", ExecutionOrigin.class);
+
     private final Map<AttributeKey<?>, Object> attributes = new ConcurrentHashMap<>();
     private final List<TurnMessage> messagesToPersist = new ArrayList<>();
     private ContextUsage currentContextUsage;
@@ -74,6 +77,21 @@ public final class TurnContext {
     /** Internal engine accessor; streaming is not a public request property. */
     boolean streaming() {
         return streaming;
+    }
+
+    /** Returns the internal execution origin, defaulting to a direct turn. */
+    ExecutionOrigin executionOrigin() {
+        ExecutionOrigin origin = getAttribute(EXECUTION_ORIGIN);
+        return origin == null ? new ExecutionOrigin.Direct() : origin;
+    }
+
+    /** Sets the internal execution origin for a continuation or queued turn. */
+    void executionOrigin(ExecutionOrigin origin) {
+        if (origin == null) {
+            attributes.remove(EXECUTION_ORIGIN);
+        } else {
+            attributes.put(EXECUTION_ORIGIN, origin);
+        }
     }
 
     // ── Typed attribute access ──

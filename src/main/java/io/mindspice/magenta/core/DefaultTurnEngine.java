@@ -3,11 +3,16 @@ package io.mindspice.magenta.core;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import io.mindspice.magenta.core.*;
-import io.mindspice.magenta.core.ActiveTurnRegistry;
-import io.mindspice.magenta.core.ModelRouter;
-import io.mindspice.magenta.core.TurnExecutor;
-import io.mindspice.magenta.core.spi.*;
+import io.mindspice.magenta.core.spi.CompactionStrategy;
+import io.mindspice.magenta.core.spi.CompletionDetector;
+import io.mindspice.magenta.core.spi.ConversationMemory;
+import io.mindspice.magenta.core.spi.InteractionStore;
+import io.mindspice.magenta.core.spi.RepairStrategy;
+import io.mindspice.magenta.core.spi.ThinkingExtractor;
+import io.mindspice.magenta.core.spi.ToolAccessPolicy;
+import io.mindspice.magenta.core.spi.ToolRegistry;
+import io.mindspice.magenta.core.spi.ToolResultSummarizer;
+import io.mindspice.magenta.core.spi.TokenEstimator;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.messages.AssistantMessage;
@@ -26,14 +31,19 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
+import java.util.UUID;
+import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * Internal transport-neutral turn state machine. Spring AI is confined to this
- * engine and the model-router boundary; callers receive only Magenta events,
- * records, and exceptions.
+ * engine and the model-router boundary; callers receive only Magenta response
+ * records and exceptions.
  */
 final class DefaultTurnEngine {
 
@@ -44,6 +54,8 @@ final class DefaultTurnEngine {
 
     private static final String PENDING_TYPE = "turnloop.pending_interaction";
     private static final String CONTINUATION_FLAG = "true";
+    private static final String PENDING_INTERACTION_ID = "turnloop.pending_interaction_id";
+    private static final String PENDING_ANSWERS = "turnloop.pending_answers";
 
     private final ToolRegistry toolRegistry;
     private final ToolAccessPolicy toolAccessPolicy;
@@ -54,7 +66,6 @@ final class DefaultTurnEngine {
     private final DefaultPromptAssembler promptAssembler;
     private final CompletionDetector completionDetector;
     private final RepairStrategy repairStrategy;
-    private final InteractionHandler interactionHandler;
     private final InteractionStore interactionStore;
     private final ModelRouter modelRouter;
     private final TurnExecutor turnExecutor;
@@ -73,7 +84,6 @@ final class DefaultTurnEngine {
         this.promptAssembler = builder.promptAssembler;
         this.completionDetector = builder.completionDetector;
         this.repairStrategy = builder.repairStrategy;
-        this.interactionHandler = builder.interactionHandler;
         this.interactionStore = builder.interactionStore;
         this.modelRouter = builder.modelRouter;
         this.turnExecutor = builder.turnExecutor;
@@ -85,9 +95,15 @@ final class DefaultTurnEngine {
         this.contextManager.contextLengthProvider(this::configuredContextLength);
     }
 
-    /** Executes one turn as a cold event stream. */
-    public Flux<TurnEvent> stream(TurnContext ctx) {
+    /** Executes one turn as a cold response stream. */
+    public Flux<TurnResponse> stream(TurnContext ctx) {
+        Objects.requireNonNull(ctx, "ctx");
+        return Flux.defer(() -> createStream(ctx));
+    }
+
+    private Flux<TurnResponse> createStream(TurnContext ctx) {
         return Flux.create(sink -> {
+            Instant submittedAt = Instant.now();
             ActiveTurnRegistry.ActiveTurn active = null;
             boolean registeredHere = false;
             try {
@@ -98,6 +114,16 @@ final class DefaultTurnEngine {
                 }
                 ActiveTurnRegistry.ActiveTurn registered = active;
                 boolean engineOwnsRegistration = registeredHere;
+                AtomicReference<CompletableFuture<Void>> taskReference = new AtomicReference<>();
+
+                sink.onCancel(() -> {
+                    registered.revoke("subscriber_cancelled");
+                    CompletableFuture<Void> task = taskReference.get();
+                    if (task != null) {
+                        task.cancel(true);
+                    }
+                });
+
                 CompletableFuture<Void> task = turnExecutor.submit(ctx.sessionId(), () -> {
                     try {
                         runTurnLoop(ctx, sink, registered);
@@ -108,50 +134,45 @@ final class DefaultTurnEngine {
                     }
                     return null;
                 });
-
-                sink.onCancel(() -> {
+                taskReference.set(task);
+                if (sink.isCancelled()) {
                     registered.revoke("subscriber_cancelled");
                     task.cancel(true);
-                });
+                }
 
+                ActiveTurnRegistry.ActiveTurn taskActive = registered;
                 task.whenComplete((ignored, failure) -> {
-                    if (failure == null || sink.isCancelled()) {
-                        return;
+                    if (failure != null && !sink.isCancelled()) {
+                        emitFailure(ctx, sink, taskActive, submittedAt, failure);
                     }
-                    Throwable cause = unwrap(failure);
-                    if (cause instanceof java.util.concurrent.CancellationException) {
-                        return;
-                    }
-                    emitFailure(ctx, sink, cause);
                 });
             } catch (Throwable failure) {
                 if (active != null && registeredHere) {
                     activeTurnRegistry.remove(ctx.turnId());
                 }
-                emitFailure(ctx, sink, failure);
+                emitFailure(ctx, sink, active, submittedAt, failure);
             }
         });
     }
 
-    /** Executes a turn and reduces its terminal events to a Magenta result. */
-    public TurnResult execute(TurnContext ctx) {
-        List<TurnEvent> events = new ArrayList<>();
+    /**
+     * Executes a turn by collecting the same response stream exposed to
+     * callers and reducing the exact emitted values to its one outcome.
+     */
+    public TurnResponse.Outcome execute(TurnContext ctx) {
+        Objects.requireNonNull(ctx, "ctx");
         try {
-            return stream(ctx)
-                .doOnNext(events::add)
-                .blockLast() == null
-                ? reduceToResult(ctx, events)
-                : reduceToResult(ctx, events);
-        } catch (TurnFailedException e) {
-            throw e;
-        } catch (RuntimeException e) {
-            Throwable cause = unwrap(e);
-            if (cause instanceof TurnFailedException tfe) {
-                throw tfe;
+            List<TurnResponse> responses = stream(ctx).collectList().block();
+            return reduceToOutcome(ctx, responses == null ? List.of() : responses);
+        } catch (Throwable failure) {
+            Throwable cause = unwrap(failure);
+            if (cause instanceof TurnFailedException turnFailed) {
+                throw turnFailed;
             }
-            throw new TurnFailedException(
-                cause.getMessage() == null ? "Turn execution failed" : cause.getMessage(),
-                failureDiagnostic(ctx, cause));
+            if (isSpecializedFailure(cause)) {
+                throw (RuntimeException) cause;
+            }
+            throw failureException(ctx, Instant.now(), currentPhase(ctx), cause);
         }
     }
 
@@ -181,19 +202,17 @@ final class DefaultTurnEngine {
 
     // ── state machine ──
 
-    private void runTurnLoop(TurnContext ctx, FluxSink<TurnEvent> sink,
+    private void runTurnLoop(TurnContext ctx, FluxSink<TurnResponse> sink,
                              ActiveTurnRegistry.ActiveTurn active) {
         Instant startedAt = Instant.now();
-        TurnLoopState state = new TurnLoopState(ctx, toolLoopGuard);
+        TurnLoopState state = new TurnLoopState(ctx, toolLoopGuard, executionOrigin(ctx));
 
         try {
             active.phase(TurnPhase.PREPARE);
             if (ctx.streaming() && !modelRouter.supportsStreaming(ctx.model())) {
-                throw new TurnFailedException(
-                    "Model '" + ctx.model() + "' does not support streaming",
-                    diagnostic(ctx, startedAt, TurnPhase.PREPARE,
-                        TurnDiagnostic.OutcomeKind.FAILED,
-                        Map.of("reason", "streaming_unsupported", "model", ctx.model())));
+                throw new ConfigurationException(
+                    "Selected model does not support streaming",
+                    Map.of("error", "streaming_unsupported"));
             }
 
             state.activeTools = toolAccessPolicy.filterTools(
@@ -203,12 +222,12 @@ final class DefaultTurnEngine {
             String systemText = promptAssembler.assemble(ctx);
             state.systemPromptText = systemText;
             state.conversationMessages = new ArrayList<>(
-                turnMessagesToSpring(contextManager.window(ctx, configuredContextLength(ctx.model()))));
+                turnMessagesToSpring(contextManager.window(ctx,
+                    configuredContextLength(ctx.model()))));
 
             QuestionPendingContext continuation = continuationContext(ctx);
             if (continuation != null) {
-                TurnMessage questionAnswer = questionAnswerMessage(continuation,
-                    ctx.request().message(), ctx.turnId());
+                TurnMessage questionAnswer = questionAnswerMessage(continuation, ctx);
                 state.messagesToPersist.add(questionAnswer);
                 state.conversationMessages.add(turnMessageToSpring(questionAnswer));
             }
@@ -221,22 +240,22 @@ final class DefaultTurnEngine {
 
             ContextUsage startUsage = computeUsage(ctx);
             ctx.currentContextUsage(startUsage);
-            sink.next(new TurnEvent.Started(ctx.turnId(), Instant.now(), ctx.turnId(), startUsage));
+            emit(sink, new TurnResponse.Started(
+                ctx.sessionId(), ctx.turnId(), Instant.now(), state.origin, ctx.model(), startUsage));
 
             state.currentPhase = TurnPhase.INVOKE_MODEL;
             while (state.currentPhase != TurnPhase.DONE) {
                 Optional<String> revoked = active.revocationReason();
                 if (revoked.isPresent() || sink.isCancelled() || Thread.currentThread().isInterrupted()) {
                     state.wasInterrupted = true;
-                    state.interruptReason = revoked.orElse("subscriber_cancelled");
+                    state.interruptReason = normalizedReason(
+                        revoked.orElse("interrupted"), "interrupted");
                     state.currentPhase = TurnPhase.FINALIZE;
                 } else {
                     Optional<String> interrupt = active.pollInterrupt();
                     if (interrupt.isPresent()) {
                         state.wasInterrupted = true;
-                        state.interruptReason = interrupt.get();
-                        sink.next(new TurnEvent.Interrupt(ctx.turnId(), Instant.now(),
-                            state.interruptReason, computeUsage(ctx)));
+                        state.interruptReason = normalizedReason(interrupt.get(), "interrupted");
                         state.currentPhase = TurnPhase.FINALIZE;
                     }
                 }
@@ -258,62 +277,77 @@ final class DefaultTurnEngine {
                     default -> state.currentPhase = TurnPhase.FINALIZE;
                 }
             }
-        } catch (TurnFailedException e) {
+        } catch (TurnFailedException failure) {
             persistFailure(ctx, state, active);
             clearPendingAfterFailure(ctx.sessionId(), active);
-            throw e;
-        } catch (Throwable e) {
+            throw failure;
+        } catch (Throwable failure) {
+            Optional<String> controlReason = controlReason(active, failure);
+            if (controlReason.isPresent() && !sink.isCancelled()) {
+                state.wasInterrupted = true;
+                state.interruptReason = normalizedReason(controlReason.get(), "interrupted");
+                state.currentPhase = TurnPhase.FINALIZE;
+                try {
+                    handleFinalize(ctx, state, sink, startedAt, active);
+                    return;
+                } catch (TurnFailedException terminalFailure) {
+                    persistFailure(ctx, state, active);
+                    clearPendingAfterFailure(ctx.sessionId(), active);
+                    throw terminalFailure;
+                } catch (Throwable terminalFailure) {
+                    failure = terminalFailure;
+                }
+            }
+            if (isSpecializedFailure(failure)) {
+                persistFailure(ctx, state, active);
+                clearPendingAfterFailure(ctx.sessionId(), active);
+                throw (RuntimeException) failure;
+            }
             persistFailure(ctx, state, active);
             clearPendingAfterFailure(ctx.sessionId(), active);
-            throw new TurnFailedException(
-                e.getMessage() == null ? "Turn execution failed" : e.getMessage(),
-                failureDiagnostic(ctx, e));
+            throw failureException(ctx, startedAt, state.currentPhase, failure);
         }
     }
 
     private void handleInvokeModel(TurnContext ctx, TurnLoopState state,
-                                   FluxSink<TurnEvent> sink) {
+                                   FluxSink<TurnResponse> sink) {
         ChatModel model = modelRouter.springAiChatModel(ctx.model());
         state.lastResponsePersisted = false;
 
-        try {
-            if (ctx.streaming()) {
-                StreamingResponse streaming = new StreamingResponse();
-                model.stream(state.prompt)
-                    .doOnNext(response -> {
-                        if (response == null) {
-                            return;
-                        }
-                        streaming.lastResponse = response;
-                        emitResponseContent(ctx, response, sink, streaming);
-                    })
-                    .blockLast();
-                state.response = streaming.lastResponse;
-                state.allVisibleText = streaming.visibleText.toString();
-                state.latestThinking = streaming.thinkingText.toString();
+        if (ctx.streaming()) {
+            StreamingResponse streaming = new StreamingResponse();
+            model.stream(state.prompt)
+                .doOnNext(response -> {
+                    if (response == null) {
+                        return;
+                    }
+                    streaming.lastResponse = response;
+                    emitResponseContent(ctx, response, sink, streaming);
+                })
+                .blockLast();
+            state.response = streaming.lastResponse;
+            state.allVisibleText = streaming.visibleText.toString();
+            state.visibleText.append(streaming.visibleText);
+            state.latestThinking = streaming.thinkingText.toString();
+        } else {
+            state.response = model.call(state.prompt);
+            if (state.response != null && state.response.getResult() != null) {
+                ThinkingExtractor.ThinkingResult extracted = extractThinking(state.response);
+                state.latestThinking = extracted.thinkingText();
+                state.allVisibleText = extracted.visibleText();
+                state.visibleText.append(extracted.visibleText());
+                emitThinkingAndVisible(ctx, extracted, sink);
             } else {
-                state.response = model.call(state.prompt);
-                if (state.response != null && state.response.getResult() != null) {
-                    ThinkingExtractor.ThinkingResult extracted = extractThinking(state.response);
-                    state.latestThinking = extracted.thinkingText();
-                    state.latestVisibleText = extracted.visibleText();
-                    state.allVisibleText = extracted.visibleText();
-                    emitThinkingAndVisible(ctx, extracted, sink);
-                }
+                state.latestThinking = "";
+                state.allVisibleText = "";
             }
-            ctx.currentContextUsage(computeUsage(ctx));
-            state.currentPhase = TurnPhase.EVALUATE;
-        } catch (Throwable e) {
-            throw new TurnFailedException(
-                "Model invocation failed: " + (e.getMessage() == null ? "unknown" : e.getMessage()),
-                diagnostic(ctx, Instant.now(), TurnPhase.INVOKE_MODEL,
-                    TurnDiagnostic.OutcomeKind.FAILED,
-                    Map.of("error", e.getMessage() == null ? "unknown" : e.getMessage())));
         }
+        ctx.currentContextUsage(computeUsage(ctx));
+        state.currentPhase = TurnPhase.EVALUATE;
     }
 
     private void emitResponseContent(TurnContext ctx, ChatResponse response,
-                                     FluxSink<TurnEvent> sink, StreamingResponse target) {
+                                     FluxSink<TurnResponse> sink, StreamingResponse target) {
         if (response.getResult() == null || response.getResult().getOutput() == null) {
             return;
         }
@@ -329,15 +363,14 @@ final class DefaultTurnEngine {
 
     private void emitThinkingAndVisible(TurnContext ctx,
                                         ThinkingExtractor.ThinkingResult extracted,
-                                        FluxSink<TurnEvent> sink) {
-        ContextUsage usage = computeUsage(ctx);
+                                        FluxSink<TurnResponse> sink) {
         if (!extracted.visibleText().isEmpty() && !sink.isCancelled()) {
-            sink.next(new TurnEvent.Chunk(ctx.turnId(), Instant.now(),
-                extracted.visibleText(), false, usage));
+            emit(sink, new TurnResponse.ContentChunk(
+                ctx.sessionId(), ctx.turnId(), Instant.now(), extracted.visibleText()));
         }
         if (!extracted.thinkingText().isEmpty() && !sink.isCancelled()) {
-            sink.next(new TurnEvent.Chunk(ctx.turnId(), Instant.now(),
-                extracted.thinkingText(), true, usage));
+            emit(sink, new TurnResponse.ThinkingChunk(
+                ctx.sessionId(), ctx.turnId(), Instant.now(), extracted.thinkingText()));
         }
     }
 
@@ -382,6 +415,14 @@ final class DefaultTurnEngine {
     }
 
     private void handleEvaluate(TurnContext ctx, TurnLoopState state) {
+        if (isEmptyResponse(state.response)) {
+            if (state.emptyResponseRetries < maxEmptyResponseRetries) {
+                state.currentPhase = TurnPhase.REPAIR;
+            } else {
+                state.currentPhase = TurnPhase.FINALIZE;
+            }
+            return;
+        }
         if (completionDetector.isComplete(ctx)) {
             state.currentPhase = TurnPhase.FINALIZE;
             return;
@@ -394,16 +435,11 @@ final class DefaultTurnEngine {
             state.currentPhase = TurnPhase.REPAIR;
             return;
         }
-        if (isEmptyResponse(state.response)
-            && state.emptyResponseRetries < maxEmptyResponseRetries) {
-            state.currentPhase = TurnPhase.REPAIR;
-            return;
-        }
         state.currentPhase = TurnPhase.FINALIZE;
     }
 
     private void handleExecuteTools(TurnContext ctx, TurnLoopState state,
-                                    FluxSink<TurnEvent> sink,
+                                    FluxSink<TurnResponse> sink,
                                     ActiveTurnRegistry.ActiveTurn active) {
         List<AssistantMessage.ToolCall> toolCalls = extractToolCalls(state.response);
         if (toolCalls.isEmpty()) {
@@ -443,7 +479,7 @@ final class DefaultTurnEngine {
             if (interrupt.isPresent()) {
                 flushToolState(state, responses, durableToolMessages);
                 state.wasInterrupted = true;
-                state.interruptReason = interrupt.get();
+                state.interruptReason = normalizedReason(interrupt.get(), "interrupted");
                 state.currentPhase = TurnPhase.FINALIZE;
                 return;
             }
@@ -465,18 +501,18 @@ final class DefaultTurnEngine {
                         "tool.summary", "Questions pending")));
                 state.toolActivities.add(new ToolActivityData(
                     call.name(), call.id(), ToolActivityStatus.COMPLETED, "Questions pending"));
-                sink.next(new TurnEvent.ToolActivity(ctx.turnId(), Instant.now(),
-                    call.name(), call.id(), ToolActivityStatus.COMPLETED,
-                    "Questions pending", computeUsage(ctx)));
-                handleAskUser(ctx, state, questions, sink, active);
+                emit(sink, new TurnResponse.ToolActivity(ctx.sessionId(), ctx.turnId(), Instant.now(),
+                    new ToolActivityData(call.name(), call.id(), ToolActivityStatus.COMPLETED,
+                        "Questions pending")));
+                handleAskUser(ctx, state, questions, active);
                 return;
             }
 
-            ToolCallback callback = tools.get(call.name());
             ToolActivityStatus status;
             String summary;
             String resultText;
             long started = System.nanoTime();
+            ToolCallback callback = tools.get(call.name());
             if (callback == null) {
                 status = ToolActivityStatus.FAILED;
                 summary = "Tool not found: " + call.name();
@@ -490,9 +526,8 @@ final class DefaultTurnEngine {
                     resultText = summarized.summary();
                     summary = summarized.summary();
                     status = ToolActivityStatus.COMPLETED;
-                } catch (Throwable e) {
-                    resultText = "Tool execution failed: "
-                        + (e.getMessage() == null ? "unknown" : e.getMessage());
+                } catch (Throwable failure) {
+                    resultText = "Tool execution failed";
                     summary = resultText;
                     status = ToolActivityStatus.FAILED;
                 }
@@ -508,8 +543,8 @@ final class DefaultTurnEngine {
             toolMetadata.put("tool.summary", summary);
             durableToolMessages.add(new TurnMessage("tool", resultText,
                 call.name(), call.id(), toolMetadata));
-            sink.next(new TurnEvent.ToolActivity(ctx.turnId(), Instant.now(),
-                call.name(), call.id(), status, summary, computeUsage(ctx)));
+            emit(sink, new TurnResponse.ToolActivity(ctx.sessionId(), ctx.turnId(), Instant.now(),
+                activity));
 
             try {
                 state.toolLoopGuard.recordToolResponses(new ToolLoopGuard.ToolExecutionResult(
@@ -524,7 +559,6 @@ final class DefaultTurnEngine {
             }
         }
 
-        AssistantMessage assistantOutput = state.response.getResult().getOutput();
         flushToolState(state, responses, durableToolMessages);
 
         state.prompt = new Prompt(buildPromptMessages(state.systemPromptText,
@@ -549,7 +583,7 @@ final class DefaultTurnEngine {
         }
     }
 
-    private void handleRepair(TurnContext ctx, TurnLoopState state, FluxSink<TurnEvent> sink) {
+    private void handleRepair(TurnContext ctx, TurnLoopState state, FluxSink<TurnResponse> sink) {
         RepairStrategy.RepairReason reason = state.toolLoopAbortReason != null
             ? RepairStrategy.RepairReason.TOOL_LOOP_EXCEEDED
             : RepairStrategy.RepairReason.EMPTY_RESPONSE;
@@ -562,7 +596,7 @@ final class DefaultTurnEngine {
         }
 
         List<TurnMessage> repairs = repairStrategy.repair(ctx, reason);
-        if (repairs.isEmpty()) {
+        if (repairs == null || repairs.isEmpty()) {
             repairs = List.of(TurnMessage.system(
                 reason == RepairStrategy.RepairReason.TOOL_LOOP_EXCEEDED
                     ? "Tool loop guard triggered. Continue without further tool calls."
@@ -574,12 +608,11 @@ final class DefaultTurnEngine {
             state.messagesToPersist.add(durable);
             state.conversationMessages.add(turnMessageToSpring(durable));
         }
-        sink.next(new TurnEvent.SystemNotice(ctx.turnId(), Instant.now(),
+        emit(sink, new TurnResponse.Notice(ctx.sessionId(), ctx.turnId(), Instant.now(),
             reason == RepairStrategy.RepairReason.TOOL_LOOP_EXCEEDED
                 ? NoticeKind.TOOL_LOOP_WARNING : NoticeKind.REPAIR_APPLIED,
             reason == RepairStrategy.RepairReason.TOOL_LOOP_EXCEEDED
-                ? "Tool loop guard triggered" : "Turn repair applied",
-            computeUsage(ctx)));
+                ? "Tool loop guard triggered" : "Turn repair applied"));
         state.toolLoopAbortReason = null;
         state.prompt = new Prompt(buildPromptMessages(state.systemPromptText,
             state.conversationMessages), modelRouter.toolCallingOptions(ctx.model(), state.activeTools));
@@ -587,15 +620,18 @@ final class DefaultTurnEngine {
     }
 
     private void handleFinalize(TurnContext ctx, TurnLoopState state,
-                                FluxSink<TurnEvent> sink, Instant startedAt,
+                                FluxSink<TurnResponse> sink, Instant startedAt,
                                 ActiveTurnRegistry.ActiveTurn active) {
         if (!state.wasInterrupted && !state.suspended && !state.lastResponsePersisted
             && state.response != null && state.response.getResult() != null
             && state.response.getResult().getOutput() != null) {
-            String text = state.allVisibleText == null || state.allVisibleText.isEmpty()
-                ? nullToEmpty(state.response.getResult().getOutput().getText())
-                : state.allVisibleText;
-            state.messagesToPersist.add(assistantMessage(text, state.latestThinking));
+            String text = state.visibleText.toString();
+            if (text.isBlank()) {
+                throw failureException(ctx, startedAt, TurnPhase.FINALIZE,
+                    TurnFailureCategory.MODEL, "Model returned no visible response");
+            }
+            state.messagesToPersist.add(assistantMessage(nullToEmpty(state.allVisibleText),
+                state.latestThinking));
             state.lastResponsePersisted = true;
         }
 
@@ -606,86 +642,101 @@ final class DefaultTurnEngine {
         }
         if (!persistState(state, ctx.sessionId(), active)) {
             state.wasInterrupted = true;
-            state.interruptReason = active.revocationReason().orElse("execution_fenced");
+            state.interruptReason = normalizedReason(
+                active.revocationReason().orElse("execution_fenced"), "execution_fenced");
         }
 
         ContextUsage finalUsage = computeUsage(ctx);
-        TurnDiagnostic.OutcomeKind outcome = interruptedOutcome(state.interruptReason,
-            state.wasInterrupted);
-        Map<String, Object> details = new LinkedHashMap<>();
-        details.put("model", ctx.model());
-        details.put("toolRounds", ctx.toolRoundCount());
-        details.put("toolActivities", state.toolActivities.size());
-        if (state.interruptReason != null) {
-            details.put("reason", state.interruptReason);
-        }
-        TurnDiagnostic diagnostic = diagnostic(ctx, startedAt, TurnPhase.FINALIZE, outcome, details);
+        Instant completedAt = atOrAfter(startedAt);
+        ExecutionInfo execution = new ExecutionInfo(
+            ctx.sessionId(), ctx.turnId(), state.origin, startedAt, completedAt,
+            finalUsage, List.copyOf(state.toolActivities));
 
-        if (outcome == TurnDiagnostic.OutcomeKind.COMPLETED) {
-            sink.next(new TurnEvent.Completed(ctx.turnId(), Instant.now(), diagnostic, finalUsage));
+        TurnResponse.Outcome outcome;
+        if (state.wasInterrupted) {
+            outcome = interruptionOutcome(execution, state.interruptReason);
+        } else if (state.suspended) {
+            String interactionId = state.pendingInteractionId;
+            if (interactionId == null || interactionId.isBlank() || state.pendingContext == null) {
+                throw failureException(ctx, startedAt, TurnPhase.FINALIZE,
+                    TurnFailureCategory.PERSISTENCE, "Pending interaction state is incomplete");
+            }
+            outcome = new TurnResponse.Questions(
+                execution, interactionId, state.pendingContext.questions());
         } else {
-            sink.next(new TurnEvent.Failed(ctx.turnId(), Instant.now(), diagnostic, finalUsage));
+            String text = state.visibleText.toString();
+            if (text.isBlank()) {
+                throw failureException(ctx, startedAt, TurnPhase.FINALIZE,
+                    TurnFailureCategory.MODEL, "Model returned no visible response");
+            }
+            outcome = new TurnResponse.Message(execution, text);
         }
-        triggerAsyncCompaction(ctx, finalUsage, active);
+
+        if (!sink.isCancelled()) {
+            emit(sink, outcome);
+        }
+        if (!state.suspended) {
+            triggerAsyncCompaction(ctx, finalUsage, active);
+        }
         state.currentPhase = TurnPhase.DONE;
         if (!sink.isCancelled()) {
             sink.complete();
         }
     }
 
+    private TurnResponse.Outcome interruptionOutcome(ExecutionInfo execution, String reason) {
+        String normalized = normalizedReason(reason, "interrupted");
+        return switch (normalized) {
+            case "turn_timeout" -> new TurnResponse.TimedOut(execution, normalized);
+            case "subscriber_cancelled", "turn_cancelled", "cancelled" ->
+                new TurnResponse.TurnCancelled(execution, normalized);
+            default -> new TurnResponse.Interrupted(execution, normalized);
+        };
+    }
+
     private void handleAskUser(TurnContext ctx, TurnLoopState state,
-                               List<String> questions, FluxSink<TurnEvent> sink,
+                               List<String> questions,
                                ActiveTurnRegistry.ActiveTurn active) {
-        List<String> ordered = questions == null || questions.isEmpty()
-            ? List.of("The assistant has a question for you.")
-            : List.copyOf(questions);
+        List<String> ordered = normalizeQuestions(questions);
+        String interactionId = UUID.randomUUID().toString();
         Map<String, String> continuation = new LinkedHashMap<>();
         if (ctx.request().metadata() != null) {
             continuation.putAll(ctx.request().metadata());
         }
+        continuation.put(PENDING_INTERACTION_ID, interactionId);
         continuation.put("turnloop.pending_tool_names", writeJson(
             ctx.request().toolNames() == null ? List.of() : ctx.request().toolNames()));
         QuestionPendingContext pending = new QuestionPendingContext(
             ctx.sessionId(), ctx.turnId(), ordered, ctx.model(), continuation);
 
-        AnswerResult handlerResult;
+        boolean saved;
         try {
-            handlerResult = interactionHandler == null
-                ? new AnswerResult.Continue()
-                : interactionHandler.onQuestionsAsked(pending);
-        } catch (Throwable e) {
-            active.runIfActive(() -> interactionStore.delete(ctx.sessionId()));
-            throw e;
+            saved = active.runIfActive(() -> {
+                try {
+                    interactionStore.save(ctx.sessionId(), pending);
+                    state.messagesToPersist.add(pendingMarker(pending));
+                    persistState(state, ctx.sessionId(), active);
+                } catch (Throwable failure) {
+                    try {
+                        interactionStore.delete(ctx.sessionId());
+                    } catch (Throwable cleanupFailure) {
+                        log.warn("Unable to clean up pending interaction for session {}",
+                            ctx.sessionId());
+                    }
+                    try {
+                        removePendingMarkers(ctx.sessionId());
+                    } catch (Throwable cleanupFailure) {
+                        log.warn("Unable to clean up pending markers for session {}",
+                            ctx.sessionId());
+                    }
+                    throw new PersistenceFailure(failure);
+                }
+            });
+        } catch (PersistenceFailure failure) {
+            throw failure;
+        } catch (Throwable failure) {
+            throw new PersistenceFailure(failure);
         }
-        if (handlerResult instanceof AnswerResult.Abort abort) {
-            state.wasInterrupted = true;
-            state.interruptReason = abort.reason();
-            state.messagesToPersist.add(withMetadata(
-                TurnMessage.system("Question cancelled: " + abort.reason()),
-                Map.of("turnloop.persistence_type", "interaction_cancelled")));
-            if (!persistState(state, ctx.sessionId(), active)) {
-                markRevoked(state, active);
-                state.currentPhase = TurnPhase.FINALIZE;
-                return;
-            }
-            sink.next(new TurnEvent.Interrupt(ctx.turnId(), Instant.now(),
-                abort.reason(), computeUsage(ctx)));
-            state.currentPhase = TurnPhase.DONE;
-            if (!sink.isCancelled()) sink.complete();
-            return;
-        }
-
-        boolean saved = active.runIfActive(() -> {
-            try {
-                interactionStore.save(ctx.sessionId(), pending);
-                state.messagesToPersist.add(pendingMarker(pending));
-                persistState(state, ctx.sessionId(), active);
-            } catch (Throwable e) {
-                interactionStore.delete(ctx.sessionId());
-                removePendingMarkers(ctx.sessionId());
-                throw e;
-            }
-        });
         if (!saved) {
             markRevoked(state, active);
             state.currentPhase = TurnPhase.FINALIZE;
@@ -693,11 +744,9 @@ final class DefaultTurnEngine {
         }
 
         state.pendingContext = pending;
+        state.pendingInteractionId = interactionId;
         state.suspended = true;
-        sink.next(new TurnEvent.QuestionPending(ctx.turnId(), Instant.now(),
-            ordered, computeUsage(ctx)));
-        state.currentPhase = TurnPhase.DONE;
-        if (!sink.isCancelled()) sink.complete();
+        state.currentPhase = TurnPhase.FINALIZE;
     }
 
     private void triggerAsyncCompaction(TurnContext ctx, ContextUsage usage,
@@ -720,8 +769,8 @@ final class DefaultTurnEngine {
             replacement.addAll(messages.subList(count, messages.size()));
             active.runIfActive(() -> conversationMemory.replaceMessages(
                 ctx.sessionId(), List.copyOf(replacement)));
-        } catch (Throwable e) {
-            log.warn("Compaction failed for session {}: {}", ctx.sessionId(), e.getMessage());
+        } catch (Throwable failure) {
+            log.warn("Compaction failed for session {}", ctx.sessionId());
         }
     }
 
@@ -739,13 +788,17 @@ final class DefaultTurnEngine {
             return active.revocationReason().isEmpty();
         }
         List<TurnMessage> snapshot = List.copyOf(state.messagesToPersist);
-        boolean persisted = active.runIfActive(() ->
-            conversationMemory.addMessages(sessionId, snapshot));
-        if (persisted) {
-            state.messagesToPersist.clear();
-            state.statePersisted = true;
+        try {
+            boolean persisted = active.runIfActive(() ->
+                conversationMemory.addMessages(sessionId, snapshot));
+            if (persisted) {
+                state.messagesToPersist.clear();
+                state.statePersisted = true;
+            }
+            return persisted;
+        } catch (Throwable failure) {
+            throw new PersistenceFailure(failure);
         }
-        return persisted;
     }
 
     private void persistFailure(TurnContext ctx, TurnLoopState state,
@@ -754,9 +807,8 @@ final class DefaultTurnEngine {
             if (!state.messagesToPersist.isEmpty()) {
                 persistState(state, ctx.sessionId(), active);
             }
-        } catch (Throwable e) {
-            log.warn("Unable to persist failed turn for session {}: {}",
-                ctx.sessionId(), e.getMessage());
+        } catch (Throwable failure) {
+            log.warn("Unable to persist failed turn for session {}", ctx.sessionId());
         }
     }
 
@@ -769,9 +821,8 @@ final class DefaultTurnEngine {
                     interactionStore.delete(sessionId);
                 }
             });
-        } catch (Throwable e) {
-            log.warn("Unable to clear pending interaction for session {}: {}",
-                sessionId, e.getMessage());
+        } catch (Throwable failure) {
+            log.warn("Unable to clear pending interaction for session {}", sessionId);
         }
     }
 
@@ -794,6 +845,8 @@ final class DefaultTurnEngine {
         metadata.put("turnloop.persistence_type", PENDING_TYPE);
         metadata.put("turnloop.pending_turn_id", pending.turnId());
         metadata.put("turnloop.pending_model", nullToEmpty(pending.model()));
+        metadata.put("turnloop.pending_interaction_id",
+            pending.continuationContext().getOrDefault(PENDING_INTERACTION_ID, ""));
         metadata.put("turnloop.pending_questions", writeJson(pending.questions()));
         metadata.put("turnloop.pending_tool_names", pending.continuationContext()
             .getOrDefault("turnloop.pending_tool_names", "[]"));
@@ -811,28 +864,50 @@ final class DefaultTurnEngine {
         if (metadata == null || !CONTINUATION_FLAG.equals(metadata.get("turnloop.continuation"))) {
             return null;
         }
-        List<String> questions = readJsonList(metadata.get("turnloop.pending_questions"));
+        List<String> questions = normalizeQuestions(
+            readJsonList(metadata.get("turnloop.pending_questions")));
         String model = emptyToNull(metadata.get("turnloop.pending_model"));
-        Map<String, String> originalMetadata = readJsonMap(metadata.get("turnloop.pending_metadata"));
+        Map<String, String> originalMetadata = new LinkedHashMap<>(
+            readJsonMap(metadata.get("turnloop.pending_metadata")));
+        String interactionId = firstNonBlank(
+            metadata.get(PENDING_INTERACTION_ID), originalMetadata.get(PENDING_INTERACTION_ID));
+        if (interactionId != null) {
+            originalMetadata.put(PENDING_INTERACTION_ID, interactionId);
+        }
         return new QuestionPendingContext(ctx.sessionId(),
             emptyToNull(metadata.get("turnloop.pending_turn_id")) == null
                 ? ctx.turnId() : metadata.get("turnloop.pending_turn_id"),
-            questions, model, originalMetadata);
+            questions.isEmpty() ? List.of("The assistant has a question for you.") : questions,
+            model, originalMetadata);
     }
 
     private TurnMessage questionAnswerMessage(QuestionPendingContext pending,
-                                               String answer, String turnId) {
+                                               TurnContext ctx) {
         StringBuilder text = new StringBuilder();
-        text.append("[Ordered questions and combined answer]\n");
-        for (int i = 0; i < pending.questions().size(); i++) {
-            text.append("Question ").append(i + 1).append(": ")
-                .append(pending.questions().get(i)).append('\n');
+        text.append("[Questions and answers]\n");
+        List<String> answers = readJsonList(ctx.request().metadata().get(PENDING_ANSWERS));
+        if (answers.size() == pending.questions().size()) {
+            for (int i = 0; i < pending.questions().size(); i++) {
+                text.append("Question ").append(i + 1).append(": ")
+                    .append(pending.questions().get(i)).append('\n');
+                text.append("Answer ").append(i + 1).append(": ")
+                    .append(answers.get(i)).append('\n');
+            }
+        } else {
+            for (int i = 0; i < pending.questions().size(); i++) {
+                text.append("Question ").append(i + 1).append(": ")
+                    .append(pending.questions().get(i)).append('\n');
+            }
+            text.append("Answer: ").append(ctx.request().message());
         }
-        text.append("Combined answer: ").append(answer);
         Map<String, String> metadata = new LinkedHashMap<>();
         metadata.put("turnloop.persistence_type", "question_answer_context");
         metadata.put("turnloop.pending_turn_id", pending.turnId());
-        metadata.put("turnloop.answer_turn_id", turnId);
+        metadata.put("turnloop.answer_turn_id", ctx.turnId());
+        String interactionId = pending.continuationContext().get(PENDING_INTERACTION_ID);
+        if (interactionId != null) {
+            metadata.put(PENDING_INTERACTION_ID, interactionId);
+        }
         return new TurnMessage("system", text.toString(), null, null, metadata);
     }
 
@@ -859,7 +934,8 @@ final class DefaultTurnEngine {
         Map<String, String> metadata = new LinkedHashMap<>();
         metadata.put("turnloop.persistence_type", "assistant_tool_activity");
         List<String> calls = output.getToolCalls() == null ? List.of()
-            : output.getToolCalls().stream().map(call -> call.name() + ":" + call.arguments()).toList();
+            : output.getToolCalls().stream()
+                .map(call -> call.name() + ":" + call.arguments()).toList();
         metadata.put("tool_calls", writeJson(calls));
         if (state.latestThinking != null && !state.latestThinking.isBlank()) {
             metadata.put("thinking", state.latestThinking);
@@ -880,109 +956,137 @@ final class DefaultTurnEngine {
     private ContextUsage computeUsage(TurnContext ctx) {
         try {
             return contextManager.computeUsage(ctx.sessionId(), ctx.model());
-        } catch (RuntimeException e) {
+        } catch (RuntimeException failure) {
             return new ContextUsage(0, 0, configuredContextLength(ctx.model()));
         }
     }
 
-    // ── result and diagnostics ──
+    // ── response reduction and failures ──
 
-    private void markRevoked(TurnLoopState state, ActiveTurnRegistry.ActiveTurn active) {
-        state.wasInterrupted = true;
-        state.interruptReason = active.revocationReason().orElse("execution_fenced");
-    }
-
-    private TurnDiagnostic.OutcomeKind interruptedOutcome(String reason, boolean interrupted) {
-        if (!interrupted) {
-            return TurnDiagnostic.OutcomeKind.COMPLETED;
-        }
-        if ("turn_timeout".equals(reason)) {
-            return TurnDiagnostic.OutcomeKind.TIMED_OUT;
-        }
-        if ("subscriber_cancelled".equals(reason)) {
-            return TurnDiagnostic.OutcomeKind.CANCELLED;
-        }
-        return TurnDiagnostic.OutcomeKind.INTERRUPTED;
-    }
-
-    private TurnResult reduceToResult(TurnContext ctx, List<TurnEvent> events) {
-        TurnDiagnostic diagnostic = null;
-        ContextUsage usage = null;
-        StringBuilder visible = new StringBuilder();
-        List<ToolActivityData> activities = new ArrayList<>();
-
-        for (TurnEvent event : events) {
-            if (event instanceof TurnEvent.Completed completed) {
-                diagnostic = completed.diagnostic();
-            } else if (event instanceof TurnEvent.Failed failed) {
-                diagnostic = failed.diagnostic();
-            } else if (event instanceof TurnEvent.Queued queued) {
-                diagnostic = queued.diagnostic();
-            } else if (event instanceof TurnEvent.QuestionPending pending) {
-                diagnostic = diagnostic(ctx, Instant.now(), TurnPhase.FINALIZE,
-                    TurnDiagnostic.OutcomeKind.SUSPENDED,
-                    Map.of("questions", pending.questions()));
-            } else if (event instanceof TurnEvent.Interrupt interrupt) {
-                diagnostic = diagnostic(ctx, Instant.now(), TurnPhase.FINALIZE,
-                    TurnDiagnostic.OutcomeKind.INTERRUPTED,
-                    Map.of("reason", interrupt.reason()));
-            } else if (event instanceof TurnEvent.ToolActivity activity) {
-                activities.add(new ToolActivityData(activity.toolName(), activity.toolCallId(),
-                    activity.status(), activity.summary()));
-            } else if (event instanceof TurnEvent.Chunk chunk && !chunk.thinking()) {
-                visible.append(chunk.text());
+    private TurnResponse.Outcome reduceToOutcome(TurnContext ctx,
+                                                  List<TurnResponse> responses) {
+        TurnResponse.Outcome outcome = null;
+        int outcomeIndex = -1;
+        for (int index = 0; index < responses.size(); index++) {
+            TurnResponse response = responses.get(index);
+            if (response instanceof TurnResponse.Outcome terminal) {
+                if (outcome != null || outcomeIndex >= 0) {
+                    throw failureException(ctx, Instant.now(), currentPhase(ctx),
+                        TurnFailureCategory.INTERNAL, "Turn emitted multiple outcomes");
+                }
+                outcome = terminal;
+                outcomeIndex = index;
             }
-            if (event.contextUsage() != null) usage = event.contextUsage();
         }
-
-        if (diagnostic == null) {
-            diagnostic = diagnostic(ctx, Instant.now(), TurnPhase.FINALIZE,
-                TurnDiagnostic.OutcomeKind.COMPLETED, Map.of());
+        if (outcome == null) {
+            throw failureException(ctx, Instant.now(), currentPhase(ctx),
+                TurnFailureCategory.INTERNAL, "Turn completed without an outcome");
         }
-        if (usage == null) usage = computeUsage(ctx);
-        String message = visible.isEmpty() ? null : visible.toString();
-        if (diagnostic.outcomeKind() == TurnDiagnostic.OutcomeKind.SUSPENDED
-            && message == null) {
-            message = events.stream()
-                .filter(TurnEvent.QuestionPending.class::isInstance)
-                .map(TurnEvent.QuestionPending.class::cast)
-                .findFirst()
-                .map(event -> String.join("\n", event.questions()))
-                .orElse(null);
+        if (outcomeIndex != responses.size() - 1) {
+            throw failureException(ctx, Instant.now(), currentPhase(ctx),
+                TurnFailureCategory.INTERNAL, "Turn emitted progress after its outcome");
         }
-        return new TurnResult(ctx.sessionId(), ctx.turnId(), message, usage,
-            diagnostic, List.copyOf(activities));
+        return outcome;
     }
 
-    private void emitFailure(TurnContext ctx, FluxSink<TurnEvent> sink, Throwable failure) {
+    private void emitFailure(TurnContext ctx, FluxSink<TurnResponse> sink,
+                             ActiveTurnRegistry.ActiveTurn active,
+                             Instant startedAt, Throwable failure) {
         if (sink.isCancelled()) {
             return;
         }
         Throwable cause = unwrap(failure);
-        TurnFailedException exception = cause instanceof TurnFailedException tfe
-            ? tfe
-            : new TurnFailedException(
-                cause.getMessage() == null ? "Turn execution failed" : cause.getMessage(),
-                failureDiagnostic(ctx, cause));
-        TurnDiagnostic diagnostic = exception.diagnostic();
-        sink.next(new TurnEvent.Failed(ctx.turnId(), Instant.now(), diagnostic,
-            computeUsage(ctx)));
-        sink.error(exception);
+        Throwable terminal = cause;
+        if (!(cause instanceof TurnFailedException) && !isSpecializedFailure(cause)) {
+            TurnPhase phase = active == null ? TurnPhase.PREPARE : active.phase();
+            terminal = failureException(ctx, startedAt, phase, cause);
+        }
+        sink.error(terminal);
     }
 
-    private TurnDiagnostic failureDiagnostic(TurnContext ctx, Throwable failure) {
-        return diagnostic(ctx, Instant.now(), TurnPhase.FINALIZE,
-            TurnDiagnostic.OutcomeKind.FAILED,
-            Map.of("error", failure.getMessage() == null ? "unknown" : failure.getMessage()));
+    private TurnFailedException failureException(TurnContext ctx, Instant startedAt,
+                                                  TurnPhase phase, Throwable failure) {
+        Throwable cause = unwrap(failure);
+        if (cause instanceof TurnFailedException turnFailed) {
+            return turnFailed;
+        }
+        TurnFailureCategory category = failureCategory(cause, phase);
+        return failureException(ctx, startedAt, phase, category, safeFailureMessage(category));
     }
 
-    private TurnDiagnostic diagnostic(TurnContext ctx, Instant startedAt,
-                                     TurnPhase phase, TurnDiagnostic.OutcomeKind outcome,
-                                     Map<String, ?> details) {
-        Map<String, Object> copied = new LinkedHashMap<>();
-        details.forEach(copied::put);
-        return new TurnDiagnostic(ctx.turnId(), ctx.sessionId(), startedAt, Instant.now(),
-            phase, outcome, copied);
+    private TurnFailedException failureException(TurnContext ctx, Instant startedAt,
+                                                  TurnPhase phase,
+                                                  TurnFailureCategory category,
+                                                  String message) {
+        Instant failedAt = atOrAfter(startedAt);
+        String safeMessage = ResponseValidation.nonBlank(message, "message");
+        TurnFailure failure = new TurnFailure(
+            ctx.sessionId(), ctx.turnId(), executionOrigin(ctx), phase,
+            category, startedAt, failedAt, safeMessage);
+        return new TurnFailedException(safeMessage, failure);
+    }
+
+    private TurnFailureCategory failureCategory(Throwable failure, TurnPhase phase) {
+        if (failure instanceof PersistenceFailure) {
+            return TurnFailureCategory.PERSISTENCE;
+        }
+        if (failure instanceof ToolException) {
+            return TurnFailureCategory.TOOL;
+        }
+        if (failure instanceof TurnFailedException.ContextExhaustedException) {
+            return TurnFailureCategory.CONTEXT;
+        }
+        return switch (phase) {
+            case INVOKE_MODEL -> TurnFailureCategory.MODEL;
+            case EXECUTE_TOOLS -> TurnFailureCategory.TOOL;
+            case FINALIZE -> TurnFailureCategory.PERSISTENCE;
+            case PREPARE, EVALUATE, REPAIR, DONE -> TurnFailureCategory.EXECUTION;
+        };
+    }
+
+    private String safeFailureMessage(TurnFailureCategory category) {
+        return switch (category) {
+            case MODEL -> "Model execution failed";
+            case TOOL -> "Tool execution failed";
+            case CONTEXT -> "Context processing failed";
+            case PERSISTENCE -> "Turn state persistence failed";
+            case EXECUTION -> "Turn execution failed";
+            case INTERNAL -> "Internal turn execution failure";
+        };
+    }
+
+    private boolean isSpecializedFailure(Throwable failure) {
+        return failure instanceof ConfigurationException
+            || failure instanceof ConversationNotFoundException
+            || failure instanceof InteractionStateException
+            || failure instanceof TurnLoopBusyException;
+    }
+
+    private TurnPhase currentPhase(TurnContext ctx) {
+        ActiveTurnRegistry.ActiveTurn active = activeTurnRegistry.get(ctx.turnId());
+        return active == null ? TurnPhase.FINALIZE : active.phase();
+    }
+
+    private Optional<String> controlReason(ActiveTurnRegistry.ActiveTurn active,
+                                           Throwable failure) {
+        if (active != null) {
+            Optional<String> revoked = active.revocationReason();
+            if (revoked.isPresent()) {
+                return revoked;
+            }
+            Optional<String> queued = active.pollInterrupt();
+            if (queued.isPresent()) {
+                return queued;
+            }
+        }
+        if (failure instanceof InterruptedException
+            || Thread.currentThread().isInterrupted()) {
+            return Optional.of("interrupted");
+        }
+        if (failure instanceof CancellationException) {
+            return Optional.of("turn_cancelled");
+        }
+        return Optional.empty();
     }
 
     // ── conversion and parsing ──
@@ -1101,11 +1205,25 @@ final class DefaultTurnEngine {
         return List.copyOf(questions);
     }
 
+    private List<String> normalizeQuestions(List<String> questions) {
+        if (questions == null || questions.isEmpty()) {
+            return List.of("The assistant has a question for you.");
+        }
+        List<String> normalized = questions.stream()
+            .filter(Objects::nonNull)
+            .filter(question -> !question.isBlank())
+            .toList();
+        return normalized.isEmpty()
+            ? List.of("The assistant has a question for you.")
+            : List.copyOf(normalized);
+    }
+
     private String formatQuestions(List<String> questions) {
         StringBuilder result = new StringBuilder();
-        for (int i = 0; i < questions.size(); i++) {
+        List<String> normalized = normalizeQuestions(questions);
+        for (int i = 0; i < normalized.size(); i++) {
             if (i > 0) result.append('\n');
-            result.append("Question ").append(i + 1).append(": ").append(questions.get(i));
+            result.append("Question ").append(i + 1).append(": ").append(normalized.get(i));
         }
         return result.toString();
     }
@@ -1113,7 +1231,7 @@ final class DefaultTurnEngine {
     private String writeJson(Object value) {
         try {
             return CODEC.writeValueAsString(value);
-        } catch (JsonProcessingException e) {
+        } catch (JsonProcessingException failure) {
             return "[]";
         }
     }
@@ -1144,6 +1262,12 @@ final class DefaultTurnEngine {
         return value == null || value.isBlank() ? null : value;
     }
 
+    private String firstNonBlank(String first, String second) {
+        if (first != null && !first.isBlank()) return first;
+        if (second != null && !second.isBlank()) return second;
+        return null;
+    }
+
     private static String extractReasoningViaReflection(AssistantMessage output) {
         try {
             Method method = output.getClass().getMethod("getReasoningContent");
@@ -1152,6 +1276,36 @@ final class DefaultTurnEngine {
         } catch (Exception ignored) {
             return null;
         }
+    }
+
+    private void emit(FluxSink<TurnResponse> sink, TurnResponse response) {
+        if (!sink.isCancelled()) {
+            sink.next(response);
+        }
+    }
+
+    private ExecutionOrigin executionOrigin(TurnContext ctx) {
+        try {
+            ExecutionOrigin origin = ctx.executionOrigin();
+            return origin == null ? new ExecutionOrigin.Direct() : origin;
+        } catch (RuntimeException ignored) {
+            return new ExecutionOrigin.Direct();
+        }
+    }
+
+    private void markRevoked(TurnLoopState state, ActiveTurnRegistry.ActiveTurn active) {
+        state.wasInterrupted = true;
+        state.interruptReason = normalizedReason(
+            active.revocationReason().orElse("execution_fenced"), "execution_fenced");
+    }
+
+    private String normalizedReason(String reason, String fallback) {
+        return reason == null || reason.isBlank() ? fallback : reason;
+    }
+
+    private Instant atOrAfter(Instant baseline) {
+        Instant now = Instant.now();
+        return now.isBefore(baseline) ? baseline : now;
     }
 
     // ── router metadata ──
@@ -1167,8 +1321,7 @@ final class DefaultTurnEngine {
 
     private Throwable unwrap(Throwable error) {
         Throwable result = error;
-        while ((result instanceof CompletionException
-                || result instanceof java.util.concurrent.ExecutionException)
+        while ((result instanceof CompletionException || result instanceof ExecutionException)
             && result.getCause() != null) {
             result = result.getCause();
         }
@@ -1185,6 +1338,7 @@ final class DefaultTurnEngine {
 
     private static final class TurnLoopState {
         private final TurnContext context;
+        private final ExecutionOrigin origin;
         private final List<TurnMessage> messagesToPersist = new ArrayList<>();
         private final List<ToolActivityData> toolActivities = new ArrayList<>();
         private final ToolLoopGuard toolLoopGuard;
@@ -1194,7 +1348,7 @@ final class DefaultTurnEngine {
         private Prompt prompt;
         private ChatResponse response;
         private String allVisibleText = "";
-        private String latestVisibleText = "";
+        private final StringBuilder visibleText = new StringBuilder();
         private String latestThinking = "";
         private String toolLoopAbortReason;
         private String interruptReason;
@@ -1205,10 +1359,19 @@ final class DefaultTurnEngine {
         private boolean lastResponsePersisted;
         private boolean statePersisted;
         private QuestionPendingContext pendingContext;
+        private String pendingInteractionId;
 
-        private TurnLoopState(TurnContext context, ToolLoopGuard toolLoopGuard) {
+        private TurnLoopState(TurnContext context, ToolLoopGuard toolLoopGuard,
+                              ExecutionOrigin origin) {
             this.context = context;
             this.toolLoopGuard = toolLoopGuard.forTurn();
+            this.origin = origin;
+        }
+    }
+
+    private static final class PersistenceFailure extends RuntimeException {
+        private PersistenceFailure(Throwable cause) {
+            super(cause);
         }
     }
 
@@ -1224,7 +1387,6 @@ final class DefaultTurnEngine {
         DefaultPromptAssembler promptAssembler;
         CompletionDetector completionDetector = ctx -> false;
         RepairStrategy repairStrategy = (ctx, reason) -> List.of();
-        InteractionHandler interactionHandler;
         InteractionStore interactionStore;
         ModelRouter modelRouter;
         TurnExecutor turnExecutor;
@@ -1266,8 +1428,17 @@ final class DefaultTurnEngine {
             return this;
         }
 
-        public Builder interaction(InteractionHandler handler, InteractionStore store) {
-            this.interactionHandler = handler;
+        /**
+         * Retains the staged composition call shape while the facade is being
+         * cut over. The first argument is deliberately ignored: ask_user is
+         * owned by this engine and never invokes an application callback.
+         */
+        public Builder interaction(Object ignored, InteractionStore store) {
+            this.interactionStore = store;
+            return this;
+        }
+
+        public Builder interactionStore(InteractionStore store) {
             this.interactionStore = store;
             return this;
         }
@@ -1301,9 +1472,6 @@ final class DefaultTurnEngine {
             require(turnExecutor, "turnExecutor");
             require(activeTurnRegistry, "activeTurnRegistry");
             require(thinkingExtractor, "thinkingExtractor");
-            if (interactionHandler == null) {
-                interactionHandler = context -> new AnswerResult.Continue();
-            }
             return new DefaultTurnEngine(this);
         }
 
