@@ -9,9 +9,11 @@ mvn clean verify
 Useful boundary checks:
 
 ```bash
-mvn help:evaluate -Dexpression=project.artifactId -DforceStdout
-mvn dependency:tree -Dscope=runtime
+mvn -q help:evaluate -Dexpression=project.artifactId -DforceStdout
+mvn -q dependency:tree -Dscope=runtime
 jar tf target/magenta-core-*.jar
 ```
 
-The dependency graph must not contain Spring Boot auto-configuration, servlet APIs, MVC/WebFlux starters, embedded servers, Actuator, or application classes. Spring AI provider clients may bring `spring-web`/`spring-webflux` transport libraries transitively; those are client implementation dependencies, not a web application surface. Consumer examples use only the published `magenta-core` dependency and programmatic builder calls.
+The dependency graph must not contain Spring Boot auto-configuration, servlet APIs, MVC/WebFlux application starters, embedded servers, Actuator, or application classes. Spring AI provider clients may bring transport libraries transitively; they remain implementation dependencies rather than a web application surface. The public JAR exposes programmatic construction, Magenta-owned response records and SPIs, and JSON rendering only. Embedding applications own HTTP or other transport framing.
+
+Finish with the standalone fixture validation in [Testing](testing.md), a forbidden-old-symbol scan, and `git diff --check`.

@@ -46,6 +46,16 @@ created: 2026-05-25
 
 **Affected specs:** `architecture.md`, `service-graph.md`, `services.md`, `api.md`. **Source:** accepted job plan and user invocation. **Review after:** 2026-09-24.
 
+**DECISION-20260824-02 — The clean-break caller protocol is a single sealed `TurnResponse` hierarchy.** `Progress` and `Outcome` are nested sealed families. Blocking `send` returns an expected outcome, while cold `stream`, `streamAnswer`, and caller-subscribed `drain` expose progress and exactly one expected outcome per execution. Questions use dedicated interaction IDs, exact ordered answers, pending rehydration, and ID-qualified CAS. Queue receipts are durable `Queued` outcomes; queue claim, acknowledgement, release, and bounded lease recovery remain internal framework policy behind the advanced store SPI. Unexpected failures use typed `TurnFailure` facts and the exception/error channel rather than a failure response variant. JSON rendering is response-only with stable snake_case `type` tags, and embedding applications own transport framing.
+
+**Justification:** One typed protocol prevents blocking, streaming, lifecycle, audit, and queue-drain paths from assigning different meanings to the same execution. Separating interaction IDs, execution turn IDs, message IDs, and claim tokens protects restart recovery and stale UI submissions. Hiding queue mechanics preserves framework ownership while retaining an extension point for persistence.
+
+**Alternatives/tradeoffs:** Keeping separate result/event/diagnostic types or exposing claim/ack/release would preserve older call shapes but perpetuate duplicated terminal semantics and leak processing policy. A failure outcome was rejected because an unexpected failure must remain distinguishable from an expected terminal response. Caller-owned SSE framing keeps the core transport-neutral at the cost of requiring adapters in embedding applications.
+
+**Caveats:** Queue processing is at-least-once across unrecoverable process-crash windows and is not a distributed exactly-once guarantee. The protocol is source-incompatible by design; no deprecated bridges or cached duplicate-answer outcomes are retained.
+
+**Affected specs:** `architecture.md`, `api.md`, `schema.md`. **Source:** accepted sealed-response refactor plan and implementation branch. **Review after:** 2026-09-24.
+
 ## Superseded Decisions
 
 | id | decision | status | owner | source | decided_on | superseded_on | superseded_by | knowledge_ref | notes |

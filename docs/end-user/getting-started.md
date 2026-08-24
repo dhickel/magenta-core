@@ -7,6 +7,13 @@ Magenta Core is embedded directly in a Java application. There is no application
 Choose exactly one persistent storage source:
 
 ```java
+import io.mindspice.magenta.core.EndpointType;
+import io.mindspice.magenta.core.ModelConfig;
+import io.mindspice.magenta.core.TurnLoop;
+import io.mindspice.magenta.core.TurnLoopBuilder;
+
+import java.nio.file.Path;
+
 TurnLoop loop = TurnLoopBuilder.create()
     .dataRoot(Path.of("data/magenta"))
     .model("assistant", new ModelConfig(
@@ -20,10 +27,24 @@ For caller-owned JDBC storage use `.dataSource(dataSource)` instead. Register ad
 ## Send and stream
 
 ```java
-TurnResult result = loop.send(new TurnRequest("session-1", "Summarize this", null, null, false, Map.of()));
-loop.stream(new TurnRequest("session-1", "Continue", null, null, true, Map.of()))
-    .doOnNext(System.out::println)
-    .blockLast();
+import io.mindspice.magenta.core.TurnRequest;
+import io.mindspice.magenta.core.TurnResponse;
+
+import java.util.List;
+
+TurnResponse.Outcome outcome = loop.send(
+    TurnRequest.of("session-1", "Summarize this"));
+
+List<TurnResponse> stream = loop.stream(
+        TurnRequest.of("session-1", "Continue"))
+    .collectList()
+    .block();
 ```
 
-`TurnLoop` owns persistence, per-session serialization, queueing, interruption, question suspension, and graceful shutdown. Transport adapters can map `TurnEvent` to their own protocol.
+The stream is cold and contains progress records followed by one expected outcome. `TurnResponse.Message` contains the user-visible text. `Questions` provides a durable interaction ID and ordered questions; `Queued` is returned when the session is not idle.
+
+## Questions and queued work
+
+Use `pendingQuestions(sessionId)` after reconnect, then call `answer(sessionId, interactionId, answers)` with exactly one nonblank answer per question, or call `cancelQuestions(...)`. Use `enqueue(request)` for an explicit durable receipt and subscribe to `drain(sessionId)` when the application wants the framework to process queued work.
+
+`TurnLoop` owns persistence, per-session serialization, queue leases, interruption, question suspension, and graceful shutdown. Embedding applications choose their own transport and rendering.

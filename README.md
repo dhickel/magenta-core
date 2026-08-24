@@ -1,6 +1,6 @@
 # Magenta Core
 
-Magenta Core is a transport-neutral Java 25 library for building persistent Spring AI turn loops without Spring Boot application wiring.
+Magenta Core is a transport-neutral Java 25 library for embedding persistent AI turn loops. It is one `io.mindspice:magenta-core` JAR with programmatic construction and no Spring Boot application, HTTP, servlet, Actuator, or UI surface.
 
 ## Dependency
 
@@ -12,23 +12,40 @@ Magenta Core is a transport-neutral Java 25 library for building persistent Spri
 </dependency>
 ```
 
-The artifact bundles Ollama, OpenAI-compatible, and DeepSeek Spring AI providers transitively. It does not provide HTTP, servlet, web, Actuator, or Spring Boot auto-configuration support.
+Ollama, OpenAI-compatible, and DeepSeek provider implementations are bundled as runtime dependencies. Provider-specific types stay behind the Magenta API.
 
 ## Minimal construction
 
 ```java
-TurnLoop loop = TurnLoopBuilder.create()
-    .dataRoot(Path.of("./data"))
-    .model("local", new ModelConfig(
-        "local", "llama3.2", "http://localhost:11434", null,
-        EndpointType.OLLAMA, 32_000, 0))
-    .build();
+import io.mindspice.magenta.core.EndpointType;
+import io.mindspice.magenta.core.ModelConfig;
+import io.mindspice.magenta.core.TurnLoop;
+import io.mindspice.magenta.core.TurnLoopBuilder;
+import io.mindspice.magenta.core.TurnRequest;
+import io.mindspice.magenta.core.TurnResponse;
 
-TurnResult result = loop.send(TurnRequest.of("session-1", "Hello"));
-System.out.println(result.message());
-loop.close();
+import java.nio.file.Path;
+
+try (TurnLoop loop = TurnLoopBuilder.create()
+        .dataRoot(Path.of("./data"))
+        .model("local", new ModelConfig(
+            "local", "llama3.2", "http://localhost:11434", null,
+            EndpointType.OLLAMA, 32_000, 0))
+        .build()) {
+    TurnResponse.Outcome outcome = loop.send(TurnRequest.of("session-1", "Hello"));
+    String summary = switch (outcome) {
+        case TurnResponse.Message message -> message.text();
+        case TurnResponse.Questions questions -> "questions: " + questions.interactionId();
+        case TurnResponse.Queued queued -> "queued: " + queued.messageId();
+        case TurnResponse.Interrupted interrupted -> interrupted.reason();
+        case TurnResponse.TimedOut timedOut -> timedOut.reason();
+        case TurnResponse.QuestionsCancelled cancelled -> cancelled.reason();
+        case TurnResponse.TurnCancelled cancelled -> cancelled.reason();
+    };
+    System.out.println(summary);
+}
 ```
 
-Use `dataSource(DataSource)` instead of `dataRoot(Path)` when the caller owns JDBC storage. Exactly one storage source is required. Sessions are created lazily from caller-supplied IDs, and the model registry is immutable after `build()`.
+`send` returns `TurnResponse.Outcome`. `stream`, `streamAnswer`, and `drain` return cold `Flux<TurnResponse>` values containing progress followed by expected outcomes. Use `dataSource(DataSource)` instead of `dataRoot(Path)` when the caller owns JDBC storage; configure exactly one storage source.
 
-See [Getting started](docs/end-user/getting-started.md), [turn-loop API](docs/api/turn-loop.md), and [technical architecture](docs/technical/architecture.md).
+See [Getting started](docs/end-user/getting-started.md), the [TurnLoop API](docs/api/turn-loop.md), the [response stream](docs/api/streaming.md), and [technical architecture](docs/technical/architecture.md).

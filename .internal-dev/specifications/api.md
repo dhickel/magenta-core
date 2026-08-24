@@ -168,9 +168,15 @@ These server-rendered routes are scoped browser adapters, not trusted filesystem
 
 The artifact REST family under `/api/artifacts` owns scoped metadata, preview/download, search/lineage, and retention operations. Request scope is workspace kind/key with optional exact task run; authorization is applied before counts or rows are calculated.
 
+## Branch-Specific Framework API Contract (2026-08-24)
+
+The `refactor/turn-response-protocol-20260824` branch is a programmatic Java library contract, not a REST or SSE route surface. `TurnLoop.send(TurnRequest)` returns `TurnResponse.Outcome`; `stream`, `streamAnswer`, and `drain` return cold `Flux<TurnResponse>` values. The sealed response tags are `started`, `content_chunk`, `thinking_chunk`, `tool_activity`, `notice`, `message`, `questions`, `queued`, `interrupted`, `timed_out`, `questions_cancelled`, and `turn_cancelled`.
+
+Questions expose a dedicated interaction UUID and ordered nonblank strings. `answer` and `streamAnswer` require the exact interaction ID and one nonblank answer per question; `pendingQuestions` rehydrates without acknowledging delivery; `cancelQuestions` uses the same ID-qualified state boundary. `enqueue` and non-idle `send`/`stream` return the same durable `Queued` receipt. `drain` is caller-subscribed and owns internal claim/ack/release policy. Claim tokens never cross the facade. Unexpected execution failures use `TurnFailure` plus `TurnFailedException` or the stream error channel, never an additional failure response. `TurnResponseRenderer` is JSON-only; HTTP/SSE/WebSocket framing belongs to an embedding application. The clean-break schema rejects incompatible existing `magenta_core_*` state without deletion and leaves historical `turnloop_*` tables untouched.
+
 ## Ownership Boundary
 
-This file owns route and payload contracts. Service behavior belongs in `services.md`; page/fragment behavior belongs in `web.md`.
+This file owns route and payload contracts. Service behavior belongs in `services.md`; page/fragment behavior belongs in `web.md`. The branch-specific framework contract above is intentionally not a route definition.
 
 ## Drift/Gaps
 
