@@ -1,41 +1,45 @@
 package io.mindspice.magenta.core;
 
+import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.mindspice.magenta.core.engine.DefaultTurnEngine;
 import io.mindspice.magenta.core.internal.ActiveTurnRegistry;
 import io.mindspice.magenta.core.internal.TurnExecutor;
+import io.mindspice.magenta.core.persistence.InMemoryInteractionStore;
+import io.mindspice.magenta.core.persistence.SqliteAuditWriter;
+import io.mindspice.magenta.core.persistence.SqliteConversationMemory;
+import io.mindspice.magenta.core.persistence.SqliteInteractionStore;
 import io.mindspice.magenta.core.spi.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.SignalType;
 
+import javax.sql.DataSource;
+import java.lang.reflect.Field;
 import java.time.Duration;
 import java.time.Instant;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
- * Package-private implementation of {@link TurnLoop} that orchestrates
- * the {@link DefaultTurnEngine}, {@link TurnGate}, {@link MessageQueue},
- * {@link InteractionStore}, and all SPI wiring.
- *
- * <p>The only public construction path is {@link TurnLoopBuilder#build()}.
- * This class implements the full facade contract including send, stream,
- * answer, enqueue/claim/ack/release, session management, interrupt, and
- * the 7-step ordered {@link #close()} lifecycle.</p>
- *
- * <h3>Exception contract</h3>
- * Every public method catches internal exceptions and wraps them in
- * {@link TurnLoopException} or its documented subtypes. No raw
- * {@code RuntimeException} or Spring AI exception escapes through
- * any public method.
+ * Package-private facade implementation. It owns the public state-machine
+ * boundary: gate acquisition, durable session setup, queue outcomes,
+ * interaction lifecycle, observation hooks, and exception translation.
  */
 final class DefaultTurnLoop implements TurnLoop {
 
     private static final Logger log = LoggerFactory.getLogger(DefaultTurnLoop.class);
-
-    // ── Dependencies ──
+    private static final String PENDING_TYPE = "turnloop.pending_interaction";
+    private static final TypeReference<List<String>> STRING_LIST = new TypeReference<>() {};
+    private static final TypeReference<Map<String, String>> STRING_MAP = new TypeReference<>() {};
 
     private final DefaultTurnEngine engine;
     private final TurnGate gate;
@@ -49,22 +53,19 @@ final class DefaultTurnLoop implements TurnLoop {
     private final ModelCapabilityProvider modelCapabilityProvider;
     private final TurnLifecycleListener lifecycleListener;
     private final TurnLoopMetrics metrics;
+    private final AuditWriter auditWriter;
     private final ObjectMapper objectMapper;
     private final String defaultSystemPrompt;
     private final String defaultModel;
     private final long drainTimeoutSeconds;
 
-    // ── State ──
-
     private final AtomicBoolean closed = new AtomicBoolean(false);
-
-    // ── Sub-interface instances (created once, returned on every call) ──
-
+    private final ConcurrentHashMap<String, Object> sessionLocks = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<String, String> activeTurnIds = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<String, String> claimSessions = new ConcurrentHashMap<>();
     private final ToolSubinterface toolsView;
     private final MemorySubinterface memoryView;
     private final SessionSubinterface sessionsView;
-
-    // ── Constructor ──
 
     DefaultTurnLoop(
         DefaultTurnEngine engine,
@@ -84,398 +85,461 @@ final class DefaultTurnLoop implements TurnLoop {
         String defaultModel,
         long drainTimeoutSeconds
     ) {
+        this(engine, gate, messageQueue, interactionStore, sessionStore, conversationMemory,
+            activeTurnRegistry, executor, toolRegistry, modelCapabilityProvider,
+            lifecycleListener, metrics, objectMapper, defaultSystemPrompt, defaultModel,
+            drainTimeoutSeconds, null);
+    }
+
+    DefaultTurnLoop(
+        DefaultTurnEngine engine,
+        TurnGate gate,
+        MessageQueue messageQueue,
+        InteractionStore interactionStore,
+        SessionStore sessionStore,
+        ConversationMemory conversationMemory,
+        ActiveTurnRegistry activeTurnRegistry,
+        TurnExecutor executor,
+        ToolRegistry toolRegistry,
+        ModelCapabilityProvider modelCapabilityProvider,
+        TurnLifecycleListener lifecycleListener,
+        TurnLoopMetrics metrics,
+        ObjectMapper objectMapper,
+        String defaultSystemPrompt,
+        String defaultModel,
+        long drainTimeoutSeconds,
+        AuditWriter auditWriter
+    ) {
         this.engine = Objects.requireNonNull(engine, "engine");
         this.gate = Objects.requireNonNull(gate, "gate");
         this.messageQueue = Objects.requireNonNull(messageQueue, "messageQueue");
-        this.interactionStore = Objects.requireNonNull(interactionStore, "interactionStore");
-        this.sessionStore = Objects.requireNonNull(sessionStore, "sessionStore");
+        ObjectMapper mapper = objectMapper == null ? new ObjectMapper() : objectMapper;
+        this.objectMapper = mapper;
         this.conversationMemory = Objects.requireNonNull(conversationMemory, "conversationMemory");
+        this.interactionStore = restartSafeInteractionStore(
+            Objects.requireNonNull(interactionStore, "interactionStore"), conversationMemory, mapper);
+        this.sessionStore = Objects.requireNonNull(sessionStore, "sessionStore");
         this.activeTurnRegistry = Objects.requireNonNull(activeTurnRegistry, "activeTurnRegistry");
         this.executor = Objects.requireNonNull(executor, "executor");
         this.toolRegistry = Objects.requireNonNull(toolRegistry, "toolRegistry");
         this.modelCapabilityProvider = Objects.requireNonNull(modelCapabilityProvider, "modelCapabilityProvider");
-        this.lifecycleListener = lifecycleListener != null ? lifecycleListener : result -> {};
-        this.metrics = metrics != null ? metrics : new NoOpTurnLoopMetrics();
-        this.objectMapper = objectMapper != null ? objectMapper : new ObjectMapper();
-        this.defaultSystemPrompt = defaultSystemPrompt != null ? defaultSystemPrompt : "You are a helpful AI assistant.";
+        this.lifecycleListener = lifecycleListener == null ? result -> { } : lifecycleListener;
+        this.metrics = metrics == null ? new NoOpTurnLoopMetrics() : metrics;
+        this.auditWriter = auditWriter == null
+            ? defaultAuditWriter(conversationMemory, mapper) : auditWriter;
+        this.defaultSystemPrompt = defaultSystemPrompt == null
+            ? "You are a helpful AI assistant." : defaultSystemPrompt;
         this.defaultModel = Objects.requireNonNull(defaultModel, "defaultModel");
         this.drainTimeoutSeconds = Math.max(0, drainTimeoutSeconds);
-
         this.toolsView = new Tools();
         this.memoryView = new Memory();
         this.sessionsView = new Sessions();
     }
 
-    // ── TurnLoop: send ──
+    // ── turn execution ──
 
     @Override
     public TurnResult send(@NonNull TurnRequest request) {
         validateClosed();
         validateRequest(request);
-
         String sessionId = request.sessionId();
-        TurnGate.AcquireResult acquire = gate.acquire(sessionId, TurnGate.TurnGateMode.SEND);
 
-        if (acquire instanceof TurnGate.AcquireResult.Rejected rej) {
-            throw new TurnLoopException(
-                "Turn already in progress for session " + sessionId + ": " + rej.reason());
-        }
+        synchronized (lockFor(sessionId)) {
+            try {
+                QuestionPendingContext pending = restorePending(sessionId);
+                if (pending != null || gate.state(sessionId) == TurnGate.GateState.AWAITING_ANSWER) {
+                    return queueResult(request, enqueueInternal(request));
+                }
 
-        // Ignore Queued — the SerialTurnGate never returns Queued for SEND mode.
-        // If a future gate implementation returns Queued, treat as rejection.
-        if (acquire instanceof TurnGate.AcquireResult.Queued q) {
-            throw new TurnLoopException(
-                "Turn queued but synchronous send requires immediate execution for session " + sessionId);
-        }
+                String model = resolveModel(request);
+                ensureSession(sessionId, model);
+                TurnGate.AcquireResult acquired = gate.acquire(sessionId, TurnGate.TurnGateMode.SEND);
+                if (!(acquired instanceof TurnGate.AcquireResult.Acquired)) {
+                    if (gate.state(sessionId) == TurnGate.GateState.AWAITING_ANSWER) {
+                        return queueResult(request, enqueueInternal(request));
+                    }
+                    String reason = acquired instanceof TurnGate.AcquireResult.Rejected rejected
+                        ? rejected.reason() : "turn was queued by the gate";
+                    throw new TurnLoopException("Turn already in progress for session "
+                        + sessionId + ": " + reason);
+                }
 
-        String model = resolveModel(request.model());
-        TurnContext ctx = buildTurnContext(request, model, false);
-
-        long startMs = System.currentTimeMillis();
-        try {
-            TurnResult result = engine.execute(ctx);
-            recordSuccess(request, result, startMs);
-
-            // If the turn suspended on ask_user, transition gate; otherwise release.
-            if (interactionStore.load(sessionId) != null) {
-                gate.transitionToAwaitingAnswer(sessionId);
-            } else {
-                gate.release(sessionId);
+                TurnContext context = buildTurnContext(request, model, false);
+                activeTurnIds.put(sessionId, context.turnId());
+                List<TurnMessage> before = safeHistory(sessionId);
+                auditUser(sessionId, currentUser(request));
+                setActiveMetric();
+                long started = System.currentTimeMillis();
+                try {
+                    TurnResult result = engine.execute(context);
+                    finishSuccessfulTurn(sessionId, result);
+                    recordTurnObservability(request, result, before, model, started, true);
+                    return result;
+                } catch (Throwable failure) {
+                    clearPendingAfterFailure(sessionId);
+                    gate.release(sessionId);
+                    recordFailureObservability(sessionId, model, before, started, failure);
+                    throw publicFailure("Turn execution failed", failure);
+                } finally {
+                    activeTurnIds.remove(sessionId, context.turnId());
+                    setActiveMetric();
+                }
+            } catch (TurnLoopException e) {
+                throw e;
+            } catch (Throwable e) {
+                throw publicFailure("Turn execution failed", e);
             }
-
-            return result;
-        } catch (TurnFailedException | ConfigurationException
-                 | ConversationNotFoundException | ToolException e) {
-            // Public exceptions — release gate and rethrow
-            gate.release(sessionId);
-            throw e;
-        } catch (IllegalArgumentException e) {
-            // ModelRouter throws IAE for unknown model alias
-            gate.release(sessionId);
-            String msg = e.getMessage() != null ? e.getMessage() : "Unknown model";
-            throw new ConfigurationException(msg, Map.of("error", "unknown_model"));
-        } catch (RuntimeException e) {
-            gate.release(sessionId);
-            throw new TurnLoopException("Turn execution failed: " + e.getMessage(), e);
         }
     }
-
-    // ── TurnLoop: stream ──
 
     @Override
     public Flux<TurnEvent> stream(@NonNull TurnRequest request) {
         validateClosed();
         validateRequest(request);
-
-        String sessionId = request.sessionId();
-        String model = resolveModel(request.model());
-
-        // Fast-fail streaming capability check before gate acquisition
-        if (!modelCapabilityProvider.capabilities(model).contains(ModelCapability.STREAMING)) {
-            throw new TurnLoopException("Model '" + model + "' does not support streaming");
-        }
-
-        TurnGate.AcquireResult acquire = gate.acquire(sessionId, TurnGate.TurnGateMode.STREAM);
-        if (acquire instanceof TurnGate.AcquireResult.Rejected rej) {
-            throw new TurnLoopException(
-                "Turn already in progress for session " + sessionId + ": " + rej.reason());
-        }
-        if (acquire instanceof TurnGate.AcquireResult.Queued) {
-            throw new TurnLoopException(
-                "Turn queued but streaming requires immediate execution for session " + sessionId);
-        }
-
-        TurnContext ctx = buildTurnContext(request, model, true);
-        long startMs = System.currentTimeMillis();
-
-        // Gate-release guard — ensures release happens at most once
-        final AtomicBoolean gateReleased = new AtomicBoolean(false);
-
-        return engine.stream(ctx)
-            .doOnSubscribe(s -> {
-                if (metrics != null) {
-                    try {
-                        metrics.setActiveTurns(activeTurnRegistry.activeTurns().size());
-                    } catch (Exception ignored) { }
-                }
-            })
-            .doFinally(signal -> {
-                releaseGateOnce(sessionId, gateReleased);
-                try {
-                    if (signal == SignalType.ON_COMPLETE || signal == SignalType.ON_ERROR) {
-                        long durationMs = System.currentTimeMillis() - startMs;
-                        QuestionPendingContext pending = interactionStore.load(sessionId);
-                        String outcome = pending != null ? "suspended" : "completed";
-                        try {
-                            metrics.recordTurnDuration(model, outcome, durationMs);
-                        } catch (Exception ignored) { }
-                    }
-                } catch (Exception e) {
-                    log.warn("Metrics recording failed for stream turn session={}: {}", sessionId, e.getMessage());
-                }
-            })
-            .onErrorMap(e -> {
-                // Release gate on error too (guard ensures once)
-                releaseGateOnce(sessionId, gateReleased);
-                return mapInternalException(e);
-            });
+        return Flux.defer(() -> startStream(request))
+            .onErrorMap(this::mapInternalException);
     }
 
-    // ── TurnLoop: answer ──
+    private Flux<TurnEvent> startStream(TurnRequest request) {
+        validateClosed();
+        String sessionId = request.sessionId();
+        synchronized (lockFor(sessionId)) {
+            try {
+                QuestionPendingContext pending = restorePending(sessionId);
+                if (pending != null || gate.state(sessionId) == TurnGate.GateState.AWAITING_ANSWER) {
+                    return Flux.just(queuedEvent(request, enqueueInternal(request)));
+                }
+
+                String model = resolveModel(request);
+                ensureSession(sessionId, model);
+                if (!modelCapabilityProvider.capabilities(model)
+                    .contains(ModelCapability.STREAMING)) {
+                    throw new TurnLoopException("Model '" + model + "' does not support streaming");
+                }
+
+                TurnGate.AcquireResult acquired = gate.acquire(sessionId, TurnGate.TurnGateMode.STREAM);
+                if (!(acquired instanceof TurnGate.AcquireResult.Acquired)) {
+                    if (gate.state(sessionId) == TurnGate.GateState.AWAITING_ANSWER) {
+                        return Flux.just(queuedEvent(request, enqueueInternal(request)));
+                    }
+                    String reason = acquired instanceof TurnGate.AcquireResult.Rejected rejected
+                        ? rejected.reason() : "turn was queued by the gate";
+                    throw new TurnLoopException("Turn already in progress for session "
+                        + sessionId + ": " + reason);
+                }
+
+                TurnContext context = buildTurnContext(request, model, true);
+                activeTurnIds.put(sessionId, context.turnId());
+                List<TurnMessage> before = safeHistory(sessionId);
+                auditUser(sessionId, currentUser(request));
+                long started = System.currentTimeMillis();
+                AtomicBoolean gateFinished = new AtomicBoolean(false);
+                AtomicBoolean lifecycleRecorded = new AtomicBoolean(false);
+                CopyOnWriteArrayList<TurnEvent> events = new CopyOnWriteArrayList<>();
+
+                return engine.stream(context)
+                    .doOnSubscribe(subscription -> setActiveMetric())
+                    .doOnNext(event -> {
+                        events.add(event);
+                        if (event instanceof TurnEvent.Started) {
+                            setActiveMetric();
+                        }
+                        if (event instanceof TurnEvent.ToolActivity activity) {
+                            safeMetric(() -> metrics.recordToolCall(
+                                activity.toolName(), activity.status().name()));
+                        }
+                    })
+                    .doFinally(signal -> {
+                        try {
+                            if (signal == SignalType.CANCEL) {
+                                activeTurnRegistry.get(context.turnId());
+                                clearPendingAfterInterruption(sessionId, "subscriber_cancelled");
+                            } else if (signal == SignalType.ON_ERROR) {
+                                clearPendingAfterFailure(sessionId);
+                            }
+                            if (signal == SignalType.ON_COMPLETE
+                                && events.stream().anyMatch(event -> event instanceof TurnEvent.Failed failed
+                                    && (failed.diagnostic().outcomeKind() == TurnDiagnostic.OutcomeKind.INTERRUPTED
+                                        || failed.diagnostic().outcomeKind() == TurnDiagnostic.OutcomeKind.CANCELLED))) {
+                                clearPendingAfterInterruption(sessionId, "interrupted");
+                            }
+                            finishGate(sessionId, signal, gateFinished);
+                            activeTurnRegistry.remove(context.turnId());
+                            activeTurnIds.remove(sessionId, context.turnId());
+                            recordStreamObservability(request, context, before, events,
+                                model, started, signal, lifecycleRecorded);
+                        } catch (Throwable e) {
+                            log.warn("Stream cleanup failed for session {}: {}", sessionId, e.getMessage());
+                        } finally {
+                            setActiveMetric();
+                        }
+                    });
+            } catch (TurnLoopException e) {
+                throw e;
+            } catch (Throwable e) {
+                gate.release(sessionId);
+                throw publicFailure("Unable to start stream", e);
+            }
+        }
+    }
 
     @Override
     public TurnResult answer(@NonNull String sessionId, @NonNull String answer) {
         validateClosed();
-        if (sessionId.isBlank()) {
-            throw new TurnLoopException("sessionId must not be blank");
-        }
-        if (answer.isBlank()) {
-            throw new TurnLoopException("answer must not be blank");
-        }
+        validateText(sessionId, "sessionId");
+        validateText(answer, "answer");
 
-        // Gate must be in AWAITING_ANSWER state
-        if (gate.state(sessionId) != TurnGate.GateState.AWAITING_ANSWER) {
-            throw new TurnLoopException("No question pending for session " + sessionId);
-        }
-
-        // Load the pending question context
-        QuestionPendingContext pendingCtx = interactionStore.load(sessionId);
-        if (pendingCtx == null) {
-            throw new TurnLoopException("No pending question context for session " + sessionId);
-        }
-
-        // Resolve model — use the session's stored model, fall back to default
-        String model = resolveSessionModel(sessionId);
-
-        // Acquire gate in ANSWER mode (transitions AWAITING_ANSWER → EXECUTING)
-        TurnGate.AcquireResult acquire = gate.acquire(sessionId, TurnGate.TurnGateMode.ANSWER);
-        if (acquire instanceof TurnGate.AcquireResult.Rejected rej) {
-            throw new TurnLoopException("Cannot resume turn for session " + sessionId + ": " + rej.reason());
-        }
-
-        // Build a continuation TurnRequest injecting the user's answer
-        TurnRequest contRequest = new TurnRequest(
-            sessionId, answer, model, null, false, Map.of("turnloop.continuation", "true"));
-
-        TurnContext ctx = buildTurnContext(contRequest, model, false);
-
-        try {
-            TurnResult result = engine.execute(ctx);
-
-            // On success: delete interaction store entry and release gate
-            interactionStore.delete(sessionId);
-            gate.release(sessionId);
-
+        synchronized (lockFor(sessionId)) {
             try {
-                lifecycleListener.onTurnCompleted(result);
-            } catch (Exception e) {
-                log.warn("Lifecycle listener failed for answer session={}: {}", sessionId, e.getMessage());
-            }
+                QuestionPendingContext pending = restorePending(sessionId);
+                if (pending == null || pending.state() != QuestionPendingContext.State.PENDING
+                    || gate.state(sessionId) != TurnGate.GateState.AWAITING_ANSWER) {
+                    throw new TurnLoopException("No question pending for session " + sessionId);
+                }
 
-            return result;
-        } catch (TurnFailedException | ConfigurationException
-                 | ConversationNotFoundException | ToolException e) {
-            gate.release(sessionId);
-            throw e;
-        } catch (IllegalArgumentException e) {
-            gate.release(sessionId);
-            String msg = e.getMessage() != null ? e.getMessage() : "Unknown model";
-            throw new ConfigurationException(msg, Map.of("error", "unknown_model"));
-        } catch (RuntimeException e) {
-            gate.release(sessionId);
-            throw new TurnLoopException("Answer turn execution failed: " + e.getMessage(), e);
+                String model = pending.model() == null || pending.model().isBlank()
+                    ? resolveModel(new TurnRequest(sessionId, answer, null, null, false, Map.of()))
+                    : pending.model();
+                TurnGate.AcquireResult acquired = gate.acquire(
+                    sessionId, TurnGate.TurnGateMode.ANSWER);
+                if (!(acquired instanceof TurnGate.AcquireResult.Acquired)) {
+                    String reason = acquired instanceof TurnGate.AcquireResult.Rejected rejected
+                        ? rejected.reason() : "answer was queued by the gate";
+                    throw new TurnLoopException("Cannot resume turn for session "
+                        + sessionId + ": " + reason);
+                }
+
+                List<String> toolNames = readJsonList(
+                    pending.continuationContext().get("turnloop.pending_tool_names"));
+                Map<String, String> continuation = continuationMetadata(pending);
+                TurnRequest request = new TurnRequest(
+                    sessionId, answer, model, toolNames, false, continuation);
+                TurnContext context = buildTurnContext(request, model, false);
+                activeTurnIds.put(sessionId, context.turnId());
+                List<TurnMessage> before = safeHistory(sessionId);
+                auditUser(sessionId, currentUser(request));
+                long started = System.currentTimeMillis();
+                setActiveMetric();
+                try {
+                    TurnResult result = engine.execute(context);
+                    if (result.diagnostic().outcomeKind()
+                        != TurnDiagnostic.OutcomeKind.SUSPENDED) {
+                        clearPendingState(sessionId);
+                    }
+                    finishSuccessfulTurn(sessionId, result);
+                    recordTurnObservability(request, result, before, model, started, true);
+                    return result;
+                } catch (Throwable failure) {
+                    clearPendingAfterFailure(sessionId);
+                    gate.release(sessionId);
+                    recordFailureObservability(sessionId, model, before, started, failure);
+                    throw publicFailure("Answer turn execution failed", failure);
+                } finally {
+                    activeTurnIds.remove(sessionId, context.turnId());
+                    setActiveMetric();
+                }
+            } catch (TurnLoopException e) {
+                throw e;
+            } catch (Throwable e) {
+                throw publicFailure("Answer turn execution failed", e);
+            }
         }
     }
 
-    // ── TurnLoop: enqueue ──
+    @Override
+    public boolean cancelQuestion(@NonNull String sessionId, @NonNull String reason) {
+        validateClosed();
+        validateText(sessionId, "sessionId");
+        validateText(reason, "reason");
+        synchronized (lockFor(sessionId)) {
+            try {
+                QuestionPendingContext pending = restorePending(sessionId);
+                if (pending == null || pending.state() != QuestionPendingContext.State.PENDING) {
+                    if (gate.state(sessionId) == TurnGate.GateState.AWAITING_ANSWER) {
+                        gate.release(sessionId);
+                    }
+                    return false;
+                }
+                cancelPendingInternal(sessionId, reason);
+                gate.release(sessionId);
+                auditError(sessionId, "Question cancelled: " + reason, null, pending.model());
+                return true;
+            } catch (Throwable e) {
+                throw publicFailure("Failed to cancel question", e);
+            }
+        }
+    }
+
+    // ── queue ──
 
     @Override
     public PendingMessage enqueue(@NonNull TurnRequest request) {
         validateClosed();
         validateRequest(request);
         try {
-            return messageQueue.enqueue(
-                request.sessionId(),
-                request.message(),
-                request.metadata() != null ? request.metadata() : Map.of());
-        } catch (RuntimeException e) {
-            throw new TurnLoopException("Failed to enqueue message: " + e.getMessage(), e);
+            return enqueueInternal(request);
+        } catch (Throwable e) {
+            throw publicFailure("Failed to enqueue message", e);
         }
     }
-
-    // ── TurnLoop: claim ──
 
     @Override
     @Nullable
     public ClaimedMessage claim(@NonNull String sessionId) {
         validateClosed();
-        if (sessionId.isBlank()) {
-            throw new TurnLoopException("sessionId must not be blank");
-        }
+        validateText(sessionId, "sessionId");
         try {
-            return messageQueue.claim(sessionId);
-        } catch (RuntimeException e) {
-            throw new TurnLoopException("Failed to claim message: " + e.getMessage(), e);
+            ClaimedMessage claimed = messageQueue.claim(sessionId);
+            if (claimed != null) {
+                claimSessions.put(claimed.claimToken(), sessionId);
+            }
+            setQueueMetric(sessionId);
+            return claimed;
+        } catch (Throwable e) {
+            throw publicFailure("Failed to claim message", e);
         }
     }
-
-    // ── TurnLoop: ack ──
 
     @Override
     public void ack(@NonNull String claimToken) {
         validateClosed();
-        if (claimToken.isBlank()) {
-            throw new TurnLoopException("claimToken must not be blank");
-        }
+        validateText(claimToken, "claimToken");
         try {
             messageQueue.ack(claimToken);
+            String sessionId = claimSessions.remove(claimToken);
+            if (sessionId != null) setQueueMetric(sessionId);
         } catch (IllegalArgumentException | IllegalStateException e) {
-            // Stale/already-acked claim — log and return normally per contract
-            log.warn("ack on stale claim token: {}", claimToken);
-        } catch (RuntimeException e) {
-            throw new TurnLoopException("Failed to ack message: " + e.getMessage(), e);
+            log.warn("Ignoring stale queue claim {}", claimToken);
+        } catch (Throwable e) {
+            throw publicFailure("Failed to acknowledge message", e);
         }
     }
-
-    // ── TurnLoop: release ──
 
     @Override
     public void release(@NonNull String claimToken) {
         validateClosed();
-        if (claimToken.isBlank()) {
-            throw new TurnLoopException("claimToken must not be blank");
-        }
+        validateText(claimToken, "claimToken");
         try {
             messageQueue.release(claimToken);
+            String sessionId = claimSessions.remove(claimToken);
+            if (sessionId != null) setQueueMetric(sessionId);
         } catch (IllegalArgumentException | IllegalStateException e) {
-            // Stale/already-released claim — log and return normally per contract
-            log.warn("release on stale claim token: {}", claimToken);
-        } catch (RuntimeException e) {
-            throw new TurnLoopException("Failed to release message: " + e.getMessage(), e);
+            log.warn("Ignoring stale queue claim {}", claimToken);
+        } catch (Throwable e) {
+            throw publicFailure("Failed to release message", e);
         }
     }
 
-    // ── TurnLoop: clearSession ──
+    // ── session lifecycle ──
 
     @Override
     public void clearSession(@NonNull String sessionId) {
         validateClosed();
-        if (sessionId.isBlank()) {
-            throw new TurnLoopException("sessionId must not be blank");
+        validateText(sessionId, "sessionId");
+        synchronized (lockFor(sessionId)) {
+            try {
+                interruptActiveSession(sessionId, "session_cleared");
+                conversationMemory.clear(sessionId);
+                interactionStore.delete(sessionId);
+                if (gate.state(sessionId) != TurnGate.GateState.EXECUTING) {
+                    gate.release(sessionId);
+                }
+            } catch (Throwable e) {
+                throw publicFailure("Failed to clear session", e);
+            }
         }
-        try {
-            conversationMemory.clear(sessionId);
-        } catch (RuntimeException e) {
-            throw new TurnLoopException("Failed to clear conversation memory: " + e.getMessage(), e);
-        }
-        try {
-            interactionStore.delete(sessionId);
-        } catch (RuntimeException e) {
-            throw new TurnLoopException("Failed to clear interaction store: " + e.getMessage(), e);
-        }
-        // Session metadata is preserved (not deleted)
     }
-
-    // ── TurnLoop: interrupt ──
 
     @Override
     public boolean interrupt(@NonNull String turnId, @NonNull String reason) {
         validateClosed();
-        if (turnId.isBlank()) {
-            throw new TurnLoopException("turnId must not be blank");
-        }
-        if (reason.isBlank()) {
-            throw new TurnLoopException("reason must not be blank");
-        }
+        validateText(turnId, "turnId");
+        validateText(reason, "reason");
         try {
             ActiveTurnRegistry.ActiveTurn active = activeTurnRegistry.get(turnId);
-            if (active == null) {
-                return false;
+            boolean found = active != null;
+            if (active != null) {
+                active.queueInterrupt(reason);
             }
-            active.queueInterrupt(reason);
-            return true;
-        } catch (RuntimeException e) {
-            throw new TurnLoopException("Failed to interrupt turn: " + e.getMessage(), e);
+            for (String sessionId : knownSessionIds()) {
+                QuestionPendingContext pending = restorePending(sessionId);
+                if (pending != null && turnId.equals(pending.turnId())) {
+                    synchronized (lockFor(sessionId)) {
+                        cancelPendingInternal(sessionId, reason);
+                        gate.release(sessionId);
+                    }
+                    found = true;
+                }
+            }
+            return found;
+        } catch (Throwable e) {
+            throw publicFailure("Failed to interrupt turn", e);
         }
     }
 
-    // ── TurnLoop: close ──
-
-    /**
-     * Gracefully shuts down the turn loop.
-     *
-     * <h3>7-step ordered drain sequence</h3>
-     * <ol>
-     *   <li>CAS closed flag false→true. If already true, return immediately.</li>
-     *   <li>Cancel pending questions: for each AWAITING_ANSWER session, queue
-     *       interrupt (via gate drain which handles this internally).</li>
-     *   <li>Wait for EXECUTING turns up to drain timeout.</li>
-     *   <li>Force-release remaining EXECUTING turns after timeout.</li>
-     *   <li>Release stream resources (subscriptions cancel when the sink
-     *       completes; the executor shutdown in step 7 stops async work).</li>
-     *   <li>Release pending claims: recover all stale claims with zero-age
-     *       threshold and release each; log the count at INFO.</li>
-     *   <li>Close ChatModel instances and shut down the
-     *       {@link TurnExecutor}.</li>
-     * </ol>
-     *
-     * <p>Every step is individually try-caught and logged at ERROR.
-     * No step may throw out of close().</p>
-     */
     @Override
     public void close() {
         if (!closed.compareAndSet(false, true)) {
-            return; // idempotent
+            return;
         }
+        log.info("Closing TurnLoop");
 
-        log.info("TurnLoop closing...");
-
-        // Step 2-4: Drain the gate (SerialTurnGate.drain handles AWAITING_ANSWER
-        // cancellation, EXECUTING wait, and force-release internally).
         try {
-            gate.drain(drainTimeoutSeconds * 1000L);
-        } catch (Exception e) {
-            log.error("Gate drain failed during close: {}", e.getMessage(), e);
-        }
-
-        // Step 5: Release stream resources.
-        // The facade does not hold direct Flux references; the engine owns
-        // the sinks. Cancelling the scheduler below stops async work.
-
-        // Step 6: Release pending claims.
-        try {
-            List<ClaimedMessage> stale = messageQueue.recoverStaleClaims(Duration.ZERO);
-            int count = 0;
-            for (ClaimedMessage cm : stale) {
-                try {
-                    messageQueue.release(cm.claimToken());
-                    count++;
-                } catch (Exception e) {
-                    log.warn("Failed to release claim token {} during close: {}",
-                        cm.claimToken(), e.getMessage());
+            for (String sessionId : knownSessionIds()) {
+                synchronized (lockFor(sessionId)) {
+                    try {
+                        QuestionPendingContext pending = restorePending(sessionId);
+                        if (pending != null && pending.state() == QuestionPendingContext.State.PENDING) {
+                            cancelPendingInternal(sessionId, "shutdown");
+                            gate.release(sessionId);
+                        }
+                    } catch (Throwable e) {
+                        log.warn("Failed to cancel pending question for {}: {}",
+                            sessionId, e.getMessage());
+                    }
                 }
             }
-            log.info("Released {} pending claims during close", count);
-        } catch (Exception e) {
-            log.error("Pending claim release failed during close: {}", e.getMessage(), e);
+        } catch (Throwable e) {
+            log.error("Pending-question shutdown failed", e);
         }
-
-        // Step 7: Close ChatModel instances and shut down executor.
+        try {
+            for (ActiveTurnRegistry.ActiveTurn active : activeTurnRegistry.activeTurns()) {
+                active.queueInterrupt("shutdown");
+            }
+        } catch (Throwable e) {
+            log.error("Active-turn interruption during close failed", e);
+        }
+        try {
+            gate.drain(drainTimeoutSeconds * 1000L);
+        } catch (Throwable e) {
+            log.error("Turn gate drain failed", e);
+        }
+        try {
+            List<ClaimedMessage> stale = messageQueue.recoverStaleClaims(Duration.ZERO);
+            for (ClaimedMessage claim : stale) {
+                try {
+                    messageQueue.release(claim.claimToken());
+                } catch (Throwable ignored) {
+                    // recovery already returned the row to pending in the default store
+                }
+            }
+        } catch (Throwable e) {
+            log.error("Pending queue recovery during close failed", e);
+        }
         try {
             engine.closeChatModels();
-        } catch (Exception e) {
-            log.error("ChatModel close failed during shutdown: {}", e.getMessage(), e);
+        } catch (Throwable e) {
+            log.error("Model close failed", e);
         }
         try {
             executor.close();
-        } catch (Exception e) {
-            log.error("TurnExecutor shutdown failed during close: {}", e.getMessage(), e);
+        } catch (Throwable e) {
+            log.error("Executor close failed", e);
         }
-
         log.info("TurnLoop closed");
     }
 
-    // ── TurnLoop: accessors ──
+    // ── views ──
 
     @Override
     public ToolSubinterface tools() {
@@ -492,125 +556,16 @@ final class DefaultTurnLoop implements TurnLoop {
         return sessionsView;
     }
 
-    // ── Internal helpers ──
-
-    private void validateClosed() {
-        if (closed.get()) {
-            throw new TurnLoopException("TurnLoop is closed");
-        }
-    }
-
-    private void validateRequest(TurnRequest request) {
-        if (request == null) {
-            throw new TurnLoopException("request must not be null");
-        }
-        if (request.sessionId() == null || request.sessionId().isBlank()) {
-            throw new TurnLoopException("sessionId must not be blank");
-        }
-        if (request.message() == null || request.message().isBlank()) {
-            throw new TurnLoopException("message must not be blank");
-        }
-    }
-
-    private String resolveModel(@Nullable String requestedModel) {
-        if (requestedModel != null && !requestedModel.isBlank()) {
-            return requestedModel;
-        }
-        return defaultModel;
-    }
-
-    private String resolveSessionModel(String sessionId) {
-        try {
-            ConversationSession session = sessionStore.findById(sessionId);
-            if (session != null && session.model() != null && !session.model().isBlank()) {
-                return session.model();
-            }
-        } catch (Exception e) {
-            log.warn("Failed to resolve model from session store for {}: {}", sessionId, e.getMessage());
-        }
-        return defaultModel;
-    }
-
-    private TurnContext buildTurnContext(TurnRequest request, String model, boolean streaming) {
-        TurnRequest effectiveRequest = streaming
-            ? new TurnRequest(request.sessionId(), request.message(), model,
-                request.toolNames(), true, request.metadata())
-            : new TurnRequest(request.sessionId(), request.message(), model,
-                request.toolNames(), false, request.metadata());
-
-        String turnId = UUID.randomUUID().toString();
-        return new TurnContext(effectiveRequest, turnId, model);
-    }
-
-    private void recordSuccess(TurnRequest request, TurnResult result, long startMs) {
-        try {
-            lifecycleListener.onTurnCompleted(result);
-        } catch (Exception e) {
-            log.warn("Lifecycle listener failed for session={}: {}", request.sessionId(), e.getMessage());
-        }
-        try {
-            long durationMs = System.currentTimeMillis() - startMs;
-            String outcome = result.diagnostic().outcomeKind().name().toLowerCase();
-            metrics.recordTurnDuration(
-                resolveModel(request.model()), outcome, durationMs);
-        } catch (Exception e) {
-            log.warn("Metrics recording failed for session={}: {}", request.sessionId(), e.getMessage());
-        }
-    }
-
-    /**
-     * Releases the gate exactly once. Safe for multiple calls.
-     */
-    private void releaseGateOnce(String sessionId, AtomicBoolean gateReleased) {
-        if (gateReleased.compareAndSet(false, true)) {
-            try {
-                // Check if the turn was suspended — if so, transition instead of release.
-                if (interactionStore.load(sessionId) != null) {
-                    gate.transitionToAwaitingAnswer(sessionId);
-                } else {
-                    gate.release(sessionId);
-                }
-            } catch (Exception e) {
-                log.warn("Gate release/transition failed for session={}: {}", sessionId, e.getMessage());
-            }
-        }
-    }
-
-    /**
-     * Maps internal exceptions to public exception hierarchy.
-     * TurnFailedException and known public types pass through;
-     * IllegalArgumentException (model alias) becomes ConfigurationException;
-     * everything else becomes TurnLoopException.
-     */
-    private Throwable mapInternalException(Throwable e) {
-        if (e instanceof TurnFailedException
-            || e instanceof ConfigurationException
-            || e instanceof ConversationNotFoundException
-            || e instanceof ToolException
-            || e instanceof TurnLoopException) {
-            return e; // already public
-        }
-        if (e instanceof IllegalArgumentException) {
-            String msg = e.getMessage() != null ? e.getMessage() : "Invalid argument";
-            return new ConfigurationException(msg, Map.of("error", "illegal_argument"));
-        }
-        return new TurnLoopException(
-            e.getMessage() != null ? e.getMessage() : "Turn execution failed", e);
-    }
-
-    // ── Sub-interface: Tools ──
-
     private final class Tools implements ToolSubinterface {
-
         @Override
         public void register(@NonNull ToolCallback tool) {
             validateClosed();
             try {
                 toolRegistry.register(tool);
             } catch (ToolException e) {
-                throw e; // already public
-            } catch (RuntimeException e) {
-                throw new TurnLoopException("Failed to register tool: " + e.getMessage(), e);
+                throw e;
+            } catch (Throwable e) {
+                throw publicFailure("Failed to register tool", e);
             }
         }
 
@@ -621,18 +576,19 @@ final class DefaultTurnLoop implements TurnLoop {
                 toolRegistry.registerToolBean(bean);
             } catch (ToolException e) {
                 throw e;
-            } catch (RuntimeException e) {
-                throw new TurnLoopException("Failed to register tool bean: " + e.getMessage(), e);
+            } catch (Throwable e) {
+                throw publicFailure("Failed to register tool bean", e);
             }
         }
 
         @Override
         public void unregister(@NonNull String toolName) {
             validateClosed();
+            validateText(toolName, "toolName");
             try {
                 toolRegistry.unregister(toolName);
-            } catch (RuntimeException e) {
-                throw new TurnLoopException("Failed to unregister tool: " + e.getMessage(), e);
+            } catch (Throwable e) {
+                throw publicFailure("Failed to unregister tool", e);
             }
         }
 
@@ -641,79 +597,54 @@ final class DefaultTurnLoop implements TurnLoop {
             validateClosed();
             try {
                 return toolRegistry.definitions();
-            } catch (RuntimeException e) {
-                throw new TurnLoopException("Failed to list tool definitions: " + e.getMessage(), e);
+            } catch (Throwable e) {
+                throw publicFailure("Failed to list tools", e);
             }
         }
     }
 
-    // ── Sub-interface: Memory ──
-
     private final class Memory implements MemorySubinterface {
-
         @Override
         public List<TurnMessage> history(@NonNull String sessionId) {
             validateClosed();
-            if (sessionId.isBlank()) {
-                throw new TurnLoopException("sessionId must not be blank");
-            }
+            validateText(sessionId, "sessionId");
             try {
-                return conversationMemory.getMessages(sessionId);
-            } catch (RuntimeException e) {
-                throw new TurnLoopException("Failed to get message history: " + e.getMessage(), e);
+                return safeHistory(sessionId).stream()
+                    .filter(message -> !isPendingMarker(message))
+                    .toList();
+            } catch (Throwable e) {
+                throw publicFailure("Failed to read conversation history", e);
             }
         }
 
         @Override
         public void clear(@NonNull String sessionId) {
-            validateClosed();
-            if (sessionId.isBlank()) {
-                throw new TurnLoopException("sessionId must not be blank");
-            }
-            try {
-                conversationMemory.clear(sessionId);
-            } catch (RuntimeException e) {
-                throw new TurnLoopException("Failed to clear memory: " + e.getMessage(), e);
-            }
+            clearSession(sessionId);
         }
 
         @Override
         public ContextUsage contextUsage(@NonNull String sessionId) {
             validateClosed();
-            if (sessionId.isBlank()) {
-                throw new TurnLoopException("sessionId must not be blank");
-            }
+            validateText(sessionId, "sessionId");
             try {
-                List<TurnMessage> messages = conversationMemory.getMessages(sessionId);
-                int totalChars = 0;
-                for (TurnMessage msg : messages) {
-                    String text = msg.text();
-                    if (text != null) {
-                        totalChars += text.length();
-                    }
-                }
-                // Rough estimate: ~4 chars per token, default max 128K
-                int usedTokens = totalChars / 4;
-                int maxTokens = 128_000;
-                int triggerTokens = (int) (maxTokens * 0.85);
-                return new ContextUsage(usedTokens, triggerTokens, maxTokens);
-            } catch (RuntimeException e) {
-                throw new TurnLoopException("Failed to compute context usage: " + e.getMessage(), e);
+                ConversationSession session = sessionStore.findById(sessionId);
+                String alias = session != null && session.model() != null
+                    ? session.model() : engine.firstRegisteredModel(defaultModel);
+                return engine.contextUsage(sessionId, alias);
+            } catch (Throwable e) {
+                throw publicFailure("Failed to compute context usage", e);
             }
         }
     }
 
-    // ── Sub-interface: Sessions ──
-
     private final class Sessions implements SessionSubinterface {
-
         @Override
         public List<ConversationSession> list(@NonNull SessionFilter filter) {
             validateClosed();
             try {
                 return sessionStore.list(filter);
-            } catch (RuntimeException e) {
-                throw new TurnLoopException("Failed to list sessions: " + e.getMessage(), e);
+            } catch (Throwable e) {
+                throw publicFailure("Failed to list sessions", e);
             }
         }
 
@@ -721,93 +652,625 @@ final class DefaultTurnLoop implements TurnLoop {
         @Nullable
         public ConversationSession get(@NonNull String sessionId) {
             validateClosed();
-            if (sessionId.isBlank()) {
-                throw new TurnLoopException("sessionId must not be blank");
-            }
+            validateText(sessionId, "sessionId");
             try {
                 return sessionStore.findById(sessionId);
-            } catch (RuntimeException e) {
-                throw new TurnLoopException("Failed to get session: " + e.getMessage(), e);
+            } catch (Throwable e) {
+                throw publicFailure("Failed to get session", e);
             }
         }
 
         @Override
         public void updateTitle(@NonNull String sessionId, @NonNull String title) {
             validateClosed();
-            if (sessionId.isBlank()) {
-                throw new TurnLoopException("sessionId must not be blank");
-            }
+            validateText(sessionId, "sessionId");
             try {
                 sessionStore.updateTitle(sessionId, title);
-            } catch (RuntimeException e) {
-                throw new TurnLoopException("Failed to update title: " + e.getMessage(), e);
+            } catch (Throwable e) {
+                throw publicFailure("Failed to update session title", e);
             }
         }
 
         @Override
         public void setFavorite(@NonNull String sessionId, boolean favorite) {
             validateClosed();
-            if (sessionId.isBlank()) {
-                throw new TurnLoopException("sessionId must not be blank");
-            }
+            validateText(sessionId, "sessionId");
             try {
                 sessionStore.setFavorite(sessionId, favorite);
-            } catch (RuntimeException e) {
-                throw new TurnLoopException("Failed to set favorite: " + e.getMessage(), e);
+            } catch (Throwable e) {
+                throw publicFailure("Failed to update session favorite", e);
             }
         }
 
         @Override
         public void setArchived(@NonNull String sessionId, boolean archived) {
             validateClosed();
-            if (sessionId.isBlank()) {
-                throw new TurnLoopException("sessionId must not be blank");
-            }
+            validateText(sessionId, "sessionId");
             try {
                 sessionStore.setArchived(sessionId, archived);
-            } catch (RuntimeException e) {
-                throw new TurnLoopException("Failed to set archived: " + e.getMessage(), e);
+            } catch (Throwable e) {
+                throw publicFailure("Failed to update session archive state", e);
             }
         }
 
         @Override
         public void delete(@NonNull String sessionId) {
             validateClosed();
-            if (sessionId.isBlank()) {
-                throw new TurnLoopException("sessionId must not be blank");
-            }
-            try {
-                // Clear conversation memory for this session
-                conversationMemory.clear(sessionId);
-            } catch (RuntimeException e) {
-                throw new TurnLoopException("Failed to clear memory during session delete: " + e.getMessage(), e);
-            }
-            try {
-                interactionStore.delete(sessionId);
-            } catch (RuntimeException e) {
-                throw new TurnLoopException("Failed to clear interactions during session delete: " + e.getMessage(), e);
-            }
-            try {
-                sessionStore.delete(sessionId);
-            } catch (RuntimeException e) {
-                throw new TurnLoopException("Failed to delete session: " + e.getMessage(), e);
+            validateText(sessionId, "sessionId");
+            synchronized (lockFor(sessionId)) {
+                try {
+                    interruptActiveSession(sessionId, "session_deleted");
+                    conversationMemory.clear(sessionId);
+                    interactionStore.delete(sessionId);
+                    messageQueue.deleteBySessionId(sessionId);
+                    if (gate.state(sessionId) != TurnGate.GateState.EXECUTING) {
+                        gate.release(sessionId);
+                    }
+                    sessionStore.delete(sessionId);
+                } catch (Throwable e) {
+                    throw publicFailure("Failed to delete session", e);
+                }
             }
         }
     }
 
-    // ── No-op metrics (used when no TurnLoopMetrics is provided) ──
+    // ── gate/queue/session helpers ──
+
+    private PendingMessage enqueueInternal(TurnRequest request) {
+        Map<String, String> metadata = new LinkedHashMap<>();
+        if (request.metadata() != null) metadata.putAll(request.metadata());
+        metadata.put("turnloop.queued", "true");
+        if (request.model() != null && !request.model().isBlank()) {
+            metadata.put("turnloop.queued_model", request.model());
+        }
+        PendingMessage pending = messageQueue.enqueue(
+            request.sessionId(), request.message(), metadata);
+        setQueueMetric(request.sessionId());
+        return pending;
+    }
+
+    private TurnResult queueResult(TurnRequest request, PendingMessage pending) {
+        String turnId = UUID.randomUUID().toString();
+        ContextUsage usage = safeUsage(request.sessionId(), request.model());
+        Map<String, Object> details = new LinkedHashMap<>();
+        details.put("queuedMessageId", pending.messageId());
+        details.put("messageId", pending.messageId());
+        TurnDiagnostic diagnostic = new TurnDiagnostic(
+            turnId, request.sessionId(), Instant.now(), Instant.now(), TurnPhase.PREPARE,
+            TurnDiagnostic.OutcomeKind.QUEUED, details);
+        safeMetric(() -> metrics.recordTurnDuration(
+            request.model() == null ? defaultModel : request.model(), "queued", 0));
+        return new TurnResult(request.sessionId(), turnId,
+            "Queued message " + pending.messageId(), usage, diagnostic, List.of());
+    }
+
+    private TurnEvent queuedEvent(TurnRequest request, PendingMessage pending) {
+        TurnResult result = queueResult(request, pending);
+        return new TurnEvent.Queued(result.turnId(), Instant.now(), pending.messageId(),
+            result.diagnostic(), result.contextUsage());
+    }
+
+    private void finishSuccessfulTurn(String sessionId, TurnResult result) {
+        try {
+            TurnDiagnostic.OutcomeKind outcome = result.diagnostic().outcomeKind();
+            if (outcome == TurnDiagnostic.OutcomeKind.INTERRUPTED
+                || outcome == TurnDiagnostic.OutcomeKind.CANCELLED
+                || outcome == TurnDiagnostic.OutcomeKind.FAILED) {
+                clearPendingAfterInterruption(sessionId, outcome.name().toLowerCase());
+                gate.release(sessionId);
+                return;
+            }
+            QuestionPendingContext pending = activePending(sessionId);
+            if (pending != null && pending.state() == QuestionPendingContext.State.PENDING) {
+                gate.transitionToAwaitingAnswer(sessionId);
+            } else {
+                gate.release(sessionId);
+            }
+        } catch (Throwable e) {
+            throw publicFailure("Failed to finalize session gate", e);
+        }
+    }
+
+    private void finishGate(String sessionId, SignalType signal, AtomicBoolean finished) {
+        if (!finished.compareAndSet(false, true)) return;
+        if (signal == SignalType.CANCEL || signal == SignalType.ON_ERROR) {
+            gate.release(sessionId);
+            return;
+        }
+        if (activePending(sessionId) != null) {
+            gate.transitionToAwaitingAnswer(sessionId);
+        } else {
+            gate.release(sessionId);
+        }
+    }
+
+    private String resolveModel(TurnRequest request) {
+        try {
+            ConversationSession session = sessionStore.findById(request.sessionId());
+            String stored = session == null ? null : session.model();
+            return engine.selectModelAlias(request.model(), stored);
+        } catch (IllegalArgumentException e) {
+            throw new ConfigurationException(
+                e.getMessage() == null ? "Unknown model alias" : e.getMessage(),
+                Map.of("error", "unknown_model"));
+        } catch (TurnLoopException e) {
+            throw e;
+        } catch (Throwable e) {
+            throw publicFailure("Failed to resolve model", e);
+        }
+    }
+
+    private void ensureSession(String sessionId, String model) {
+        ConversationSession existing = sessionStore.findById(sessionId);
+        Instant now = Instant.now();
+        if (existing == null) {
+            sessionStore.save(new ConversationSession(
+                sessionId, null, model, false, false, "turnloop", now, now, Map.of()));
+        } else if (model != null && !model.equals(existing.model())) {
+            sessionStore.updateModel(sessionId, model);
+        }
+    }
+
+    private TurnContext buildTurnContext(TurnRequest request, String model, boolean streaming) {
+        TurnRequest effective = new TurnRequest(
+            request.sessionId(), request.message(), model, request.toolNames(), streaming,
+            request.metadata() == null ? Map.of() : Map.copyOf(request.metadata()));
+        return new TurnContext(effective, UUID.randomUUID().toString(), model);
+    }
+
+    private QuestionPendingContext restorePending(String sessionId) {
+        QuestionPendingContext pending = interactionStore.load(sessionId);
+        if (pending == null) {
+            pending = pendingFromMemory(sessionId);
+            if (pending != null) {
+                interactionStore.save(sessionId, pending);
+            }
+        }
+        if (pending == null || pending.state() != QuestionPendingContext.State.PENDING) {
+            return null;
+        }
+        if (gate.state(sessionId) == TurnGate.GateState.IDLE) {
+            TurnGate.AcquireResult acquired = gate.acquire(sessionId, TurnGate.TurnGateMode.SEND);
+            if (acquired instanceof TurnGate.AcquireResult.Acquired) {
+                gate.transitionToAwaitingAnswer(sessionId);
+            }
+        }
+        return pending;
+    }
+
+    private QuestionPendingContext activePending(String sessionId) {
+        QuestionPendingContext pending = interactionStore.load(sessionId);
+        return pending != null && pending.state() == QuestionPendingContext.State.PENDING
+            ? pending : null;
+    }
+
+    private QuestionPendingContext pendingFromMemory(String sessionId) {
+        List<TurnMessage> messages = conversationMemory.getMessages(sessionId);
+        for (int i = messages.size() - 1; i >= 0; i--) {
+            TurnMessage message = messages.get(i);
+            if (!isPendingMarker(message)) continue;
+            Map<String, String> metadata = message.metadata();
+            List<String> questions = readJsonList(metadata.get("turnloop.pending_questions"));
+            if (questions.isEmpty()) continue;
+            Map<String, String> continuation = readJsonMap(metadata.get("turnloop.pending_metadata"));
+            return new QuestionPendingContext(
+                sessionId, metadata.get("turnloop.pending_turn_id"), questions,
+                emptyToNull(metadata.get("turnloop.pending_model")), continuation);
+        }
+        return null;
+    }
+
+    private void clearPendingState(String sessionId) {
+        removePendingMarkers(sessionId);
+        interactionStore.delete(sessionId);
+    }
+
+    private void clearPendingAfterFailure(String sessionId) {
+        try {
+            if (interactionStore.load(sessionId) != null || pendingFromMemory(sessionId) != null) {
+                clearPendingState(sessionId);
+            }
+        } catch (Throwable e) {
+            log.warn("Failed to clear pending interaction for {}: {}", sessionId, e.getMessage());
+        }
+    }
+
+    private void clearPendingAfterInterruption(String sessionId, String reason) {
+        try {
+            QuestionPendingContext pending = activePending(sessionId);
+            if (pending != null) {
+                cancelPendingInternal(sessionId, reason);
+                auditError(sessionId, "Question cancelled: " + reason, null, pending.model());
+            }
+        } catch (Throwable e) {
+            log.warn("Failed to clear interrupted interaction for {}: {}", sessionId, e.getMessage());
+        }
+    }
+
+    private void cancelPendingInternal(String sessionId, String reason) {
+        removePendingMarkers(sessionId);
+        interactionStore.delete(sessionId);
+        conversationMemory.addMessages(sessionId, List.of(new TurnMessage(
+            "system", "Question cancelled: " + reason, null, null,
+            Map.of("turnloop.persistence_type", "interaction_cancelled"))));
+    }
+
+    private void removePendingMarkers(String sessionId) {
+        List<TurnMessage> all = conversationMemory.getMessages(sessionId);
+        List<TurnMessage> retained = all.stream()
+            .filter(message -> !isPendingMarker(message))
+            .toList();
+        if (retained.size() == all.size()) return;
+        conversationMemory.clear(sessionId);
+        if (!retained.isEmpty()) conversationMemory.addMessages(sessionId, retained);
+    }
+
+    private boolean isPendingMarker(TurnMessage message) {
+        return message != null && message.metadata() != null
+            && PENDING_TYPE.equals(message.metadata().get("turnloop.persistence_type"));
+    }
+
+    private Map<String, String> continuationMetadata(QuestionPendingContext pending) {
+        Map<String, String> metadata = new LinkedHashMap<>(pending.continuationContext());
+        metadata.put("turnloop.continuation", "true");
+        metadata.put("turnloop.pending_turn_id", pending.turnId());
+        metadata.put("turnloop.pending_model", nullToEmpty(pending.model()));
+        metadata.put("turnloop.pending_questions", writeJson(pending.questions()));
+        metadata.put("turnloop.pending_tool_names",
+            pending.continuationContext().getOrDefault("turnloop.pending_tool_names", "[]"));
+        metadata.put("turnloop.pending_metadata", writeJson(pending.continuationContext()));
+        return metadata;
+    }
+
+    private void interruptActiveSession(String sessionId, String reason) {
+        String turnId = activeTurnIds.get(sessionId);
+        if (turnId == null) return;
+        ActiveTurnRegistry.ActiveTurn active = activeTurnRegistry.get(turnId);
+        if (active != null) active.queueInterrupt(reason);
+    }
+
+    private List<String> knownSessionIds() {
+        List<String> ids = new ArrayList<>();
+        try {
+            sessionStore.list(SessionFilter.all()).forEach(session -> ids.add(session.sessionId()));
+        } catch (Throwable e) {
+            log.warn("Unable to enumerate sessions during lifecycle cleanup: {}", e.getMessage());
+        }
+        return List.copyOf(ids);
+    }
+
+    // ── observations ──
+
+    private void recordTurnObservability(TurnRequest request, TurnResult result,
+                                         List<TurnMessage> before, String model,
+                                         long started, boolean lifecycle) {
+        auditNewMessages(request.sessionId(), before);
+        safeAuditContext(request.sessionId(), result.contextUsage(), model);
+        long duration = Math.max(0, System.currentTimeMillis() - started);
+        safeMetric(() -> metrics.recordTurnDuration(model,
+            result.diagnostic().outcomeKind().name().toLowerCase(), duration));
+        result.toolActivities().forEach(activity -> safeMetric(() -> metrics.recordToolCall(
+            activity.toolName(), activity.status().name())));
+        if (lifecycle && result.diagnostic().outcomeKind() != TurnDiagnostic.OutcomeKind.QUEUED) {
+            safeLifecycle(result);
+        }
+        setQueueMetric(request.sessionId());
+    }
+
+    private void recordStreamObservability(TurnRequest request, TurnContext context,
+                                            List<TurnMessage> before,
+                                            List<TurnEvent> events, String model,
+                                            long started, SignalType signal,
+                                            AtomicBoolean lifecycleRecorded) {
+        if (events.isEmpty()) return;
+        TurnResult result = reduceEvents(context, events);
+        auditNewMessages(request.sessionId(), before);
+        safeAuditContext(request.sessionId(), result.contextUsage(), model);
+        long duration = Math.max(0, System.currentTimeMillis() - started);
+        String outcome = result.diagnostic().outcomeKind().name().toLowerCase();
+        safeMetric(() -> metrics.recordTurnDuration(model, outcome, duration));
+        result.toolActivities().forEach(activity -> safeMetric(() -> metrics.recordToolCall(
+            activity.toolName(), activity.status().name())));
+        if (lifecycleRecorded.compareAndSet(false, true)
+            && result.diagnostic().outcomeKind() != TurnDiagnostic.OutcomeKind.QUEUED) {
+            safeLifecycle(result);
+        }
+        setQueueMetric(request.sessionId());
+    }
+
+    private void recordFailureObservability(String sessionId, String model,
+                                            List<TurnMessage> before, long started,
+                                            Throwable failure) {
+        auditNewMessages(sessionId, before);
+        auditError(sessionId, messageOf(failure), null, model);
+        safeMetric(() -> metrics.recordTurnDuration(model, "failed",
+            Math.max(0, System.currentTimeMillis() - started)));
+    }
+
+    private void auditNewMessages(String sessionId, List<TurnMessage> before) {
+        try {
+            List<TurnMessage> after = conversationMemory.getMessages(sessionId);
+            List<TurnMessage> visibleBefore = before.stream()
+                .filter(message -> !isPendingMarker(message)).toList();
+            List<TurnMessage> visibleAfter = after.stream()
+                .filter(message -> !isPendingMarker(message)).toList();
+            int index = commonPrefix(visibleBefore, visibleAfter);
+            for (; index < visibleAfter.size(); index++) {
+                TurnMessage message = visibleAfter.get(index);
+                if (isPendingMarker(message) || "user".equals(message.role())) continue;
+                if ("assistant".equals(message.role())) {
+                    auditWriter.recordAssistantMessage(sessionId, message);
+                } else if ("tool".equals(message.role())) {
+                    auditWriter.recordToolExecution(sessionId,
+                        new AuditWriter.ToolExecutionRecord(
+                            nullToEmpty(message.toolName()), nullToEmpty(message.toolCallId()),
+                            "", message.text(), true, 0));
+                }
+            }
+        } catch (Throwable e) {
+            log.debug("Audit history capture failed for session {}: {}", sessionId, e.getMessage());
+        }
+    }
+
+    private void auditUser(String sessionId, TurnMessage message) {
+        try {
+            auditWriter.recordUserMessage(sessionId, message);
+        } catch (Throwable e) {
+            log.debug("User audit failed for session {}: {}", sessionId, e.getMessage());
+        }
+    }
+
+    private void auditError(String sessionId, String summary, String stack, String model) {
+        try {
+            auditWriter.recordError(sessionId, new AuditWriter.TurnError(summary, stack, model));
+        } catch (Throwable e) {
+            log.debug("Error audit failed for session {}: {}", sessionId, e.getMessage());
+        }
+    }
+
+    private void safeAuditContext(String sessionId, ContextUsage usage, String model) {
+        try {
+            auditWriter.recordContextUsage(sessionId, usage, model);
+        } catch (Throwable e) {
+            log.debug("Context audit failed for session {}: {}", sessionId, e.getMessage());
+        }
+    }
+
+    private void safeLifecycle(TurnResult result) {
+        try {
+            lifecycleListener.onTurnCompleted(result);
+        } catch (Throwable e) {
+            log.warn("Turn lifecycle listener failed: {}", e.getMessage());
+        }
+    }
+
+    private void setActiveMetric() {
+        safeMetric(() -> metrics.setActiveTurns(activeTurnRegistry.activeTurns().size()));
+    }
+
+    private void setQueueMetric(String sessionId) {
+        safeMetric(() -> metrics.setQueueDepth(sessionId, messageQueue.list(sessionId).size()));
+    }
+
+    private void safeMetric(Runnable action) {
+        try {
+            action.run();
+        } catch (Throwable e) {
+            log.debug("Turn metric failed: {}", e.getMessage());
+        }
+    }
+
+    // ── result reduction ──
+
+    private TurnResult reduceEvents(TurnContext context, List<TurnEvent> events) {
+        TurnDiagnostic diagnostic = null;
+        ContextUsage usage = null;
+        StringBuilder message = new StringBuilder();
+        List<ToolActivityData> activities = new ArrayList<>();
+        for (TurnEvent event : events) {
+            if (event instanceof TurnEvent.Completed completed) diagnostic = completed.diagnostic();
+            if (event instanceof TurnEvent.Failed failed) diagnostic = failed.diagnostic();
+            if (event instanceof TurnEvent.Queued queued) diagnostic = queued.diagnostic();
+            if (event instanceof TurnEvent.QuestionPending pending) {
+                diagnostic = new TurnDiagnostic(context.turnId(), context.sessionId(),
+                    Instant.now(), Instant.now(), TurnPhase.FINALIZE,
+                    TurnDiagnostic.OutcomeKind.SUSPENDED,
+                    Map.of("questions", pending.questions()));
+                if (message.isEmpty()) message.append(String.join("\n", pending.questions()));
+            }
+            if (event instanceof TurnEvent.Interrupt interrupt) {
+                diagnostic = new TurnDiagnostic(context.turnId(), context.sessionId(),
+                    Instant.now(), Instant.now(), TurnPhase.FINALIZE,
+                    TurnDiagnostic.OutcomeKind.INTERRUPTED,
+                    Map.of("reason", interrupt.reason()));
+            }
+            if (event instanceof TurnEvent.Chunk chunk && !chunk.thinking()) message.append(chunk.text());
+            if (event instanceof TurnEvent.ToolActivity activity) {
+                activities.add(new ToolActivityData(activity.toolName(), activity.toolCallId(),
+                    activity.status(), activity.summary()));
+            }
+            if (event.contextUsage() != null) usage = event.contextUsage();
+        }
+        if (diagnostic == null) {
+            diagnostic = new TurnDiagnostic(context.turnId(), context.sessionId(),
+                Instant.now(), Instant.now(), TurnPhase.FINALIZE,
+                TurnDiagnostic.OutcomeKind.COMPLETED, Map.of());
+        }
+        if (usage == null) usage = safeUsage(context.sessionId(), context.model());
+        return new TurnResult(context.sessionId(), context.turnId(),
+            message.isEmpty() ? null : message.toString(), usage, diagnostic, List.copyOf(activities));
+    }
+
+    // ── validation and exception boundary ──
+
+    private void validateClosed() {
+        if (closed.get()) throw new TurnLoopException("TurnLoop is closed");
+    }
+
+    private void validateRequest(TurnRequest request) {
+        if (request == null) throw new TurnLoopException("request must not be null");
+        validateText(request.sessionId(), "sessionId");
+        validateText(request.message(), "message");
+    }
+
+    private void validateText(String value, String name) {
+        if (value == null || value.isBlank()) {
+            throw new TurnLoopException(name + " must not be blank");
+        }
+    }
+
+    private Throwable mapInternalException(Throwable error) {
+        Throwable cause = unwrap(error);
+        if (cause instanceof TurnLoopException) return cause;
+        return publicFailure("Turn execution failed", cause);
+    }
+
+    private TurnLoopException publicFailure(String prefix, Throwable error) {
+        Throwable cause = unwrap(error);
+        if (cause instanceof TurnLoopException turnLoopException) return turnLoopException;
+        if (cause instanceof IllegalArgumentException) {
+            return new ConfigurationException(
+                cause.getMessage() == null ? prefix : cause.getMessage(),
+                Map.of("error", "invalid_configuration"));
+        }
+        return new TurnLoopException(prefix + ": " + messageOf(cause), cause);
+    }
+
+    private Throwable unwrap(Throwable error) {
+        Throwable current = error;
+        while ((current instanceof java.util.concurrent.CompletionException
+                || current instanceof java.util.concurrent.ExecutionException)
+            && current.getCause() != null) {
+            current = current.getCause();
+        }
+        return current;
+    }
+
+    private String messageOf(Throwable error) {
+        return error == null || error.getMessage() == null || error.getMessage().isBlank()
+            ? "unknown failure" : error.getMessage();
+    }
+
+    private TurnMessage currentUser(TurnRequest request) {
+        return TurnMessage.user(request.message());
+    }
+
+    private List<TurnMessage> safeHistory(String sessionId) {
+        return conversationMemory.getMessages(sessionId);
+    }
+
+    private ContextUsage safeUsage(String sessionId, String requestedModel) {
+        try {
+            String model = requestedModel == null || requestedModel.isBlank()
+                ? engine.firstRegisteredModel(defaultModel) : requestedModel;
+            return engine.contextUsage(sessionId, model);
+        } catch (Throwable e) {
+            return new ContextUsage(0, 0, 0);
+        }
+    }
+
+    private int commonPrefix(List<TurnMessage> before, List<TurnMessage> after) {
+        int limit = Math.min(before.size(), after.size());
+        int index = 0;
+        while (index < limit && before.get(index).equals(after.get(index))) index++;
+        return index;
+    }
+
+    private Object lockFor(String sessionId) {
+        return sessionLocks.computeIfAbsent(sessionId, ignored -> new Object());
+    }
+
+    private String writeJson(Object value) {
+        try {
+            return objectMapper.writeValueAsString(value);
+        } catch (Exception e) {
+            throw new TurnLoopException("Unable to serialize interaction continuation", e);
+        }
+    }
+
+    private List<String> readJsonList(String json) {
+        if (json == null || json.isBlank()) return List.of();
+        try {
+            return List.copyOf(objectMapper.readValue(json, STRING_LIST));
+        } catch (Exception e) {
+            return List.of();
+        }
+    }
+
+    private Map<String, String> readJsonMap(String json) {
+        if (json == null || json.isBlank()) return Map.of();
+        try {
+            return Map.copyOf(objectMapper.readValue(json, STRING_MAP));
+        } catch (Exception e) {
+            return Map.of();
+        }
+    }
+
+    private String nullToEmpty(String value) {
+        return value == null ? "" : value;
+    }
+
+    private String emptyToNull(String value) {
+        return value == null || value.isBlank() ? null : value;
+    }
+
+    private static InteractionStore restartSafeInteractionStore(InteractionStore candidate,
+                                                                 ConversationMemory memory,
+                                                                 ObjectMapper mapper) {
+        if (!(candidate instanceof InMemoryInteractionStore)) return candidate;
+        DataSource dataSource = dataSourceOf(memory);
+        if (dataSource == null) return candidate;
+        try {
+            return new SqliteInteractionStore(dataSource, mapper);
+        } catch (Throwable e) {
+            log.warn("Durable interaction store unavailable; retaining supplied store: {}",
+                e.getMessage());
+            return candidate;
+        }
+    }
+
+    private static AuditWriter defaultAuditWriter(ConversationMemory memory, ObjectMapper mapper) {
+        DataSource dataSource = dataSourceOf(memory);
+        if (dataSource == null) return new NoOpTurnLoopAuditWriter();
+        try {
+            return new SqliteAuditWriter(dataSource, mapper);
+        } catch (Throwable e) {
+            log.warn("Durable audit writer unavailable: {}", e.getMessage());
+            return new NoOpTurnLoopAuditWriter();
+        }
+    }
+
+    private static DataSource dataSourceOf(Object repository) {
+        if (repository == null) return null;
+        for (String fieldName : List.of("dataSource", "jdbc")) {
+            try {
+                Field field = repository.getClass().getDeclaredField(fieldName);
+                field.setAccessible(true);
+                Object value = field.get(repository);
+                if (value instanceof DataSource dataSource) return dataSource;
+                if (value != null) {
+                    try {
+                        Object nested = value.getClass().getMethod("getDataSource").invoke(value);
+                        if (nested instanceof DataSource dataSource) return dataSource;
+                    } catch (ReflectiveOperationException ignored) { }
+                }
+            } catch (ReflectiveOperationException ignored) { }
+        }
+        return null;
+    }
+
+    private static final class NoOpTurnLoopAuditWriter implements AuditWriter {
+        @Override public void recordUserMessage(String s, TurnMessage m) { }
+        @Override public void recordAssistantMessage(String s, TurnMessage m) { }
+        @Override public void recordToolExecution(String s, ToolExecutionRecord r) { }
+        @Override public void recordContextUsage(String s, ContextUsage u, String m) { }
+        @Override public void recordError(String s, TurnError e) { }
+    }
 
     private static final class NoOpTurnLoopMetrics implements TurnLoopMetrics {
-        @Override
-        public void recordTurnDuration(String model, String outcome, long durationMs) { }
-
-        @Override
-        public void recordToolCall(String toolName, String status) { }
-
-        @Override
-        public void setActiveTurns(long count) { }
-
-        @Override
-        public void setQueueDepth(String sessionId, long depth) { }
+        @Override public void recordTurnDuration(String model, String outcome, long durationMs) { }
+        @Override public void recordToolCall(String toolName, String status) { }
+        @Override public void setActiveTurns(long count) { }
+        @Override public void setQueueDepth(String sessionId, long depth) { }
     }
 }

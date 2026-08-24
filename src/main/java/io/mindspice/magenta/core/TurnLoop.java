@@ -18,8 +18,9 @@ import java.util.List;
  * {@link #sessions()} are safe for concurrent read but mutations through
  * them should be serialized externally. {@link #enqueue(TurnRequest) enqueue},
  * {@link #claim(String) claim}, {@link #ack(String) ack},
- * {@link #release(String) release}, and {@link #interrupt(String, String) interrupt}
- * are safe for concurrent use. {@link #close()} is idempotent and thread-safe.
+ * {@link #release(String) release}, {@link #interrupt(String, String) interrupt},
+ * and {@link #cancelQuestion(String, String) cancelQuestion} are safe for
+ * concurrent use. {@link #close()} is idempotent and thread-safe.
  *
  * <h3>Exception contract</h3>
  * Every public method may throw {@link TurnLoopException} or one of its
@@ -89,6 +90,16 @@ public interface TurnLoop extends AutoCloseable {
      * @throws TurnFailedException if the resumed turn fails
      */
     TurnResult answer(@NonNull String sessionId, @NonNull String answer);
+
+    /**
+     * Cancels the pending question interaction for a session, releases its
+     * gate, and leaves already queued messages untouched.
+     *
+     * @param sessionId session awaiting an answer
+     * @param reason durable cancellation reason
+     * @return {@code true} when an active pending interaction was cancelled
+     */
+    boolean cancelQuestion(@NonNull String sessionId, @NonNull String reason);
 
     // ── Queue ──
 

@@ -25,7 +25,10 @@ public record TurnDiagnostic(
 ) {
     public enum OutcomeKind {
         COMPLETED,
+        SUSPENDED,
+        QUEUED,
         INTERRUPTED,
+        CANCELLED,
         FAILED,
         TIMED_OUT,
         ABORTED
