@@ -1,4 +1,4 @@
-package io.mindspice.magenta.core.engine;
+package io.mindspice.magenta.core;
 
 import io.mindspice.magenta.core.CompactionResult;
 import io.mindspice.magenta.core.ContextUsage;
@@ -20,7 +20,7 @@ import java.util.function.ToIntFunction;
  * context length is supplied by the engine's model boundary; this class never
  * guesses from a provider-specific type.
  */
-public final class ContextManager {
+final class ContextManager {
 
     private static final int FALLBACK_CONTEXT_LENGTH = 128_000;
 

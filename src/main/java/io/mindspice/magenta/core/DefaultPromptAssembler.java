@@ -1,4 +1,4 @@
-package io.mindspice.magenta.core.engine;
+package io.mindspice.magenta.core;
 
 import io.mindspice.magenta.core.NonNull;
 import io.mindspice.magenta.core.TurnContext;
@@ -22,7 +22,7 @@ import java.util.stream.Collectors;
  * <p>This is a framework-public class — external consumers use
  * the {@code TurnLoop} facade exclusively.</p>
  */
-public final class DefaultPromptAssembler {
+final class DefaultPromptAssembler {
 
     private final String defaultSystemPrompt;
     private final List<PromptContributor> contributors;

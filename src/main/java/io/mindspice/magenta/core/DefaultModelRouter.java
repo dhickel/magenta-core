@@ -1,4 +1,4 @@
-package io.mindspice.magenta.core.internal;
+package io.mindspice.magenta.core;
 
 import io.mindspice.magenta.core.ConfigurationException;
 import io.mindspice.magenta.core.ModelConfig;
@@ -25,7 +25,7 @@ import java.util.Objects;
  * provider artifacts bundled by the root POM. Spring AI types stop at this
  * internal boundary; callers provide only Magenta model and tool contracts.</p>
  */
-public final class DefaultModelRouter implements ModelRouter {
+final class DefaultModelRouter implements ModelRouter {
 
     private static final Logger log = LoggerFactory.getLogger(DefaultModelRouter.class);
     private static final Duration DEFAULT_TIMEOUT = Duration.ofSeconds(360);

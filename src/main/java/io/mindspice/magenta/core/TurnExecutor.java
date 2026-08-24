@@ -1,4 +1,4 @@
-package io.mindspice.magenta.core.internal;
+package io.mindspice.magenta.core;
 
 import io.mindspice.magenta.core.NonNull;
 
@@ -10,7 +10,7 @@ import java.util.function.Supplier;
  * turns. The concrete virtual-thread implementation is created in a later
  * phase; this phase defines only the interface.
  */
-public interface TurnExecutor extends AutoCloseable {
+interface TurnExecutor extends AutoCloseable {
 
     <T> CompletableFuture<T> submit(@NonNull String sessionId, @NonNull Supplier<T> task);
 

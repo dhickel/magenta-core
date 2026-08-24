@@ -1,4 +1,4 @@
-package io.mindspice.magenta.core.internal;
+package io.mindspice.magenta.core;
 
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;

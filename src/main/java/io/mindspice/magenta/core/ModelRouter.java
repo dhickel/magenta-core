@@ -1,4 +1,4 @@
-package io.mindspice.magenta.core.internal;
+package io.mindspice.magenta.core;
 
 import io.mindspice.magenta.core.NonNull;
 import io.mindspice.magenta.core.Nullable;
@@ -12,7 +12,7 @@ import java.util.List;
  * Internal mapping boundary to Spring AI. Public callers use Magenta-owned
  * model, request, and tool contracts instead of this interface.
  */
-public interface ModelRouter {
+interface ModelRouter {
 
     @NonNull
     ChatModel springAiChatModel(@NonNull String modelAlias);

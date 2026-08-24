@@ -1,4 +1,4 @@
-package io.mindspice.magenta.core.internal;
+package io.mindspice.magenta.core;
 
 import com.openai.client.OpenAIClient;
 import com.openai.client.OpenAIClientAsync;

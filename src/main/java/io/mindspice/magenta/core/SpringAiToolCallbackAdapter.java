@@ -1,4 +1,4 @@
-package io.mindspice.magenta.core.internal;
+package io.mindspice.magenta.core;
 
 import io.mindspice.magenta.core.ToolCallback;
 import io.mindspice.magenta.core.ToolDefinition;

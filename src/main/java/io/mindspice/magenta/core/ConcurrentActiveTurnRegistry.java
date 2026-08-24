@@ -1,4 +1,4 @@
-package io.mindspice.magenta.core.internal;
+package io.mindspice.magenta.core;
 
 import io.mindspice.magenta.core.NonNull;
 import io.mindspice.magenta.core.Nullable;
@@ -19,7 +19,7 @@ import java.util.concurrent.locks.ReentrantLock;
  * time replaces the previous registration (no duplicate detection —
  * the engine ensures uniqueness).</p>
  */
-public final class ConcurrentActiveTurnRegistry implements ActiveTurnRegistry {
+final class ConcurrentActiveTurnRegistry implements ActiveTurnRegistry {
 
     private final ConcurrentMap<String, ActiveTurnImpl> turns = new ConcurrentHashMap<>();
 

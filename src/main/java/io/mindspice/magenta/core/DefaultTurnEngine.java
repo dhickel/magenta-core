@@ -1,12 +1,12 @@
-package io.mindspice.magenta.core.engine;
+package io.mindspice.magenta.core;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.mindspice.magenta.core.*;
-import io.mindspice.magenta.core.internal.ActiveTurnRegistry;
-import io.mindspice.magenta.core.internal.ModelRouter;
-import io.mindspice.magenta.core.internal.TurnExecutor;
+import io.mindspice.magenta.core.ActiveTurnRegistry;
+import io.mindspice.magenta.core.ModelRouter;
+import io.mindspice.magenta.core.TurnExecutor;
 import io.mindspice.magenta.core.spi.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -35,7 +35,7 @@ import java.util.concurrent.CompletionException;
  * engine and the model-router boundary; callers receive only Magenta events,
  * records, and exceptions.
  */
-public final class DefaultTurnEngine {
+final class DefaultTurnEngine {
 
     private static final Logger log = LoggerFactory.getLogger(DefaultTurnEngine.class);
     private static final ObjectMapper CODEC = new ObjectMapper();
@@ -1212,7 +1212,7 @@ public final class DefaultTurnEngine {
         }
     }
 
-    public static final class Builder {
+    static final class Builder {
         ToolRegistry toolRegistry;
         ToolAccessPolicy toolAccessPolicy = ToolAccessPolicy.allowAll();
         ToolResultSummarizer toolResultSummarizer;

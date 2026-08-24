@@ -2,9 +2,9 @@ package io.mindspice.magenta.core;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import io.mindspice.magenta.core.engine.DefaultTurnEngine;
-import io.mindspice.magenta.core.internal.ActiveTurnRegistry;
-import io.mindspice.magenta.core.internal.TurnExecutor;
+import io.mindspice.magenta.core.DefaultTurnEngine;
+import io.mindspice.magenta.core.ActiveTurnRegistry;
+import io.mindspice.magenta.core.TurnExecutor;
 import io.mindspice.magenta.core.persistence.SqliteAuditWriter;
 import io.mindspice.magenta.core.persistence.SqliteConversationMemory;
 import io.mindspice.magenta.core.spi.*;

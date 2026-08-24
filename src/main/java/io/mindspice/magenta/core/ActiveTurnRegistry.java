@@ -1,4 +1,4 @@
-package io.mindspice.magenta.core.internal;
+package io.mindspice.magenta.core;
 
 import io.mindspice.magenta.core.NonNull;
 import io.mindspice.magenta.core.Nullable;
@@ -13,7 +13,7 @@ import java.util.Optional;
  * this phase defines only the interface and its inner {@code ActiveTurn}
  * sub-interface.
  */
-public interface ActiveTurnRegistry {
+interface ActiveTurnRegistry {
 
     @NonNull
     ActiveTurn register(@NonNull String turnId);

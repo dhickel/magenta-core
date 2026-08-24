@@ -1,4 +1,4 @@
-package io.mindspice.magenta.core.internal;
+package io.mindspice.magenta.core;
 
 import io.mindspice.magenta.core.ExecutorStrategy;
 import io.mindspice.magenta.core.NonNull;
@@ -19,7 +19,7 @@ import java.util.function.Supplier;
  * (for isolated turn execution). The executor is shut down during
  * {@link #close()} with a bounded await-termination period.</p>
  */
-public final class DefaultTurnExecutor implements TurnExecutor {
+final class DefaultTurnExecutor implements TurnExecutor {
 
     private static final Logger log = LoggerFactory.getLogger(DefaultTurnExecutor.class);
 

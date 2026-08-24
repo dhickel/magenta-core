@@ -1,4 +1,4 @@
-package io.mindspice.magenta.core.internal;
+package io.mindspice.magenta.core;
 
 import io.mindspice.magenta.core.ConfigurationException;
 import io.mindspice.magenta.core.ModelConfig;
