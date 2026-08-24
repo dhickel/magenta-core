@@ -225,7 +225,7 @@ final class DefaultTurnEngine {
                 turnMessagesToSpring(contextManager.window(ctx,
                     configuredContextLength(ctx.model()))));
 
-            QuestionPendingContext continuation = continuationContext(ctx);
+            InteractionStore.Interaction continuation = continuationContext(ctx);
             if (continuation != null) {
                 TurnMessage questionAnswer = questionAnswerMessage(continuation, ctx);
                 state.messagesToPersist.add(questionAnswer);
@@ -661,8 +661,10 @@ final class DefaultTurnEngine {
                 throw failureException(ctx, startedAt, TurnPhase.FINALIZE,
                     TurnFailureCategory.PERSISTENCE, "Pending interaction state is incomplete");
             }
-            outcome = new TurnResponse.Questions(
-                execution, interactionId, state.pendingContext.questions());
+            // The interaction store owns the exact Questions snapshot. Reuse
+            // that snapshot so pendingQuestions() and the emitted terminal
+            // response cannot diverge in execution metadata.
+            outcome = state.pendingContext.questions();
         } else {
             String text = state.visibleText.toString();
             if (text.isBlank()) {
@@ -706,19 +708,27 @@ final class DefaultTurnEngine {
         continuation.put(PENDING_INTERACTION_ID, interactionId);
         continuation.put("turnloop.pending_tool_names", writeJson(
             ctx.request().toolNames() == null ? List.of() : ctx.request().toolNames()));
-        QuestionPendingContext pending = new QuestionPendingContext(
-            ctx.sessionId(), ctx.turnId(), ordered, ctx.model(), continuation);
+        Instant now = Instant.now();
+        ExecutionInfo execution = new ExecutionInfo(
+            ctx.sessionId(), ctx.turnId(), state.origin, now, now,
+            computeUsage(ctx), List.copyOf(state.toolActivities));
+        TurnResponse.Questions questionOutcome = new TurnResponse.Questions(
+            execution, interactionId, ordered);
+        InteractionStore.Interaction pending = new InteractionStore.Interaction(
+            interactionId, ctx.sessionId(), questionOutcome, ctx.model(),
+            ctx.request().toolNames(), ctx.request().metadata(), continuation,
+            List.of(), InteractionState.PENDING, now, now, null, null);
 
         boolean saved;
         try {
             saved = active.runIfActive(() -> {
                 try {
-                    interactionStore.save(ctx.sessionId(), pending);
+                    interactionStore.save(pending);
                     state.messagesToPersist.add(pendingMarker(pending));
                     persistState(state, ctx.sessionId(), active);
                 } catch (Throwable failure) {
                     try {
-                        interactionStore.delete(ctx.sessionId());
+                        interactionStore.delete(ctx.sessionId(), interactionId);
                     } catch (Throwable cleanupFailure) {
                         log.warn("Unable to clean up pending interaction for session {}",
                             ctx.sessionId());
@@ -816,10 +826,10 @@ final class DefaultTurnEngine {
                                           ActiveTurnRegistry.ActiveTurn active) {
         try {
             active.runIfActive(() -> {
-                if (interactionStore.load(sessionId) != null) {
+                interactionStore.pending(sessionId).ifPresent(interaction -> {
                     removePendingMarkers(sessionId);
-                    interactionStore.delete(sessionId);
-                }
+                    interactionStore.delete(sessionId, interaction.interactionId());
+                });
             });
         } catch (Throwable failure) {
             log.warn("Unable to clear pending interaction for session {}", sessionId);
@@ -840,17 +850,16 @@ final class DefaultTurnEngine {
         }
     }
 
-    private TurnMessage pendingMarker(QuestionPendingContext pending) {
+    private TurnMessage pendingMarker(InteractionStore.Interaction pending) {
         Map<String, String> metadata = new LinkedHashMap<>();
         metadata.put("turnloop.persistence_type", PENDING_TYPE);
-        metadata.put("turnloop.pending_turn_id", pending.turnId());
-        metadata.put("turnloop.pending_model", nullToEmpty(pending.model()));
-        metadata.put("turnloop.pending_interaction_id",
-            pending.continuationContext().getOrDefault(PENDING_INTERACTION_ID, ""));
-        metadata.put("turnloop.pending_questions", writeJson(pending.questions()));
-        metadata.put("turnloop.pending_tool_names", pending.continuationContext()
-            .getOrDefault("turnloop.pending_tool_names", "[]"));
-        metadata.put("turnloop.pending_metadata", writeJson(pending.continuationContext()));
+        metadata.put("turnloop.pending_turn_id", pending.questions().execution().turnId());
+        metadata.put("turnloop.pending_model", pending.model());
+        metadata.put("turnloop.pending_interaction_id", pending.interactionId());
+        metadata.put("turnloop.pending_questions", writeJson(pending.questions().questions()));
+        metadata.put("turnloop.pending_tool_names", writeJson(
+            pending.explicitToolNames() == null ? List.of() : pending.explicitToolNames()));
+        metadata.put("turnloop.pending_metadata", writeJson(pending.continuationMetadata()));
         return new TurnMessage("system", "[Magenta interaction pending]", null, null, metadata);
     }
 
@@ -859,7 +868,7 @@ final class DefaultTurnEngine {
             && PENDING_TYPE.equals(message.metadata().get("turnloop.persistence_type"));
     }
 
-    private QuestionPendingContext continuationContext(TurnContext ctx) {
+    private InteractionStore.Interaction continuationContext(TurnContext ctx) {
         Map<String, String> metadata = ctx.request().metadata();
         if (metadata == null || !CONTINUATION_FLAG.equals(metadata.get("turnloop.continuation"))) {
             return null;
@@ -867,47 +876,53 @@ final class DefaultTurnEngine {
         List<String> questions = normalizeQuestions(
             readJsonList(metadata.get("turnloop.pending_questions")));
         String model = emptyToNull(metadata.get("turnloop.pending_model"));
+        if (model == null) model = ctx.model();
         Map<String, String> originalMetadata = new LinkedHashMap<>(
             readJsonMap(metadata.get("turnloop.pending_metadata")));
         String interactionId = firstNonBlank(
             metadata.get(PENDING_INTERACTION_ID), originalMetadata.get(PENDING_INTERACTION_ID));
-        if (interactionId != null) {
-            originalMetadata.put(PENDING_INTERACTION_ID, interactionId);
-        }
-        return new QuestionPendingContext(ctx.sessionId(),
-            emptyToNull(metadata.get("turnloop.pending_turn_id")) == null
-                ? ctx.turnId() : metadata.get("turnloop.pending_turn_id"),
-            questions.isEmpty() ? List.of("The assistant has a question for you.") : questions,
-            model, originalMetadata);
+        if (interactionId == null) interactionId = UUID.randomUUID().toString();
+        originalMetadata.put(PENDING_INTERACTION_ID, interactionId);
+        String pendingTurnId = emptyToNull(metadata.get("turnloop.pending_turn_id"));
+        if (pendingTurnId == null) pendingTurnId = ctx.turnId();
+        Instant now = Instant.now();
+        ExecutionInfo execution = new ExecutionInfo(
+            ctx.sessionId(), pendingTurnId, new ExecutionOrigin.Answer(interactionId),
+            now, now, computeUsage(ctx), List.of());
+        TurnResponse.Questions outcome = new TurnResponse.Questions(
+            execution, interactionId, questions);
+        return new InteractionStore.Interaction(
+            interactionId, ctx.sessionId(), outcome, model,
+            readJsonList(metadata.get("turnloop.pending_tool_names")),
+            originalMetadata, originalMetadata, List.of(), InteractionState.PENDING,
+            now, now, null, null);
     }
 
-    private TurnMessage questionAnswerMessage(QuestionPendingContext pending,
+    private TurnMessage questionAnswerMessage(InteractionStore.Interaction pending,
                                                TurnContext ctx) {
         StringBuilder text = new StringBuilder();
         text.append("[Questions and answers]\n");
         List<String> answers = readJsonList(ctx.request().metadata().get(PENDING_ANSWERS));
-        if (answers.size() == pending.questions().size()) {
-            for (int i = 0; i < pending.questions().size(); i++) {
+        List<String> questions = pending.questions().questions();
+        if (answers.size() == questions.size()) {
+            for (int i = 0; i < questions.size(); i++) {
                 text.append("Question ").append(i + 1).append(": ")
-                    .append(pending.questions().get(i)).append('\n');
+                    .append(questions.get(i)).append('\n');
                 text.append("Answer ").append(i + 1).append(": ")
                     .append(answers.get(i)).append('\n');
             }
         } else {
-            for (int i = 0; i < pending.questions().size(); i++) {
+            for (int i = 0; i < questions.size(); i++) {
                 text.append("Question ").append(i + 1).append(": ")
-                    .append(pending.questions().get(i)).append('\n');
+                    .append(questions.get(i)).append('\n');
             }
             text.append("Answer: ").append(ctx.request().message());
         }
         Map<String, String> metadata = new LinkedHashMap<>();
         metadata.put("turnloop.persistence_type", "question_answer_context");
-        metadata.put("turnloop.pending_turn_id", pending.turnId());
+        metadata.put("turnloop.pending_turn_id", pending.questions().execution().turnId());
         metadata.put("turnloop.answer_turn_id", ctx.turnId());
-        String interactionId = pending.continuationContext().get(PENDING_INTERACTION_ID);
-        if (interactionId != null) {
-            metadata.put(PENDING_INTERACTION_ID, interactionId);
-        }
+        metadata.put(PENDING_INTERACTION_ID, pending.interactionId());
         return new TurnMessage("system", text.toString(), null, null, metadata);
     }
 
@@ -1358,7 +1373,7 @@ final class DefaultTurnEngine {
         private boolean suspended;
         private boolean lastResponsePersisted;
         private boolean statePersisted;
-        private QuestionPendingContext pendingContext;
+        private InteractionStore.Interaction pendingContext;
         private String pendingInteractionId;
 
         private TurnLoopState(TurnContext context, ToolLoopGuard toolLoopGuard,
@@ -1425,16 +1440,6 @@ final class DefaultTurnEngine {
         public Builder responseRepair(CompletionDetector detector, RepairStrategy strategy) {
             this.completionDetector = detector == null ? ctx -> false : detector;
             this.repairStrategy = strategy == null ? (ctx, reason) -> List.of() : strategy;
-            return this;
-        }
-
-        /**
-         * Retains the staged composition call shape while the facade is being
-         * cut over. The first argument is deliberately ignored: ask_user is
-         * owned by this engine and never invokes an application callback.
-         */
-        public Builder interaction(Object ignored, InteractionStore store) {
-            this.interactionStore = store;
             return this;
         }
 

@@ -15,6 +15,7 @@ import java.time.Instant;
 import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeParseException;
 import java.time.format.DateTimeFormatterBuilder;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 
@@ -28,6 +29,7 @@ import java.util.Objects;
 final class PersistenceSupport {
 
     private static final TypeReference<Map<String, String>> STRING_MAP = new TypeReference<>() {};
+    private static final TypeReference<List<String>> STRING_LIST = new TypeReference<>() {};
     private static final DateTimeFormatter STORAGE_TIMESTAMP =
         new DateTimeFormatterBuilder().appendInstant(9).toFormatter();
 
@@ -134,6 +136,21 @@ final class PersistenceSupport {
             return Map.copyOf(objectMapper.readValue(json, STRING_MAP));
         } catch (JsonProcessingException | IllegalArgumentException e) {
             throw new IllegalStateException("Unable to deserialize persistence metadata", e);
+        }
+    }
+
+    static String stringListToJson(ObjectMapper objectMapper, List<String> values) {
+        return values == null ? null : toJson(objectMapper, values);
+    }
+
+    static List<String> stringListFromJson(ObjectMapper objectMapper, String json) {
+        if (json == null || json.isBlank()) {
+            return null;
+        }
+        try {
+            return List.copyOf(objectMapper.readValue(json, STRING_LIST));
+        } catch (JsonProcessingException | IllegalArgumentException e) {
+            throw new IllegalStateException("Unable to deserialize persistence string list", e);
         }
     }
 

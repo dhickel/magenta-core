@@ -19,9 +19,7 @@ import io.mindspice.magenta.core.spi.AuditWriter;
 import io.mindspice.magenta.core.spi.CompactionStrategy;
 import io.mindspice.magenta.core.spi.CompletionDetector;
 import io.mindspice.magenta.core.spi.ConversationMemory;
-import io.mindspice.magenta.core.spi.InteractionHandler;
 import io.mindspice.magenta.core.spi.InteractionStore;
-import io.mindspice.magenta.core.spi.MessageQueue;
 import io.mindspice.magenta.core.spi.MessageQueueStore;
 import io.mindspice.magenta.core.spi.ModelCapabilityProvider;
 import io.mindspice.magenta.core.spi.PromptContributor;
@@ -84,7 +82,6 @@ public final class TurnLoopBuilder {
     private ToolRegistry toolRegistry;
     private ToolAccessPolicy toolAccessPolicy = ToolAccessPolicy.allowAll();
     private ToolResultSummarizer toolResultSummarizer;
-    private InteractionHandler interactionHandler;
     private InteractionStore interactionStore;
     private ConversationMemory conversationMemory;
     private SessionStore sessionStore;
@@ -93,7 +90,6 @@ public final class TurnLoopBuilder {
     private CompletionDetector completionDetector;
     private RepairStrategy repairStrategy;
     private TurnGate turnGate;
-    private MessageQueue messageQueue;
     private MessageQueueStore messageQueueStore;
     private AuditWriter auditWriter;
     private ModelCapabilityProvider modelCapabilityProvider;
@@ -102,6 +98,7 @@ public final class TurnLoopBuilder {
     private TurnLoopMetrics turnLoopMetrics;
     private ObjectMapper objectMapper;
     private Duration modelTimeout = DEFAULT_MODEL_TIMEOUT;
+    private Duration queueClaimLease = SqliteMessageQueueStore.DEFAULT_CLAIM_LEASE;
     private long drainTimeoutSeconds = 30;
 
     /** Creates an empty builder with no implicit storage source. */
@@ -176,11 +173,6 @@ public final class TurnLoopBuilder {
         return this;
     }
 
-    public TurnLoopBuilder interactionHandler(@NonNull InteractionHandler handler) {
-        this.interactionHandler = Objects.requireNonNull(handler, "handler");
-        return this;
-    }
-
     public TurnLoopBuilder interactionStore(@NonNull InteractionStore store) {
         this.interactionStore = Objects.requireNonNull(store, "store");
         return this;
@@ -218,11 +210,6 @@ public final class TurnLoopBuilder {
 
     public TurnLoopBuilder turnGate(@NonNull TurnGate gate) {
         this.turnGate = Objects.requireNonNull(gate, "gate");
-        return this;
-    }
-
-    public TurnLoopBuilder messageQueue(@NonNull MessageQueue queue) {
-        this.messageQueue = Objects.requireNonNull(queue, "queue");
         return this;
     }
 
@@ -279,6 +266,12 @@ public final class TurnLoopBuilder {
         return this;
     }
 
+    /** Sets the bounded lease used by framework-managed queue claims. */
+    public TurnLoopBuilder queueClaimLease(@NonNull Duration lease) {
+        this.queueClaimLease = validateClaimLease(lease);
+        return this;
+    }
+
     /** Sets the graceful shutdown drain timeout in seconds. */
     public TurnLoopBuilder drainTimeoutSeconds(long seconds) {
         if (seconds < 0) {
@@ -298,6 +291,7 @@ public final class TurnLoopBuilder {
      */
     public TurnLoop build() {
         Map<String, ModelConfig> registeredModels = validateAndSnapshotModels();
+        Duration validatedClaimLease = validateClaimLease(queueClaimLease);
         DataSource resolvedDataSource = resolveStorage();
         ObjectMapper mapper = objectMapper != null
             ? objectMapper : new ObjectMapper().findAndRegisterModules();
@@ -321,7 +315,8 @@ public final class TurnLoopBuilder {
             sStore = resolveDefault(
                 sessionStore, "sessionStore", () -> new SqliteSessionStore(resolvedDataSource, mapper));
             mqStore = resolveDefault(
-                messageQueueStore, "messageQueueStore", () -> new SqliteMessageQueueStore(resolvedDataSource, mapper));
+                messageQueueStore, "messageQueueStore",
+                () -> new SqliteMessageQueueStore(resolvedDataSource, mapper, validatedClaimLease));
         } catch (RuntimeException e) {
             throw configuration(
                 "Framework schema initialization failed: " + messageOf(e),
@@ -338,7 +333,6 @@ public final class TurnLoopBuilder {
         boolean ownsTurnGate = turnGate == null;
         TurnGate gate = resolveDefault(
             turnGate, "turnGate", () -> new SerialTurnGate(Duration.ofMinutes(10)));
-        MessageQueue mQueue = resolveDefault(messageQueue, "messageQueue", () -> new DefaultMessageQueue(mqStore));
         AuditWriter resolvedAuditWriter = resolveDefault(
             auditWriter, "auditWriter", () -> new SqliteAuditWriter(resolvedDataSource, mapper));
         ThinkingExtractor tExtractor = resolveDefault(
@@ -360,7 +354,7 @@ public final class TurnLoopBuilder {
             .contextManager(ctxManager)
             .promptAssembler(assembler)
             .responseRepair(cDetector, rStrategy)
-            .interaction(interactionHandler, iStore)
+            .interactionStore(iStore)
             .infrastructure(router, executor, activeTurnRegistry, tExtractor)
             .build();
 
@@ -368,7 +362,7 @@ public final class TurnLoopBuilder {
         return new DefaultTurnLoop(
             engine,
             gate,
-            mQueue,
+            mqStore,
             iStore,
             sStore,
             cMemory,
@@ -379,8 +373,8 @@ public final class TurnLoopBuilder {
             lifecycleListener,
             turnLoopMetrics,
             mapper,
-            defaultSystemPrompt,
             defaultModel,
+            validatedClaimLease,
             drainTimeoutSeconds,
             resolvedAuditWriter,
             ownsTurnGate
@@ -551,6 +545,20 @@ public final class TurnLoopBuilder {
         return modelCapabilityProvider != null
             ? modelCapabilityProvider
             : DefaultModelCapabilityProvider.instance();
+    }
+
+    private static Duration validateClaimLease(Duration lease) {
+        if (lease == null || lease.isZero() || lease.isNegative()) {
+            throw configuration(
+                "queue claim lease must be positive",
+                Map.of("error", "invalid_queue_claim_lease"));
+        }
+        if (lease.compareTo(Duration.ofHours(1)) > 0) {
+            throw configuration(
+                "queue claim lease must not exceed one hour",
+                Map.of("error", "invalid_queue_claim_lease"));
+        }
+        return lease;
     }
 
     private static void validateAlias(String alias, String field) {

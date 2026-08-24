@@ -42,7 +42,8 @@ public final class MigrationRunner {
     private static final Logger LOG = LoggerFactory.getLogger(MigrationRunner.class);
 
     private static final int FRESH_SCHEMA_VERSION = 1;
-    private static final String SCHEMA_ID = "io.mindspice:magenta-core";
+    private static final String SCHEMA_ID =
+        "io.mindspice:magenta-core:turn-response-protocol-v2";
     private static final String SCHEMA_RESOURCE = "schema.sql";
 
     private static final String INSERT_IDENTITY = """
@@ -121,6 +122,7 @@ public final class MigrationRunner {
         try (Connection connection = openConnection()) {
             connection.setAutoCommit(false);
             try {
+                rejectIncompatibleExistingSchema(connection);
                 ScriptUtils.executeSqlScript(connection, new ClassPathResource(SCHEMA_RESOURCE));
                 recordAndValidateIdentity(connection);
                 try (PreparedStatement statement = connection.prepareStatement(INSERT_VERSION)) {
@@ -133,7 +135,9 @@ public final class MigrationRunner {
             } catch (Exception e) {
                 rollback(connection, e);
                 throw new IllegalStateException(
-                    "Unable to initialize Magenta Core fresh schema", e);
+                    "Unable to initialize Magenta Core fresh schema: "
+                        + (e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage()),
+                    e);
             } finally {
                 restoreAutoCommit(connection);
             }
@@ -141,6 +145,70 @@ public final class MigrationRunner {
             throw new IllegalStateException(
                 "Unable to open connection for Magenta Core schema initialization", e);
         }
+    }
+
+    /**
+     * Rejects any pre-existing Magenta Core identity before ScriptUtils can
+     * execute CREATE IF NOT EXISTS statements. This is deliberately stricter
+     * than a hash check after initialization: an old schema must neither be
+     * reused nor have new tables installed beside it.
+     */
+    private void rejectIncompatibleExistingSchema(Connection connection) throws SQLException {
+        if (!tableExists(connection, "magenta_core_schema_identity")) {
+            if (hasMagentaCoreTable(connection)) {
+                throw incompatibleSchema("Magenta Core tables exist without a schema identity");
+            }
+            return;
+        }
+
+        try (PreparedStatement statement = connection.prepareStatement("""
+            SELECT schema_id, schema_version, schema_hash
+            FROM magenta_core_schema_identity
+            """)) {
+            try (ResultSet resultSet = statement.executeQuery()) {
+                if (!resultSet.next()) {
+                    throw incompatibleSchema(
+                        "Magenta Core schema identity is present but empty");
+                }
+                String schemaId = resultSet.getString("schema_id");
+                int version = resultSet.getInt("schema_version");
+                String hash = resultSet.getString("schema_hash");
+                if (!SCHEMA_ID.equals(schemaId)
+                    || version != FRESH_SCHEMA_VERSION
+                    || !schemaHash.equals(hash)
+                    || resultSet.next()) {
+                    throw incompatibleSchema(
+                        "Existing Magenta Core schema identity does not match "
+                            + SCHEMA_ID);
+                }
+            }
+        }
+    }
+
+    private boolean tableExists(Connection connection, String tableName) throws SQLException {
+        try (ResultSet resultSet = connection.getMetaData().getTables(
+            null, null, tableName, new String[] {"TABLE"})) {
+            return resultSet.next();
+        }
+    }
+
+    private boolean hasMagentaCoreTable(Connection connection) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement("""
+            SELECT 1
+            FROM sqlite_master
+            WHERE type = 'table' AND name LIKE 'magenta_core_%'
+            LIMIT 1
+            """)) {
+            try (ResultSet resultSet = statement.executeQuery()) {
+                return resultSet.next();
+            }
+        }
+    }
+
+    private IllegalStateException incompatibleSchema(String detail) {
+        return new IllegalStateException(
+            "Incompatible existing Magenta Core schema: " + detail
+                + ". Refusing to reuse, rewrite, or delete existing tables");
     }
 
     private void recordAndValidateIdentity(Connection connection) throws SQLException {

@@ -26,7 +26,7 @@ import java.util.concurrent.ConcurrentHashMap;
  * in the constructor. Its {@link ToolCallback#call(String)} returns a simple
  * JSON acknowledgement. The actual suspension logic lives in the engine,
  * which intercepts the tool call by name before invoking the callback.
- * This design keeps the registry free of {@code InteractionHandler} coupling;
+ * This design keeps the registry free of application interaction coupling;
  * the engine owns the full ask_user lifecycle.
  */
 public final class DefaultToolRegistry implements ToolRegistry {
