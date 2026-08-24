@@ -184,7 +184,7 @@ public final class DefaultTurnEngine {
     private void runTurnLoop(TurnContext ctx, FluxSink<TurnEvent> sink,
                              ActiveTurnRegistry.ActiveTurn active) {
         Instant startedAt = Instant.now();
-        TurnLoopState state = new TurnLoopState(ctx);
+        TurnLoopState state = new TurnLoopState(ctx, toolLoopGuard);
 
         try {
             active.phase(TurnPhase.PREPARE);
@@ -412,7 +412,7 @@ public final class DefaultTurnEngine {
         }
 
         try {
-            toolLoopGuard.recordToolCalls(toolCalls.stream()
+            state.toolLoopGuard.recordToolCalls(toolCalls.stream()
                 .map(call -> new ToolLoopGuard.ToolCallIdentity(call.name(), call.arguments()))
                 .toList());
         } catch (ToolException.LoopExceeded e) {
@@ -512,7 +512,7 @@ public final class DefaultTurnEngine {
                 call.name(), call.id(), status, summary, computeUsage(ctx)));
 
             try {
-                toolLoopGuard.recordToolResponses(new ToolLoopGuard.ToolExecutionResult(
+                state.toolLoopGuard.recordToolResponses(new ToolLoopGuard.ToolExecutionResult(
                     status == ToolActivityStatus.COMPLETED,
                     call.name(), status == ToolActivityStatus.FAILED ? summary : null));
             } catch (ToolException.LoopExceeded e) {
@@ -717,11 +717,17 @@ public final class DefaultTurnEngine {
                     int count = Math.min(messages.size(), 50);
                     CompactionResult result = toolCompaction(messages, count, usage, ctx.sessionId());
                     if (result != null && !result.summary().isBlank()) {
-                        List<TurnMessage> summary = List.of(withMetadata(
+                        TurnMessage summary = withMetadata(
                             TurnMessage.system(result.summary()),
-                            Map.of("type", "compaction_summary")));
-                        active.runIfActive(() ->
-                            conversationMemory.addMessages(ctx.sessionId(), summary));
+                            Map.of("type", "compaction_summary"));
+                        List<TurnMessage> tail = messages.subList(count, messages.size());
+                        active.runIfActive(() -> {
+                            conversationMemory.clear(ctx.sessionId());
+                            List<TurnMessage> replacement = new ArrayList<>(tail.size() + 1);
+                            replacement.add(summary);
+                            replacement.addAll(tail);
+                            conversationMemory.addMessages(ctx.sessionId(), replacement);
+                        });
                     }
                 } catch (Throwable e) {
                     log.warn("Async compaction failed for session {}: {}",
@@ -1197,6 +1203,7 @@ public final class DefaultTurnEngine {
         private final TurnContext context;
         private final List<TurnMessage> messagesToPersist = new ArrayList<>();
         private final List<ToolActivityData> toolActivities = new ArrayList<>();
+        private final ToolLoopGuard toolLoopGuard;
         private List<ToolCallback> activeTools = List.of();
         private List<Message> conversationMessages = new ArrayList<>();
         private String systemPromptText;
@@ -1215,8 +1222,9 @@ public final class DefaultTurnEngine {
         private boolean statePersisted;
         private QuestionPendingContext pendingContext;
 
-        private TurnLoopState(TurnContext context) {
+        private TurnLoopState(TurnContext context, ToolLoopGuard toolLoopGuard) {
             this.context = context;
+            this.toolLoopGuard = toolLoopGuard.forTurn();
         }
     }
 

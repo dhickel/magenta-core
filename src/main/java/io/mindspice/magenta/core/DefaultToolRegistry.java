@@ -7,8 +7,10 @@ import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.lang.reflect.Parameter;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
@@ -73,7 +75,10 @@ public final class DefaultToolRegistry implements ToolRegistry {
             throw new ToolException.AccessDenied(name,
                 "Tool name '" + name + "' conflicts with a framework-internal tool");
         }
-        publicTools.put(name, tool);
+        if (publicTools.putIfAbsent(name, tool) != null) {
+            throw new ToolException.AccessDenied(name,
+                "Tool name '" + name + "' is already registered");
+        }
     }
 
     @Override
@@ -83,6 +88,7 @@ public final class DefaultToolRegistry implements ToolRegistry {
 
     @Override
     public void registerToolBean(@NonNull Object bean) {
+        List<ToolCallback> discovered = new ArrayList<>();
         for (Method method : bean.getClass().getMethods()) {
             Tool toolAnn = method.getAnnotation(Tool.class);
             if (toolAnn == null) {
@@ -118,6 +124,17 @@ public final class DefaultToolRegistry implements ToolRegistry {
                 }
             };
 
+            discovered.add(callback);
+        }
+        Set<String> names = new HashSet<>();
+        for (ToolCallback callback : discovered) {
+            String name = callback.getToolDefinition().name();
+            if (!names.add(name) || frameworkTools.containsKey(name) || publicTools.containsKey(name)) {
+                throw new ToolException.AccessDenied(name,
+                    "Tool name '" + name + "' is already registered or reserved");
+            }
+        }
+        for (ToolCallback callback : discovered) {
             register(callback);
         }
     }
@@ -140,10 +157,27 @@ public final class DefaultToolRegistry implements ToolRegistry {
     @Override
     @NonNull
     public List<ToolCallback> resolveForTurn(@NonNull TurnContext context) {
-        List<ToolCallback> merged = new ArrayList<>();
-        merged.addAll(publicTools.values());
-        merged.addAll(frameworkTools.values());
-        return List.copyOf(merged);
+        List<String> requested = context.request().toolNames();
+        if (requested == null || requested.isEmpty()) {
+            List<ToolCallback> merged = new ArrayList<>();
+            merged.addAll(publicTools.values());
+            merged.addAll(frameworkTools.values());
+            return List.copyOf(merged);
+        }
+
+        List<ToolCallback> selected = new ArrayList<>();
+        Set<String> seen = new HashSet<>();
+        for (String name : requested) {
+            if (!seen.add(name)) continue;
+            ToolCallback callback = publicTools.get(name);
+            if (callback == null) callback = frameworkTools.get(name);
+            if (callback == null) {
+                throw new ToolException.AccessDenied(name,
+                    "Requested tool '" + name + "' is not registered");
+            }
+            selected.add(callback);
+        }
+        return List.copyOf(selected);
     }
 
     // ── Helpers ──

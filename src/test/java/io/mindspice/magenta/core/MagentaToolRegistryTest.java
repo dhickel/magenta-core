@@ -5,6 +5,7 @@ import org.junit.jupiter.api.Test;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
@@ -38,6 +39,23 @@ class MagentaToolRegistryTest {
         assertEquals("Tool parameter on " + ToolWithoutParameterName.class.getName()
                 + "#echo must declare @ToolParam(name = ...) when compiled without -parameters",
             failure.getMessage());
+    }
+
+    @Test
+    void rejectsDuplicateAndHonorsExplicitToolSelection() {
+        DefaultToolRegistry registry = new DefaultToolRegistry();
+        registry.registerToolBean(new ExampleTool());
+        assertThrows(ToolException.AccessDenied.class,
+            () -> registry.registerToolBean(new ExampleTool()));
+
+        TurnContext selected = new TurnContext(
+            new TurnRequest("session", "message", "model", List.of("echo"), false, java.util.Map.of()),
+            "turn", "model");
+        assertEquals(List.of("echo"), registry.resolveForTurn(selected).stream()
+            .map(callback -> callback.getToolDefinition().name()).toList());
+        assertThrows(ToolException.AccessDenied.class, () -> registry.resolveForTurn(
+            new TurnContext(new TurnRequest("session", "message", "model", List.of("missing"),
+                false, java.util.Map.of()), "turn-2", "model")));
     }
 
     static final class ExampleTool {

@@ -60,6 +60,11 @@ public final class ToolLoopGuard {
         this(5, 8, 5);
     }
 
+    /** Creates an independent guard with the same configured limits for one turn. */
+    public ToolLoopGuard forTurn() {
+        return new ToolLoopGuard(identicalCallLimit, errorWindowSize, errorWindowLimit);
+    }
+
     // ── Public methods ──
 
     /**
