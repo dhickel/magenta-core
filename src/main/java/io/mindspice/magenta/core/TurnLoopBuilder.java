@@ -15,59 +15,71 @@ import io.mindspice.magenta.core.persistence.NoOpAuditWriter;
 import io.mindspice.magenta.core.persistence.SqliteConversationMemory;
 import io.mindspice.magenta.core.persistence.SqliteMessageQueueStore;
 import io.mindspice.magenta.core.persistence.SqliteSessionStore;
-import io.mindspice.magenta.core.spi.*;
+import io.mindspice.magenta.core.spi.AuditWriter;
+import io.mindspice.magenta.core.spi.CompactionStrategy;
+import io.mindspice.magenta.core.spi.CompletionDetector;
+import io.mindspice.magenta.core.spi.ConversationMemory;
+import io.mindspice.magenta.core.spi.InteractionHandler;
+import io.mindspice.magenta.core.spi.InteractionStore;
+import io.mindspice.magenta.core.spi.MessageQueue;
+import io.mindspice.magenta.core.spi.MessageQueueStore;
+import io.mindspice.magenta.core.spi.ModelCapabilityProvider;
+import io.mindspice.magenta.core.spi.PromptContributor;
+import io.mindspice.magenta.core.spi.RepairStrategy;
+import io.mindspice.magenta.core.spi.SessionStore;
+import io.mindspice.magenta.core.spi.ThinkingExtractor;
+import io.mindspice.magenta.core.spi.TokenEstimator;
+import io.mindspice.magenta.core.spi.ToolAccessPolicy;
+import io.mindspice.magenta.core.spi.ToolRegistry;
+import io.mindspice.magenta.core.spi.ToolResultSummarizer;
+import io.mindspice.magenta.core.spi.TurnGate;
+import io.mindspice.magenta.core.spi.TurnLifecycleListener;
+import io.mindspice.magenta.core.spi.TurnLoopMetrics;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.context.ApplicationContext;
 import org.sqlite.SQLiteDataSource;
 
 import javax.sql.DataSource;
+import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.function.Supplier;
+import java.util.regex.Pattern;
 
 /**
- * Public construction path for the {@link TurnLoop} facade.
+ * Programmatic composition root for the {@link TurnLoop} facade.
  *
- * <h3>Usage</h3>
- * <pre>{@code
- * TurnLoop turnLoop = TurnLoopBuilder.create(applicationContext)
- *     .model("gpt-4", new ModelConfig("gpt-4", "gpt-4", "https://api.openai.com", key,
- *         EndpointType.OPENAI_COMPATIBLE, 128000, 0))
- *     .dataRoot(Path.of("/data/turnloop"))
- *     .defaultSystemPrompt("You are a helpful assistant.")
- *     .build();
- * }</pre>
+ * <p>The builder deliberately has no Spring application-context dependency.
+ * Callers select exactly one storage source, register models in order, and
+ * provide optional Magenta-owned collaborators before calling {@link #build()}.
+ * The resulting model registry is an immutable snapshot of the registrations
+ * made at build time.</p>
  *
- * <h3>Defaults</h3>
- * Every SPI slot has a production-quality default. Calling {@code build()}
- * with only a model configured produces a fully working instance backed by
- * an in-memory SQLite database.
- *
- * <h3>Auto-discovery</h3>
- * {@link PromptContributor}, {@link TurnLifecycleListener}, and
- * {@link TurnLoopMetrics} beans are auto-discovered from the
- * {@link ApplicationContext} unless explicitly set via their respective
- * setter methods.
- *
- * <h3>Thread safety</h3>
- * The builder is <strong>not</strong> thread-safe. Build on a single
- * thread and call {@link #build()} once (or multiple times to create
- * independent instances sharing the same {@link DataSource}).
+ * <p>Build-time model aliases are safe, non-blank identifiers. The alias used
+ * to register a model must equal the alias carried by its {@link ModelConfig};
+ * this prevents the persisted/session alias from silently selecting a
+ * different endpoint.</p>
  */
 public final class TurnLoopBuilder {
 
     private static final Logger log = LoggerFactory.getLogger(TurnLoopBuilder.class);
-
-    // ── Required ──
-
-    private final ApplicationContext context;
-
-    // ── Configurable fields with defaults ──
+    private static final Pattern MODEL_ALIAS =
+        Pattern.compile("[A-Za-z0-9][A-Za-z0-9._-]{0,127}");
+    private static final Duration DEFAULT_MODEL_TIMEOUT = Duration.ofSeconds(360);
+    private static final String DATABASE_FILE_NAME = "turnloop.db";
 
     private final Map<String, ModelConfig> modelConfigs = new LinkedHashMap<>();
-    private Path dataRoot = Path.of(System.getProperty("java.io.tmpdir"), "turnloop");
+    private final List<PromptContributor> promptContributors = new ArrayList<>();
+
+    private Path dataRoot;
+    private DataSource dataSource;
     private String defaultSystemPrompt = "You are a helpful AI assistant.";
     private ToolRegistry toolRegistry;
     private ToolAccessPolicy toolAccessPolicy = ToolAccessPolicy.allowAll();
@@ -84,312 +96,256 @@ public final class TurnLoopBuilder {
     private MessageQueue messageQueue;
     private MessageQueueStore messageQueueStore;
     private AuditWriter auditWriter;
-    private final List<PromptContributor> promptContributors = new ArrayList<>();
     private ModelCapabilityProvider modelCapabilityProvider;
     private ThinkingExtractor thinkingExtractor;
     private TurnLifecycleListener turnLifecycleListener;
     private TurnLoopMetrics turnLoopMetrics;
     private ObjectMapper objectMapper;
+    private Duration modelTimeout = DEFAULT_MODEL_TIMEOUT;
     private long drainTimeoutSeconds = 30;
-    private DataSource dataSource;
 
-    // ── Auto-discovery tracking ──
-
-    private final Set<String> explicitlySet = new HashSet<>();
-
-    // ── Private constructor ──
-
-    private TurnLoopBuilder(ApplicationContext context) {
-        this.context = Objects.requireNonNull(context, "ApplicationContext must not be null");
+    /** Creates an empty builder with no implicit storage source. */
+    public TurnLoopBuilder() {
     }
 
-    // ── Factory ──
+    /** Creates an empty builder with no implicit storage source. */
+    public static TurnLoopBuilder create() {
+        return new TurnLoopBuilder();
+    }
 
     /**
-     * Creates a new builder backed by the given Spring {@link ApplicationContext}.
-     * The context is used for auto-discovery of SPI beans and for obtaining
-     * the {@link ToolCallingManager}.
-     *
-     * @param context the Spring application context (must not be null)
-     * @return a new builder instance
-     * @throws NullPointerException if {@code context} is null
+     * Registers a model under an immutable build-time alias.
+     * Registration order determines the fallback model.
      */
-    public static TurnLoopBuilder create(@NonNull ApplicationContext context) {
-        return new TurnLoopBuilder(context);
-    }
-
-    // ── Builder setters ──
-
-    /** Registers a model under the given alias. At least one model is required. */
     public TurnLoopBuilder model(@NonNull String alias, @NonNull ModelConfig config) {
-        Objects.requireNonNull(alias, "alias");
-        Objects.requireNonNull(config, "config");
+        validateAlias(alias, "alias");
+        if (config == null) {
+            throw configuration(
+                "Model configuration for alias '" + alias + "' must not be null",
+                Map.of("error", "model_config_missing", "alias", alias));
+        }
+        if (modelConfigs.containsKey(alias)) {
+            throw configuration(
+                "Model alias '" + alias + "' is already registered",
+                Map.of("error", "duplicate_model_alias", "alias", alias));
+        }
         modelConfigs.put(alias, config);
         return this;
     }
 
-    /** Sets the root directory for SQLite database files. Created if it does not exist. */
+    /** Sets the root directory for the durable, file-backed SQLite database. */
     public TurnLoopBuilder dataRoot(@NonNull Path dataRoot) {
-        this.dataRoot = Objects.requireNonNull(dataRoot, "dataRoot");
-        explicitlySet.add("dataRoot");
+        if (dataRoot == null) {
+            throw configuration(
+                "dataRoot must not be null",
+                Map.of("error", "data_root_missing"));
+        }
+        this.dataRoot = dataRoot;
+        return this;
+    }
+
+    /** Sets the caller-owned JDBC storage source. */
+    public TurnLoopBuilder dataSource(@NonNull DataSource dataSource) {
+        if (dataSource == null) {
+            throw configuration(
+                "dataSource must not be null",
+                Map.of("error", "data_source_missing"));
+        }
+        this.dataSource = dataSource;
         return this;
     }
 
     /** Sets the default system prompt used when the caller does not supply one. */
     public TurnLoopBuilder defaultSystemPrompt(@NonNull String prompt) {
         this.defaultSystemPrompt = Objects.requireNonNull(prompt, "prompt");
-        explicitlySet.add("defaultSystemPrompt");
         return this;
     }
 
     public TurnLoopBuilder toolRegistry(@NonNull ToolRegistry registry) {
         this.toolRegistry = Objects.requireNonNull(registry, "registry");
-        explicitlySet.add("toolRegistry");
         return this;
     }
 
     public TurnLoopBuilder toolAccessPolicy(@NonNull ToolAccessPolicy policy) {
         this.toolAccessPolicy = Objects.requireNonNull(policy, "policy");
-        explicitlySet.add("toolAccessPolicy");
         return this;
     }
 
     public TurnLoopBuilder toolResultSummarizer(@NonNull ToolResultSummarizer summarizer) {
         this.toolResultSummarizer = Objects.requireNonNull(summarizer, "summarizer");
-        explicitlySet.add("toolResultSummarizer");
         return this;
     }
 
     public TurnLoopBuilder interactionHandler(@NonNull InteractionHandler handler) {
         this.interactionHandler = Objects.requireNonNull(handler, "handler");
-        explicitlySet.add("interactionHandler");
         return this;
     }
 
     public TurnLoopBuilder interactionStore(@NonNull InteractionStore store) {
         this.interactionStore = Objects.requireNonNull(store, "store");
-        explicitlySet.add("interactionStore");
         return this;
     }
 
     public TurnLoopBuilder conversationMemory(@NonNull ConversationMemory memory) {
         this.conversationMemory = Objects.requireNonNull(memory, "memory");
-        explicitlySet.add("conversationMemory");
         return this;
     }
 
     public TurnLoopBuilder sessionStore(@NonNull SessionStore store) {
         this.sessionStore = Objects.requireNonNull(store, "store");
-        explicitlySet.add("sessionStore");
         return this;
     }
 
     public TurnLoopBuilder tokenEstimator(@NonNull TokenEstimator estimator) {
         this.tokenEstimator = Objects.requireNonNull(estimator, "estimator");
-        explicitlySet.add("tokenEstimator");
         return this;
     }
 
     public TurnLoopBuilder compactionStrategy(@NonNull CompactionStrategy strategy) {
         this.compactionStrategy = Objects.requireNonNull(strategy, "strategy");
-        explicitlySet.add("compactionStrategy");
         return this;
     }
 
     public TurnLoopBuilder completionDetector(@NonNull CompletionDetector detector) {
         this.completionDetector = Objects.requireNonNull(detector, "detector");
-        explicitlySet.add("completionDetector");
         return this;
     }
 
     public TurnLoopBuilder repairStrategy(@NonNull RepairStrategy strategy) {
         this.repairStrategy = Objects.requireNonNull(strategy, "strategy");
-        explicitlySet.add("repairStrategy");
         return this;
     }
 
     public TurnLoopBuilder turnGate(@NonNull TurnGate gate) {
         this.turnGate = Objects.requireNonNull(gate, "gate");
-        explicitlySet.add("turnGate");
         return this;
     }
 
     public TurnLoopBuilder messageQueue(@NonNull MessageQueue queue) {
         this.messageQueue = Objects.requireNonNull(queue, "queue");
-        explicitlySet.add("messageQueue");
         return this;
     }
 
     public TurnLoopBuilder messageQueueStore(@NonNull MessageQueueStore store) {
         this.messageQueueStore = Objects.requireNonNull(store, "store");
-        explicitlySet.add("messageQueueStore");
         return this;
     }
 
     public TurnLoopBuilder auditWriter(@NonNull AuditWriter writer) {
         this.auditWriter = Objects.requireNonNull(writer, "writer");
-        explicitlySet.add("auditWriter");
         return this;
     }
 
-    /**
-     * Adds a prompt contributor. This method is cumulative — each call
-     * appends to the contributor list. Contributors are invoked in
-     * registration order (then sorted by {@code @Order}).
-     */
+    /** Adds a prompt contributor in registration order. */
     public TurnLoopBuilder promptContributor(@NonNull PromptContributor contributor) {
         promptContributors.add(Objects.requireNonNull(contributor, "contributor"));
-        explicitlySet.add("promptContributor");
         return this;
     }
 
     public TurnLoopBuilder modelCapabilityProvider(@NonNull ModelCapabilityProvider provider) {
         this.modelCapabilityProvider = Objects.requireNonNull(provider, "provider");
-        explicitlySet.add("modelCapabilityProvider");
         return this;
     }
 
     public TurnLoopBuilder thinkingExtractor(@NonNull ThinkingExtractor extractor) {
         this.thinkingExtractor = Objects.requireNonNull(extractor, "extractor");
-        explicitlySet.add("thinkingExtractor");
         return this;
     }
 
     public TurnLoopBuilder turnLifecycleListener(@NonNull TurnLifecycleListener listener) {
         this.turnLifecycleListener = Objects.requireNonNull(listener, "listener");
-        explicitlySet.add("turnLifecycleListener");
+        return this;
+    }
+
+    /** Sets the explicit metrics sink; no Spring bean discovery is performed. */
+    public TurnLoopBuilder turnLoopMetrics(@NonNull TurnLoopMetrics metrics) {
+        this.turnLoopMetrics = Objects.requireNonNull(metrics, "metrics");
         return this;
     }
 
     public TurnLoopBuilder objectMapper(@NonNull ObjectMapper objectMapper) {
         this.objectMapper = Objects.requireNonNull(objectMapper, "objectMapper");
-        explicitlySet.add("objectMapper");
         return this;
     }
 
-    /** Sets the drain timeout for graceful shutdown in seconds (default 30). */
+    /** Sets the provider request timeout used by internally-owned model clients. */
+    public TurnLoopBuilder modelTimeout(@NonNull Duration timeout) {
+        if (timeout == null || timeout.isZero() || timeout.isNegative()) {
+            throw configuration(
+                "model timeout must be greater than zero",
+                Map.of("error", "invalid_model_timeout"));
+        }
+        this.modelTimeout = timeout;
+        return this;
+    }
+
+    /** Sets the graceful shutdown drain timeout in seconds. */
     public TurnLoopBuilder drainTimeoutSeconds(long seconds) {
-        this.drainTimeoutSeconds = Math.max(0, seconds);
-        explicitlySet.add("drainTimeoutSeconds");
+        if (seconds < 0) {
+            throw configuration(
+                "drainTimeoutSeconds must not be negative",
+                Map.of("error", "invalid_drain_timeout"));
+        }
+        this.drainTimeoutSeconds = seconds;
         return this;
     }
-
-    /** Sets the JDBC {@link DataSource}. Defaults to an in-memory SQLite database. */
-    public TurnLoopBuilder dataSource(@NonNull DataSource dataSource) {
-        this.dataSource = Objects.requireNonNull(dataSource, "dataSource");
-        explicitlySet.add("dataSource");
-        return this;
-    }
-
-    // ── build() ──
 
     /**
-     * Validates configuration and constructs a fully wired {@link TurnLoop}.
+     * Validates the builder and constructs a fully programmatic turn loop.
      *
-     * <h3>Validation checks (in order)</h3>
-     * <ol>
-     *   <li>At least one model configured</li>
-     *   <li>Default model exists in the model map</li>
-     *   <li>ModelCapabilityProvider set or optimistic default if any model
-     *       has streaming enabled</li>
-     *   <li>InteractionHandler required when {@code ask_user} tool is registered</li>
-     *   <li>{@code dataRoot} exists or can be created</li>
-     *   <li>Schema migrations applied</li>
-     * </ol>
-     *
-     * <p>Calling {@code build()} multiple times creates independent instances
-     * sharing the same {@link DataSource}.</p>
-     *
-     * @return a fully wired {@code TurnLoop} instance
-     * @throws ConfigurationException if validation fails
+     * @throws ConfigurationException if storage, model, provider, or schema
+     *                                configuration is invalid
      */
     public TurnLoop build() {
-        // ── 1. At least one model ──
-        if (modelConfigs.isEmpty()) {
-            throw new ConfigurationException("At least one model must be configured",
-                Map.of("error", "no_models"));
-        }
+        Map<String, ModelConfig> registeredModels = validateAndSnapshotModels();
+        DataSource resolvedDataSource = resolveStorage();
+        ObjectMapper mapper = objectMapper != null ? objectMapper : new ObjectMapper();
 
-        // ── 2. Default model ──
-        String defaultModel = resolveDefaultModelAlias();
-        if (!modelConfigs.containsKey(defaultModel)) {
-            throw new ConfigurationException(
-                "Default model '" + defaultModel + "' not found in configured models",
-                Map.of("error", "default_model_missing", "alias", defaultModel));
-        }
+        initializeSchema(resolvedDataSource);
 
-        // ── 3. Auto-discover from ApplicationContext ──
-        autoDiscoverBeans();
-
-        // ── 4. ModelCapabilityProvider ──
-        ModelCapabilityProvider capabilityProvider = resolveModelCapabilityProvider();
-
-        // ── 5. InteractionHandler check ──
-        if (interactionHandler == null && hasAskUserTool()) {
-            throw new ConfigurationException(
-                "interactionHandler is required when the ask_user tool is registered",
-                Map.of("error", "missing_interaction_handler"));
-        }
-
-        // ── 6. dataRoot ──
-        try {
-            Files.createDirectories(dataRoot);
-        } catch (Exception e) {
-            throw new ConfigurationException(
-                "Cannot create data root: " + dataRoot, Map.of("error", "data_root", "path", dataRoot.toString()));
-        }
-
-        // ── 7. DataSource ──
-        DataSource ds = resolveDataSource();
-
-        // ── 8. Run MigrationRunner ──
-        runMigrations(ds);
-
-        // ── 9. Resolve all defaults ──
-        ToolRegistry registry = resolveDefault(toolRegistry, "toolRegistry",
-            DefaultToolRegistry::new);
+        ToolRegistry registry = resolveDefault(toolRegistry, "toolRegistry", DefaultToolRegistry::new);
         ToolAccessPolicy accessPolicy = toolAccessPolicy;
-        ToolResultSummarizer summarizer = resolveDefault(toolResultSummarizer, "toolResultSummarizer",
-            DefaultToolResultSummarizer::new);
-        InteractionStore iStore = resolveDefault(interactionStore, "interactionStore",
-            InMemoryInteractionStore::new);
-        ConversationMemory cMemory = resolveDefault(conversationMemory, "conversationMemory",
-            () -> new SqliteConversationMemory(ds));
-        SessionStore sStore = resolveDefault(sessionStore, "sessionStore",
-            () -> new SqliteSessionStore(ds));
-        TokenEstimator tEstimator = resolveDefault(tokenEstimator, "tokenEstimator",
-            DefaultTokenEstimator::new);
-        CompactionStrategy cStrategy = resolveDefault(compactionStrategy, "compactionStrategy",
-            DefaultCompactionStrategy::new);
-        CompletionDetector cDetector = resolveDefault(completionDetector, "completionDetector",
-            DefaultCompletionDetector::instance);
-        RepairStrategy rStrategy = resolveDefault(repairStrategy, "repairStrategy",
-            DefaultRepairStrategy::instance);
-        TurnGate gate = resolveDefault(turnGate, "turnGate",
-            () -> new SerialTurnGate(Duration.ofMinutes(10)));
-        MessageQueueStore mqStore = resolveDefault(messageQueueStore, "messageQueueStore",
-            () -> new SqliteMessageQueueStore(ds));
-        MessageQueue mQueue = resolveDefault(messageQueue, "messageQueue",
-            () -> new DefaultMessageQueue(mqStore));
-        AuditWriter aWriter = resolveDefault(auditWriter, "auditWriter",
-            NoOpAuditWriter::instance);
-        ThinkingExtractor tExtractor = resolveDefault(thinkingExtractor, "thinkingExtractor",
-            CompositeThinkingExtractor::new);
-        TurnLifecycleListener lifecycleListener = resolveDefault(turnLifecycleListener,
-            "turnLifecycleListener", () -> result -> {});
-        ObjectMapper mapper = resolveDefault(objectMapper, "objectMapper", ObjectMapper::new);
+        ToolResultSummarizer summarizer = resolveDefault(
+            toolResultSummarizer, "toolResultSummarizer", DefaultToolResultSummarizer::new);
+        InteractionStore iStore = resolveDefault(
+            interactionStore, "interactionStore", InMemoryInteractionStore::new);
 
-        // ── 10. Build TurnExecutor ──
+        ConversationMemory cMemory;
+        SessionStore sStore;
+        MessageQueueStore mqStore;
+        try {
+            cMemory = resolveDefault(
+                conversationMemory, "conversationMemory", () -> new SqliteConversationMemory(resolvedDataSource, mapper));
+            sStore = resolveDefault(
+                sessionStore, "sessionStore", () -> new SqliteSessionStore(resolvedDataSource, mapper));
+            mqStore = resolveDefault(
+                messageQueueStore, "messageQueueStore", () -> new SqliteMessageQueueStore(resolvedDataSource, mapper));
+        } catch (RuntimeException e) {
+            throw configuration(
+                "Framework schema initialization failed: " + messageOf(e),
+                Map.of("error", "schema_initialization_failed"), e);
+        }
+
+        TokenEstimator tEstimator = resolveDefault(tokenEstimator, "tokenEstimator", DefaultTokenEstimator::new);
+        CompactionStrategy cStrategy = resolveDefault(
+            compactionStrategy, "compactionStrategy", DefaultCompactionStrategy::new);
+        CompletionDetector cDetector = resolveDefault(
+            completionDetector, "completionDetector", DefaultCompletionDetector::instance);
+        RepairStrategy rStrategy = resolveDefault(
+            repairStrategy, "repairStrategy", DefaultRepairStrategy::instance);
+        TurnGate gate = resolveDefault(
+            turnGate, "turnGate", () -> new SerialTurnGate(Duration.ofMinutes(10)));
+        MessageQueue mQueue = resolveDefault(messageQueue, "messageQueue", () -> new DefaultMessageQueue(mqStore));
+        resolveDefault(auditWriter, "auditWriter", NoOpAuditWriter::instance);
+        ThinkingExtractor tExtractor = resolveDefault(
+            thinkingExtractor, "thinkingExtractor", CompositeThinkingExtractor::new);
+        TurnLifecycleListener lifecycleListener = resolveDefault(
+            turnLifecycleListener, "turnLifecycleListener", () -> result -> { });
+
         TurnExecutor executor = new DefaultTurnExecutor();
-
-        // ── 11. Build ActiveTurnRegistry ──
         ActiveTurnRegistry activeTurnRegistry = new ConcurrentActiveTurnRegistry();
+        ModelRouter router = new DefaultModelRouter(registeredModels, modelTimeout);
 
-        // ── 12. Build ModelRouter ──
-        ModelRouter router = DefaultModelRouter.fromContext(
-            Map.copyOf(modelConfigs), context);
-
-        // ── 13. Build DefaultTurnEngine ──
         ContextManager ctxManager = new ContextManager(cMemory, tEstimator, cStrategy, 10);
         DefaultPromptAssembler assembler = new DefaultPromptAssembler(
             defaultSystemPrompt, List.copyOf(promptContributors));
@@ -404,7 +360,7 @@ public final class TurnLoopBuilder {
             .infrastructure(router, executor, activeTurnRegistry, tExtractor)
             .build();
 
-        // ── 14. Build DefaultTurnLoop ──
+        String defaultModel = registeredModels.keySet().iterator().next();
         return new DefaultTurnLoop(
             engine,
             gate,
@@ -415,7 +371,7 @@ public final class TurnLoopBuilder {
             activeTurnRegistry,
             executor,
             registry,
-            capabilityProvider,
+            resolveModelCapabilityProvider(),
             lifecycleListener,
             turnLoopMetrics,
             mapper,
@@ -425,133 +381,205 @@ public final class TurnLoopBuilder {
         );
     }
 
-    // ── Internal helpers ──
-
-    private String resolveDefaultModelAlias() {
-        // Prefer the alias literally named "default"
-        if (modelConfigs.containsKey("default")) {
-            return "default";
+    private Map<String, ModelConfig> validateAndSnapshotModels() {
+        if (modelConfigs.isEmpty()) {
+            throw configuration(
+                "At least one model must be configured",
+                Map.of("error", "no_models"));
         }
-        // Otherwise use the first registered model
-        return modelConfigs.keySet().iterator().next();
+
+        LinkedHashMap<String, ModelConfig> snapshot = new LinkedHashMap<>();
+        for (Map.Entry<String, ModelConfig> entry : modelConfigs.entrySet()) {
+            String alias = entry.getKey();
+            ModelConfig config = entry.getValue();
+            validateAlias(alias, "alias");
+            validateModelConfig(alias, config);
+            if (!alias.equals(config.alias())) {
+                throw configuration(
+                    "ModelConfig alias '" + config.alias() + "' does not match registration alias '" + alias + "'",
+                    Map.of("error", "model_alias_mismatch", "alias", alias,
+                        "configAlias", String.valueOf(config.alias())));
+            }
+            snapshot.put(alias, config);
+        }
+        return Collections.unmodifiableMap(snapshot);
+    }
+
+    private void validateModelConfig(String alias, ModelConfig config) {
+        if (config == null) {
+            throw configuration(
+                "Model configuration for alias '" + alias + "' must not be null",
+                Map.of("error", "model_config_missing", "alias", alias));
+        }
+        if (config.alias() == null || config.alias().isBlank()) {
+            throw configuration(
+                "ModelConfig alias must not be blank",
+                Map.of("error", "invalid_model_alias", "alias", alias));
+        }
+        validateAlias(config.alias(), "modelConfig.alias");
+        if (config.remoteModelName() == null || config.remoteModelName().isBlank()
+            || containsControlCharacter(config.remoteModelName())) {
+            throw configuration(
+                "Remote model name for alias '" + alias + "' must be a non-blank name",
+                Map.of("error", "invalid_remote_model", "alias", alias));
+        }
+        if (config.remoteEndpoint() == null || config.remoteEndpoint().isBlank()) {
+            throw configuration(
+                "Remote endpoint for alias '" + alias + "' must not be blank",
+                Map.of("error", "invalid_remote_endpoint", "alias", alias));
+        }
+        validateEndpoint(alias, config.remoteEndpoint());
+        if (config.endpointType() == null) {
+            throw configuration(
+                "Endpoint type for alias '" + alias + "' must not be null",
+                Map.of("error", "invalid_endpoint_type", "alias", alias));
+        }
+        if (config.apiKey() != null && config.apiKey().isBlank()) {
+            throw configuration(
+                "API key for alias '" + alias + "' must be null or non-blank",
+                Map.of("error", "invalid_api_key", "alias", alias));
+        }
+        if (config.endpointType() == EndpointType.DEEPSEEK
+            && (config.apiKey() == null || config.apiKey().isBlank())) {
+            throw configuration(
+                "DeepSeek requires a non-blank API key for alias '" + alias + "'",
+                Map.of("error", "deepseek_api_key_missing", "alias", alias));
+        }
+        if (config.contextLength() != null && config.contextLength() <= 0) {
+            throw configuration(
+                "Context length for alias '" + alias + "' must be greater than zero",
+                Map.of("error", "invalid_context_length", "alias", alias));
+        }
+        if (config.thinkLevel() != null && (config.thinkLevel() < 0 || config.thinkLevel() > 4)) {
+            throw configuration(
+                "Think level for alias '" + alias + "' must be between 0 and 4",
+                Map.of("error", "invalid_think_level", "alias", alias));
+        }
+        if (config.endpointType() == EndpointType.DEEPSEEK
+            && config.effectiveThinkLevel() > 0) {
+            throw configuration(
+                "DeepSeek thinking/reasoning levels are not exposed by the pinned Spring AI 2.0.0 API",
+                Map.of("error", "unsupported_provider_option", "provider", "DEEPSEEK",
+                    "option", "thinkLevel", "alias", alias));
+        }
+    }
+
+    private void validateEndpoint(String alias, String endpoint) {
+        try {
+            URI uri = URI.create(endpoint);
+            String scheme = uri.getScheme();
+            if (!uri.isAbsolute() || scheme == null
+                || !(scheme.equalsIgnoreCase("http") || scheme.equalsIgnoreCase("https"))
+                || uri.getHost() == null) {
+                throw new IllegalArgumentException("endpoint must be an absolute HTTP(S) URL");
+            }
+        } catch (IllegalArgumentException e) {
+            throw configuration(
+                "Remote endpoint for alias '" + alias + "' is invalid: " + messageOf(e),
+                Map.of("error", "invalid_remote_endpoint", "alias", alias));
+        }
+    }
+
+    private DataSource resolveStorage() {
+        boolean rootConfigured = dataRoot != null;
+        boolean dataSourceConfigured = dataSource != null;
+        if (rootConfigured == dataSourceConfigured) {
+            if (rootConfigured) {
+                throw configuration(
+                    "Configure exactly one storage source: dataRoot or dataSource, not both",
+                    Map.of("error", "storage_conflict"));
+            }
+            throw configuration(
+                "Configure exactly one storage source: dataRoot or dataSource",
+                Map.of("error", "storage_missing"));
+        }
+
+        if (dataSourceConfigured) {
+            return dataSource;
+        }
+
+        Path root = dataRoot;
+        if (root.toString().isBlank()) {
+            throw configuration(
+                "dataRoot must not be blank",
+                Map.of("error", "invalid_data_root", "path", root.toString()));
+        }
+        Path absoluteRoot = root.toAbsolutePath().normalize();
+        try {
+            if (Files.exists(absoluteRoot) && !Files.isDirectory(absoluteRoot)) {
+                throw configuration(
+                    "dataRoot is not a directory: " + absoluteRoot,
+                    Map.of("error", "invalid_data_root", "path", absoluteRoot.toString()));
+            }
+            Files.createDirectories(absoluteRoot);
+            if (!Files.isDirectory(absoluteRoot) || !Files.isReadable(absoluteRoot)
+                || !Files.isWritable(absoluteRoot)) {
+                throw configuration(
+                    "dataRoot must be a readable and writable directory: " + absoluteRoot,
+                    Map.of("error", "invalid_data_root", "path", absoluteRoot.toString()));
+            }
+        } catch (ConfigurationException e) {
+            throw e;
+        } catch (Exception e) {
+            throw configuration(
+                "Cannot prepare dataRoot '" + absoluteRoot + "': " + messageOf(e),
+                Map.of("error", "invalid_data_root", "path", absoluteRoot.toString()), e);
+        }
+
+        SQLiteDataSource sqlite = new SQLiteDataSource();
+        sqlite.setUrl("jdbc:sqlite:" + absoluteRoot.resolve(DATABASE_FILE_NAME));
+        return sqlite;
+    }
+
+    private void initializeSchema(DataSource dataSource) {
+        try {
+            new MigrationRunner(dataSource).apply(List.of());
+        } catch (Exception e) {
+            throw configuration(
+                "Framework schema initialization failed: " + messageOf(e),
+                Map.of("error", "schema_initialization_failed"), e);
+        }
     }
 
     private ModelCapabilityProvider resolveModelCapabilityProvider() {
-        if (modelCapabilityProvider != null) {
-            return modelCapabilityProvider;
-        }
-        // Check if any model config requests streaming
-        boolean streamingRequested = modelConfigs.values().stream()
-            .anyMatch(mc -> mc.endpointType() != EndpointType.OLLAMA);
-        if (streamingRequested) {
-            log.warn("No ModelCapabilityProvider configured — using optimistic default. "
-                + "Streaming capability checks will assume all models support STREAMING and TOOL_CALLING. "
-                + "Set a real ModelCapabilityProvider via TurnLoopBuilder.modelCapabilityProvider() "
-                + "for accurate capability detection.");
-            return DefaultModelCapabilityProvider.instance();
-        }
-        return DefaultModelCapabilityProvider.instance();
+        return modelCapabilityProvider != null
+            ? modelCapabilityProvider
+            : DefaultModelCapabilityProvider.instance();
     }
 
-    private boolean hasAskUserTool() {
-        // The default ToolRegistry always registers ask_user as a framework-internal
-        // tool. Custom registries may or may not include it. We check the resolved
-        // tools from a synthetic context — resolveForTurn() includes both public and
-        // framework-internal tools.
-        ToolRegistry registry = toolRegistry != null ? toolRegistry : new DefaultToolRegistry();
-        try {
-            return registry.resolveForTurn(
-                new TurnContext(TurnRequest.of("_", "_"), "_", "_"))
-                .stream()
-                .anyMatch(tc -> "ask_user".equals(tc.getToolDefinition().name()));
-        } catch (Exception e) {
-            // If resolution fails, assume ask_user is present (safe default)
-            return true;
+    private static void validateAlias(String alias, String field) {
+        if (alias == null || alias.isBlank() || !MODEL_ALIAS.matcher(alias).matches()) {
+            throw configuration(
+                "Invalid " + field + ": aliases must start with a letter or digit and contain only letters, digits, '.', '_' or '-'",
+                Map.of("error", "invalid_model_alias", "field", field,
+                    "alias", String.valueOf(alias)));
         }
     }
 
-    private DataSource resolveDataSource() {
-        if (dataSource != null) {
-            return dataSource;
-        }
-        log.info("No DataSource configured — using in-memory SQLite");
-        SQLiteDataSource ds = new SQLiteDataSource();
-        ds.setUrl("jdbc:sqlite:file:" + dataRoot.resolve("turnloop.db").toAbsolutePath()
-            + "?mode=memory&cache=shared");
-        return ds;
+    private static boolean containsControlCharacter(String value) {
+        return value.chars().anyMatch(Character::isISOControl);
     }
 
-    private void runMigrations(DataSource ds) {
-        try {
-            MigrationRunner runner = new MigrationRunner(ds);
-            // Individual stores self-migrate in their constructors.
-            // The MigrationRunner ensures the turnloop_schema_version table
-            // exists; we pass an empty list since no additional migrations
-            // are needed for the default stores.
-            runner.apply(List.of());
-            log.info("Schema migrations applied successfully");
-        } catch (Exception e) {
-            throw new ConfigurationException(
-                "Schema migration failed: " + e.getMessage(),
-                Map.of("error", "migration_failed"));
-        }
-    }
-
-    /**
-     * Auto-discovers {@link PromptContributor}, {@link TurnLifecycleListener},
-     * and {@link TurnLoopMetrics} beans from the {@link ApplicationContext}.
-     * Only runs for slots that were never explicitly set.
-     */
-    private void autoDiscoverBeans() {
-        // PromptContributor beans (cumulative — add to list if no explicit call)
-        if (!explicitlySet.contains("promptContributor")) {
-            try {
-                var providers = context.getBeanProvider(PromptContributor.class);
-                providers.orderedStream().forEach(pc -> {
-                    log.debug("Auto-discovered PromptContributor: {}", pc.getClass().getName());
-                    promptContributors.add(pc);
-                });
-            } catch (Exception e) {
-                log.debug("No PromptContributor beans found in context");
-            }
-        }
-
-        // TurnLifecycleListener (use highest-priority if not explicitly set)
-        if (!explicitlySet.contains("turnLifecycleListener")) {
-            try {
-                turnLifecycleListener = context.getBeanProvider(TurnLifecycleListener.class)
-                    .getIfAvailable();
-                if (turnLifecycleListener != null) {
-                    log.debug("Auto-discovered TurnLifecycleListener: {}",
-                        turnLifecycleListener.getClass().getName());
-                }
-            } catch (Exception e) {
-                log.debug("No TurnLifecycleListener bean found in context");
-            }
-        }
-
-        // TurnLoopMetrics (use highest-priority if not explicitly set)
-        if (!explicitlySet.contains("turnLoopMetrics")) {
-            try {
-                turnLoopMetrics = context.getBeanProvider(TurnLoopMetrics.class)
-                    .getIfAvailable();
-                if (turnLoopMetrics != null) {
-                    log.debug("Auto-discovered TurnLoopMetrics: {}",
-                        turnLoopMetrics.getClass().getName());
-                }
-            } catch (Exception e) {
-                log.debug("No TurnLoopMetrics bean found in context");
-            }
-        }
-    }
-
-    @SuppressWarnings("unchecked")
-    private static <T> T resolveDefault(T value, String name, java.util.function.Supplier<T> defaultSupplier) {
+    private static <T> T resolveDefault(T value, String name, Supplier<T> defaultSupplier) {
         if (value != null) {
             return value;
         }
-        T def = defaultSupplier.get();
-        log.debug("Using default for '{}': {}", name, def.getClass().getSimpleName());
-        return def;
+        T resolved = defaultSupplier.get();
+        log.debug("Using default for '{}': {}", name, resolved.getClass().getSimpleName());
+        return resolved;
+    }
+
+    private static ConfigurationException configuration(String message, Map<String, String> details) {
+        return new ConfigurationException(message, details);
+    }
+
+    private static ConfigurationException configuration(
+        String message, Map<String, String> details, Throwable cause) {
+        return new ConfigurationException(message, details, cause);
+    }
+
+    private static String messageOf(Throwable throwable) {
+        String message = throwable.getMessage();
+        return message == null || message.isBlank() ? throwable.getClass().getSimpleName() : message;
     }
 }

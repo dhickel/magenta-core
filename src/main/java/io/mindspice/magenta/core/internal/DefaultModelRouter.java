@@ -1,108 +1,100 @@
 package io.mindspice.magenta.core.internal;
 
 import io.mindspice.magenta.core.ConfigurationException;
-import io.mindspice.magenta.core.EndpointType;
 import io.mindspice.magenta.core.ModelConfig;
 import io.mindspice.magenta.core.NonNull;
 import io.mindspice.magenta.core.Nullable;
 import io.mindspice.magenta.core.ToolCallback;
+import io.mindspice.magenta.core.internal.provider.DeepSeekProviderAdapter;
+import io.mindspice.magenta.core.internal.provider.OllamaProviderAdapter;
+import io.mindspice.magenta.core.internal.provider.OpenAiProviderAdapter;
+import io.mindspice.magenta.core.internal.provider.OwnedChatModel;
+import io.mindspice.magenta.core.internal.provider.SpringAiToolCallbackAdapter;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.model.tool.ToolCallingChatOptions;
 import org.springframework.ai.model.tool.ToolCallingManager;
-import org.springframework.context.ApplicationContext;
 
 import java.time.Duration;
+import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
+import java.util.Objects;
 
 /**
- * Default implementation of {@link ModelRouter}.
+ * Immutable, deterministic model routing boundary.
  *
- * <p>Constructs {@link ChatModel} instances per alias from a configuration
- * map. Provider detection uses classpath probing so the router loads
- * successfully even when only a subset of provider dependencies are
- * present. This is the <strong>sole</strong> point where Spring AI
- * provider types appear — it is internal, not public API.</p>
+ * <p>All provider construction is direct and compile-time linked to the
+ * provider artifacts bundled by the root POM. Spring AI types stop at this
+ * internal boundary; callers provide only Magenta model and tool contracts.</p>
  */
-public class DefaultModelRouter implements ModelRouter {
+public final class DefaultModelRouter implements ModelRouter {
 
     private static final Logger log = LoggerFactory.getLogger(DefaultModelRouter.class);
-
-    private static final boolean OLLAMA_AVAILABLE = probeClass("org.springframework.ai.ollama.OllamaChatModel");
-    private static final boolean OPENAI_AVAILABLE = probeClass("org.springframework.ai.openai.OpenAiChatModel");
-    private static final boolean DEEPSEEK_AVAILABLE = probeClass("org.springframework.ai.deepseek.DeepSeekChatModel");
+    private static final Duration DEFAULT_TIMEOUT = Duration.ofSeconds(360);
 
     private final Map<String, ModelConfig> configs;
-    private final Map<String, ChatModel> modelCache = new ConcurrentHashMap<>();
+    private final Map<String, OwnedChatModel> modelCache = new LinkedHashMap<>();
     private final ToolCallingManager toolCallingManager;
-    private final Duration openAiReadTimeout;
+    private final Duration requestTimeout;
+    private final Object lifecycleMonitor = new Object();
+    private boolean closed;
 
-    /**
-     * Creates a router from a map of model alias → config.
-     *
-     * @param configs             model configurations keyed by alias
-     * @param toolCallingManager  Spring AI tool-calling manager
-     * @param openAiReadTimeoutSeconds read timeout for OpenAI-compatible endpoints
-     */
-    public DefaultModelRouter(
-        @NonNull Map<String, ModelConfig> configs,
-        @NonNull ToolCallingManager toolCallingManager,
-        long openAiReadTimeoutSeconds
-    ) {
-        this.configs = Map.copyOf(configs);
-        this.toolCallingManager = toolCallingManager;
-        this.openAiReadTimeout = Duration.ofSeconds(Math.max(1, openAiReadTimeoutSeconds));
+    /** Creates a router with the default provider request timeout. */
+    public DefaultModelRouter(@NonNull Map<String, ModelConfig> configs) {
+        this(configs, null, DEFAULT_TIMEOUT);
     }
 
-    public DefaultModelRouter(
-        @NonNull Map<String, ModelConfig> configs,
-        @NonNull ToolCallingManager toolCallingManager
-    ) {
-        this(configs, toolCallingManager, 360);
+    /** Creates a router with an explicit provider request timeout. */
+    public DefaultModelRouter(@NonNull Map<String, ModelConfig> configs,
+                              @NonNull Duration requestTimeout) {
+        this(configs, null, requestTimeout);
     }
 
     /**
-     * Factory that resolves the {@link ToolCallingManager} from the Spring
-     * {@link ApplicationContext}. This is the preferred entry point for
-     * {@code TurnLoopBuilder} so that the builder itself never imports
-     * Spring AI types.
-     *
-     * @param configs model configurations keyed by alias
-     * @param context Spring application context
-     * @return a fully initialised router
-     * @throws ConfigurationException if {@code ToolCallingManager} cannot be resolved
+     * Compatibility constructor for internal callers that already own a
+     * Spring AI tool-calling manager.
      */
-    public static DefaultModelRouter fromContext(
-        @NonNull Map<String, ModelConfig> configs,
-        @NonNull ApplicationContext context
-    ) {
-        ToolCallingManager tcm = context.getBeanProvider(ToolCallingManager.class)
-            .getIfAvailable(() -> {
-                log.info("No ToolCallingManager bean found — creating default");
-                try {
-                    var builderMethod = ToolCallingManager.class.getMethod("builder");
-                    Object builder = builderMethod.invoke(null);
-                    var buildMethod = builder.getClass().getMethod("build");
-                    return (ToolCallingManager) buildMethod.invoke(builder);
-                } catch (Exception e) {
-                    throw new ConfigurationException(
-                        "ToolCallingManager is required but could not be created. "
-                        + "Ensure spring-ai-model is on the classpath.",
-                        Map.of("error", "tool_calling_manager_missing"));
-                }
-            });
-        return new DefaultModelRouter(configs, tcm);
+    public DefaultModelRouter(@NonNull Map<String, ModelConfig> configs,
+                              @NonNull ToolCallingManager toolCallingManager,
+                              long requestTimeoutSeconds) {
+        this(configs, toolCallingManager,
+            Duration.ofSeconds(Math.max(1, requestTimeoutSeconds)));
     }
 
-    // ── ModelRouter ──
+    /** Internal constructor used by the public-free provider composition path. */
+    public DefaultModelRouter(@NonNull Map<String, ModelConfig> configs,
+                              @Nullable ToolCallingManager toolCallingManager,
+                              @NonNull Duration requestTimeout) {
+        this.configs = immutableOrderedCopy(configs);
+        this.toolCallingManager = toolCallingManager != null
+            ? toolCallingManager
+            : ToolCallingManager.builder().build();
+        if (requestTimeout.isZero() || requestTimeout.isNegative()) {
+            throw new ConfigurationException(
+                "Provider request timeout must be greater than zero",
+                Map.of("error", "invalid_model_timeout"));
+        }
+        this.requestTimeout = requestTimeout;
+    }
 
     @Override
     @NonNull
     public ChatModel springAiChatModel(@NonNull String modelAlias) {
-        return modelCache.computeIfAbsent(modelAlias, this::buildModel);
+        String alias = canonicalAlias(modelAlias, true);
+        synchronized (lifecycleMonitor) {
+            if (closed) {
+                throw new IllegalStateException("Model router is closed");
+            }
+            OwnedChatModel owned = modelCache.get(alias);
+            if (owned == null) {
+                owned = buildModel(alias);
+                modelCache.put(alias, owned);
+            }
+            return owned.model();
+        }
     }
 
     @Override
@@ -113,308 +105,142 @@ public class DefaultModelRouter implements ModelRouter {
 
     @Override
     @NonNull
+    public String selectModelAlias(@Nullable String requestedAlias,
+                                   @Nullable String sessionAlias) {
+        if (requestedAlias != null && !requestedAlias.isBlank()) {
+            return canonicalAlias(requestedAlias, true);
+        }
+        if (sessionAlias != null && !sessionAlias.isBlank()) {
+            String resolvedSessionAlias = canonicalAlias(sessionAlias, false);
+            if (resolvedSessionAlias != null) {
+                return resolvedSessionAlias;
+            }
+        }
+        return configs.keySet().iterator().next();
+    }
+
+    @Override
+    public int contextLength(@NonNull String modelAlias) {
+        Integer contextLength = requireConfig(modelAlias).contextLength();
+        return contextLength != null ? contextLength : 0;
+    }
+
+    @Override
+    @NonNull
     public ToolCallingChatOptions toolCallingOptions(
         @NonNull String modelAlias,
         @NonNull List<ToolCallback> tools
     ) {
         ModelConfig config = requireConfig(modelAlias);
-        ToolCallingChatOptions base = buildOptions(config);
-        List<org.springframework.ai.tool.ToolCallback> springAiTools =
-            tools.stream().map(SpringAiToolCallbackAdapter::new).collect(java.util.stream.Collectors.toList());
-        return base.mutate().toolCallbacks(springAiTools).build();
+        List<org.springframework.ai.tool.ToolCallback> springTools = tools.stream()
+            .map(tool -> (org.springframework.ai.tool.ToolCallback)
+                new SpringAiToolCallbackAdapter(Objects.requireNonNull(tool, "tool")))
+            .toList();
+        return providerOptions(config, springTools);
     }
 
     @Override
     @NonNull
     public ToolCallingChatOptions basicChatOptions(@NonNull String modelAlias) {
-        return buildOptions(requireConfig(modelAlias));
+        return providerOptions(requireConfig(modelAlias), List.of());
     }
 
     @Override
     public boolean supportsStreaming(@NonNull String modelAlias) {
-        ModelConfig config = requireConfig(modelAlias);
-        return config.endpointType() != EndpointType.OLLAMA || OLLAMA_AVAILABLE;
+        requireConfig(modelAlias);
+        // All three supported Spring AI ChatModel implementations expose the
+        // same synchronous/streaming boundary. Streaming is selected by the
+        // TurnRequest, not by mutating a provider-specific public option.
+        return true;
     }
 
     @Override
     public void closeChatModels() {
-        for (var entry : modelCache.entrySet()) {
-            ChatModel model = entry.getValue();
-            try {
-                if (model instanceof AutoCloseable ac) {
-                    ac.close();
-                }
-            } catch (Exception e) {
-                log.warn("Failed to close ChatModel for alias '{}': {}", entry.getKey(), e.getMessage());
+        synchronized (lifecycleMonitor) {
+            if (closed) {
+                return;
             }
+            closed = true;
+            for (Map.Entry<String, OwnedChatModel> entry : modelCache.entrySet()) {
+                try {
+                    entry.getValue().close();
+                } catch (Exception e) {
+                    log.warn("Failed to close model client for alias '{}': {}",
+                        entry.getKey(), e.getMessage());
+                }
+            }
+            modelCache.clear();
         }
-        modelCache.clear();
     }
 
-    // ── Model construction ──
-
-    private ChatModel buildModel(String alias) {
+    private OwnedChatModel buildModel(String alias) {
         ModelConfig config = requireConfig(alias);
         return switch (config.endpointType()) {
-            case OLLAMA -> buildOllamaModel(config);
-            case OPENAI_COMPATIBLE -> buildOpenAiModel(config);
-            case DEEPSEEK -> buildDeepSeekModel(config);
+            case OLLAMA -> OllamaProviderAdapter.create(
+                config, toolCallingManager, requestTimeout);
+            case OPENAI_COMPATIBLE -> OpenAiProviderAdapter.create(
+                config, toolCallingManager, requestTimeout);
+            case DEEPSEEK -> DeepSeekProviderAdapter.create(
+                config, toolCallingManager, requestTimeout);
         };
     }
 
-    @SuppressWarnings("unchecked")
-    private ChatModel buildOllamaModel(ModelConfig config) {
-        if (!OLLAMA_AVAILABLE) {
-            throw new IllegalStateException("Ollama model requested but spring-ai-ollama is not on the classpath: "
-                + config.alias());
-        }
-        try {
-            // Reflection to avoid compile-time dependency on optional provider
-            Class<?> ollamaApiClass = Class.forName("org.springframework.ai.ollama.api.OllamaApi");
-            Class<?> ollamaChatOptionsClass = Class.forName("org.springframework.ai.ollama.api.OllamaChatOptions");
-            Class<?> ollamaChatModelClass = Class.forName("org.springframework.ai.ollama.OllamaChatModel");
-            Class<?> modelMgmtClass = Class.forName("org.springframework.ai.ollama.management.ModelManagementOptions");
-
-            Object ollamaApi = ollamaApiClass.getMethod("builder").invoke(null);
-            ollamaApi = ollamaApi.getClass().getMethod("baseUrl", String.class)
-                .invoke(ollamaApi, config.remoteEndpoint());
-            ollamaApi = ollamaApi.getClass().getMethod("build").invoke(ollamaApi);
-
-            Object optionsBuilder = ollamaChatOptionsClass.getMethod("builder").invoke(null);
-            optionsBuilder = optionsBuilder.getClass().getMethod("model", String.class)
-                .invoke(optionsBuilder, config.remoteModelName());
-            applyOllamaThinkReflective(optionsBuilder, config.effectiveThinkLevel());
-            Object options = optionsBuilder.getClass().getMethod("build").invoke(optionsBuilder);
-
-            Object modelMgmt = modelMgmtClass.getMethod("defaults").invoke(null);
-
-            Object builder = ollamaChatModelClass.getMethod("builder").invoke(null);
-            builder = builder.getClass().getMethod("ollamaApi", ollamaApi.getClass().getInterfaces()[0])
-                .invoke(builder, ollamaApi);
-            builder = builder.getClass().getMethod("options",
-                    Class.forName("org.springframework.ai.chat.prompt.ChatOptions"))
-                .invoke(builder, options);
-            builder = builder.getClass().getMethod("toolCallingManager", ToolCallingManager.class)
-                .invoke(builder, toolCallingManager);
-            builder = builder.getClass().getMethod("modelManagementOptions", modelMgmtClass)
-                .invoke(builder, modelMgmt);
-            builder = builder.getClass().getMethod("observationRegistry",
-                    Class.forName("io.micrometer.observation.ObservationRegistry"))
-                .invoke(builder, Class.forName("io.micrometer.observation.ObservationRegistry")
-                    .getField("NOOP").get(null));
-
-            return (ChatModel) builder.getClass().getMethod("build").invoke(builder);
-        } catch (Exception e) {
-            throw new RuntimeException("Failed to build Ollama model for alias " + config.alias(), e);
-        }
-    }
-
-    private ChatModel buildOpenAiModel(ModelConfig config) {
-        if (!OPENAI_AVAILABLE) {
-            throw new IllegalStateException("OpenAI-compatible model requested but spring-ai-openai is not on the classpath: "
-                + config.alias());
-        }
-        try {
-            Class<?> openAiChatOptionsClass = Class.forName("org.springframework.ai.openai.OpenAiChatOptions");
-            Class<?> openAiChatModelClass = Class.forName("org.springframework.ai.openai.OpenAiChatModel");
-
-            Object optionsBuilder = openAiChatOptionsClass.getMethod("builder").invoke(null);
-            optionsBuilder = optionsBuilder.getClass().getMethod("model", String.class)
-                .invoke(optionsBuilder, config.remoteModelName());
-            applyOpenAiReasoningReflective(optionsBuilder, config.effectiveThinkLevel());
-            Object options = optionsBuilder.getClass().getMethod("build").invoke(optionsBuilder);
-
-            Object builder = openAiChatModelClass.getMethod("builder").invoke(null);
-            builder = builder.getClass().getMethod("options",
-                    Class.forName("org.springframework.ai.chat.prompt.ChatOptions"))
-                .invoke(builder, options);
-            builder = builder.getClass().getMethod("toolCallingManager", ToolCallingManager.class)
-                .invoke(builder, toolCallingManager);
-            builder = builder.getClass().getMethod("observationRegistry",
-                    Class.forName("io.micrometer.observation.ObservationRegistry"))
-                .invoke(builder, Class.forName("io.micrometer.observation.ObservationRegistry")
-                    .getField("NOOP").get(null));
-
-            return (ChatModel) builder.getClass().getMethod("build").invoke(builder);
-        } catch (Exception e) {
-            throw new RuntimeException("Failed to build OpenAI model for alias " + config.alias(), e);
-        }
-    }
-
-    private ChatModel buildDeepSeekModel(ModelConfig config) {
-        if (!DEEPSEEK_AVAILABLE) {
-            throw new IllegalStateException("DeepSeek model requested but spring-ai-deepseek is not on the classpath: "
-                + config.alias());
-        }
-        try {
-            Class<?> deepSeekChatOptionsClass = Class.forName("org.springframework.ai.deepseek.DeepSeekChatOptions");
-            Class<?> deepSeekChatModelClass = Class.forName("org.springframework.ai.deepseek.DeepSeekChatModel");
-            Class<?> deepSeekApiClass = Class.forName("org.springframework.ai.deepseek.api.DeepSeekApi");
-
-            Object optionsBuilder = deepSeekChatOptionsClass.getMethod("builder").invoke(null);
-            optionsBuilder = optionsBuilder.getClass().getMethod("model", String.class)
-                .invoke(optionsBuilder, config.remoteModelName());
-            applyDeepSeekReasoningReflective(optionsBuilder, config.effectiveThinkLevel());
-            Object options = optionsBuilder.getClass().getMethod("build").invoke(optionsBuilder);
-
-            Object apiBuilder = deepSeekApiClass.getMethod("builder").invoke(null);
-            apiBuilder = apiBuilder.getClass().getMethod("baseUrl", String.class)
-                .invoke(apiBuilder, config.remoteEndpoint());
-            if (config.apiKey() != null) {
-                apiBuilder = apiBuilder.getClass().getMethod("apiKey", String.class)
-                    .invoke(apiBuilder, config.apiKey());
-            }
-            Object api = apiBuilder.getClass().getMethod("build").invoke(apiBuilder);
-
-            Object builder = deepSeekChatModelClass.getMethod("builder").invoke(null);
-            builder = builder.getClass().getMethod("deepSeekApi", deepSeekApiClass)
-                .invoke(builder, api);
-            builder = builder.getClass().getMethod("options",
-                    Class.forName("org.springframework.ai.chat.prompt.ChatOptions"))
-                .invoke(builder, options);
-            builder = builder.getClass().getMethod("toolCallingManager", ToolCallingManager.class)
-                .invoke(builder, toolCallingManager);
-            builder = builder.getClass().getMethod("observationRegistry",
-                    Class.forName("io.micrometer.observation.ObservationRegistry"))
-                .invoke(builder, Class.forName("io.micrometer.observation.ObservationRegistry")
-                    .getField("NOOP").get(null));
-
-            return (ChatModel) builder.getClass().getMethod("build").invoke(builder);
-        } catch (Exception e) {
-            throw new RuntimeException("Failed to build DeepSeek model for alias " + config.alias(), e);
-        }
-    }
-
-    // ── Options ──
-
-    private ToolCallingChatOptions buildOptions(ModelConfig config) {
+    private ToolCallingChatOptions providerOptions(
+        ModelConfig config, List<org.springframework.ai.tool.ToolCallback> tools) {
         return switch (config.endpointType()) {
-            case OLLAMA -> buildOllamaOptions(config);
-            case OPENAI_COMPATIBLE -> buildOpenAiOptions(config);
-            case DEEPSEEK -> buildDeepSeekOptions(config);
+            case OLLAMA -> OllamaProviderAdapter.options(config, tools);
+            case OPENAI_COMPATIBLE -> OpenAiProviderAdapter.options(
+                config, tools, requestTimeout);
+            case DEEPSEEK -> DeepSeekProviderAdapter.options(config, tools);
         };
     }
 
-    private ToolCallingChatOptions buildOllamaOptions(ModelConfig config) {
-        try {
-            Class<?> cls = Class.forName("org.springframework.ai.ollama.api.OllamaChatOptions");
-            Object builder = cls.getMethod("builder").invoke(null);
-            builder = builder.getClass().getMethod("model", String.class)
-                .invoke(builder, config.remoteModelName());
-            applyOllamaThinkReflective(builder, config.effectiveThinkLevel());
-            return (ToolCallingChatOptions) builder.getClass().getMethod("build").invoke(builder);
-        } catch (Exception e) {
-            return ToolCallingChatOptions.builder().build();
-        }
+    private ModelConfig requireConfig(String value) {
+        String alias = canonicalAlias(value, true);
+        return configs.get(alias);
     }
-
-    private ToolCallingChatOptions buildOpenAiOptions(ModelConfig config) {
-        try {
-            Class<?> cls = Class.forName("org.springframework.ai.openai.OpenAiChatOptions");
-            Object builder = cls.getMethod("builder").invoke(null);
-            builder = builder.getClass().getMethod("model", String.class)
-                .invoke(builder, config.remoteModelName());
-            applyOpenAiReasoningReflective(builder, config.effectiveThinkLevel());
-            return (ToolCallingChatOptions) builder.getClass().getMethod("build").invoke(builder);
-        } catch (Exception e) {
-            return ToolCallingChatOptions.builder().build();
-        }
-    }
-
-    private ToolCallingChatOptions buildDeepSeekOptions(ModelConfig config) {
-        try {
-            Class<?> cls = Class.forName("org.springframework.ai.deepseek.DeepSeekChatOptions");
-            Object builder = cls.getMethod("builder").invoke(null);
-            builder = builder.getClass().getMethod("model", String.class)
-                .invoke(builder, config.remoteModelName());
-            applyDeepSeekReasoningReflective(builder, config.effectiveThinkLevel());
-            return (ToolCallingChatOptions) builder.getClass().getMethod("build").invoke(builder);
-        } catch (Exception e) {
-            return ToolCallingChatOptions.builder().build();
-        }
-    }
-
-    // ── Thinking / reasoning effort (reflective) ──
-
-    private static void applyOllamaThinkReflective(Object builder, int level) {
-        try {
-            switch (level) {
-                case 0 -> builder.getClass().getMethod("disableThinking").invoke(builder);
-                case 1 -> builder.getClass().getMethod("thinkLow").invoke(builder);
-                case 2 -> builder.getClass().getMethod("thinkMedium").invoke(builder);
-                case 3, 4 -> builder.getClass().getMethod("thinkHigh").invoke(builder);
-            }
-        } catch (Exception ignored) {
-            // method may not exist in all versions
-        }
-    }
-
-    private static void applyOpenAiReasoningReflective(Object builder, int level) {
-        if (level <= 0) return;
-        try {
-            String effort = switch (level) {
-                case 1 -> "low";
-                case 2 -> "medium";
-                default -> "high";
-            };
-            builder.getClass().getMethod("reasoningEffort", String.class).invoke(builder, effort);
-        } catch (Exception ignored) {
-            // method may not exist in all versions
-        }
-    }
-
-    private static void applyDeepSeekReasoningReflective(Object builder, int level) {
-        if (level <= 0) return;
-        try {
-            builder.getClass().getMethod("enableThinking").invoke(builder);
-            String effort = level >= 4 ? "max" : "high";
-            builder.getClass().getMethod("reasoningEffort", String.class).invoke(builder, effort);
-        } catch (Exception ignored) {
-            // method may not exist in all versions
-        }
-    }
-
-    // ── Helpers ──
-
-    private ModelConfig requireConfig(String alias) {
-        ModelConfig config = configs.get(alias);
-        if (config == null) {
-            throw new IllegalArgumentException("Unknown model alias: " + alias);
-        }
-        return config;
-    }
-
-    private static boolean probeClass(String className) {
-        try {
-            Class.forName(className);
-            return true;
-        } catch (ClassNotFoundException e) {
-            return false;
-        }
-    }
-
-    // ── Spring AI ToolCallback adapter ──
 
     /**
-     * Adapts framework {@link ToolCallback} to Spring AI {@code ToolCallback}
-     * so framework tools can be passed to {@code ToolCallingChatOptions}.
+     * Resolves canonical aliases first and then accepts a remote model name as
+     * a compatibility value for persisted settings. If several aliases point
+     * at one remote name, registration order supplies the deterministic alias.
      */
-    private record SpringAiToolCallbackAdapter(ToolCallback delegate)
-        implements org.springframework.ai.tool.ToolCallback {
-
-        @Override
-        public org.springframework.ai.tool.definition.ToolDefinition getToolDefinition() {
-            io.mindspice.magenta.core.ToolDefinition fd = delegate.getToolDefinition();
-            return org.springframework.ai.tool.definition.ToolDefinition.builder()
-                .name(fd.name())
-                .description(fd.description())
-                .inputSchema(fd.inputSchema())
-                .build();
+    private String canonicalAlias(String value, boolean failIfMissing) {
+        if (value == null || value.isBlank()) {
+            if (failIfMissing) {
+                throw new IllegalArgumentException("Model alias must not be blank");
+            }
+            return null;
         }
-
-        @Override
-        public String call(String toolInput) {
-            return delegate.call(toolInput);
+        if (configs.containsKey(value)) {
+            return value;
         }
+        for (Map.Entry<String, ModelConfig> entry : configs.entrySet()) {
+            if (value.equals(entry.getValue().remoteModelName())) {
+                return entry.getKey();
+            }
+        }
+        if (failIfMissing) {
+            throw new IllegalArgumentException("Unknown model alias: " + value);
+        }
+        return null;
+    }
+
+    private static Map<String, ModelConfig> immutableOrderedCopy(
+        Map<String, ModelConfig> source) {
+        Objects.requireNonNull(source, "configs");
+        LinkedHashMap<String, ModelConfig> copy = new LinkedHashMap<>();
+        source.forEach((alias, config) -> {
+            if (alias == null || config == null) {
+                throw new IllegalArgumentException("Model aliases and configurations must not be null");
+            }
+            if (copy.putIfAbsent(alias, config) != null) {
+                throw new IllegalArgumentException("Duplicate model alias: " + alias);
+            }
+        });
+        if (copy.isEmpty()) {
+            throw new IllegalArgumentException("At least one model must be configured");
+        }
+        return Collections.unmodifiableMap(copy);
     }
 }

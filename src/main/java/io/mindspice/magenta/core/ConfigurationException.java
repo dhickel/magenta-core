@@ -11,7 +11,13 @@ public final class ConfigurationException extends TurnLoopException {
 
     public ConfigurationException(@NonNull String message,
                                   @NonNull Map<String, String> details) {
-        super(message);
+        this(message, details, null);
+    }
+
+    public ConfigurationException(@NonNull String message,
+                                  @NonNull Map<String, String> details,
+                                  Throwable cause) {
+        super(message, cause);
         this.details = Map.copyOf(details);
     }
 
