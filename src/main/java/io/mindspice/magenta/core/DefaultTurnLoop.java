@@ -416,11 +416,13 @@ final class DefaultTurnLoop implements TurnLoop {
                 started = System.currentTimeMillis();
                 setActiveMetric();
             } catch (TurnLoopException e) {
+                if (coordinatorClaimed) ACTIVE_ANSWER_CLAIMS.remove(sessionId, Boolean.TRUE);
                 if (answerClaimed) clearPendingState(sessionId);
                 cleanupFailedStart(sessionId, context == null ? null : context.turnId(), gateToken);
                 if (answerClaimed && gateToken == null) gate.release(sessionId);
                 throw e;
             } catch (Throwable e) {
+                if (coordinatorClaimed) ACTIVE_ANSWER_CLAIMS.remove(sessionId, Boolean.TRUE);
                 if (answerClaimed) clearPendingState(sessionId);
                 cleanupFailedStart(sessionId, context == null ? null : context.turnId(), gateToken);
                 if (answerClaimed && gateToken == null) gate.release(sessionId);
