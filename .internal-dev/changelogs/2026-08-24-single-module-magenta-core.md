@@ -27,7 +27,7 @@ Converted the transitional three-module Spring Boot reactor into one root-level 
 - Ollama, OpenAI-compatible, and DeepSeek provider construction is internal and bundled transitively.
 - Framework persistence uses fresh `magenta_core_*` tables; historical `turnloop_*` tables remain untouched.
 - User messages enter prompts and durable memory once; question suspension is restart-safe, supports ordered multiple questions and combined answers, auto-queues pending-session submissions, and supports cancellation.
-- Sync/stream lifecycle, interruption, metrics, audit, context sizing, graceful close, durable answer/cancel CAS, restart-safe queue claims, bounded session coordination, cancellation/timeout fencing, terminal observability, isolated tool guards, explicit tool selection, duplicate protection, and replacing compaction are wired through transport-neutral contracts.
+- Sync/stream lifecycle, interruption, metrics, audit, context sizing, graceful close, durable answer/cancel CAS, restart-safe queue claims, bounded session coordination, cancellation/timeout fencing, terminal observability, isolated tool guards, explicit tool selection, duplicate protection, replacing compaction, and sealed composition internals are wired through transport-neutral contracts.
 - Subscriber cancellation and gate timeout revoke execution authority before gate release; stale execution memory, interaction, failure-cleanup, audit/lifecycle, and compaction writes are fenced, while authoritative cancellation cleanup completes under the session boundary. Late cleanup is qualified by both turn ID and gate token.
 - Timeout scanning invokes the facade's token-aware interrupt fence before changing gate state. Default builder-owned scanners stop on `TurnLoop.close()`; caller-supplied gates remain caller-owned and open.
 
@@ -43,7 +43,7 @@ The branch-specific single-module framework contract and `DECISION-20260824-01` 
 - Maven dependency ban passed; no Boot application/auto-configuration, servlet, Actuator, or Micrometer adapter is present.
 - JAR manifest contains `Automatic-Module-Name: io.mindspice.magenta.core`; forbidden old package/module entries are absent.
 - Standalone consumer fixture compiled and ran with only the built artifact and runtime dependency classpath, exercising both `dataRoot` and caller-owned `DataSource` construction.
-- `git diff --check` passed after concurrency, provider-visibility, cancellation/timeout-fencing, queue timestamp, observability, compaction, tool-isolation, registration, mapper, and provider-transport repairs.
+- `git diff --check` passed after concurrency, provider-visibility, cancellation/timeout-fencing, queue timestamp, observability, compaction, tool-isolation, registration, mapper, provider-transport, interaction-recovery, and composition-boundary repairs.
 
 ## Risks
 
