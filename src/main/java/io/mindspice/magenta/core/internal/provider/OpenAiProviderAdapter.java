@@ -23,15 +23,17 @@ public final class OpenAiProviderAdapter {
         ModelConfig config, ToolCallingManager toolCallingManager, Duration timeout) {
         OpenAiChatOptions options = options(config, List.of(), timeout);
         String apiKey = config.apiKey() != null ? config.apiKey() : "";
-        OpenAIClient client = OpenAiSetup.setupSyncClient(
-            config.remoteEndpoint(), apiKey, null, null, null, null,
-            false, false, config.remoteModelName(), timeout, 0, null,
-            java.util.Map.of(), ObservationRegistry.NOOP, null, List.of());
-        OpenAIClientAsync asyncClient = OpenAiSetup.setupAsyncClient(
-            config.remoteEndpoint(), apiKey, null, null, null, null,
-            false, false, config.remoteModelName(), timeout, 0, null,
-            java.util.Map.of(), ObservationRegistry.NOOP, null, List.of());
+        OpenAIClient client = null;
+        OpenAIClientAsync asyncClient = null;
         try {
+            client = OpenAiSetup.setupSyncClient(
+                config.remoteEndpoint(), apiKey, null, null, null, null,
+                false, false, config.remoteModelName(), timeout, 0, null,
+                java.util.Map.of(), ObservationRegistry.NOOP, null, List.of());
+            asyncClient = OpenAiSetup.setupAsyncClient(
+                config.remoteEndpoint(), apiKey, null, null, null, null,
+                false, false, config.remoteModelName(), timeout, 0, null,
+                java.util.Map.of(), ObservationRegistry.NOOP, null, List.of());
             OpenAiChatModel model = OpenAiChatModel.builder()
                 .openAiClient(client)
                 .openAiClientAsync(asyncClient)
@@ -39,7 +41,9 @@ public final class OpenAiProviderAdapter {
                 .toolCallingManager(toolCallingManager)
                 .observationRegistry(ObservationRegistry.NOOP)
                 .build();
-            return new OwnedChatModel(model, () -> closeClients(client, asyncClient));
+            OpenAIClient ownedClient = client;
+            OpenAIClientAsync ownedAsyncClient = asyncClient;
+            return new OwnedChatModel(model, () -> closeClients(ownedClient, ownedAsyncClient));
         } catch (RuntimeException | Error e) {
             try {
                 closeClients(client, asyncClient);
@@ -79,18 +83,22 @@ public final class OpenAiProviderAdapter {
 
     private static void closeClients(OpenAIClient client, OpenAIClientAsync asyncClient) {
         RuntimeException failure = null;
-        try {
-            asyncClient.close();
-        } catch (RuntimeException e) {
-            failure = e;
-        }
-        try {
-            client.close();
-        } catch (RuntimeException e) {
-            if (failure == null) {
+        if (asyncClient != null) {
+            try {
+                asyncClient.close();
+            } catch (RuntimeException e) {
                 failure = e;
-            } else {
-                failure.addSuppressed(e);
+            }
+        }
+        if (client != null) {
+            try {
+                client.close();
+            } catch (RuntimeException e) {
+                if (failure == null) {
+                    failure = e;
+                } else {
+                    failure.addSuppressed(e);
+                }
             }
         }
         if (failure != null) {
