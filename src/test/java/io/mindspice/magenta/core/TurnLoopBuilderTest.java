@@ -60,7 +60,8 @@ class TurnLoopBuilderTest {
             assertTrue(names.contains("magenta_core_schema_version"));
             assertTrue(names.contains("magenta_core_conversation_memory"));
             assertTrue(names.contains("magenta_core_session_metadata"));
-            assertTrue(names.contains("magenta_core_pending_messages"));
+            assertTrue(names.contains("magenta_core_queued_requests"));
+            assertTrue(names.contains("magenta_core_interactions"));
         }
     }
 

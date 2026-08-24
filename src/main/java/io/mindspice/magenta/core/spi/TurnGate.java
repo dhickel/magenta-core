@@ -24,13 +24,11 @@ public interface TurnGate {
     // ── Nested types ──
 
     sealed interface AcquireResult
-        permits AcquireResult.Acquired, AcquireResult.Rejected, AcquireResult.Queued {
+        permits AcquireResult.Acquired, AcquireResult.Rejected {
 
         record Acquired(@NonNull String lockToken) implements AcquireResult {}
 
         record Rejected(@NonNull String reason) implements AcquireResult {}
-
-        record Queued(@NonNull String claimToken) implements AcquireResult {}
     }
 
     enum TurnGateMode { SEND, STREAM, ANSWER }

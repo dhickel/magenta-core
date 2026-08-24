@@ -20,6 +20,7 @@ import reactor.core.Exceptions;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.FluxSink;
 import reactor.core.publisher.SignalType;
+import reactor.core.publisher.Sinks;
 
 import javax.sql.DataSource;
 import java.lang.reflect.Field;
@@ -445,18 +446,63 @@ final class DefaultTurnLoop implements TurnLoop {
             messageQueueStore.recoverExpiredClaims();
             while (!state.cancelled.get() && !sink.isCancelled()) {
                 InteractionStore.Interaction pending;
+                ExecutionHandle recoveryHandle = null;
                 synchronized (lockFor(state.sessionId)) {
                     if (activeTurnIds.containsKey(state.sessionId)
                         || gate.state(state.sessionId) == TurnGate.GateState.EXECUTING) {
                         throw new TurnLoopBusyException(state.sessionId);
                     }
                     pending = pendingInteractionLocked(state.sessionId).orElse(null);
+                    if (pending == null) {
+                        InteractionStore.Interaction recovery = answeredRecoveryLocked(
+                            state.sessionId).orElse(null);
+                        if (recovery != null) {
+                            if (ACTIVE_ANSWER_CLAIMS.putIfAbsent(
+                                recovery.interactionId(), Boolean.TRUE) != null) {
+                                throw new TurnLoopBusyException(state.sessionId);
+                            }
+                            try {
+                                recoveryHandle = startExecutionLocked(
+                                    continuationRequest(recovery),
+                                    new ExecutionOrigin.Answer(recovery.interactionId()), true,
+                                    TurnGate.TurnGateMode.ANSWER);
+                                recoveryHandle.answerInteractionId = recovery.interactionId();
+                                recoveryHandle.answerClaimId = recovery.interactionId();
+                            } catch (Throwable failure) {
+                                ACTIVE_ANSWER_CLAIMS.remove(
+                                    recovery.interactionId(), Boolean.TRUE);
+                                throw failure;
+                            }
+                        }
+                    }
                 }
                 if (pending != null) {
                     TurnResponse.Questions outcome = pending.questions();
                     observeStandaloneOutcome(outcome, state.sessionId, pending.model());
                     if (!sink.isCancelled()) {
                         sink.next(outcome);
+                    }
+                    break;
+                }
+                if (recoveryHandle != null) {
+                    state.handle.set(recoveryHandle);
+                    Throwable recoveryFailure = awaitDrainExecution(
+                        state, sink, recoveryHandle);
+                    state.handle.compareAndSet(recoveryHandle, null);
+                    if (state.cancelled.get() || sink.isCancelled()) {
+                        break;
+                    }
+                    if (recoveryFailure != null) {
+                        if (!sink.isCancelled()) sink.error(recoveryFailure);
+                        break;
+                    }
+                    TurnResponse.Outcome recovered = recoveryHandle.accumulator.outcome();
+                    if (recovered instanceof TurnResponse.Message) {
+                        continue;
+                    }
+                    if (recovered == null) {
+                        throw failureException(recoveryHandle, TurnFailureCategory.INTERNAL,
+                            "Recovered answer completed without an outcome");
                     }
                     break;
                 }
@@ -590,16 +636,20 @@ final class DefaultTurnLoop implements TurnLoop {
     }
 
     private void acknowledgeClaim(DrainState state) {
-        MessageQueueStore.Claim claim = state.claim.getAndSet(null);
+        MessageQueueStore.Claim claim = state.claim.get();
         if (claim == null) return;
+        boolean acknowledged;
         try {
-            if (!messageQueueStore.ack(claim.claimToken())) {
-                log.warn("Queued claim {} was not acknowledged", claim.claimToken());
-            }
-        } catch (Throwable e) {
-            log.warn("Unable to acknowledge queued claim {}: {}",
-                claim.claimToken(), e.getMessage());
+            acknowledged = messageQueueStore.ack(claim.claimToken());
+        } catch (Throwable failure) {
+            throw new TurnLoopException(
+                "Unable to acknowledge queued claim " + claim.claimToken(), failure);
         }
+        if (!acknowledged) {
+            throw new TurnLoopException(
+                "Queued claim was not acknowledged: " + claim.claimToken());
+        }
+        state.claim.compareAndSet(claim, null);
         setQueueMetric(state.sessionId);
     }
 
@@ -650,8 +700,6 @@ final class DefaultTurnLoop implements TurnLoop {
 
         TurnGate.AcquireResult acquired = gate.acquire(sessionId, mode);
         if (!(acquired instanceof TurnGate.AcquireResult.Acquired ownership)) {
-            String reason = acquired instanceof TurnGate.AcquireResult.Rejected rejected
-                ? rejected.reason() : "turn gate did not grant execution ownership";
             throw new TurnLoopBusyException(sessionId);
         }
         String gateToken = ownership.lockToken();
@@ -694,7 +742,12 @@ final class DefaultTurnLoop implements TurnLoop {
      * from progress or from a diagnostic enum.
      */
     private Flux<TurnResponse> executionStream(ExecutionHandle handle) {
-        return engine.stream(handle.context)
+        Flux<TurnResponse> engineResponses = engine.stream(handle.context)
+            .concatWith(Flux.defer(() -> Flux.error(failureException(
+                handle, TurnFailureCategory.INTERNAL,
+                "Turn completed without an outcome"))));
+        return Flux.merge(engineResponses, handle.forcedOutcomes.asFlux())
+            .takeUntil(TurnResponse.Outcome.class::isInstance)
             .doOnNext(handle.accumulator::accept)
             .doOnComplete(() -> finishExpected(handle,
                 handle.accumulator.requireOutcome(handle)))
@@ -914,23 +967,15 @@ final class DefaultTurnLoop implements TurnLoop {
                 return false;
             }
             ActiveTurnRegistry.ActiveTurn active = activeTurnRegistry.get(turnId);
-            if (active == null) {
-                return false;
-            }
-            if (!active.revoke("turn_timeout")) {
-                return false;
-            }
-            activeTurnIds.remove(sessionId, turnId);
-            activeGateTokens.remove(sessionId, gateToken);
-            activeTurnRegistry.remove(turnId);
             ExecutionHandle handle = executionsByTurn.get(turnId);
-            if (handle != null) {
-                finishExpected(handle, new TurnResponse.TimedOut(
-                    executionInfo(handle), "turn_timeout"));
+            if (active == null || handle == null || !active.revoke("turn_timeout")) {
+                return false;
             }
-            SessionAction action = pendingSessionActions.remove(sessionId);
-            if (action != null) {
-                applySessionAction(sessionId, action);
+            Sinks.EmitResult emitted = handle.forcedOutcomes.tryEmitNext(
+                new TurnResponse.TimedOut(executionInfo(handle), "turn_timeout"));
+            if (emitted.isFailure()) {
+                log.warn("Unable to terminate timed-out execution {}: {}", turnId, emitted);
+                return handle.terminalObserved.get();
             }
             setActiveMetric();
             return true;
@@ -1997,6 +2042,8 @@ final class DefaultTurnLoop implements TurnLoop {
         private final String model;
         private final Instant startedAt;
         private final ResponseAccumulator accumulator = new ResponseAccumulator();
+        private final Sinks.Many<TurnResponse> forcedOutcomes =
+            Sinks.many().replay().limit(1);
         private final AtomicBoolean terminalObserved = new AtomicBoolean(false);
         private volatile String answerInteractionId;
         private volatile String answerClaimId;

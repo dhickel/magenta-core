@@ -155,27 +155,6 @@ final class DefaultTurnEngine {
         });
     }
 
-    /**
-     * Executes a turn by collecting the same response stream exposed to
-     * callers and reducing the exact emitted values to its one outcome.
-     */
-    public TurnResponse.Outcome execute(TurnContext ctx) {
-        Objects.requireNonNull(ctx, "ctx");
-        try {
-            List<TurnResponse> responses = stream(ctx).collectList().block();
-            return reduceToOutcome(ctx, responses == null ? List.of() : responses);
-        } catch (Throwable failure) {
-            Throwable cause = unwrap(failure);
-            if (cause instanceof TurnFailedException turnFailed) {
-                throw turnFailed;
-            }
-            if (isSpecializedFailure(cause)) {
-                throw (RuntimeException) cause;
-            }
-            throw failureException(ctx, Instant.now(), currentPhase(ctx), cause);
-        }
-    }
-
     /** Closes provider models owned by the internal router. */
     public void closeChatModels() {
         modelRouter.closeChatModels();
@@ -205,7 +184,8 @@ final class DefaultTurnEngine {
     private void runTurnLoop(TurnContext ctx, FluxSink<TurnResponse> sink,
                              ActiveTurnRegistry.ActiveTurn active) {
         Instant startedAt = Instant.now();
-        TurnLoopState state = new TurnLoopState(ctx, toolLoopGuard, executionOrigin(ctx));
+        TurnLoopState state = new TurnLoopState(
+            ctx, toolLoopGuard, executionOrigin(ctx), startedAt);
 
         try {
             active.phase(TurnPhase.PREPARE);
@@ -647,13 +627,12 @@ final class DefaultTurnEngine {
         }
 
         ContextUsage finalUsage = computeUsage(ctx);
-        Instant completedAt = atOrAfter(startedAt);
-        ExecutionInfo execution = new ExecutionInfo(
-            ctx.sessionId(), ctx.turnId(), state.origin, startedAt, completedAt,
-            finalUsage, List.copyOf(state.toolActivities));
-
         TurnResponse.Outcome outcome;
         if (state.wasInterrupted) {
+            Instant completedAt = atOrAfter(startedAt);
+            ExecutionInfo execution = new ExecutionInfo(
+                ctx.sessionId(), ctx.turnId(), state.origin, startedAt, completedAt,
+                finalUsage, List.copyOf(state.toolActivities));
             outcome = interruptionOutcome(execution, state.interruptReason);
         } else if (state.suspended) {
             String interactionId = state.pendingInteractionId;
@@ -661,16 +640,26 @@ final class DefaultTurnEngine {
                 throw failureException(ctx, startedAt, TurnPhase.FINALIZE,
                     TurnFailureCategory.PERSISTENCE, "Pending interaction state is incomplete");
             }
+            TurnResponse.Questions questions = state.pendingContext.questions();
+            if (!questions.execution().finalContextUsage().equals(finalUsage)) {
+                throw failureException(ctx, startedAt, TurnPhase.FINALIZE,
+                    TurnFailureCategory.PERSISTENCE,
+                    "Pending interaction context snapshot is not final");
+            }
             // The interaction store owns the exact Questions snapshot. Reuse
             // that snapshot so pendingQuestions() and the emitted terminal
             // response cannot diverge in execution metadata.
-            outcome = state.pendingContext.questions();
+            outcome = questions;
         } else {
             String text = state.visibleText.toString();
             if (text.isBlank()) {
                 throw failureException(ctx, startedAt, TurnPhase.FINALIZE,
                     TurnFailureCategory.MODEL, "Model returned no visible response");
             }
+            Instant completedAt = atOrAfter(startedAt);
+            ExecutionInfo execution = new ExecutionInfo(
+                ctx.sessionId(), ctx.turnId(), state.origin, startedAt, completedAt,
+                finalUsage, List.copyOf(state.toolActivities));
             outcome = new TurnResponse.Message(execution, text);
         }
 
@@ -708,10 +697,13 @@ final class DefaultTurnEngine {
         continuation.put(PENDING_INTERACTION_ID, interactionId);
         continuation.put("turnloop.pending_tool_names", writeJson(
             ctx.request().toolNames() == null ? List.of() : ctx.request().toolNames()));
-        Instant now = Instant.now();
+        Instant now = atOrAfter(state.startedAt);
+        ContextUsage finalUsage = contextManager.computeUsage(
+            ctx.sessionId(), ctx.model(), state.messagesToPersist);
+        ctx.currentContextUsage(finalUsage);
         ExecutionInfo execution = new ExecutionInfo(
-            ctx.sessionId(), ctx.turnId(), state.origin, now, now,
-            computeUsage(ctx), List.copyOf(state.toolActivities));
+            ctx.sessionId(), ctx.turnId(), state.origin, state.startedAt, now,
+            finalUsage, List.copyOf(state.toolActivities));
         TurnResponse.Questions questionOutcome = new TurnResponse.Questions(
             execution, interactionId, ordered);
         InteractionStore.Interaction pending = new InteractionStore.Interaction(
@@ -976,33 +968,7 @@ final class DefaultTurnEngine {
         }
     }
 
-    // ── response reduction and failures ──
-
-    private TurnResponse.Outcome reduceToOutcome(TurnContext ctx,
-                                                  List<TurnResponse> responses) {
-        TurnResponse.Outcome outcome = null;
-        int outcomeIndex = -1;
-        for (int index = 0; index < responses.size(); index++) {
-            TurnResponse response = responses.get(index);
-            if (response instanceof TurnResponse.Outcome terminal) {
-                if (outcome != null || outcomeIndex >= 0) {
-                    throw failureException(ctx, Instant.now(), currentPhase(ctx),
-                        TurnFailureCategory.INTERNAL, "Turn emitted multiple outcomes");
-                }
-                outcome = terminal;
-                outcomeIndex = index;
-            }
-        }
-        if (outcome == null) {
-            throw failureException(ctx, Instant.now(), currentPhase(ctx),
-                TurnFailureCategory.INTERNAL, "Turn completed without an outcome");
-        }
-        if (outcomeIndex != responses.size() - 1) {
-            throw failureException(ctx, Instant.now(), currentPhase(ctx),
-                TurnFailureCategory.INTERNAL, "Turn emitted progress after its outcome");
-        }
-        return outcome;
-    }
+    // ── failures ──
 
     private void emitFailure(TurnContext ctx, FluxSink<TurnResponse> sink,
                              ActiveTurnRegistry.ActiveTurn active,
@@ -1354,6 +1320,7 @@ final class DefaultTurnEngine {
     private static final class TurnLoopState {
         private final TurnContext context;
         private final ExecutionOrigin origin;
+        private final Instant startedAt;
         private final List<TurnMessage> messagesToPersist = new ArrayList<>();
         private final List<ToolActivityData> toolActivities = new ArrayList<>();
         private final ToolLoopGuard toolLoopGuard;
@@ -1377,10 +1344,11 @@ final class DefaultTurnEngine {
         private String pendingInteractionId;
 
         private TurnLoopState(TurnContext context, ToolLoopGuard toolLoopGuard,
-                              ExecutionOrigin origin) {
+                              ExecutionOrigin origin, Instant startedAt) {
             this.context = context;
             this.toolLoopGuard = toolLoopGuard.forTurn();
             this.origin = origin;
+            this.startedAt = startedAt;
         }
     }
 

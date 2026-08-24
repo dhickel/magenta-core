@@ -47,7 +47,7 @@ class MagentaToolRegistryTest {
             new com.fasterxml.jackson.databind.ObjectMapper().findAndRegisterModules());
         registry.registerToolBean(new StructuredTool());
         ToolCallback callback = registry.resolveForTurn(new TurnContext(
-            new TurnRequest("session", "message", "model", List.of("join"), false,
+            new TurnRequest("session", "message", "model", List.of("join"),
                 java.util.Map.of()), "turn", "model")).getFirst();
         assertEquals("ab", callback.call("{\"values\":\"[\\\"a\\\",\\\"b\\\"]\"}"));
         assertEquals(1, new com.fasterxml.jackson.databind.ObjectMapper()
@@ -62,17 +62,17 @@ class MagentaToolRegistryTest {
             () -> registry.registerToolBean(new ExampleTool()));
 
         TurnContext selected = new TurnContext(
-            new TurnRequest("session", "message", "model", List.of("echo"), false, java.util.Map.of()),
+            new TurnRequest("session", "message", "model", List.of("echo"), java.util.Map.of()),
             "turn", "model");
         assertEquals(List.of("echo"), registry.resolveForTurn(selected).stream()
             .map(callback -> callback.getToolDefinition().name()).toList());
         TurnContext noTools = new TurnContext(
-            new TurnRequest("session", "message", "model", List.of(), false, java.util.Map.of()),
+            new TurnRequest("session", "message", "model", List.of(), java.util.Map.of()),
             "turn-empty", "model");
         assertEquals(List.of(), registry.resolveForTurn(noTools));
         assertThrows(ToolException.AccessDenied.class, () -> registry.resolveForTurn(
             new TurnContext(new TurnRequest("session", "message", "model", List.of("missing"),
-                false, java.util.Map.of()), "turn-2", "model")));
+                java.util.Map.of()), "turn-2", "model")));
     }
 
     static final class StructuredTool {

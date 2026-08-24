@@ -71,7 +71,20 @@ final class ContextManager {
     /** Computes usage for the durable, model-visible session context. */
     @NonNull
     public ContextUsage computeUsage(@NonNull String sessionId, @NonNull String modelAlias) {
-        List<TurnMessage> messages = visibleMessages(conversationMemory.getMessages(sessionId));
+        return computeUsage(sessionId, modelAlias, List.of());
+    }
+
+    /**
+     * Computes the exact post-checkpoint usage before pending messages are
+     * written, allowing a durable terminal snapshot to be created first.
+     */
+    @NonNull
+    ContextUsage computeUsage(@NonNull String sessionId, @NonNull String modelAlias,
+                              @NonNull List<TurnMessage> additionalMessages) {
+        List<TurnMessage> messages = new ArrayList<>(
+            visibleMessages(conversationMemory.getMessages(sessionId)));
+        messages.addAll(visibleMessages(Objects.requireNonNull(
+            additionalMessages, "additionalMessages")));
         int usedTokens = 0;
         for (TurnMessage msg : messages) {
             usedTokens = saturatingAdd(usedTokens, tokenEstimator.estimateTokens(msg));
