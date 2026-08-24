@@ -299,7 +299,8 @@ public final class TurnLoopBuilder {
     public TurnLoop build() {
         Map<String, ModelConfig> registeredModels = validateAndSnapshotModels();
         DataSource resolvedDataSource = resolveStorage();
-        ObjectMapper mapper = objectMapper != null ? objectMapper : new ObjectMapper();
+        ObjectMapper mapper = objectMapper != null
+            ? objectMapper : new ObjectMapper().findAndRegisterModules();
 
         initializeSchema(resolvedDataSource);
 
