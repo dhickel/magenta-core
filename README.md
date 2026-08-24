@@ -1,114 +1,34 @@
-# Magenta
+# Magenta Core
 
-Magenta is a Spring Boot and Spring AI assistant application for chat, planning, operational workflows, jobs, agents, projects, workspaces, and tool-assisted work. It is currently in alpha development and uses SQLite-backed persistence for local development.
+Magenta Core is a transport-neutral Java 25 library for building persistent Spring AI turn loops without Spring Boot application wiring.
 
-## Documentation
+## Dependency
 
-- End-user docs: [docs/end-user/00-index.md](docs/end-user/00-index.md)
-- Technical docs: [docs/technical/00-index.md](docs/technical/00-index.md)
-- API docs: [docs/api/00-index.md](docs/api/00-index.md)
-- Documentation contribution rules: [docs/AGENTS.md](docs/AGENTS.md)
-
-Older Maestro design and planning material remains under `docs/maestro/`; it is not the alpha documentation entry point.
-
-## Run
-
-```bash
-mvn spring-boot:run
+```xml
+<dependency>
+  <groupId>io.mindspice</groupId>
+  <artifactId>magenta-core</artifactId>
+  <version>0.0.1-SNAPSHOT</version>
+</dependency>
 ```
 
-This starts:
-- the web API in the background
-- the terminal REPL in the foreground
+The artifact bundles Ollama, OpenAI-compatible, and DeepSeek Spring AI providers transitively. It does not provide HTTP, servlet, web, Actuator, or Spring Boot auto-configuration support.
 
-Type directly in the terminal to chat. Useful commands:
-- `/help`
-- `/new`
-- `/use <conversation-id>`
-- `/model` or `/model <name>` or `/model default`
-- `/clear` or `/clear <conversation-id>`
-- `/exit`
+## Minimal construction
 
-If you want API-only mode without the terminal loop:
+```java
+TurnLoop loop = TurnLoopBuilder.create()
+    .dataRoot(Path.of("./data"))
+    .model("local", new ModelConfig(
+        "local", "llama3.2", "http://localhost:11434", null,
+        EndpointType.OLLAMA, 32_000, 0))
+    .build();
 
-```bash
-mvn spring-boot:run -Dspring-boot.run.arguments=--app.repl.enabled=false
+TurnResult result = loop.send(TurnRequest.of("session-1", "Hello"));
+System.out.println(result.message());
+loop.close();
 ```
 
-## Chat API Examples
+Use `dataSource(DataSource)` instead of `dataRoot(Path)` when the caller owns JDBC storage. Exactly one storage source is required. Sessions are created lazily from caller-supplied IDs, and the model registry is immutable after `build()`.
 
-Start a conversation:
-
-```bash
-curl -s http://localhost:8080/api/chat \
-  -H 'Content-Type: application/json' \
-  -d '{"message":"Hello. Keep answers short."}'
-```
-
-Continue the same conversation by reusing `conversationId` from the previous response:
-
-```bash
-curl -s http://localhost:8080/api/chat \
-  -H 'Content-Type: application/json' \
-  -d '{"conversationId":"<conversation-id>","message":"What did I just ask you?"}'
-```
-
-Override model per request:
-
-```bash
-curl -s http://localhost:8080/api/chat \
-  -H 'Content-Type: application/json' \
-  -d '{"conversationId":"<conversation-id>","model":"<model-name>","message":"Reply with one sentence."}'
-```
-
-Stream a response as server-sent events:
-
-```bash
-curl -N http://localhost:8080/api/chat/stream \
-  -H 'Accept: text/event-stream' \
-  -H 'Content-Type: application/json' \
-  -d '{"conversationId":"<conversation-id>","message":"Reply gradually."}'
-```
-
-Clear a conversation from memory:
-
-```bash
-curl -i -X DELETE http://localhost:8080/api/chat/<conversation-id>
-```
-
-## Session And History Endpoints
-
-List persisted conversation ids:
-
-```bash
-curl -s http://localhost:8080/api/chat/sessions
-```
-
-Load a conversation history:
-
-```bash
-curl -s http://localhost:8080/api/chat/<conversation-id>/history
-```
-
-Run command-style session actions:
-
-```bash
-curl -s http://localhost:8080/api/chat/commands \
-  -H 'Content-Type: application/json' \
-  -d '{"conversationId":"<active-id>","command":"/new"}'
-```
-
-Supported commands include:
-- `/new`
-- `/switch <uuid>`
-- `/clear`
-- `/clear <uuid>`
-- `/plan`
-- `/exit-plan`
-- `/exec-plan`
-
-Planning mode records the goal, deliverables, optional inputs and outputs, assumptions, notes, detailed steps, and validation criteria. `/exec-plan` streams execution from the approved plan and requires `plan_complete` validation before the plan is marked completed.
-
-## Browser UI
-
-Open `http://localhost:8080/chat` for the chat UI. Operational alpha surfaces, including dashboards, plans, workflows, jobs, agents, projects, workspaces, outputs, settings, and skills, are documented from the indexes under `docs/` as those sections are completed.
+See [Getting started](docs/end-user/getting-started.md), [turn-loop API](docs/api/turn-loop.md), and [technical architecture](docs/technical/architecture.md).

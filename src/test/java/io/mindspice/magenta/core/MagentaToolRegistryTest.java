@@ -1,0 +1,56 @@
+package io.mindspice.magenta.core;
+
+import org.junit.jupiter.api.Test;
+
+import java.util.List;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+
+class MagentaToolRegistryTest {
+    @Test
+    void registersMagentaOwnedAnnotatedBeanWithoutSpringAnnotations() throws Exception {
+        assertFalse(ExampleTool.class.getDeclaredMethod("echo", String.class)
+            .getParameters()[0].isNamePresent());
+
+        DefaultToolRegistry registry = new DefaultToolRegistry();
+        registry.registerToolBean(new ExampleTool());
+
+        assertEquals(List.of("echo"), registry.definitions().stream()
+            .map(ToolDefinition::name).sorted().toList());
+        assertEquals("{\"type\":\"object\",\"properties\":{\"message\":{\"type\":\"string\","
+                + "\"description\":\"Message\"}},\"required\":[\"message\"]}",
+            registry.definitions().getFirst().inputSchema());
+        assertEquals("hello", registry.resolveForTurn(
+            new TurnContext(TurnRequest.of("session", "message"), "turn", "model"))
+            .stream().filter(callback -> "echo".equals(callback.getToolDefinition().name()))
+            .findFirst().orElseThrow().call("{\"message\":\"hello\"}"));
+    }
+
+    @Test
+    void rejectsSyntheticParameterNamesAtRegistration() {
+        DefaultToolRegistry registry = new DefaultToolRegistry();
+
+        IllegalArgumentException failure = assertThrows(IllegalArgumentException.class,
+            () -> registry.registerToolBean(new ToolWithoutParameterName()));
+
+        assertEquals("Tool parameter on " + ToolWithoutParameterName.class.getName()
+                + "#echo must declare @ToolParam(name = ...) when compiled without -parameters",
+            failure.getMessage());
+    }
+
+    static final class ExampleTool {
+        @Tool(name = "echo", description = "Echo")
+        public String echo(@ToolParam(name = "message", description = "Message") String message) {
+            return message;
+        }
+    }
+
+    static final class ToolWithoutParameterName {
+        @Tool(name = "echo")
+        public String echo(String message) {
+            return message;
+        }
+    }
+}

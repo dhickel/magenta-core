@@ -3,9 +3,6 @@ package io.mindspice.magenta.core;
 import io.mindspice.magenta.core.spi.ToolRegistry;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.ai.tool.annotation.Tool;
-import org.springframework.ai.tool.annotation.ToolParam;
-
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.lang.reflect.Parameter;
@@ -35,8 +32,9 @@ public final class DefaultToolRegistry implements ToolRegistry {
     private static final String ASK_USER_DESC = "Ask the user one or more questions. "
         + "The turn suspends until the user answers.";
     private static final String ASK_USER_INPUT_SCHEMA = """
-        {"type":"object","properties":{"question":{"type":"string",\
-        "description":"The question to ask the user"}},"required":["question"]}""";
+        {"type":"object","properties":{"questions":{"type":"array","items":{"type":"string"},\
+        "description":"Ordered questions to ask the user"},"question":{"type":"string",\
+        "description":"One question to ask the user"}},"anyOf":[{"required":["questions"]},{"required":["question"]}]}""";
 
     private final Map<String, ToolCallback> publicTools = new ConcurrentHashMap<>();
     private final Map<String, ToolCallback> frameworkTools = new ConcurrentHashMap<>();
@@ -168,10 +166,10 @@ public final class DefaultToolRegistry implements ToolRegistry {
                 sb.append(",");
             }
             Parameter param = parameters[i];
-            String paramName = param.getName();
+            String paramName = resolveParameterName(method, param);
             ToolParam toolParam = param.getAnnotation(ToolParam.class);
 
-            sb.append("\"").append(paramName).append("\":{");
+            sb.append("\"").append(escapeJson(paramName)).append("\":{");
             sb.append("\"type\":\"").append(javaTypeToJsonType(param.getType())).append("\"");
             if (toolParam != null && !toolParam.description().isEmpty()) {
                 sb.append(",\"description\":\"").append(escapeJson(toolParam.description())).append("\"");
@@ -190,7 +188,7 @@ public final class DefaultToolRegistry implements ToolRegistry {
                 if (i > 0) {
                     sb.append(",");
                 }
-                sb.append("\"").append(required.get(i)).append("\"");
+                sb.append("\"").append(escapeJson(required.get(i))).append("\"");
             }
             sb.append("]");
         }
@@ -216,7 +214,7 @@ public final class DefaultToolRegistry implements ToolRegistry {
 
         Object[] args = new Object[parameters.length];
         for (int i = 0; i < parameters.length; i++) {
-            String paramName = parameters[i].getName();
+            String paramName = resolveParameterName(method, parameters[i]);
             Object raw = inputMap.get(paramName);
 
             if (raw == null) {
@@ -234,6 +232,19 @@ public final class DefaultToolRegistry implements ToolRegistry {
             }
         }
         return args;
+    }
+
+    private static String resolveParameterName(Method method, Parameter parameter) {
+        ToolParam toolParam = parameter.getAnnotation(ToolParam.class);
+        if (toolParam != null && !toolParam.name().isBlank()) {
+            return toolParam.name();
+        }
+        if (parameter.isNamePresent()) {
+            return parameter.getName();
+        }
+        throw new IllegalArgumentException("Tool parameter on "
+            + method.getDeclaringClass().getName() + "#" + method.getName()
+            + " must declare @ToolParam(name = ...) when compiled without -parameters");
     }
 
     private static String javaTypeToJsonType(Class<?> type) {

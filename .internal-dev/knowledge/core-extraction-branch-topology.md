@@ -33,3 +33,7 @@ Repository state gotcha: the Magenta working tree (branch `core`, 2026-08) is a 
 
 - RESOLVED 2026-08-09: the rectification sprint starts from a new branch created at `336eb5f0` (tip of `sprint/20260729-163244-project-dashboard`); `core` remains standalone and is addressed later. See `DECISION-20260809-02` in `.internal-dev/specifications/decisions.md`.
 - Schema/migration approach on the new base is settled: the full schema and `db/migrations/` are live; rectification changes come as new ordered `NNN-kebab.sql` migrations.
+
+## Branch-Specific Correction (2026-08-24)
+
+The later user-approved extraction plan supersedes the prior rectification handoff for `refactor/magenta-core-single-module-20260824`. This branch intentionally remains framework-only and is being converted from the transitional three-module state into one root `io.mindspice:magenta-core` JAR. The product architecture records remain historical evidence; do not restore the deleted application or its migration corpus here. The new framework schema is `magenta_core_*`, and old `turnloop_*` tables are inert coexistence data.

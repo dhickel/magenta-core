@@ -1,6 +1,7 @@
 package io.mindspice.magenta.core.example;
 
-import org.springframework.ai.tool.annotation.Tool;
+import io.mindspice.magenta.core.Tool;
+import io.mindspice.magenta.core.ToolParam;
 
 /**
  * Simple echo tool for testing and demonstration.
@@ -18,7 +19,7 @@ public final class EchoTool {
      * @return the same message, unmodified
      */
     @Tool(name = "echo", description = "Echoes the input message back to the caller")
-    public String echo(String message) {
+    public String echo(@ToolParam(name = "message", description = "Message to echo") String message) {
         return message == null ? "" : message;
     }
 }

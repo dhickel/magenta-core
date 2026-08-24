@@ -58,13 +58,19 @@ Ordered migration ownership covers contiguous resources 001-020, including artif
 - **Schedule/reaction state:** definitions are revisioned and soft-deleted; historical snapshots and audit retain their original revision. Scheduler ownership uses persisted owner/fence claims suitable for the current topology. Firings and dispatches carry canonical operation keys/request digests, append-only attempts, exact lifecycle links, and recovery state. Reactions additionally persist root/parent causation, dedupe, and loop/depth/rate suppression. Shared evaluators accept immutable input and a supplied clock; simulation has no mutation-capable collaborators.
 - **Retention:** no policy means `PRESERVE`/keep indefinitely. Lifecycle actions are explicit and scoped, and protection from active work/access, references, lineage/legal pins, and unresolved reconciliation overrides deletion policy.
 
+## Branch-Specific Framework Contract (2026-08-24)
+
+On `refactor/magenta-core-single-module-20260824`, the accepted clean-break extraction plan supersedes the product-runtime architecture above for this implementation scope. The branch publishes one transport-neutral root-level `io.mindspice:magenta-core` JAR under `io.mindspice.magenta.core`; Spring Boot application, web/servlet, Actuator, Micrometer, auto-configuration, and product-domain surfaces are absent. `TurnLoopBuilder` is a programmatic composition root with exactly one caller-selected storage source (`dataRoot` or `DataSource`), and framework persistence uses fresh `magenta_core_*` tables while leaving historical `turnloop_*` tables inert. Provider-specific Spring AI types remain internal. This entry records branch-local intended truth without rewriting historical product architecture evidence.
+
 ## Ownership Boundary
 
-Architecture specs state intended system boundaries and drift. Product code remains observed truth, and implementation plans own task-specific sequencing.
+Architecture specs state intended system boundaries and drift. Product code remains observed truth, and implementation plans own task-specific sequencing. The branch-specific framework contract above governs this refactor's implementation surface; product entries remain historical/superseded for this branch.
 
 ## Drift/Gaps
 
 | id | status | observed_drift | routing | review_after |
+| --- | --- | --- | --- | --- |
+| DRIFT-20260824-01 | accepted | The active product architecture entries describe the former Spring Boot application and conflict with the accepted single-module framework branch contract. | Preserve historical entries; use the branch-specific contract and accepted plan for this branch, then review after the refactor closes. | 2026-09-24 |
 | --- | --- | --- | --- | --- |
 | DRIFT-20260525-01 | open | Chat sync/stream serialization is split across two gates. | Deferred architecture/service work. | 2026-06-24 |
 | DRIFT-20260525-02 | in-progress | Ordered migration ownership now covers task-run, artifact-publication, and scoped-skill structures. Older unrelated domain tables still use repository-local compatibility DDL. | Transfer remaining ownership only in explicit later migrations; do not reintroduce publication DDL in repositories. | 2026-07-28 |

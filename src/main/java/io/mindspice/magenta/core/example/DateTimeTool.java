@@ -1,6 +1,7 @@
 package io.mindspice.magenta.core.example;
 
-import org.springframework.ai.tool.annotation.Tool;
+import io.mindspice.magenta.core.Tool;
+import io.mindspice.magenta.core.ToolParam;
 
 import java.time.ZoneId;
 import java.time.ZonedDateTime;
@@ -28,7 +29,9 @@ public final class DateTimeTool {
      * @return ISO-8601 formatted current date and time
      */
     @Tool(name = "get_current_time", description = "Returns the current date and time")
-    public String getCurrentTime(String timezone) {
+    public String getCurrentTime(
+        @ToolParam(name = "timezone", description = "Optional IANA timezone", required = false) String timezone
+    ) {
         ZoneId zone;
         if (timezone == null || timezone.isBlank()) {
             zone = ZoneId.of("UTC");

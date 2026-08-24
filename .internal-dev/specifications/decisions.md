@@ -36,6 +36,16 @@ created: 2026-05-25
 | DECISION-20260522-02 | Summary-style internal jobs use `summaryModel`; context compaction uses `compactionModel` with summary fallback. | active | unassigned | chat summary/title model fix | 2026-05-22 | Conversation title generation is decoupled from selected chat model. | Using selected chat model for all internal summaries was rejected. | None. | `services.md` | `.internal-dev/knowledge/summary-title-model-selection.md` | 2026-06-21 |
 | DECISION-20260522-01 | Initialize strict-schema focus living documents without migrating existing notes. | superseded | unassigned | task request | 2026-05-22 | Superseded by this specification-store workflow. | Focus/notes are no longer active stores. | Preserved for historical decision trace only. | `workflow.md` | `.internal-dev/knowledge/internal-dev-focus-workflow.md` | 2026-06-21 |
 
+## Branch-Specific Decision: Single-Module Framework (2026-08-24)
+
+**DECISION-20260824-01 — The `core` branch is now a clean-break, root-level `io.mindspice:magenta-core` library.** The former three-module reactor and its Spring Boot application/auto-configuration surfaces are superseded for this branch. The public package is `io.mindspice.magenta.core`; construction is programmatic through `TurnLoopBuilder`; supported providers are bundled transitively; persistence is selected by exactly one `dataRoot` or caller `DataSource`; and new `magenta_core_*` tables coexist with untouched `turnloop_*` history. No compatibility package, Maven relocation, web/servlet integration, or Boot registration is retained.
+
+**Justification:** The user-approved extraction plan requires a transport-neutral framework artifact with a small, direct consumer contract. Keeping the old reactor or compatibility layers would preserve accidental application coupling and make provider/persistence behavior dependent on Spring context discovery.
+
+**Alternatives/tradeoffs:** A two-artifact core plus auto-configure split would retain Boot convenience but violates the clean-break and no-auto-configuration requirements. A migration of old `turnloop_*` tables would add an unsupported pre-release data contract, so coexistence is intentional.
+
+**Affected specs:** `architecture.md`, `service-graph.md`, `services.md`, `api.md`. **Source:** accepted job plan and user invocation. **Review after:** 2026-09-24.
+
 ## Superseded Decisions
 
 | id | decision | status | owner | source | decided_on | superseded_on | superseded_by | knowledge_ref | notes |
