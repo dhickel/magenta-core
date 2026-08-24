@@ -8,12 +8,12 @@ import java.util.Map;
 
 /**
  * Mutable turn-scoped carrier. One instance per turn, writes from the owning
- * turn thread. The attributes map uses {@link ConcurrentHashMap} purely for
- * safe reads from asynchronous compaction or lifecycle-listener callbacks —
- * normal turn-state writes are single-threaded.
+ * turn thread. Streaming mode is execution state supplied by the internal
+ * engine and is not part of {@link TurnRequest}.
  *
- * <p>Immutable fields set at construction time are exposed via accessors.
- * Mutable fields have getters and (where allowed) setters.</p>
+ * <p>The attributes map uses {@link ConcurrentHashMap} purely for safe reads
+ * from asynchronous compaction or lifecycle-listener callbacks. Normal
+ * turn-state writes are single-threaded.</p>
  */
 public final class TurnContext {
 
@@ -29,36 +29,52 @@ public final class TurnContext {
     private List<ToolCallback> activeTools = List.of();
 
     /**
-     * Creates a new turn context.
-     *
-     * @param request the turn request
-     * @param turnId  unique turn identifier
-     * @param model   resolved model alias (never null)
+     * Creates a non-streaming context for callers that need a turn-scoped
+     * carrier outside the execution engine.
      */
     public TurnContext(@NonNull TurnRequest request,
                        @NonNull String turnId,
                        @NonNull String model) {
-        this.request = Objects.requireNonNull(request);
-        this.turnId = Objects.requireNonNull(turnId);
-        this.model = Objects.requireNonNull(model);
-        this.streaming = request.stream();
+        this(request, turnId, model, false);
+    }
+
+    /** Creates a context with the execution mode selected by the internal engine. */
+    TurnContext(@NonNull TurnRequest request,
+                @NonNull String turnId,
+                @NonNull String model,
+                boolean streaming) {
+        this.request = Objects.requireNonNull(request, "request");
+        this.turnId = ResponseValidation.nonBlank(turnId, "turnId");
+        this.model = ResponseValidation.nonBlank(model, "model");
+        this.streaming = streaming;
     }
 
     // ── Immutable accessors ──
 
     @NonNull
-    public TurnRequest request() { return request; }
+    public TurnRequest request() {
+        return request;
+    }
 
     @NonNull
-    public String sessionId() { return request.sessionId(); }
+    public String sessionId() {
+        return request.sessionId();
+    }
 
     @NonNull
-    public String turnId() { return turnId; }
+    public String turnId() {
+        return turnId;
+    }
 
     @NonNull
-    public String model() { return model; }
+    public String model() {
+        return model;
+    }
 
-    public boolean streaming() { return streaming; }
+    /** Internal engine accessor; streaming is not a public request property. */
+    boolean streaming() {
+        return streaming;
+    }
 
     // ── Typed attribute access ──
 

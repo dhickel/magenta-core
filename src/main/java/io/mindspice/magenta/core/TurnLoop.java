@@ -3,29 +3,28 @@ package io.mindspice.magenta.core;
 import reactor.core.publisher.Flux;
 
 import java.util.List;
+import java.util.Optional;
 
 /**
  * Primary facade for embedding applications to interact with the turn-loop
- * framework. A single {@code TurnLoop} instance orchestrates turn execution,
- * streaming, question-user interaction, message queuing, session management,
- * tool registration, memory access, and lifecycle control.
+ * framework. A single {@code TurnLoop} instance orchestrates execution,
+ * streaming, durable questions, queued work, session management, tools,
+ * memory, interruption, and lifecycle control.
  *
  * <h3>Thread safety</h3>
- * Callers must serialize {@link #send(TurnRequest) send},
- * {@link #stream(TurnRequest) stream}, and {@link #answer(String, String) answer}
- * per session (these methods contend on a per-session {@code TurnGate}).
- * The sub-interfaces returned by {@link #tools()}, {@link #memory()}, and
- * {@link #sessions()} are safe for concurrent read but mutations through
- * them should be serialized externally. {@link #enqueue(TurnRequest) enqueue},
- * {@link #claim(String) claim}, {@link #ack(String) ack},
- * {@link #release(String) release}, {@link #interrupt(String, String) interrupt},
- * and {@link #cancelQuestion(String, String) cancelQuestion} are safe for
- * concurrent use. {@link #close()} is idempotent and thread-safe.
+ * The implementation serializes execution-affecting operations per session.
+ * Submissions made while a session is active or awaiting questions are queued
+ * rather than rejected. The returned streams are cold: subscribing starts the
+ * corresponding operation. Tool, memory, and session views are safe for
+ * concurrent reads; callers should serialize their mutations. {@link #close()}
+ * is idempotent and thread-safe.
  *
  * <h3>Exception contract</h3>
  * Every public method may throw {@link TurnLoopException} or one of its
- * documented subtypes. No internal exception type (including Spring AI
- * exceptions) escapes through this interface.
+ * documented subtypes. Provider-specific and other implementation exceptions
+ * do not escape this interface. Unexpected execution failures use
+ * {@link TurnFailedException} or terminate a stream with an error; they are
+ * not emitted as a terminal {@link TurnResponse.Outcome}.
  *
  * @see DefaultTurnLoop
  * @see TurnLoopBuilder
@@ -35,151 +34,139 @@ public interface TurnLoop extends AutoCloseable {
     // ── Turn execution ──
 
     /**
-     * Executes a turn synchronously and blocks until the full turn lifecycle
-     * completes. The result includes the final assistant message, turn
-     * diagnostic, tool activity summaries, and context usage.
+     * Executes a turn synchronously and blocks until its expected outcome is
+     * available. A non-idle session receives a durable {@link TurnResponse.Queued}
+     * outcome instead of starting a second provider execution.
      *
-     * <p>Callers must serialize per-session calls to {@code send},
-     * {@code stream}, and {@code answer}.</p>
-     *
-     * @param request the turn request (sessionId and message must be non-blank)
-     * @return the completed turn result
-     * @throws TurnLoopException          if the gate rejects the turn (e.g. a
-     *                                    turn is already in progress for the session)
-     * @throws TurnFailedException        if the turn completes with a non-success
-     *                                    outcome (FAILED, ABORTED, TIMED_OUT)
-     * @throws ConfigurationException     if the requested model is not configured
-     * @throws ConversationNotFoundException if the session does not exist
-     * @throws ToolException              if a tool fails during the turn (wrapped
-     *                                    by the engine and surfaced here)
+     * @param request caller turn intent; session ID and message must be nonblank
+     * @return the expected terminal outcome
+     * @throws TurnFailedException unexpected execution failure with a
+     *                             {@link TurnFailure} payload
+     * @throws ConfigurationException requested model/configuration is invalid
+     * @throws ConversationNotFoundException the session does not exist when
+     *                                       the operation requires an existing one
      */
-    TurnResult send(@NonNull TurnRequest request);
+    TurnResponse.Outcome send(@NonNull TurnRequest request);
 
     /**
-     * Executes a turn and returns a reactive stream of {@link TurnEvent}
-     * lifecycle events. The returned {@link Flux} is cold; subscribing starts
-     * the turn. Cancelling the subscription cancels the turn.
+     * Executes a turn as a cold stream. The stream emits zero or more
+     * {@link TurnResponse.Progress} values, exactly one expected
+     * {@link TurnResponse.Outcome}, and then completes. Subscriber cancellation
+     * fences the execution and does not produce a contradictory terminal value
+     * for that subscription.
      *
-     * <p>Callers must serialize per-session calls to {@code send},
-     * {@code stream}, and {@code answer}. The returned {@code Flux} may
-     * complete with a {@code TurnEvent.Completed}, error with a
-     * {@code TurnEvent.Failed}, or be cancelled by the subscriber.</p>
-     *
-     * @param request the turn request ({@code stream} should be {@code true})
-     * @return a cold {@code Flux} of turn lifecycle events
-     * @throws TurnLoopException      if the gate rejects the turn
-     * @throws ConfigurationException if the model does not support streaming
+     * @param request caller turn intent
+     * @return a cold stream of progress and one expected outcome
+     * @throws ConfigurationException if the selected model cannot stream
      */
-    Flux<TurnEvent> stream(@NonNull TurnRequest request);
+    Flux<TurnResponse> stream(@NonNull TurnRequest request);
 
-    // ── Question-user loop ──
+    // ── Question interaction ──
 
     /**
-     * Resumes a suspended turn that is waiting for a user answer. After a
-     * turn emits {@link TurnEvent.QuestionPending}, the embedding application
-     * collects the user's answer and calls this method to continue.
+     * Answers one durable pending interaction and blocks for its expected
+     * continuation outcome. The answer list must contain exactly one nonblank
+     * answer for every ordered question in the interaction.
      *
-     * <p>Callers must serialize per-session calls to {@code send},
-     * {@code stream}, and {@code answer}.</p>
-     *
-     * @param sessionId the session awaiting an answer
-     * @param answer    the user's answer text (must be non-blank)
-     * @return the completed turn result
-     * @throws TurnLoopException if no question is pending for the session
-     *                           or the stored context is stale
-     * @throws TurnFailedException if the resumed turn fails
+     * @param sessionId session awaiting answers
+     * @param interactionId exact durable interaction identifier
+     * @param answers ordered answers, one per pending question
+     * @return the continuation outcome
+     * @throws InteractionStateException if the interaction is missing or already
+     *                                   consumed, answered, or cancelled
+     * @throws IllegalArgumentException if answer cardinality or content is invalid
      */
-    TurnResult answer(@NonNull String sessionId, @NonNull String answer);
+    TurnResponse.Outcome answer(@NonNull String sessionId,
+                                @NonNull String interactionId,
+                                @NonNull List<String> answers);
 
     /**
-     * Cancels the pending question interaction for a session, releases its
-     * gate, and leaves already queued messages untouched.
+     * Streams a durable question continuation using the same interaction CAS
+     * and answer validation as {@link #answer(String, String, List)}.
      *
-     * @param sessionId session awaiting an answer
-     * @param reason durable cancellation reason
-     * @return {@code true} when an active pending interaction was cancelled
+     * @param sessionId session awaiting answers
+     * @param interactionId exact durable interaction identifier
+     * @param answers ordered answers, one per pending question
+     * @return a cold progress-and-outcome continuation stream
      */
-    boolean cancelQuestion(@NonNull String sessionId, @NonNull String reason);
-
-    // ── Queue ──
-
-    /**
-     * Enqueues a turn request for asynchronous processing. The message is
-     * stored in the {@code MessageQueue} and can later be claimed and
-     * executed via {@link #claim(String)} and {@link #send(TurnRequest)}.
-     *
-     * <p>This method is safe for concurrent use.</p>
-     *
-     * @param request the turn request to enqueue (message content is extracted)
-     * @return a {@code PendingMessage} with a unique message ID
-     * @throws TurnLoopException if the queue operation fails
-     */
-    PendingMessage enqueue(@NonNull TurnRequest request);
+    Flux<TurnResponse> streamAnswer(@NonNull String sessionId,
+                                    @NonNull String interactionId,
+                                    @NonNull List<String> answers);
 
     /**
-     * Claims the oldest pending message for the given session. Returns
-     * {@code null} if no messages are queued for the session.
+     * Rehydrates the exact durable pending question response without changing
+     * interaction state or marking delivery.
      *
-     * <p>This method is safe for concurrent use.</p>
-     *
-     * @param sessionId the session to claim a message from
-     * @return the claimed message with a claim token, or {@code null}
-     * @throws TurnLoopException if the claim operation fails at the storage level
+     * @param sessionId session to inspect
+     * @return the pending interaction, or empty when none is pending
      */
-    @Nullable
-    ClaimedMessage claim(@NonNull String sessionId);
+    Optional<TurnResponse.Questions> pendingQuestions(@NonNull String sessionId);
 
     /**
-     * Acknowledges a claimed message, removing it from the queue permanently.
-     * If the claim token is stale or already acknowledged, a warning is
-     * logged and the call returns normally (idempotent-tolerant).
+     * Consumes a pending question interaction by durable ID and records the
+     * caller's cancellation reason. Already-consumed or stale interaction IDs
+     * are rejected and do not affect a newer interaction.
      *
-     * <p>This method is safe for concurrent use.</p>
-     *
-     * @param claimToken the claim token returned by {@link #claim(String)}
-     * @throws TurnLoopException if storage fails during acknowledgement
+     * @param sessionId session awaiting answers
+     * @param interactionId exact durable interaction identifier
+     * @param reason nonblank caller cancellation reason
+     * @return the typed cancellation outcome
+     * @throws InteractionStateException if the interaction is not cancellable
      */
-    void ack(@NonNull String claimToken);
+    TurnResponse.QuestionsCancelled cancelQuestions(@NonNull String sessionId,
+                                                     @NonNull String interactionId,
+                                                     @NonNull String reason);
+
+    // ── Queue and drain ──
 
     /**
-     * Releases a claimed message back to the queue so it can be claimed
-     * again. If the claim token is stale or already released, a warning
-     * is logged and the call returns normally (idempotent-tolerant).
+     * Persists caller intent as queued work and returns its durable receipt.
+     * The receipt contains no processing claim or acknowledgement token.
      *
-     * <p>This method is safe for concurrent use.</p>
-     *
-     * @param claimToken the claim token returned by {@link #claim(String)}
-     * @throws TurnLoopException if storage fails during release
+     * @param request request intent to persist
+     * @return the durable queue receipt
      */
-    void release(@NonNull String claimToken);
+    TurnResponse.Queued enqueue(@NonNull TurnRequest request);
+
+    /**
+     * Starts a cold, framework-managed oldest-first drain for one session. Each
+     * claimed request emits its normal progress sequence and one outcome with a
+     * queued execution origin. The framework acknowledges successful message
+     * or question outcomes internally and stops after questions; retryable
+     * interruption, timeout, cancellation, or failure releases the claim.
+     *
+     * <p>If questions are already pending, the durable question outcome is
+     * emitted and the stream completes without claiming queued work. If another
+     * execution or drain owns the session, the stream terminates with
+     * {@link TurnLoopBusyException}.</p>
+     *
+     * @param sessionId session whose queue should be drained
+     * @return a cold stream of progress and outcomes for claimed executions
+     */
+    Flux<TurnResponse> drain(@NonNull String sessionId);
 
     // ── Session management ──
 
     /**
-     * Clears all conversation memory and pending interactions for a session.
-     * Session metadata (title, favorites, etc.) is preserved.
+     * Clears conversation memory and pending interaction state for a session.
+     * Session metadata is preserved. Callers should avoid concurrent execution
+     * for the session while clearing it.
      *
-     * <p>Callers should ensure no turn is in progress for the session
-     * before calling this method.</p>
-     *
-     * @param sessionId the session to clear
-     * @throws TurnLoopException if persistence operations fail
+     * @param sessionId session to clear
+     * @throws TurnLoopException if persistence fails
      */
     void clearSession(@NonNull String sessionId);
 
     // ── Interrupt ──
 
     /**
-     * Interrupts an in-progress turn identified by {@code turnId}. If the
-     * turn is found and active, an interrupt signal is queued and the
-     * engine will terminate the turn at its next polling point.
+     * Requests interruption of an active execution. The request is safe for
+     * concurrent use and is observed at the engine's next interruption point.
      *
-     * <p>This method is safe for concurrent use.</p>
-     *
-     * @param turnId the turn identifier (from {@link TurnEvent.Started#turnId()})
-     * @param reason a human-readable reason for the interrupt
-     * @return {@code true} if the turn was found and interrupted,
-     *         {@code false} if the turn is already completed or unknown
+     * @param turnId active execution turn identifier, normally obtained from
+     *              {@link TurnResponse.Started#turnId()}
+     * @param reason nonblank interruption reason
+     * @return {@code true} when an active turn accepted the request
      */
     boolean interrupt(@NonNull String turnId, @NonNull String reason);
 
@@ -187,26 +174,23 @@ public interface TurnLoop extends AutoCloseable {
 
     /**
      * Returns the tool sub-interface for registering, unregistering, and
-     * inspecting tools. The returned instance is the same on every call
-     * and is safe for concurrent read.
+     * inspecting tools. The returned instance is stable for this loop.
      *
      * @return the tool sub-interface
      */
     ToolSubinterface tools();
 
     /**
-     * Returns the memory sub-interface for inspecting and clearing
-     * conversation history and context usage. The returned instance is
-     * the same on every call and is safe for concurrent read.
+     * Returns the memory sub-interface for inspecting and clearing conversation
+     * history and context usage.
      *
      * @return the memory sub-interface
      */
     MemorySubinterface memory();
 
     /**
-     * Returns the session sub-interface for listing, retrieving, updating,
-     * and deleting session metadata. The returned instance is the same on
-     * every call and is safe for concurrent read.
+     * Returns the session sub-interface for listing, retrieving, updating, and
+     * deleting session metadata.
      *
      * @return the session sub-interface
      */
@@ -215,167 +199,64 @@ public interface TurnLoop extends AutoCloseable {
     // ── Lifecycle ──
 
     /**
-     * Gracefully shuts down the turn loop. The shutdown sequence drains
-     * the gate (cancelling pending questions, waiting for executing turns
-     * up to a configurable timeout, then force-releasing), releases stream
-     * resources, releases pending claims, closes model instances, and
-     * shuts down the turn executor.
-     *
-     * <p>This method is idempotent and thread-safe. It must never throw.
-     * Repeated calls after the first are no-ops.</p>
+     * Gracefully shuts down the loop, fencing active work and releasing
+     * framework-owned resources. This method is idempotent, thread-safe, and
+     * does not expose queue claim mechanics to callers.
      */
     @Override
     void close();
 
     // ── Sub-interfaces ──
 
-    /**
-     * View of the tool registry scoped to this {@code TurnLoop} instance.
-     * Provides methods to register tools from callbacks or annotated beans,
-     * unregister tools by name, and list public tool definitions.
-     *
-     * <p>Safe for concurrent read. Mutations ({@code register},
-     * {@code registerToolBean}, {@code unregister}) should be serialized
-     * externally.</p>
-     */
+    /** View of the tool registry scoped to this {@code TurnLoop} instance. */
     interface ToolSubinterface {
 
-        /**
-         * Registers a tool callback.
-         *
-         * @param tool the tool to register
-         * @throws ToolException if a tool with the same name is already
-         *                       registered (including framework-internal tools)
-         */
+        /** Registers a tool callback. */
         void register(@NonNull ToolCallback tool);
 
-        /**
-         * Registers a bean whose methods annotated with a framework
-         * {@code @Tool} annotation are converted to tool callbacks.
-         *
-         * @param bean the annotated object
-         * @throws ToolException if a discovered tool name conflicts with an
-         *                       already-registered tool
-         */
+        /** Registers annotated tool methods from a caller-owned bean. */
         void registerToolBean(@NonNull Object bean);
 
-        /**
-         * Unregisters a tool by name. Has no effect if no tool with the
-         * given name is registered.
-         *
-         * @param toolName the tool name
-         */
+        /** Removes a registered tool by name, if present. */
         void unregister(@NonNull String toolName);
 
-        /**
-         * Returns the definitions of all publicly registered tools.
-         * Framework-internal tools (e.g. {@code ask_user}) are excluded.
-         *
-         * @return immutable list of tool definitions
-         */
+        /** Returns immutable definitions for publicly registered tools. */
         List<ToolDefinition> definitions();
     }
 
-    /**
-     * View of conversation memory scoped to this {@code TurnLoop} instance.
-     * Provides access to message history, clearing, and context usage
-     * estimation.
-     *
-     * <p>Safe for concurrent read.</p>
-     */
+    /** View of conversation memory scoped to this {@code TurnLoop} instance. */
     interface MemorySubinterface {
 
-        /**
-         * Returns the full message history for a session in insertion order
-         * (oldest first).
-         *
-         * @param sessionId the session identifier
-         * @return immutable list of messages (empty if the session has no history)
-         * @throws TurnLoopException if storage access fails
-         */
+        /** Returns full session history in insertion order. */
         List<TurnMessage> history(@NonNull String sessionId);
 
-        /**
-         * Clears all messages from a session's conversation memory.
-         *
-         * @param sessionId the session identifier
-         * @throws TurnLoopException if storage access fails
-         */
+        /** Clears conversation messages for a session. */
         void clear(@NonNull String sessionId);
 
-        /**
-         * Estimates the token usage of the current conversation context
-         * for a session.
-         *
-         * @param sessionId the session identifier
-         * @return the context usage snapshot
-         * @throws TurnLoopException if calculation or storage access fails
-         */
+        /** Computes current context usage for a session. */
         ContextUsage contextUsage(@NonNull String sessionId);
     }
 
-    /**
-     * View of session metadata scoped to this {@code TurnLoop} instance.
-     * Provides listing, retrieval, update, and deletion of
-     * {@link ConversationSession} records.
-     *
-     * <p>Safe for concurrent read.</p>
-     */
+    /** View of session metadata scoped to this {@code TurnLoop} instance. */
     interface SessionSubinterface {
 
-        /**
-         * Lists sessions matching the given filter criteria.
-         *
-         * @param filter the filter (use {@link SessionFilter#all()} for
-         *               unfiltered listing)
-         * @return immutable list of matching sessions
-         * @throws TurnLoopException if storage access fails
-         */
+        /** Lists sessions matching the supplied filter. */
         List<ConversationSession> list(@NonNull SessionFilter filter);
 
-        /**
-         * Retrieves a single session by its identifier.
-         *
-         * @param sessionId the session identifier
-         * @return the session, or {@code null} if not found
-         * @throws TurnLoopException if storage access fails
-         */
+        /** Returns a session, or {@code null} when it does not exist. */
         @Nullable
         ConversationSession get(@NonNull String sessionId);
 
-        /**
-         * Updates the title of a session.
-         *
-         * @param sessionId the session identifier
-         * @param title     the new title (may be blank)
-         * @throws TurnLoopException if storage access fails
-         */
+        /** Updates a session title. */
         void updateTitle(@NonNull String sessionId, @NonNull String title);
 
-        /**
-         * Sets or clears the favorite flag on a session.
-         *
-         * @param sessionId the session identifier
-         * @param favorite  {@code true} to mark as favorite, {@code false} to clear
-         * @throws TurnLoopException if storage access fails
-         */
+        /** Sets or clears the favorite flag. */
         void setFavorite(@NonNull String sessionId, boolean favorite);
 
-        /**
-         * Sets or clears the archived flag on a session.
-         *
-         * @param sessionId the session identifier
-         * @param archived  {@code true} to mark as archived, {@code false} to clear
-         * @throws TurnLoopException if storage access fails
-         */
+        /** Sets or clears the archived flag. */
         void setArchived(@NonNull String sessionId, boolean archived);
 
-        /**
-         * Deletes a session and its associated conversation memory.
-         *
-         * @param sessionId the session identifier
-         * @throws TurnLoopException if storage access fails
-         */
+        /** Deletes a session and its conversation memory. */
         void delete(@NonNull String sessionId);
     }
 }

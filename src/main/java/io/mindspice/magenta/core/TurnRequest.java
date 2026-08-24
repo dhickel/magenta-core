@@ -4,24 +4,39 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * A request to execute a single turn against a session.
+ * Caller intent for one turn submission.
  *
  * @param sessionId target session
- * @param message   user message text
- * @param model     model alias, null means default model
- * @param toolNames explicit tool names, null means resolve via ToolAccessPolicy
- * @param stream    true if caller expects streaming ({@code Flux<TurnEvent>})
- * @param metadata  extension metadata
+ * @param message user message text
+ * @param model explicitly selected model, or {@code null} for normal resolution
+ * @param toolNames explicitly selected tools, or {@code null} for normal resolution
+ * @param metadata caller metadata retained with queued intent
  */
 public record TurnRequest(
     @NonNull String sessionId,
     @NonNull String message,
     @Nullable String model,
     @Nullable List<String> toolNames,
-    boolean stream,
     @Nullable Map<String, String> metadata
 ) {
+    public TurnRequest {
+        sessionId = ResponseValidation.nonBlank(sessionId, "sessionId");
+        message = ResponseValidation.nonBlank(message, "message");
+        if (model != null) {
+            model = ResponseValidation.nonBlank(model, "model");
+        }
+        if (toolNames != null) {
+            toolNames = List.copyOf(toolNames);
+            for (int index = 0; index < toolNames.size(); index++) {
+                ResponseValidation.nonBlank(toolNames.get(index),
+                    "toolNames[" + index + "]");
+            }
+        }
+        metadata = metadata == null ? Map.of() : Map.copyOf(metadata);
+    }
+
+    /** Creates a request using normal model and tool resolution. */
     public static TurnRequest of(String sessionId, String message) {
-        return new TurnRequest(sessionId, message, null, null, false, Map.of());
+        return new TurnRequest(sessionId, message, null, null, Map.of());
     }
 }
