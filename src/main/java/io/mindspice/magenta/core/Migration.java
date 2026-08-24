@@ -9,17 +9,18 @@ import javax.sql.DataSource;
 public interface Migration {
 
     /**
-     * The migration version number. Versions should be positive integers
-     * applied in ascending order.
+     * The migration version number. Version {@code 1} belongs to the
+     * framework fresh schema; extension migrations use contiguous versions
+     * starting at {@code 2}.
      */
     int version();
 
     /**
      * Execute this migration against the given {@link DataSource}.
-     * Implementations are responsible for creating their own
-     * tables and indexes (use {@code CREATE TABLE IF NOT EXISTS}).
+     * The runner supplies a connection-bound data source and commits the
+     * migration bookkeeping in the same transaction.
      *
-     * @param dataSource the data source to migrate
+     * @param dataSource the transaction-bound data source to migrate
      * @throws Exception on migration failure
      */
     void migrate(@NonNull DataSource dataSource) throws Exception;

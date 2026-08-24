@@ -10,9 +10,9 @@ import io.mindspice.magenta.core.internal.DefaultModelRouter;
 import io.mindspice.magenta.core.internal.DefaultTurnExecutor;
 import io.mindspice.magenta.core.internal.ModelRouter;
 import io.mindspice.magenta.core.internal.TurnExecutor;
-import io.mindspice.magenta.core.persistence.InMemoryInteractionStore;
-import io.mindspice.magenta.core.persistence.NoOpAuditWriter;
+import io.mindspice.magenta.core.persistence.SqliteAuditWriter;
 import io.mindspice.magenta.core.persistence.SqliteConversationMemory;
+import io.mindspice.magenta.core.persistence.SqliteInteractionStore;
 import io.mindspice.magenta.core.persistence.SqliteMessageQueueStore;
 import io.mindspice.magenta.core.persistence.SqliteSessionStore;
 import io.mindspice.magenta.core.spi.AuditWriter;
@@ -73,7 +73,7 @@ public final class TurnLoopBuilder {
     private static final Pattern MODEL_ALIAS =
         Pattern.compile("[A-Za-z0-9][A-Za-z0-9._-]{0,127}");
     private static final Duration DEFAULT_MODEL_TIMEOUT = Duration.ofSeconds(360);
-    private static final String DATABASE_FILE_NAME = "turnloop.db";
+    private static final String DATABASE_FILE_NAME = "magenta-core.db";
 
     private final Map<String, ModelConfig> modelConfigs = new LinkedHashMap<>();
     private final List<PromptContributor> promptContributors = new ArrayList<>();
@@ -308,7 +308,7 @@ public final class TurnLoopBuilder {
         ToolResultSummarizer summarizer = resolveDefault(
             toolResultSummarizer, "toolResultSummarizer", DefaultToolResultSummarizer::new);
         InteractionStore iStore = resolveDefault(
-            interactionStore, "interactionStore", InMemoryInteractionStore::new);
+            interactionStore, "interactionStore", () -> new SqliteInteractionStore(resolvedDataSource, mapper));
 
         ConversationMemory cMemory;
         SessionStore sStore;
@@ -336,7 +336,8 @@ public final class TurnLoopBuilder {
         TurnGate gate = resolveDefault(
             turnGate, "turnGate", () -> new SerialTurnGate(Duration.ofMinutes(10)));
         MessageQueue mQueue = resolveDefault(messageQueue, "messageQueue", () -> new DefaultMessageQueue(mqStore));
-        resolveDefault(auditWriter, "auditWriter", NoOpAuditWriter::instance);
+        AuditWriter resolvedAuditWriter = resolveDefault(
+            auditWriter, "auditWriter", () -> new SqliteAuditWriter(resolvedDataSource, mapper));
         ThinkingExtractor tExtractor = resolveDefault(
             thinkingExtractor, "thinkingExtractor", CompositeThinkingExtractor::new);
         TurnLifecycleListener lifecycleListener = resolveDefault(
@@ -377,7 +378,8 @@ public final class TurnLoopBuilder {
             mapper,
             defaultSystemPrompt,
             defaultModel,
-            drainTimeoutSeconds
+            drainTimeoutSeconds,
+            resolvedAuditWriter
         );
     }
 

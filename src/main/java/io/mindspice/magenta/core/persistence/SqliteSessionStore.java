@@ -1,37 +1,33 @@
 package io.mindspice.magenta.core.persistence;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.mindspice.magenta.core.ConversationSession;
 import io.mindspice.magenta.core.SessionFilter;
 import io.mindspice.magenta.core.spi.SessionStore;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.dao.DataAccessException;
-import org.springframework.jdbc.core.JdbcTemplate;
 
 import javax.sql.DataSource;
+import java.sql.Connection;
+import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
+import java.util.Objects;
 
-/**
- * SQLite-backed {@link SessionStore} implementation.
- * <p>
- * Self-migrates the {@code turnloop_session_metadata} table on construction.
- * Session metadata is stored as JSON in {@code metadata_json}.
- */
+/** Durable SQLite-backed session metadata storage. */
 public class SqliteSessionStore implements SessionStore {
 
-    private static final Logger log = LoggerFactory.getLogger(SqliteSessionStore.class);
+    private static final Logger LOG = LoggerFactory.getLogger(SqliteSessionStore.class);
 
-    private static final TypeReference<Map<String, String>> METADATA_MAP_TYPE = new TypeReference<>() {};
+    private static final String SELECT_COLUMNS = """
+        session_id, title, model, favorite, archived, origin,
+        metadata_json, created_at, updated_at
+        """;
 
-    private final JdbcTemplate jdbc;
+    private final DataSource dataSource;
     private final ObjectMapper objectMapper;
 
     public SqliteSessionStore(DataSource dataSource) {
@@ -39,227 +35,223 @@ public class SqliteSessionStore implements SessionStore {
     }
 
     public SqliteSessionStore(DataSource dataSource, ObjectMapper objectMapper) {
-        this.jdbc = new JdbcTemplate(dataSource);
-        this.objectMapper = objectMapper;
-        migrate();
+        this.dataSource = Objects.requireNonNull(dataSource, "dataSource");
+        this.objectMapper = Objects.requireNonNull(objectMapper, "objectMapper");
     }
-
-    // ── self-migration ──
-
-    private void migrate() {
-        jdbc.execute("""
-            CREATE TABLE IF NOT EXISTS turnloop_session_metadata (
-                session_id TEXT PRIMARY KEY,
-                title TEXT,
-                model TEXT,
-                favorite INTEGER NOT NULL DEFAULT 0,
-                archived INTEGER NOT NULL DEFAULT 0,
-                origin TEXT NOT NULL DEFAULT 'turnloop',
-                metadata_json TEXT,
-                created_at TEXT NOT NULL DEFAULT (datetime('now')),
-                updated_at TEXT NOT NULL DEFAULT (datetime('now'))
-            )
-            """);
-        jdbc.execute("""
-            CREATE INDEX IF NOT EXISTS idx_session_origin
-            ON turnloop_session_metadata(origin)
-            """);
-        jdbc.execute("""
-            CREATE INDEX IF NOT EXISTS idx_session_favorite
-            ON turnloop_session_metadata(favorite)
-            """);
-        jdbc.execute("""
-            CREATE INDEX IF NOT EXISTS idx_session_archived
-            ON turnloop_session_metadata(archived)
-            """);
-    }
-
-    // ── SessionStore ──
 
     @Override
     public void save(ConversationSession session) {
+        Objects.requireNonNull(session, "session");
+        String now = Instant.now().toString();
+        String createdAt = PersistenceSupport.timestamp(session.createdAt());
+        String updatedAt = session.updatedAt() != null
+            ? session.updatedAt().toString() : now;
         try {
-            jdbc.update("""
-                INSERT OR REPLACE INTO turnloop_session_metadata
-                    (session_id, title, model, favorite, archived, origin,
-                     metadata_json, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                session.sessionId(),
-                session.title(),
-                session.model(),
-                session.favorite() ? 1 : 0,
-                session.archived() ? 1 : 0,
-                session.origin(),
-                metadataToJson(session.metadata()),
-                session.createdAt() != null ? session.createdAt().toString() : null,
-                session.updatedAt() != null ? session.updatedAt().toString() : null
-            );
-        } catch (DataAccessException e) {
-            log.error("Failed to save session {}", session.sessionId(), e);
+            PersistenceSupport.transaction(dataSource, connection -> {
+                try (PreparedStatement statement = connection.prepareStatement("""
+                    INSERT INTO magenta_core_session_metadata
+                        (session_id, title, model, favorite, archived, origin,
+                         metadata_json, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(session_id) DO UPDATE SET
+                        title = excluded.title,
+                        model = excluded.model,
+                        favorite = excluded.favorite,
+                        archived = excluded.archived,
+                        origin = excluded.origin,
+                        metadata_json = excluded.metadata_json,
+                        updated_at = excluded.updated_at
+                    """)) {
+                    statement.setString(1, session.sessionId());
+                    statement.setString(2, session.title());
+                    statement.setString(3, session.model());
+                    statement.setInt(4, session.favorite() ? 1 : 0);
+                    statement.setInt(5, session.archived() ? 1 : 0);
+                    statement.setString(6, session.origin());
+                    statement.setString(7,
+                        PersistenceSupport.metadataToJson(objectMapper, session.metadata()));
+                    statement.setString(8, createdAt);
+                    statement.setString(9, updatedAt);
+                    statement.executeUpdate();
+                }
+                return null;
+            });
+        } catch (RuntimeException e) {
+            LOG.error("Failed to save session {}", session.sessionId(), e);
             throw new RuntimeException("Failed to save session " + session.sessionId(), e);
         }
     }
 
     @Override
     public ConversationSession findById(String sessionId) {
+        Objects.requireNonNull(sessionId, "sessionId");
         try {
-            List<ConversationSession> results = jdbc.query(
-                "SELECT session_id, title, model, favorite, archived, origin, " +
-                "metadata_json, created_at, updated_at " +
-                "FROM turnloop_session_metadata WHERE session_id = ?",
-                (rs, rowNum) -> rowToSession(rs),
-                sessionId
-            );
-            return results.isEmpty() ? null : results.get(0);
-        } catch (DataAccessException e) {
-            log.error("Failed to find session {}", sessionId, e);
+            return PersistenceSupport.read(dataSource, connection -> {
+                try (PreparedStatement statement = connection.prepareStatement(
+                    "SELECT " + SELECT_COLUMNS
+                        + " FROM magenta_core_session_metadata WHERE session_id = ?")) {
+                    statement.setString(1, sessionId);
+                    try (ResultSet resultSet = statement.executeQuery()) {
+                        return resultSet.next() ? rowToSession(resultSet) : null;
+                    }
+                }
+            });
+        } catch (RuntimeException e) {
+            LOG.error("Failed to find session {}", sessionId, e);
             throw new RuntimeException("Failed to find session " + sessionId, e);
         }
     }
 
     @Override
     public List<ConversationSession> list(SessionFilter filter) {
+        Objects.requireNonNull(filter, "filter");
         try {
-            StringBuilder sql = new StringBuilder(
-                "SELECT session_id, title, model, favorite, archived, origin, " +
-                "metadata_json, created_at, updated_at " +
-                "FROM turnloop_session_metadata WHERE 1=1"
-            );
-            List<Object> params = new ArrayList<>();
+            return PersistenceSupport.read(dataSource, connection -> {
+                StringBuilder sql = new StringBuilder(
+                    "SELECT " + SELECT_COLUMNS
+                        + " FROM magenta_core_session_metadata WHERE 1 = 1");
+                List<Object> parameters = new ArrayList<>();
+                if (filter.favorite() != null) {
+                    sql.append(" AND favorite = ?");
+                    parameters.add(filter.favorite() ? 1 : 0);
+                }
+                if (filter.archived() != null) {
+                    sql.append(" AND archived = ?");
+                    parameters.add(filter.archived() ? 1 : 0);
+                }
+                if (filter.origin() != null) {
+                    sql.append(" AND origin = ?");
+                    parameters.add(filter.origin());
+                }
+                if (filter.searchQuery() != null && !filter.searchQuery().isBlank()) {
+                    sql.append(" AND title LIKE '%' || ? || '%'");
+                    parameters.add(filter.searchQuery());
+                }
+                sql.append(" ORDER BY updated_at DESC, session_id ASC LIMIT ? OFFSET ?");
+                parameters.add(Math.max(0, filter.limit()));
+                parameters.add(Math.max(0, filter.offset()));
 
-            if (filter.favorite() != null) {
-                sql.append(" AND favorite = ?");
-                params.add(filter.favorite() ? 1 : 0);
-            }
-            if (filter.archived() != null) {
-                sql.append(" AND archived = ?");
-                params.add(filter.archived() ? 1 : 0);
-            }
-            if (filter.origin() != null) {
-                sql.append(" AND origin = ?");
-                params.add(filter.origin());
-            }
-            if (filter.searchQuery() != null && !filter.searchQuery().isBlank()) {
-                sql.append(" AND title LIKE '%' || ? || '%'");
-                params.add(filter.searchQuery());
-            }
-            sql.append(" ORDER BY updated_at DESC LIMIT ? OFFSET ?");
-            params.add(filter.limit());
-            params.add(filter.offset());
-
-            return jdbc.query(
-                sql.toString(),
-                (rs, rowNum) -> rowToSession(rs),
-                params.toArray()
-            );
-        } catch (DataAccessException e) {
-            log.error("Failed to list sessions with filter", e);
+                try (PreparedStatement statement = connection.prepareStatement(sql.toString())) {
+                    bindParameters(statement, parameters);
+                    try (ResultSet resultSet = statement.executeQuery()) {
+                        List<ConversationSession> sessions = new ArrayList<>();
+                        while (resultSet.next()) {
+                            sessions.add(rowToSession(resultSet));
+                        }
+                        return List.copyOf(sessions);
+                    }
+                }
+            });
+        } catch (RuntimeException e) {
+            LOG.error("Failed to list sessions", e);
             throw new RuntimeException("Failed to list sessions", e);
         }
     }
 
     @Override
     public void delete(String sessionId) {
+        Objects.requireNonNull(sessionId, "sessionId");
         try {
-            jdbc.update("DELETE FROM turnloop_session_metadata WHERE session_id = ?", sessionId);
-        } catch (DataAccessException e) {
-            log.error("Failed to delete session {}", sessionId, e);
+            PersistenceSupport.transaction(dataSource, connection -> {
+                try (PreparedStatement statement = connection.prepareStatement(
+                    "DELETE FROM magenta_core_session_metadata WHERE session_id = ?")) {
+                    statement.setString(1, sessionId);
+                    statement.executeUpdate();
+                }
+                return null;
+            });
+        } catch (RuntimeException e) {
+            LOG.error("Failed to delete session {}", sessionId, e);
             throw new RuntimeException("Failed to delete session " + sessionId, e);
         }
     }
 
     @Override
     public void updateTitle(String sessionId, String title) {
-        try {
-            jdbc.update(
-                "UPDATE turnloop_session_metadata SET title = ?, updated_at = datetime('now') " +
-                "WHERE session_id = ?",
-                title, sessionId
-            );
-        } catch (DataAccessException e) {
-            log.error("Failed to update title for session {}", sessionId, e);
-            throw new RuntimeException("Failed to update title for session " + sessionId, e);
-        }
+        updateText(sessionId, title,
+            "UPDATE magenta_core_session_metadata SET title = ?, "
+                + "updated_at = ? WHERE session_id = ?", "title");
     }
 
     @Override
     public void setFavorite(String sessionId, boolean favorite) {
-        try {
-            jdbc.update(
-                "UPDATE turnloop_session_metadata SET favorite = ?, updated_at = datetime('now') " +
-                "WHERE session_id = ?",
-                favorite ? 1 : 0, sessionId
-            );
-        } catch (DataAccessException e) {
-            log.error("Failed to set favorite for session {}", sessionId, e);
-            throw new RuntimeException("Failed to set favorite for session " + sessionId, e);
-        }
+        updateFlag(sessionId, "favorite", favorite);
     }
 
     @Override
     public void setArchived(String sessionId, boolean archived) {
-        try {
-            jdbc.update(
-                "UPDATE turnloop_session_metadata SET archived = ?, updated_at = datetime('now') " +
-                "WHERE session_id = ?",
-                archived ? 1 : 0, sessionId
-            );
-        } catch (DataAccessException e) {
-            log.error("Failed to set archived for session {}", sessionId, e);
-            throw new RuntimeException("Failed to set archived for session " + sessionId, e);
-        }
+        updateFlag(sessionId, "archived", archived);
     }
 
     @Override
     public void updateModel(String sessionId, String model) {
+        updateText(sessionId, model,
+            "UPDATE magenta_core_session_metadata SET model = ?, "
+                + "updated_at = ? WHERE session_id = ?", "model");
+    }
+
+    private void updateText(String sessionId, String value, String sql, String field) {
+        Objects.requireNonNull(sessionId, "sessionId");
         try {
-            jdbc.update(
-                "UPDATE turnloop_session_metadata SET model = ?, updated_at = datetime('now') " +
-                "WHERE session_id = ?",
-                model, sessionId
-            );
-        } catch (DataAccessException e) {
-            log.error("Failed to update model for session {}", sessionId, e);
-            throw new RuntimeException("Failed to update model for session " + sessionId, e);
+            PersistenceSupport.transaction(dataSource, connection -> {
+                try (PreparedStatement statement = connection.prepareStatement(sql)) {
+                    statement.setString(1, value);
+                    statement.setString(2, Instant.now().toString());
+                    statement.setString(3, sessionId);
+                    statement.executeUpdate();
+                }
+                return null;
+            });
+        } catch (RuntimeException e) {
+            LOG.error("Failed to update {} for session {}", field, sessionId, e);
+            throw new RuntimeException("Failed to update " + field + " for session " + sessionId, e);
         }
     }
 
-    // ── row mapping ──
+    private void updateFlag(String sessionId, String field, boolean value) {
+        Objects.requireNonNull(sessionId, "sessionId");
+        String sql = "UPDATE magenta_core_session_metadata SET " + field
+            + " = ?, updated_at = ? WHERE session_id = ?";
+        try {
+            PersistenceSupport.transaction(dataSource, connection -> {
+                try (PreparedStatement statement = connection.prepareStatement(sql)) {
+                    statement.setInt(1, value ? 1 : 0);
+                    statement.setString(2, Instant.now().toString());
+                    statement.setString(3, sessionId);
+                    statement.executeUpdate();
+                }
+                return null;
+            });
+        } catch (RuntimeException e) {
+            LOG.error("Failed to update {} for session {}", field, sessionId, e);
+            throw new RuntimeException("Failed to update " + field + " for session " + sessionId, e);
+        }
+    }
 
-    private ConversationSession rowToSession(ResultSet rs) throws SQLException {
-        String createdAtStr = rs.getString("created_at");
-        String updatedAtStr = rs.getString("updated_at");
+    private void bindParameters(PreparedStatement statement, List<Object> parameters)
+        throws SQLException {
+        for (int index = 0; index < parameters.size(); index++) {
+            Object parameter = parameters.get(index);
+            if (parameter instanceof Integer integer) {
+                statement.setInt(index + 1, integer);
+            } else {
+                statement.setString(index + 1, (String) parameter);
+            }
+        }
+    }
+
+    private ConversationSession rowToSession(ResultSet resultSet) throws SQLException {
         return new ConversationSession(
-            rs.getString("session_id"),
-            rs.getString("title"),
-            rs.getString("model"),
-            rs.getInt("favorite") != 0,
-            rs.getInt("archived") != 0,
-            rs.getString("origin"),
-            createdAtStr != null ? Instant.parse(createdAtStr) : null,
-            updatedAtStr != null ? Instant.parse(updatedAtStr) : null,
-            metadataFromJson(rs.getString("metadata_json"))
+            resultSet.getString("session_id"),
+            resultSet.getString("title"),
+            resultSet.getString("model"),
+            resultSet.getInt("favorite") != 0,
+            resultSet.getInt("archived") != 0,
+            resultSet.getString("origin"),
+            PersistenceSupport.parseTimestamp(resultSet.getString("created_at")),
+            PersistenceSupport.parseTimestamp(resultSet.getString("updated_at")),
+            PersistenceSupport.metadataFromJson(
+                objectMapper, resultSet.getString("metadata_json"))
         );
-    }
-
-    private String metadataToJson(Map<String, String> metadata) {
-        if (metadata == null || metadata.isEmpty()) return null;
-        try {
-            return objectMapper.writeValueAsString(metadata);
-        } catch (JsonProcessingException e) {
-            log.warn("Failed to serialize metadata, storing null", e);
-            return null;
-        }
-    }
-
-    private Map<String, String> metadataFromJson(String json) {
-        if (json == null || json.isBlank()) return Map.of();
-        try {
-            return objectMapper.readValue(json, METADATA_MAP_TYPE);
-        } catch (JsonProcessingException e) {
-            log.warn("Failed to deserialize metadata, returning empty map", e);
-            return Map.of();
-        }
     }
 }

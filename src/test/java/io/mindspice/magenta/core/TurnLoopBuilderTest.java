@@ -46,7 +46,7 @@ class TurnLoopBuilderTest {
             .build();
         loop.close();
 
-        Path database = tempDir.resolve("turnloop.db");
+        Path database = tempDir.resolve("magenta-core.db");
         assertTrue(Files.isRegularFile(database));
         try (Connection connection = sqliteDataSource(database).getConnection();
              ResultSet result = connection.createStatement().executeQuery(
@@ -55,14 +55,10 @@ class TurnLoopBuilderTest {
             while (result.next()) {
                 names.add(result.getString(1));
             }
-            assertTrue(names.contains("turnloop_schema_version")
-                || names.contains("magenta_core_schema_version"));
-            assertTrue(names.contains("turnloop_conversation_memory")
-                || names.contains("magenta_core_conversation_memory"));
-            assertTrue(names.contains("turnloop_session_metadata")
-                || names.contains("magenta_core_session_metadata"));
-            assertTrue(names.contains("turnloop_pending_messages")
-                || names.contains("magenta_core_pending_messages"));
+            assertTrue(names.contains("magenta_core_schema_version"));
+            assertTrue(names.contains("magenta_core_conversation_memory"));
+            assertTrue(names.contains("magenta_core_session_metadata"));
+            assertTrue(names.contains("magenta_core_pending_messages"));
         }
     }
 

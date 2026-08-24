@@ -1,37 +1,45 @@
 package io.mindspice.magenta.core.persistence;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.mindspice.magenta.core.TurnMessage;
 import io.mindspice.magenta.core.spi.ConversationMemory;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.dao.DataAccessException;
-import org.springframework.jdbc.core.JdbcTemplate;
 
 import javax.sql.DataSource;
+import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 
 /**
- * SQLite-backed {@link ConversationMemory} implementation.
- * <p>
- * Self-migrates the {@code turnloop_conversation_memory} table on construction.
- * Message metadata is stored as JSON in {@code metadata_json}; null or empty
- * metadata is normalized to {@link Map#of()} when read back.
+ * Durable SQLite-backed conversation memory.
+ *
+ * <p>The schema is installed by {@code MigrationRunner}. This repository does
+ * not contain fallback DDL, so a caller cannot accidentally create a second,
+ * incompatible schema by constructing repositories in a different order.</p>
  */
 public class SqliteConversationMemory implements ConversationMemory {
 
-    private static final Logger log = LoggerFactory.getLogger(SqliteConversationMemory.class);
+    private static final Logger LOG = LoggerFactory.getLogger(SqliteConversationMemory.class);
 
-    private static final TypeReference<Map<String, String>> METADATA_MAP_TYPE = new TypeReference<>() {};
+    private static final String SELECT_MESSAGES = """
+        SELECT role, content, tool_name, tool_call_id, metadata_json
+        FROM magenta_core_conversation_memory
+        WHERE session_id = ?
+        ORDER BY id ASC
+        """;
+    private static final String INSERT_MESSAGE = """
+        INSERT INTO magenta_core_conversation_memory
+            (session_id, role, content, tool_name, tool_call_id, metadata_json)
+        VALUES (?, ?, ?, ?, ?, ?)
+        """;
 
-    private final JdbcTemplate jdbc;
+    private final DataSource dataSource;
     private final ObjectMapper objectMapper;
 
     public SqliteConversationMemory(DataSource dataSource) {
@@ -39,119 +47,96 @@ public class SqliteConversationMemory implements ConversationMemory {
     }
 
     public SqliteConversationMemory(DataSource dataSource, ObjectMapper objectMapper) {
-        this.jdbc = new JdbcTemplate(dataSource);
-        this.objectMapper = objectMapper;
-        migrate();
+        this.dataSource = Objects.requireNonNull(dataSource, "dataSource");
+        this.objectMapper = Objects.requireNonNull(objectMapper, "objectMapper");
     }
-
-    // ── self-migration ──
-
-    private void migrate() {
-        jdbc.execute("""
-            CREATE TABLE IF NOT EXISTS turnloop_conversation_memory (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                session_id TEXT NOT NULL,
-                role TEXT NOT NULL,
-                content TEXT NOT NULL,
-                tool_name TEXT,
-                tool_call_id TEXT,
-                metadata_json TEXT,
-                created_at TEXT NOT NULL DEFAULT (datetime('now'))
-            )
-            """);
-        jdbc.execute("""
-            CREATE INDEX IF NOT EXISTS idx_memory_session
-            ON turnloop_conversation_memory(session_id, id)
-            """);
-        jdbc.execute("""
-            CREATE INDEX IF NOT EXISTS idx_memory_session_role
-            ON turnloop_conversation_memory(session_id, role)
-            """);
-    }
-
-    // ── ConversationMemory ──
 
     @Override
     public List<TurnMessage> getMessages(String sessionId) {
+        Objects.requireNonNull(sessionId, "sessionId");
         try {
-            return jdbc.query(
-                "SELECT id, role, content, tool_name, tool_call_id, metadata_json " +
-                "FROM turnloop_conversation_memory WHERE session_id = ? ORDER BY id ASC",
-                (rs, rowNum) -> rowToTurnMessage(rs),
-                sessionId
-            );
-        } catch (DataAccessException e) {
-            log.error("Failed to get messages for session {}", sessionId, e);
+            return PersistenceSupport.read(dataSource, connection -> {
+                List<TurnMessage> messages = new ArrayList<>();
+                try (PreparedStatement statement = connection.prepareStatement(SELECT_MESSAGES)) {
+                    statement.setString(1, sessionId);
+                    try (ResultSet resultSet = statement.executeQuery()) {
+                        while (resultSet.next()) {
+                            messages.add(rowToMessage(resultSet));
+                        }
+                    }
+                }
+                return List.copyOf(messages);
+            });
+        } catch (RuntimeException e) {
+            LOG.error("Failed to read conversation memory for session {}", sessionId, e);
             throw new RuntimeException("Failed to get messages for session " + sessionId, e);
         }
     }
 
     @Override
     public void addMessages(String sessionId, List<TurnMessage> messages) {
-        if (messages.isEmpty()) return;
+        Objects.requireNonNull(sessionId, "sessionId");
+        Objects.requireNonNull(messages, "messages");
+        if (messages.isEmpty()) {
+            return;
+        }
         try {
-            jdbc.batchUpdate(
-                """
-                INSERT INTO turnloop_conversation_memory
-                    (session_id, role, content, tool_name, tool_call_id, metadata_json)
-                VALUES (?, ?, ?, ?, ?, ?)
-                """,
-                messages,
-                messages.size(),
-                (PreparedStatement ps, TurnMessage msg) -> {
-                    ps.setString(1, sessionId);
-                    ps.setString(2, msg.role());
-                    ps.setString(3, msg.text());
-                    ps.setString(4, msg.toolName());
-                    ps.setString(5, msg.toolCallId());
-                    ps.setString(6, metadataToJson(msg.metadata()));
+            PersistenceSupport.transaction(dataSource, connection -> {
+                PersistenceSupport.ensureSession(connection, sessionId);
+                try (PreparedStatement statement = connection.prepareStatement(INSERT_MESSAGE)) {
+                    for (TurnMessage message : messages) {
+                        bindMessage(statement, sessionId, message);
+                        statement.addBatch();
+                    }
+                    statement.executeBatch();
                 }
-            );
-        } catch (DataAccessException e) {
-            log.error("Failed to add {} messages for session {}", messages.size(), sessionId, e);
+                return null;
+            });
+        } catch (RuntimeException e) {
+            LOG.error("Failed to append {} messages for session {}", messages.size(), sessionId, e);
             throw new RuntimeException("Failed to add messages for session " + sessionId, e);
         }
     }
 
     @Override
     public void clear(String sessionId) {
+        Objects.requireNonNull(sessionId, "sessionId");
         try {
-            jdbc.update("DELETE FROM turnloop_conversation_memory WHERE session_id = ?", sessionId);
-        } catch (DataAccessException e) {
-            log.error("Failed to clear messages for session {}", sessionId, e);
+            PersistenceSupport.transaction(dataSource, connection -> {
+                try (PreparedStatement statement = connection.prepareStatement(
+                    "DELETE FROM magenta_core_conversation_memory WHERE session_id = ?")) {
+                    statement.setString(1, sessionId);
+                    statement.executeUpdate();
+                }
+                return null;
+            });
+        } catch (RuntimeException e) {
+            LOG.error("Failed to clear conversation memory for session {}", sessionId, e);
             throw new RuntimeException("Failed to clear messages for session " + sessionId, e);
         }
     }
 
-    // ── row mapping ──
+    private void bindMessage(PreparedStatement statement, String sessionId,
+                             TurnMessage message) throws SQLException {
+        Objects.requireNonNull(message, "messages must not contain null entries");
+        statement.setString(1, sessionId);
+        statement.setString(2, message.role());
+        statement.setString(3, message.text());
+        statement.setString(4, message.toolName());
+        statement.setString(5, message.toolCallId());
+        statement.setString(6,
+            PersistenceSupport.metadataToJson(objectMapper, message.metadata()));
+    }
 
-    private TurnMessage rowToTurnMessage(ResultSet rs) throws SQLException {
+    private TurnMessage rowToMessage(ResultSet resultSet) throws SQLException {
+        Map<String, String> metadata = PersistenceSupport.metadataFromJson(
+            objectMapper, resultSet.getString("metadata_json"));
         return new TurnMessage(
-            rs.getString("role"),
-            rs.getString("content"),
-            rs.getString("tool_name"),
-            rs.getString("tool_call_id"),
-            metadataFromJson(rs.getString("metadata_json"))
+            resultSet.getString("role"),
+            resultSet.getString("content"),
+            resultSet.getString("tool_name"),
+            resultSet.getString("tool_call_id"),
+            metadata
         );
-    }
-
-    private String metadataToJson(Map<String, String> metadata) {
-        if (metadata == null || metadata.isEmpty()) return null;
-        try {
-            return objectMapper.writeValueAsString(metadata);
-        } catch (JsonProcessingException e) {
-            log.warn("Failed to serialize metadata, storing null", e);
-            return null;
-        }
-    }
-
-    private Map<String, String> metadataFromJson(String json) {
-        if (json == null || json.isBlank()) return Map.of();
-        try {
-            return objectMapper.readValue(json, METADATA_MAP_TYPE);
-        } catch (JsonProcessingException e) {
-            log.warn("Failed to deserialize metadata, returning empty map", e);
-            return Map.of();
-        }
     }
 }
