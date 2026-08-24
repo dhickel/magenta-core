@@ -12,7 +12,6 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.sqlite.SQLiteDataSource;
 
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
@@ -81,6 +80,31 @@ class FreshSchemaPersistenceTest {
         new SqliteAuditWriter(dataSource).recordError(
             "session", new AuditWriter.TurnError("failure", null, "model-a"));
         assertEquals(1, count(dataSource, "magenta_core_audit_log"));
+    }
+
+    @Test
+    void preservesCallerOwnedSqliteUrlConfiguration() {
+        SQLiteDataSource dataSource = new SQLiteDataSource();
+        String url = "jdbc:sqlite:file:caller-owned?mode=memory&cache=shared";
+        dataSource.setUrl(url);
+
+        new MigrationRunner(dataSource);
+
+        assertEquals(url, dataSource.getUrl());
+    }
+
+    @Test
+    void queueOrderingUsesCanonicalFixedPrecisionTimestamps() {
+        SQLiteDataSource dataSource = fileDataSource(tempDir.resolve("queue-order.db"));
+        new MigrationRunner(dataSource).apply(List.of());
+        SqliteMessageQueueStore queue = new SqliteMessageQueueStore(dataSource);
+        queue.insert(new PendingMessage("later", "session", "later", Map.of(),
+            Instant.parse("2026-01-01T00:00:00.100Z")));
+        queue.insert(new PendingMessage("earlier", "session", "earlier", Map.of(),
+            Instant.parse("2026-01-01T00:00:00Z")));
+
+        assertEquals(List.of("earlier", "later"), queue.findBySessionId("session")
+            .stream().map(PendingMessage::messageId).toList());
     }
 
     @Test
@@ -266,19 +290,13 @@ class FreshSchemaPersistenceTest {
     }
 
     @Test
-    void convertsTheBuilderNamedMemoryUrlToDurableFileStorage() throws Exception {
-        Path database = tempDir.resolve("durable.db");
+    void leavesCallerOwnedNamedMemoryStorageUnchanged() {
         SQLiteDataSource dataSource = new SQLiteDataSource();
-        dataSource.setUrl("jdbc:sqlite:file:" + database.toAbsolutePath()
-            + "?mode=memory&cache=shared");
-        new MigrationRunner(dataSource).apply(List.of());
-        new SqliteSessionStore(dataSource).save(new ConversationSession(
-            "durable", null, null, false, false, "test",
-            null, null, Map.of()));
+        String url = "jdbc:sqlite:file:caller-owned-second?mode=memory&cache=shared";
+        dataSource.setUrl(url);
+        new MigrationRunner(dataSource);
 
-        assertTrue(Files.exists(database));
-        SQLiteDataSource reopened = fileDataSource(database);
-        assertNotNull(new SqliteSessionStore(reopened).findById("durable"));
+        assertEquals(url, dataSource.getUrl());
     }
 
     private SQLiteDataSource fileDataSource(Path file) {

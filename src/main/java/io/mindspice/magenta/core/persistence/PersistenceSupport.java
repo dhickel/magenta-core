@@ -12,7 +12,9 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
 import java.time.Instant;
+import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeParseException;
+import java.time.format.DateTimeFormatterBuilder;
 import java.util.Map;
 import java.util.Objects;
 
@@ -26,6 +28,8 @@ import java.util.Objects;
 final class PersistenceSupport {
 
     private static final TypeReference<Map<String, String>> STRING_MAP = new TypeReference<>() {};
+    private static final DateTimeFormatter STORAGE_TIMESTAMP =
+        new DateTimeFormatterBuilder().appendInstant(9).toFormatter();
 
     private PersistenceSupport() {}
 
@@ -134,7 +138,7 @@ final class PersistenceSupport {
     }
 
     static String timestamp(Instant instant) {
-        return (instant != null ? instant : Instant.now()).toString();
+        return STORAGE_TIMESTAMP.format((instant != null ? instant : Instant.now()));
     }
 
     static Instant parseTimestamp(String value) {

@@ -244,38 +244,8 @@ public final class MigrationRunner {
             sqliteDataSource.setEnforceForeignKeys(true);
             sqliteDataSource.setBusyTimeout(5000);
             sqliteDataSource.setTransactionMode("IMMEDIATE");
-            makeFileBacked(sqliteDataSource);
         }
         return dataSource;
-    }
-
-    /**
-     * The pre-refactor builder supplies a named shared-memory URL for its
-     * framework-owned data-root database. Remove only the memory switches so
-     * that the existing path becomes a durable SQLite file without changing
-     * an explicit in-memory URL such as jdbc:sqlite::memory:.
-     */
-    private static void makeFileBacked(SQLiteDataSource dataSource) {
-        String url = dataSource.getUrl();
-        if (url == null || !url.startsWith("jdbc:sqlite:file:") || !url.contains("?")) {
-            return;
-        }
-        int queryStart = url.indexOf('?');
-        String base = url.substring(0, queryStart);
-        String query = url.substring(queryStart + 1);
-        StringBuilder retained = new StringBuilder();
-        for (String parameter : query.split("&")) {
-            if (parameter.isBlank()
-                || parameter.startsWith("mode=memory")
-                || parameter.startsWith("cache=shared")) {
-                continue;
-            }
-            if (retained.length() > 0) {
-                retained.append('&');
-            }
-            retained.append(parameter);
-        }
-        dataSource.setUrl(retained.isEmpty() ? base : base + '?' + retained);
     }
 
     private String readSchemaHash() {

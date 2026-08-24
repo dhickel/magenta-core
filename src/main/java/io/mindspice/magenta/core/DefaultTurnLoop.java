@@ -66,6 +66,8 @@ final class DefaultTurnLoop implements TurnLoop {
     private final ConcurrentHashMap<String, String> activeGateTokens = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, SessionAction> pendingSessionActions = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, String> claimSessions = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<String, Long> terminalObservations = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<String, TurnDiagnostic.OutcomeKind> timeoutOutcomes = new ConcurrentHashMap<>();
     private final ToolSubinterface toolsView;
     private final MemorySubinterface memoryView;
     private final SessionSubinterface sessionsView;
@@ -197,8 +199,13 @@ final class DefaultTurnLoop implements TurnLoop {
         String ownershipToken = gateToken;
         try {
             TurnResult result = engine.execute(context);
+            TurnDiagnostic.OutcomeKind timeoutOutcome = timeoutOutcomes.remove(turnId);
+            if (timeoutOutcome == TurnDiagnostic.OutcomeKind.TIMED_OUT) {
+                result = withOutcome(result, timeoutOutcome, Map.of("reason", "turn_timeout"));
+            }
+            TurnResult observedResult = result;
             runIfAuthorized(turnId,
-                () -> recordTurnObservability(request, result, before, model, started, true));
+                () -> recordTurnObservability(request, observedResult, before, model, started, true));
             revokeExecution(turnId, "turn_completed");
             synchronized (lockFor(sessionId)) {
                 if (ownsExecution(sessionId, turnId, ownershipToken)) {
@@ -206,10 +213,14 @@ final class DefaultTurnLoop implements TurnLoop {
                     finishActiveTurn(sessionId, turnId, ownershipToken, true);
                 }
             }
+            TurnDiagnostic.OutcomeKind finalTimeout = timeoutOutcomes.remove(turnId);
+            if (finalTimeout == TurnDiagnostic.OutcomeKind.TIMED_OUT) {
+                result = withOutcome(result, finalTimeout, Map.of("reason", "turn_timeout"));
+            }
             return result;
         } catch (Throwable failure) {
             runIfAuthorized(turnId,
-                () -> recordFailureObservability(sessionId, model, before, started, failure));
+                () -> recordFailureObservability(sessionId, turnId, model, before, started, failure));
             revokeExecution(turnId, "turn_failed");
             synchronized (lockFor(sessionId)) {
                 if (ownsExecution(sessionId, turnId, ownershipToken)) {
@@ -281,10 +292,6 @@ final class DefaultTurnLoop implements TurnLoop {
                         events.add(event);
                         if (event instanceof TurnEvent.Started) {
                             setActiveMetric();
-                        }
-                        if (event instanceof TurnEvent.ToolActivity activity) {
-                            safeMetric(() -> metrics.recordToolCall(
-                                activity.toolName(), activity.status().name()));
                         }
                     })
                     .doFinally(signal -> {
@@ -405,8 +412,13 @@ final class DefaultTurnLoop implements TurnLoop {
         String ownershipToken = gateToken;
         try {
             TurnResult result = engine.execute(context);
+            TurnDiagnostic.OutcomeKind timeoutOutcome = timeoutOutcomes.remove(turnId);
+            if (timeoutOutcome == TurnDiagnostic.OutcomeKind.TIMED_OUT) {
+                result = withOutcome(result, timeoutOutcome, Map.of("reason", "turn_timeout"));
+            }
+            TurnResult observedResult = result;
             runIfAuthorized(turnId,
-                () -> recordTurnObservability(request, result, before, model, started, true));
+                () -> recordTurnObservability(request, observedResult, before, model, started, true));
             revokeExecution(turnId, "turn_completed");
             synchronized (lockFor(sessionId)) {
                 if (ownsExecution(sessionId, turnId, ownershipToken)) {
@@ -417,10 +429,14 @@ final class DefaultTurnLoop implements TurnLoop {
                     finishActiveTurn(sessionId, turnId, ownershipToken, true);
                 }
             }
+            TurnDiagnostic.OutcomeKind finalTimeout = timeoutOutcomes.remove(turnId);
+            if (finalTimeout == TurnDiagnostic.OutcomeKind.TIMED_OUT) {
+                result = withOutcome(result, finalTimeout, Map.of("reason", "turn_timeout"));
+            }
             return result;
         } catch (Throwable failure) {
             runIfAuthorized(turnId,
-                () -> recordFailureObservability(sessionId, model, before, started, failure));
+                () -> recordFailureObservability(sessionId, turnId, model, before, started, failure));
             revokeExecution(turnId, "turn_failed");
             synchronized (lockFor(sessionId)) {
                 if (ownsExecution(sessionId, turnId, ownershipToken)) {
@@ -867,17 +883,30 @@ final class DefaultTurnLoop implements TurnLoop {
 
     private TurnResult queueResult(TurnRequest request, PendingMessage pending) {
         String turnId = UUID.randomUUID().toString();
-        ContextUsage usage = safeUsage(request.sessionId(), request.model());
+        String model = effectiveQueuedModel(request);
+        ContextUsage usage = safeUsage(request.sessionId(), model);
         Map<String, Object> details = new LinkedHashMap<>();
         details.put("queuedMessageId", pending.messageId());
         details.put("messageId", pending.messageId());
         TurnDiagnostic diagnostic = new TurnDiagnostic(
             turnId, request.sessionId(), Instant.now(), Instant.now(), TurnPhase.PREPARE,
             TurnDiagnostic.OutcomeKind.QUEUED, details);
-        safeMetric(() -> metrics.recordTurnDuration(
-            request.model() == null ? defaultModel : request.model(), "queued", 0));
+        safeMetric(() -> metrics.recordTurnDuration(model, "queued", 0));
         return new TurnResult(request.sessionId(), turnId,
             "Queued message " + pending.messageId(), usage, diagnostic, List.of());
+    }
+
+    private String effectiveQueuedModel(TurnRequest request) {
+        if (request.model() != null && !request.model().isBlank()) return request.model();
+        try {
+            ConversationSession session = sessionStore.findById(request.sessionId());
+            if (session != null && session.model() != null && !session.model().isBlank()) {
+                return session.model();
+            }
+        } catch (Throwable ignored) {
+            // Queueing remains available even when a metadata read fails.
+        }
+        return defaultModel;
     }
 
     private TurnEvent queuedEvent(TurnRequest request, PendingMessage pending) {
@@ -941,15 +970,43 @@ final class DefaultTurnLoop implements TurnLoop {
             }
         }
 
-        active.revoke("turn_timeout");
+        if (!active.revoke("turn_timeout")) {
+            return false;
+        }
         synchronized (lockFor(sessionId)) {
-            if (ownsExecution(sessionId, turnId, gateToken)) {
-                clearPendingAfterInterruption(sessionId, "turn_timeout");
-                finishActiveTurn(sessionId, turnId, gateToken, true);
+            if (!ownsExecution(sessionId, turnId, gateToken)) {
+                return false;
             }
+            timeoutOutcomes.put(turnId, TurnDiagnostic.OutcomeKind.TIMED_OUT);
+            recordTimeoutObservability(sessionId, turnId);
+            clearPendingAfterInterruption(sessionId, "turn_timeout");
+            finishActiveTurn(sessionId, turnId, gateToken, true);
         }
         setActiveMetric();
         return true;
+    }
+
+    private void recordTimeoutObservability(String sessionId, String turnId) {
+        pruneTerminalObservations();
+        if (terminalObservations.putIfAbsent(turnId, System.currentTimeMillis()) != null) return;
+        String model = defaultModel;
+        try {
+            ConversationSession session = sessionStore.findById(sessionId);
+            if (session != null && session.model() != null && !session.model().isBlank()) {
+                model = session.model();
+            }
+        } catch (Throwable ignored) { }
+        ContextUsage usage = safeUsage(sessionId, model);
+        TurnDiagnostic diagnostic = new TurnDiagnostic(
+            turnId, sessionId, Instant.now(), Instant.now(), TurnPhase.FINALIZE,
+            TurnDiagnostic.OutcomeKind.TIMED_OUT, Map.of("reason", "turn_timeout"));
+        TurnResult result = new TurnResult(sessionId, turnId, "", usage, diagnostic, List.of());
+        auditError(sessionId, "Turn timed out", null, model);
+        safeAuditContext(sessionId, usage, model);
+        String observedModel = model;
+        safeMetric(() -> metrics.recordTurnDuration(observedModel, "timed_out", 0));
+        safeLifecycle(result);
+        setQueueMetric(sessionId);
     }
 
     private boolean isInterruptedOutcome(TurnDiagnostic.OutcomeKind outcome) {
@@ -1239,6 +1296,7 @@ final class DefaultTurnLoop implements TurnLoop {
     private void recordTurnObservability(TurnRequest request, TurnResult result,
                                          List<TurnMessage> before, String model,
                                          long started, boolean lifecycle) {
+        if (terminalObservations.remove(result.turnId()) != null) return;
         auditNewMessages(request.sessionId(), before);
         safeAuditContext(request.sessionId(), result.contextUsage(), model);
         long duration = Math.max(0, System.currentTimeMillis() - started);
@@ -1257,13 +1315,20 @@ final class DefaultTurnLoop implements TurnLoop {
                                             List<TurnEvent> events, String model,
                                             long started, SignalType signal,
                                             AtomicBoolean lifecycleRecorded) {
-        if (events.isEmpty()) return;
-        TurnResult reduced = reduceEvents(context, events);
+        if (terminalObservations.remove(context.turnId()) != null) return;
+        TurnResult reduced = events.isEmpty()
+            ? syntheticStreamResult(context, signal)
+            : reduceEvents(context, events);
         TurnResult observed = signal == SignalType.CANCEL
             ? withOutcome(reduced, TurnDiagnostic.OutcomeKind.CANCELLED,
                 Map.of("reason", "subscriber_cancelled"))
             : reduced;
         auditNewMessages(request.sessionId(), before);
+        if (observed.diagnostic().outcomeKind() == TurnDiagnostic.OutcomeKind.FAILED
+            || observed.diagnostic().outcomeKind() == TurnDiagnostic.OutcomeKind.CANCELLED) {
+            auditError(request.sessionId(), "Streaming turn "
+                + observed.diagnostic().outcomeKind().name().toLowerCase(), null, model);
+        }
         safeAuditContext(request.sessionId(), observed.contextUsage(), model);
         long duration = Math.max(0, System.currentTimeMillis() - started);
         String outcome = observed.diagnostic().outcomeKind().name().toLowerCase();
@@ -1277,13 +1342,35 @@ final class DefaultTurnLoop implements TurnLoop {
         setQueueMetric(request.sessionId());
     }
 
-    private void recordFailureObservability(String sessionId, String model,
+    private TurnResult syntheticStreamResult(TurnContext context, SignalType signal) {
+        TurnDiagnostic.OutcomeKind outcome = signal == SignalType.CANCEL
+            ? TurnDiagnostic.OutcomeKind.CANCELLED : TurnDiagnostic.OutcomeKind.FAILED;
+        TurnDiagnostic diagnostic = new TurnDiagnostic(
+            context.turnId(), context.sessionId(), Instant.now(), Instant.now(),
+            TurnPhase.FINALIZE, outcome, Map.of("reason", signal.name().toLowerCase()));
+        return new TurnResult(context.sessionId(), context.turnId(), "",
+            safeUsage(context.sessionId(), context.model()), diagnostic, List.of());
+    }
+
+    private void recordFailureObservability(String sessionId, String turnId, String model,
                                             List<TurnMessage> before, long started,
                                             Throwable failure) {
         auditNewMessages(sessionId, before);
+        ContextUsage usage = safeUsage(sessionId, model);
         auditError(sessionId, messageOf(failure), null, model);
+        safeAuditContext(sessionId, usage, model);
         safeMetric(() -> metrics.recordTurnDuration(model, "failed",
             Math.max(0, System.currentTimeMillis() - started)));
+        TurnDiagnostic diagnostic = new TurnDiagnostic(
+            turnId, sessionId, Instant.now(), Instant.now(), TurnPhase.FINALIZE,
+            TurnDiagnostic.OutcomeKind.FAILED, Map.of("error", messageOf(failure)));
+        safeLifecycle(new TurnResult(sessionId, turnId, "", usage, diagnostic, List.of()));
+    }
+
+    private void pruneTerminalObservations() {
+        long cutoff = System.currentTimeMillis() - Duration.ofMinutes(10).toMillis();
+        terminalObservations.entrySet().removeIf(entry -> entry.getValue() < cutoff);
+        timeoutOutcomes.keySet().removeIf(turnId -> !activeTurnIds.containsValue(turnId));
     }
 
     private void auditNewMessages(String sessionId, List<TurnMessage> before) {
@@ -1300,14 +1387,28 @@ final class DefaultTurnLoop implements TurnLoop {
                 if ("assistant".equals(message.role())) {
                     auditWriter.recordAssistantMessage(sessionId, message);
                 } else if ("tool".equals(message.role())) {
+                    Map<String, String> metadata = message.metadata() == null
+                        ? Map.of() : message.metadata();
                     auditWriter.recordToolExecution(sessionId,
                         new AuditWriter.ToolExecutionRecord(
                             nullToEmpty(message.toolName()), nullToEmpty(message.toolCallId()),
-                            "", message.text(), true, 0));
+                            metadata.getOrDefault("tool.arguments", ""),
+                            metadata.getOrDefault("tool.summary", message.text()),
+                            Boolean.parseBoolean(metadata.getOrDefault("tool.success", "true")),
+                            parseLong(metadata.get("tool.duration_ms"))));
                 }
             }
         } catch (Throwable e) {
             log.debug("Audit history capture failed for session {}: {}", sessionId, e.getMessage());
+        }
+    }
+
+    private long parseLong(String value) {
+        if (value == null || value.isBlank()) return 0L;
+        try {
+            return Long.parseLong(value);
+        } catch (NumberFormatException ignored) {
+            return 0L;
         }
     }
 

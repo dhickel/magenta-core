@@ -430,8 +430,10 @@ public final class DefaultTurnEngine {
 
         Map<String, ToolCallback> tools = indexTools(state.activeTools);
         List<ToolResponseMessage.ToolResponse> responses = new ArrayList<>();
+        List<TurnMessage> durableToolMessages = new ArrayList<>();
         for (AssistantMessage.ToolCall call : toolCalls) {
             if (Thread.currentThread().isInterrupted()) {
+                flushToolState(state, responses, durableToolMessages);
                 state.wasInterrupted = true;
                 state.interruptReason = "interrupted";
                 state.currentPhase = TurnPhase.FINALIZE;
@@ -439,6 +441,7 @@ public final class DefaultTurnEngine {
             }
             Optional<String> interrupt = active.pollInterrupt();
             if (interrupt.isPresent()) {
+                flushToolState(state, responses, durableToolMessages);
                 state.wasInterrupted = true;
                 state.interruptReason = interrupt.get();
                 state.currentPhase = TurnPhase.FINALIZE;
@@ -454,7 +457,12 @@ public final class DefaultTurnEngine {
                     new ToolResponseMessage.ToolResponse(call.id(), call.name(), questionSummary);
                 state.conversationMessages.add(ToolResponseMessage.builder()
                     .responses(List.of(toolResponse)).build());
-                state.messagesToPersist.add(TurnMessage.tool(call.name(), call.id(), questionSummary));
+                state.messagesToPersist.add(new TurnMessage(
+                    "tool", questionSummary, call.name(), call.id(), Map.of(
+                        "tool.arguments", call.arguments(),
+                        "tool.success", "true",
+                        "tool.duration_ms", "0",
+                        "tool.summary", "Questions pending")));
                 state.toolActivities.add(new ToolActivityData(
                     call.name(), call.id(), ToolActivityStatus.COMPLETED, "Questions pending"));
                 sink.next(new TurnEvent.ToolActivity(ctx.turnId(), Instant.now(),
@@ -493,6 +501,13 @@ public final class DefaultTurnEngine {
             responses.add(new ToolResponseMessage.ToolResponse(call.id(), call.name(), resultText));
             ToolActivityData activity = new ToolActivityData(call.name(), call.id(), status, summary);
             state.toolActivities.add(activity);
+            Map<String, String> toolMetadata = new LinkedHashMap<>();
+            toolMetadata.put("tool.arguments", call.arguments());
+            toolMetadata.put("tool.success", Boolean.toString(status == ToolActivityStatus.COMPLETED));
+            toolMetadata.put("tool.duration_ms", Long.toString(durationMs));
+            toolMetadata.put("tool.summary", summary);
+            durableToolMessages.add(new TurnMessage("tool", resultText,
+                call.name(), call.id(), toolMetadata));
             sink.next(new TurnEvent.ToolActivity(ctx.turnId(), Instant.now(),
                 call.name(), call.id(), status, summary, computeUsage(ctx)));
 
@@ -510,19 +525,28 @@ public final class DefaultTurnEngine {
         }
 
         AssistantMessage assistantOutput = state.response.getResult().getOutput();
-        appendAssistantToolMessage(state, assistantOutput);
-        if (!responses.isEmpty()) {
-            state.conversationMessages.add(ToolResponseMessage.builder().responses(responses).build());
-            state.messagesToPersist.addAll(responses.stream()
-                .map(response -> TurnMessage.tool(response.name(), response.id(), response.responseData()))
-                .toList());
-        }
+        flushToolState(state, responses, durableToolMessages);
 
         state.prompt = new Prompt(buildPromptMessages(state.systemPromptText,
             state.conversationMessages), modelRouter.toolCallingOptions(ctx.model(), state.activeTools));
         ctx.currentContextUsage(computeUsage(ctx));
         state.currentPhase = state.toolLoopAbortReason == null
             ? TurnPhase.INVOKE_MODEL : TurnPhase.REPAIR;
+    }
+
+    private void flushToolState(TurnLoopState state,
+                                List<ToolResponseMessage.ToolResponse> responses,
+                                List<TurnMessage> durableToolMessages) {
+        AssistantMessage output = state.response == null || state.response.getResult() == null
+            ? null : state.response.getResult().getOutput();
+        appendAssistantToolMessage(state, output);
+        if (!responses.isEmpty()) {
+            state.conversationMessages.add(ToolResponseMessage.builder()
+                .responses(List.copyOf(responses)).build());
+        }
+        if (!durableToolMessages.isEmpty()) {
+            state.messagesToPersist.addAll(List.copyOf(durableToolMessages));
+        }
     }
 
     private void handleRepair(TurnContext ctx, TurnLoopState state, FluxSink<TurnEvent> sink) {

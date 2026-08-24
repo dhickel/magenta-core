@@ -110,7 +110,7 @@ public class SqliteMessageQueueStore implements MessageQueueStore {
                     WHERE message_id = ? AND claim_token IS NULL
                     """)) {
                     statement.setString(1, claimToken);
-                    statement.setString(2, claimedAt.toString());
+                    statement.setString(2, PersistenceSupport.timestamp(claimedAt));
                     statement.setString(3, messageId);
                     return statement.executeUpdate() == 1;
                 }
@@ -181,7 +181,7 @@ public class SqliteMessageQueueStore implements MessageQueueStore {
                     WHERE claim_token IS NOT NULL AND claimed_at < ?
                     ORDER BY claimed_at ASC, message_id ASC
                     """)) {
-                    statement.setString(1, staleThreshold.toString());
+                    statement.setString(1, PersistenceSupport.timestamp(staleThreshold));
                     try (ResultSet resultSet = statement.executeQuery()) {
                         while (resultSet.next()) {
                             stale.add(new ClaimedMessage(rowToMessage(resultSet),
@@ -200,7 +200,7 @@ public class SqliteMessageQueueStore implements MessageQueueStore {
                     for (ClaimedMessage claim : stale) {
                         release.setString(1, claim.message().messageId());
                         release.setString(2, claim.claimToken());
-                        release.setString(3, staleThreshold.toString());
+                        release.setString(3, PersistenceSupport.timestamp(staleThreshold));
                         if (release.executeUpdate() == 1) recovered.add(claim);
                     }
                 }
@@ -245,7 +245,7 @@ public class SqliteMessageQueueStore implements MessageQueueStore {
                 FROM magenta_core_pending_messages
                 WHERE claim_token IS NOT NULL AND claimed_at < ?
                 ORDER BY claimed_at ASC, message_id ASC
-                """.formatted(SELECT_COLUMNS), staleThreshold.toString());
+                """.formatted(SELECT_COLUMNS), PersistenceSupport.timestamp(staleThreshold));
         } catch (RuntimeException e) {
             LOG.error("Failed to find stale queue claims before {}", staleThreshold, e);
             throw new RuntimeException("Failed to find stale claims", e);
