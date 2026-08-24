@@ -53,6 +53,12 @@ public final class DefaultModelRouter implements ModelRouter {
         this(configs, null, requestTimeout);
     }
 
+    /** Creates a router with a caller-supplied internal tool manager. */
+    public DefaultModelRouter(@NonNull Map<String, ModelConfig> configs,
+                              @NonNull ToolCallingManager toolCallingManager) {
+        this(configs, toolCallingManager, DEFAULT_TIMEOUT);
+    }
+
     /**
      * Compatibility constructor for internal callers that already own a
      * Spring AI tool-calling manager.
