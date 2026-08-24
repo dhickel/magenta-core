@@ -23,12 +23,15 @@ import org.springframework.ai.chat.model.Generation;
 import org.springframework.ai.chat.prompt.Prompt;
 import org.springframework.ai.model.tool.ToolCallingChatOptions;
 import org.sqlite.SQLiteDataSource;
+import reactor.core.Disposable;
 import reactor.core.publisher.Flux;
 
 import java.nio.file.Path;
 import java.sql.Connection;
+import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.ZoneId;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Deque;
@@ -41,6 +44,7 @@ import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.BooleanSupplier;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -411,6 +415,82 @@ class DefaultTurnLoopInteractionTest {
     }
 
     @Test
+    void subscriberCancellationFencesLatePersistenceBeforeASecondTurnStarts() throws Exception {
+        CancellationIgnoringStreamingModel model = new CancellationIgnoringStreamingModel();
+        Memory memory = new Memory();
+        InMemoryInteractionStore interactions = new InMemoryInteractionStore();
+        DefaultTurnLoop loop = createLoop(model, memory, interactions,
+            new RecordingAudit(), new RecordingMetrics(), result -> { });
+
+        Disposable first = loop.stream(new TurnRequest(
+            "session", "cancelled request", null, null, true, Map.of())).subscribe();
+        assertTrue(model.firstEntered.await(2, TimeUnit.SECONDS));
+        first.dispose();
+        awaitCondition(() -> loopGate(loop, "session") == TurnGate.GateState.IDLE);
+        assertEquals(0, activeTurnCount(loop));
+
+        List<TurnEvent> second = loop.stream(new TurnRequest(
+            "session", "fresh request", null, null, true, Map.of()))
+            .collectList().block(Duration.ofSeconds(2));
+        assertTrue(second.stream().anyMatch(TurnEvent.Completed.class::isInstance));
+
+        model.releaseFirst.countDown();
+        assertTrue(model.firstExited.await(2, TimeUnit.SECONDS));
+        awaitCondition(() -> model.calls.get() == 2 && activeTurnCount(loop) == 0);
+
+        assertEquals(List.of("fresh request", "fresh"), memory.messages.stream()
+            .filter(message -> "user".equals(message.role()) || "assistant".equals(message.role()))
+            .map(TurnMessage::text)
+            .toList());
+        assertNull(interactions.load("session"));
+        assertFalse(memory.messages.stream().anyMatch(message -> message.metadata() != null
+            && "turnloop.pending_interaction".equals(
+                message.metadata().get("turnloop.persistence_type"))));
+    }
+
+    @Test
+    void timeoutFencesBlockedTurnAndItsLatePersistenceBeforeSuccessor() throws Exception {
+        TimeoutIgnoringPromptModel model = new TimeoutIgnoringPromptModel();
+        Memory memory = new Memory();
+        MutableClock clock = new MutableClock(Instant.parse("2026-08-24T00:00:00Z"));
+        SerialTurnGate gate = new SerialTurnGate(
+            Duration.ofMinutes(1), Duration.ofDays(1), clock);
+        CountDownLatch timedOut = new CountDownLatch(1);
+        gate.setTimeoutCallback(sessionId -> timedOut.countDown());
+        DefaultTurnLoop loop = createLoop(model, memory, new InMemoryInteractionStore(),
+            new RecordingAudit(), new RecordingMetrics(), result -> { },
+            new DefaultTurnExecutor(), 1, gate, true);
+
+        CompletableFuture<TurnResult> first = CompletableFuture.supplyAsync(
+            () -> loop.send(TurnRequest.of("session", "timed out request")));
+        assertTrue(model.firstEntered.await(2, TimeUnit.SECONDS));
+        clock.advance(Duration.ofMinutes(2));
+        gate.scanForTimeouts();
+        assertTrue(timedOut.await(2, TimeUnit.SECONDS));
+        awaitCondition(() -> loopGate(loop, "session") == TurnGate.GateState.IDLE);
+        assertEquals(0, activeTurnCount(loop));
+
+        CompletableFuture<TurnResult> successor = CompletableFuture.supplyAsync(
+            () -> loop.send(TurnRequest.of("session", "fresh request")));
+        assertTrue(model.secondEntered.await(2, TimeUnit.SECONDS));
+
+        model.releaseFirst.countDown();
+        TurnResult timedOutResult = first.get(2, TimeUnit.SECONDS);
+        assertEquals(TurnDiagnostic.OutcomeKind.TIMED_OUT,
+            timedOutResult.diagnostic().outcomeKind());
+        assertTrue(model.firstExited.await(2, TimeUnit.SECONDS));
+        assertEquals(TurnGate.GateState.EXECUTING, loopGate(loop, "session"));
+
+        model.releaseSecond.countDown();
+        assertEquals("fresh", successor.get(2, TimeUnit.SECONDS).message());
+        assertEquals(List.of("fresh request", "fresh"), memory.messages.stream()
+            .filter(message -> "user".equals(message.role()) || "assistant".equals(message.role()))
+            .map(TurnMessage::text)
+            .toList());
+        assertFalse(memory.messages.stream().anyMatch(message -> "late".equals(message.text())));
+    }
+
+    @Test
     void lifecycleAuditAndToolMetricsAreInvoked() {
         PromptModel model = new PromptModel(List.of(response("observed")));
         Memory memory = new Memory();
@@ -443,6 +523,16 @@ class DefaultTurnLoopInteractionTest {
                                        TurnLoopMetrics metrics,
                                        TurnLifecycleListener lifecycle,
                                        TurnExecutor executor, long drainTimeoutSeconds) {
+        return createLoop(model, memory, interactions, audit, metrics, lifecycle,
+            executor, drainTimeoutSeconds, new SerialTurnGate(Duration.ofSeconds(30)), true);
+    }
+
+    private DefaultTurnLoop createLoop(PromptModel model, ConversationMemory memory,
+                                       InteractionStore interactions, AuditWriter audit,
+                                       TurnLoopMetrics metrics,
+                                       TurnLifecycleListener lifecycle,
+                                       TurnExecutor executor, long drainTimeoutSeconds,
+                                       SerialTurnGate gate, boolean ownsGate) {
         ToolRegistry tools = new EmptyToolRegistry();
         TokenEstimator estimator = new SimpleEstimator();
         CompactionStrategy compaction = context -> new CompactionResult("summary", 0, 0);
@@ -460,11 +550,11 @@ class DefaultTurnLoopInteractionTest {
                 new CompositeThinkingExtractor())
             .build();
         DefaultTurnLoop loop = new DefaultTurnLoop(
-            engine, new SerialTurnGate(Duration.ofSeconds(30)), new DefaultMessageQueue(new QueueStore()),
+            engine, gate, new DefaultMessageQueue(new QueueStore()),
             interactions, new Sessions(), memory, activeRegistry,
             executor, tools, alias -> Set.of(ModelCapability.STREAMING,
                 ModelCapability.TOOL_CALLING), lifecycle, metrics, null, "system", "model",
-            drainTimeoutSeconds, audit);
+            drainTimeoutSeconds, audit, ownsGate);
         loops.add(loop);
         return loop;
     }
@@ -476,6 +566,16 @@ class DefaultTurnLoopInteractionTest {
             @SuppressWarnings("unchecked")
             Map<String, String> active = (Map<String, String>) field.get(loop);
             return active.get(sessionId);
+        } catch (ReflectiveOperationException e) {
+            throw new AssertionError(e);
+        }
+    }
+
+    private int activeTurnCount(DefaultTurnLoop loop) {
+        try {
+            var field = DefaultTurnLoop.class.getDeclaredField("activeTurnRegistry");
+            field.setAccessible(true);
+            return ((ActiveTurnRegistry) field.get(loop)).activeTurns().size();
         } catch (ReflectiveOperationException e) {
             throw new AssertionError(e);
         }
@@ -526,6 +626,62 @@ class DefaultTurnLoopInteractionTest {
         @Override
         public Flux<ChatResponse> stream(Prompt prompt) {
             return Flux.just(call(prompt));
+        }
+    }
+
+    private static final class CancellationIgnoringStreamingModel extends PromptModel {
+        private final CountDownLatch firstEntered = new CountDownLatch(1);
+        private final CountDownLatch releaseFirst = new CountDownLatch(1);
+        private final CountDownLatch firstExited = new CountDownLatch(1);
+
+        private CancellationIgnoringStreamingModel() {
+            super(List.of());
+        }
+
+        @Override
+        public Flux<ChatResponse> stream(Prompt prompt) {
+            prompts.add(prompt);
+            int call = calls.incrementAndGet();
+            if (call != 1) {
+                return Flux.just(response("fresh"));
+            }
+            return Flux.create(sink -> {
+                firstEntered.countDown();
+                awaitUninterruptibly(releaseFirst);
+                try {
+                    sink.next(askUserResponse("late question"));
+                    sink.complete();
+                } finally {
+                    firstExited.countDown();
+                }
+            });
+        }
+    }
+
+    private static final class TimeoutIgnoringPromptModel extends PromptModel {
+        private final CountDownLatch firstEntered = new CountDownLatch(1);
+        private final CountDownLatch releaseFirst = new CountDownLatch(1);
+        private final CountDownLatch firstExited = new CountDownLatch(1);
+        private final CountDownLatch secondEntered = new CountDownLatch(1);
+        private final CountDownLatch releaseSecond = new CountDownLatch(1);
+
+        private TimeoutIgnoringPromptModel() {
+            super(List.of());
+        }
+
+        @Override
+        public ChatResponse call(Prompt prompt) {
+            prompts.add(prompt);
+            int call = calls.incrementAndGet();
+            if (call == 1) {
+                firstEntered.countDown();
+                awaitUninterruptibly(releaseFirst);
+                firstExited.countDown();
+                return response("late");
+            }
+            secondEntered.countDown();
+            awaitUninterruptibly(releaseSecond);
+            return response("fresh");
         }
     }
 
@@ -631,6 +787,42 @@ class DefaultTurnLoopInteractionTest {
     private static final class SimpleEstimator implements TokenEstimator {
         @Override public int estimateTokens(String text) { return text == null ? 0 : Math.max(1, text.length() / 4); }
         @Override public int estimateTokens(TurnMessage message) { return estimateTokens(message.text()) + 1; }
+    }
+
+    private static final class MutableClock extends Clock {
+        private volatile Instant instant;
+
+        private MutableClock(Instant instant) {
+            this.instant = instant;
+        }
+
+        private void advance(Duration duration) {
+            instant = instant.plus(duration);
+        }
+
+        @Override public ZoneId getZone() { return ZoneId.of("UTC"); }
+        @Override public Clock withZone(ZoneId zone) { return this; }
+        @Override public Instant instant() { return instant; }
+    }
+
+    private static void awaitUninterruptibly(CountDownLatch latch) {
+        boolean waiting = true;
+        while (waiting) {
+            try {
+                latch.await();
+                waiting = false;
+            } catch (InterruptedException ignored) {
+                // Deliberately model a provider that ignores task interruption.
+            }
+        }
+    }
+
+    private static void awaitCondition(BooleanSupplier condition) throws InterruptedException {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(2);
+        while (!condition.getAsBoolean() && System.nanoTime() < deadline) {
+            Thread.sleep(1);
+        }
+        assertTrue(condition.getAsBoolean(), "condition was not satisfied before timeout");
     }
 
     private static final class RecordingAudit implements AuditWriter {

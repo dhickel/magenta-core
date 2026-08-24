@@ -9,6 +9,9 @@ Run lifecycle idempotency, migration, and fencing invariants.
 - `src/main/java/io/mindspice/magenta2/ai/orchestration/runtime/OrchestrationRuntimeRepository.java`
 - `src/main/resources/db/migrations/002-run-lifecycle-fencing.sql`
 - `.internal-dev/reviews/2026-07-20-phase-02-run-lifecycle-fencing-validation.md`
+- `src/main/java/io/mindspice/magenta/core/DefaultTurnLoop.java`
+- `src/main/java/io/mindspice/magenta/core/SerialTurnGate.java`
+- `src/main/java/io/mindspice/magenta/core/internal/ConcurrentActiveTurnRegistry.java`
 
 ## Key Takeaways
 - Operation keys are scoped by operation type. Canonical request digests include immutable definition/workspace/input/lineage facts but exclude generated run IDs, native IDs, assignment IDs, timestamps, paths, display names, and transport ordering.
@@ -26,6 +29,9 @@ Run lifecycle idempotency, migration, and fencing invariants.
 - A real empty-job runner integration is a useful model-free proof: it exercises submission reservation, assignment leasing, native job identity, root provisioning, writer acquisition/closure, and terminal CAS without external AI infrastructure.
 - Immutable context bindings must be resolved through durable owner links, not checkpoint JSON or a parallel metadata column. Submission idempotency must inspect an existing operation before creating a candidate assignment/binding; otherwise a losing concurrent retry leaves orphan immutable records. Runner validation must compare assignment/run owner links and binding state/generation before filesystem provisioning or writer acquisition.
 - SQLite concurrent writers can return `SQLITE_BUSY` if two submission transactions both read before their first write. Serialize same-process submission entry before transaction work and retain a migration-owned unique operation record as the cross-process arbiter; then test that compatible concurrent calls return one assignment/binding/run while contradictory retries create nothing.
+- `CompletableFuture.cancel(true)` on work launched through `supplyAsync` is not proof that the underlying provider or tool invocation stopped. Subscriber cancellation and timeouts must revoke a turn-scoped authority under the same lock used to guard stale-execution persistence; revocation waits for an in-progress write and all later memory, interaction, failure-cleanup, audit/lifecycle, and compaction writes from that execution fail closed. Authoritative cancellation cleanup may still write its cancellation record while it owns the session boundary.
+- A gate timeout cannot safely change `EXECUTING` to `IDLE` using only a session ID. Capture the acquisition token, invoke a token-aware fence outside the gate lock to avoid lock-order inversion, and reset the gate only if the same token is still current and fencing succeeded. Late completion must also compare both turn ID and gate token before release or transition.
+- Daemon timeout scanners still require explicit ownership. The composition root closes only the default gate it created, detaches its handler from caller-owned gates, and leaves caller-supplied gate lifecycle under caller control.
 
 ## Project Relevance
 These rules prevent duplicate reservations, generated-ID idempotency failures, split-brain assignment/filesystem writers, orphan directories after rollback, and migration bookkeeping that misrepresents partial schemas as complete.

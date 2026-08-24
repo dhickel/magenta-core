@@ -333,6 +333,7 @@ public final class TurnLoopBuilder {
             completionDetector, "completionDetector", DefaultCompletionDetector::instance);
         RepairStrategy rStrategy = resolveDefault(
             repairStrategy, "repairStrategy", DefaultRepairStrategy::instance);
+        boolean ownsTurnGate = turnGate == null;
         TurnGate gate = resolveDefault(
             turnGate, "turnGate", () -> new SerialTurnGate(Duration.ofMinutes(10)));
         MessageQueue mQueue = resolveDefault(messageQueue, "messageQueue", () -> new DefaultMessageQueue(mqStore));
@@ -379,7 +380,8 @@ public final class TurnLoopBuilder {
             defaultSystemPrompt,
             defaultModel,
             drainTimeoutSeconds,
-            resolvedAuditWriter
+            resolvedAuditWriter,
+            ownsTurnGate
         );
     }
 

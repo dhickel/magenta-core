@@ -9,6 +9,7 @@ import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.ConcurrentMap;
+import java.util.concurrent.locks.ReentrantLock;
 
 /**
  * {@link ConcurrentHashMap}-backed implementation of {@link ActiveTurnRegistry}.
@@ -54,6 +55,8 @@ public final class ConcurrentActiveTurnRegistry implements ActiveTurnRegistry {
         private final String turnId;
         private volatile TurnPhase phase = TurnPhase.PREPARE;
         private final ConcurrentLinkedQueue<String> interruptQueue = new ConcurrentLinkedQueue<>();
+        private final ReentrantLock authorityLock = new ReentrantLock();
+        private volatile String revocationReason;
 
         ActiveTurnImpl(@NonNull String turnId) {
             this.turnId = turnId;
@@ -85,6 +88,41 @@ public final class ConcurrentActiveTurnRegistry implements ActiveTurnRegistry {
         @Override
         public void queueInterrupt(@NonNull String reason) {
             interruptQueue.add(reason);
+        }
+
+        @Override
+        public boolean runIfActive(@NonNull Runnable action) {
+            authorityLock.lock();
+            try {
+                if (revocationReason != null) {
+                    return false;
+                }
+                action.run();
+                return true;
+            } finally {
+                authorityLock.unlock();
+            }
+        }
+
+        @Override
+        public boolean revoke(@NonNull String reason) {
+            authorityLock.lock();
+            try {
+                if (revocationReason != null) {
+                    return false;
+                }
+                revocationReason = reason;
+                interruptQueue.add(reason);
+                return true;
+            } finally {
+                authorityLock.unlock();
+            }
+        }
+
+        @Override
+        @NonNull
+        public Optional<String> revocationReason() {
+            return Optional.ofNullable(revocationReason);
         }
     }
 }

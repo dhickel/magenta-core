@@ -9,8 +9,10 @@ import java.nio.file.Path;
 import java.sql.Connection;
 import java.sql.ResultSet;
 import java.time.Duration;
+import java.util.concurrent.ScheduledExecutorService;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -84,6 +86,30 @@ class TurnLoopBuilderTest {
     }
 
     @Test
+    void closeStopsOnlyTheDefaultOwnedTurnGateScanner() throws Exception {
+        TurnLoop ownedLoop = TurnLoopBuilder.create()
+            .model("first", model("first", EndpointType.OLLAMA))
+            .dataSource(sqliteDataSource(tempDir.resolve("owned-gate.db")))
+            .build();
+        SerialTurnGate ownedGate = serialGateOf(ownedLoop);
+        ownedLoop.close();
+        assertTrue(scannerOf(ownedGate).isShutdown());
+
+        SerialTurnGate suppliedGate = new SerialTurnGate(Duration.ofMinutes(1));
+        try {
+            TurnLoop suppliedLoop = TurnLoopBuilder.create()
+                .model("first", model("first", EndpointType.OLLAMA))
+                .dataSource(sqliteDataSource(tempDir.resolve("supplied-gate.db")))
+                .turnGate(suppliedGate)
+                .build();
+            suppliedLoop.close();
+            assertFalse(scannerOf(suppliedGate).isShutdown());
+        } finally {
+            suppliedGate.close();
+        }
+    }
+
+    @Test
     void validatesAliasesAndModelConfiguration() {
         ModelConfig valid = model("first", EndpointType.OLLAMA);
 
@@ -125,6 +151,18 @@ class TurnLoopBuilderTest {
         return new ModelConfig(alias, "remote-model", "http://localhost:11434",
             endpointType == EndpointType.DEEPSEEK ? "secret" : null,
             endpointType, 4096, thinkLevel);
+    }
+
+    private static SerialTurnGate serialGateOf(TurnLoop loop) throws Exception {
+        var field = DefaultTurnLoop.class.getDeclaredField("gate");
+        field.setAccessible(true);
+        return (SerialTurnGate) field.get(loop);
+    }
+
+    private static ScheduledExecutorService scannerOf(SerialTurnGate gate) throws Exception {
+        var field = SerialTurnGate.class.getDeclaredField("timeoutScanner");
+        field.setAccessible(true);
+        return (ScheduledExecutorService) field.get(gate);
     }
 
     private static SQLiteDataSource sqliteDataSource(Path database) {
