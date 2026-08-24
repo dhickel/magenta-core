@@ -363,14 +363,19 @@ final class DefaultTurnLoop implements TurnLoop {
         String model;
         long started;
         boolean answerClaimed = false;
+        boolean coordinatorClaimed = false;
         String gateToken = null;
 
         synchronized (lockFor(sessionId)) {
             validateClosed();
             try {
+                if (ACTIVE_ANSWER_CLAIMS.putIfAbsent(sessionId, Boolean.TRUE) != null) {
+                    throw new TurnLoopException("An answer is already executing for session " + sessionId);
+                }
+                coordinatorClaimed = true;
                 QuestionPendingContext pending = restorePending(sessionId);
                 if (pending != null && pending.state() == QuestionPendingContext.State.ANSWERED
-                    && !ACTIVE_ANSWER_CLAIMS.containsKey(sessionId)) {
+                    && coordinatorClaimed) {
                     pending = rearmAnsweredInteraction(sessionId, pending);
                 }
                 if (pending == null || pending.state() != QuestionPendingContext.State.PENDING
@@ -386,7 +391,6 @@ final class DefaultTurnLoop implements TurnLoop {
                         + sessionId);
                 }
                 answerClaimed = true;
-                ACTIVE_ANSWER_CLAIMS.put(sessionId, Boolean.TRUE);
 
                 TurnGate.AcquireResult acquired = gate.acquire(
                     sessionId, TurnGate.TurnGateMode.ANSWER);
@@ -463,7 +467,7 @@ final class DefaultTurnLoop implements TurnLoop {
             }
             throw publicFailure("Answer turn execution failed", failure);
         } finally {
-            if (answerClaimed) ACTIVE_ANSWER_CLAIMS.remove(sessionId);
+            if (coordinatorClaimed) ACTIVE_ANSWER_CLAIMS.remove(sessionId, Boolean.TRUE);
             setActiveMetric();
         }
     }
