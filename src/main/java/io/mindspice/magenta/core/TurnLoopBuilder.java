@@ -303,7 +303,8 @@ public final class TurnLoopBuilder {
 
         initializeSchema(resolvedDataSource);
 
-        ToolRegistry registry = resolveDefault(toolRegistry, "toolRegistry", DefaultToolRegistry::new);
+        ToolRegistry registry = resolveDefault(
+            toolRegistry, "toolRegistry", () -> new DefaultToolRegistry(mapper));
         ToolAccessPolicy accessPolicy = toolAccessPolicy;
         ToolResultSummarizer summarizer = resolveDefault(
             toolResultSummarizer, "toolResultSummarizer", DefaultToolResultSummarizer::new);

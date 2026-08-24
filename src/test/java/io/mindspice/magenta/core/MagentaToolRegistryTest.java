@@ -53,6 +53,10 @@ class MagentaToolRegistryTest {
             "turn", "model");
         assertEquals(List.of("echo"), registry.resolveForTurn(selected).stream()
             .map(callback -> callback.getToolDefinition().name()).toList());
+        TurnContext noTools = new TurnContext(
+            new TurnRequest("session", "message", "model", List.of(), false, java.util.Map.of()),
+            "turn-empty", "model");
+        assertEquals(List.of(), registry.resolveForTurn(noTools));
         assertThrows(ToolException.AccessDenied.class, () -> registry.resolveForTurn(
             new TurnContext(new TurnRequest("session", "message", "model", List.of("missing"),
                 false, java.util.Map.of()), "turn-2", "model")));

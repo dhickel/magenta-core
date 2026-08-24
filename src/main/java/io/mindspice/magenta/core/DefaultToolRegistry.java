@@ -1,5 +1,6 @@
 package io.mindspice.magenta.core;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import io.mindspice.magenta.core.spi.ToolRegistry;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -7,6 +8,7 @@ import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.lang.reflect.Parameter;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -40,12 +42,18 @@ public final class DefaultToolRegistry implements ToolRegistry {
 
     private final Map<String, ToolCallback> publicTools = new ConcurrentHashMap<>();
     private final Map<String, ToolCallback> frameworkTools = new ConcurrentHashMap<>();
+    private final ObjectMapper objectMapper;
 
     /**
      * Creates a new registry and auto-registers the {@code ask_user}
      * framework-internal tool.
      */
     public DefaultToolRegistry() {
+        this(new ObjectMapper().findAndRegisterModules());
+    }
+
+    public DefaultToolRegistry(ObjectMapper objectMapper) {
+        this.objectMapper = java.util.Objects.requireNonNull(objectMapper, "objectMapper");
         registerFrameworkTool(new ToolCallback() {
             @Override
             public ToolDefinition getToolDefinition() {
@@ -158,7 +166,7 @@ public final class DefaultToolRegistry implements ToolRegistry {
     @NonNull
     public List<ToolCallback> resolveForTurn(@NonNull TurnContext context) {
         List<String> requested = context.request().toolNames();
-        if (requested == null || requested.isEmpty()) {
+        if (requested == null) {
             List<ToolCallback> merged = new ArrayList<>();
             merged.addAll(publicTools.values());
             merged.addAll(frameworkTools.values());
@@ -185,7 +193,7 @@ public final class DefaultToolRegistry implements ToolRegistry {
     /**
      * Builds a simple JSON Schema string from the method's parameter annotations.
      */
-    private static String buildInputSchema(Method method) {
+    private String buildInputSchema(Method method) {
         Parameter[] parameters = method.getParameters();
         if (parameters.length == 0) {
             return "{\"type\":\"object\",\"properties\":{}}";
@@ -235,16 +243,15 @@ public final class DefaultToolRegistry implements ToolRegistry {
      * Jackson-based approach: expects a flat JSON object whose keys match
      * parameter names.
      */
-    private static Object[] resolveArguments(Method method, String toolInput) throws Exception {
+    private Object[] resolveArguments(Method method, String toolInput) throws Exception {
         Parameter[] parameters = method.getParameters();
         if (parameters.length == 0) {
             return new Object[0];
         }
 
-        // Use Jackson for JSON parsing
-        com.fasterxml.jackson.databind.ObjectMapper mapper = new com.fasterxml.jackson.databind.ObjectMapper();
+        // Use the configured shared ObjectMapper so consumer modules and coercion rules apply.
         @SuppressWarnings("unchecked")
-        Map<String, Object> inputMap = mapper.readValue(toolInput, Map.class);
+        Map<String, Object> inputMap = objectMapper.readValue(toolInput, Map.class);
 
         Object[] args = new Object[parameters.length];
         for (int i = 0; i < parameters.length; i++) {
@@ -262,7 +269,7 @@ public final class DefaultToolRegistry implements ToolRegistry {
                 }
                 args[i] = null;
             } else {
-                args[i] = mapper.convertValue(raw, parameters[i].getType());
+                args[i] = objectMapper.convertValue(raw, parameters[i].getType());
             }
         }
         return args;
@@ -298,7 +305,14 @@ public final class DefaultToolRegistry implements ToolRegistry {
         if (type == Boolean.class || type == boolean.class) {
             return "boolean";
         }
-        return "string"; // fallback
+        if (type.isArray() || Collection.class.isAssignableFrom(type)) {
+            return "array";
+        }
+        if (Map.class.isAssignableFrom(type) || type.isRecord()
+            || (!type.isPrimitive() && !type.getName().startsWith("java."))) {
+            return "object";
+        }
+        return "string";
     }
 
     private static String escapeJson(String s) {
