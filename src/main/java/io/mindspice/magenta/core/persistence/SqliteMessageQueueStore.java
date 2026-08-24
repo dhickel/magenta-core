@@ -1,6 +1,7 @@
 package io.mindspice.magenta.core.persistence;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.mindspice.magenta.core.ClaimedMessage;
 import io.mindspice.magenta.core.PendingMessage;
 import io.mindspice.magenta.core.spi.MessageQueueStore;
 import org.slf4j.Logger;
@@ -121,6 +122,97 @@ public class SqliteMessageQueueStore implements MessageQueueStore {
     }
 
     @Override
+    public boolean supportsDurableClaimTokens() {
+        return true;
+    }
+
+    @Override
+    public ClaimedMessage findByClaimToken(String claimToken) {
+        Objects.requireNonNull(claimToken, "claimToken");
+        try {
+            return PersistenceSupport.read(dataSource, connection -> {
+                try (PreparedStatement statement = connection.prepareStatement("""
+                    SELECT message_id, session_id, message_text, metadata_json,
+                           enqueued_at, claimed_at
+                    FROM magenta_core_pending_messages
+                    WHERE claim_token = ?
+                    """)) {
+                    statement.setString(1, claimToken);
+                    try (ResultSet resultSet = statement.executeQuery()) {
+                        if (!resultSet.next()) return null;
+                        return new ClaimedMessage(rowToMessage(resultSet), claimToken,
+                            PersistenceSupport.parseTimestamp(resultSet.getString("claimed_at")));
+                    }
+                }
+            });
+        } catch (RuntimeException e) {
+            LOG.error("Failed to find queue claim {}", claimToken, e);
+            throw new RuntimeException("Failed to find queue claim " + claimToken, e);
+        }
+    }
+
+    @Override
+    public boolean deleteByClaimToken(String claimToken) {
+        Objects.requireNonNull(claimToken, "claimToken");
+        return updateCount("DELETE FROM magenta_core_pending_messages WHERE claim_token = ?",
+            claimToken, "delete claimed message") == 1;
+    }
+
+    @Override
+    public boolean releaseClaimByToken(String claimToken) {
+        Objects.requireNonNull(claimToken, "claimToken");
+        return updateCount("""
+            UPDATE magenta_core_pending_messages
+            SET claim_token = NULL, claimed_at = NULL
+            WHERE claim_token = ?
+            """, claimToken, "release claim token") == 1;
+    }
+
+    @Override
+    public List<ClaimedMessage> releaseStaleClaims(Instant staleThreshold) {
+        Objects.requireNonNull(staleThreshold, "staleThreshold");
+        try {
+            return PersistenceSupport.transaction(dataSource, connection -> {
+                List<ClaimedMessage> stale = new ArrayList<>();
+                try (PreparedStatement statement = connection.prepareStatement("""
+                    SELECT message_id, session_id, message_text, metadata_json,
+                           enqueued_at, claim_token, claimed_at
+                    FROM magenta_core_pending_messages
+                    WHERE claim_token IS NOT NULL AND claimed_at < ?
+                    ORDER BY claimed_at ASC, message_id ASC
+                    """)) {
+                    statement.setString(1, staleThreshold.toString());
+                    try (ResultSet resultSet = statement.executeQuery()) {
+                        while (resultSet.next()) {
+                            stale.add(new ClaimedMessage(rowToMessage(resultSet),
+                                resultSet.getString("claim_token"),
+                                PersistenceSupport.parseTimestamp(
+                                    resultSet.getString("claimed_at"))));
+                        }
+                    }
+                }
+                List<ClaimedMessage> recovered = new ArrayList<>();
+                try (PreparedStatement release = connection.prepareStatement("""
+                    UPDATE magenta_core_pending_messages
+                    SET claim_token = NULL, claimed_at = NULL
+                    WHERE message_id = ? AND claim_token = ? AND claimed_at < ?
+                    """)) {
+                    for (ClaimedMessage claim : stale) {
+                        release.setString(1, claim.message().messageId());
+                        release.setString(2, claim.claimToken());
+                        release.setString(3, staleThreshold.toString());
+                        if (release.executeUpdate() == 1) recovered.add(claim);
+                    }
+                }
+                return List.copyOf(recovered);
+            });
+        } catch (RuntimeException e) {
+            LOG.error("Failed to release stale queue claims before {}", staleThreshold, e);
+            throw new RuntimeException("Failed to release stale claims", e);
+        }
+    }
+
+    @Override
     public void deleteByMessageId(String messageId) {
         Objects.requireNonNull(messageId, "messageId");
         update("DELETE FROM magenta_core_pending_messages WHERE message_id = ?",
@@ -176,13 +268,16 @@ public class SqliteMessageQueueStore implements MessageQueueStore {
     }
 
     private void update(String sql, String parameter, String operation) {
+        updateCount(sql, parameter, operation);
+    }
+
+    private int updateCount(String sql, String parameter, String operation) {
         try {
-            PersistenceSupport.transaction(dataSource, connection -> {
+            return PersistenceSupport.transaction(dataSource, connection -> {
                 try (PreparedStatement statement = connection.prepareStatement(sql)) {
                     statement.setString(1, parameter);
-                    statement.executeUpdate();
+                    return statement.executeUpdate();
                 }
-                return null;
             });
         } catch (RuntimeException e) {
             LOG.error("Failed to {} for {}", operation, parameter, e);

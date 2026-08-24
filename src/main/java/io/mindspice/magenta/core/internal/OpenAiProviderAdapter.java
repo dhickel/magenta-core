@@ -1,4 +1,4 @@
-package io.mindspice.magenta.core.internal.provider;
+package io.mindspice.magenta.core.internal;
 
 import com.openai.client.OpenAIClient;
 import com.openai.client.OpenAIClientAsync;
@@ -14,12 +14,12 @@ import java.time.Duration;
 import java.util.List;
 
 /** Direct Spring AI/OpenAI-compatible construction. */
-public final class OpenAiProviderAdapter {
+final class OpenAiProviderAdapter {
 
     private OpenAiProviderAdapter() {
     }
 
-    public static OwnedChatModel create(
+    static OwnedChatModel create(
         ModelConfig config, ToolCallingManager toolCallingManager, Duration timeout) {
         OpenAiChatOptions options = options(config, List.of(), timeout);
         String apiKey = config.apiKey() != null ? config.apiKey() : "";
@@ -54,7 +54,7 @@ public final class OpenAiProviderAdapter {
         }
     }
 
-    public static OpenAiChatOptions options(
+    static OpenAiChatOptions options(
         ModelConfig config, List<ToolCallback> toolCallbacks, Duration timeout) {
         OpenAiChatOptions.Builder builder = OpenAiChatOptions.builder()
             .baseUrl(config.remoteEndpoint())

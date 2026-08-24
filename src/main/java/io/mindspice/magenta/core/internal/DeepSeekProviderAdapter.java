@@ -1,4 +1,4 @@
-package io.mindspice.magenta.core.internal.provider;
+package io.mindspice.magenta.core.internal;
 
 import io.mindspice.magenta.core.ConfigurationException;
 import io.mindspice.magenta.core.ModelConfig;
@@ -14,12 +14,12 @@ import java.util.List;
 import java.util.Map;
 
 /** Direct Spring AI DeepSeek construction. */
-public final class DeepSeekProviderAdapter {
+final class DeepSeekProviderAdapter {
 
     private DeepSeekProviderAdapter() {
     }
 
-    public static OwnedChatModel create(
+    static OwnedChatModel create(
         ModelConfig config, ToolCallingManager toolCallingManager, Duration timeout) {
         ProviderHttpClientBuilders.ClientBuilders clients =
             ProviderHttpClientBuilders.forTimeout(timeout);
@@ -38,7 +38,7 @@ public final class DeepSeekProviderAdapter {
         return new OwnedChatModel(model, null);
     }
 
-    public static DeepSeekChatOptions options(
+    static DeepSeekChatOptions options(
         ModelConfig config, List<ToolCallback> toolCallbacks) {
         if (config.effectiveThinkLevel() > 0) {
             // Spring AI 2.0.0 exposes typed reasoning content on responses but

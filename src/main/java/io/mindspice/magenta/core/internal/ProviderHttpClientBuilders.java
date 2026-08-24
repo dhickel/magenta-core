@@ -1,4 +1,4 @@
-package io.mindspice.magenta.core.internal.provider;
+package io.mindspice.magenta.core.internal;
 
 import org.springframework.http.client.JdkClientHttpRequestFactory;
 import org.springframework.http.client.reactive.JdkClientHttpConnector;

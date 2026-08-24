@@ -1,9 +1,0 @@
-7. [GET] http://localhost:18080/plans/_list => [200] 
-8. [GET] http://localhost:18080/plans/_editor/_name-modal?mode=chat => [200] 
-9. [POST] http://localhost:18080/plans/_editor/_planning-chat => [200] 
-10. [POST] http://localhost:18080/plans/_editor/f019f257-032d-4060-a6df-025d2612d8cd/planning-chat/answers => [200] 
-11. [POST] http://localhost:18080/plans/_editor/f019f257-032d-4060-a6df-025d2612d8cd/planning-chat/answers => [200] 
-12. [POST] http://localhost:18080/plans/_editor/f019f257-032d-4060-a6df-025d2612d8cd/planning-chat/answers => [200] 
-13. [POST] http://localhost:18080/plans/_editor/f019f257-032d-4060-a6df-025d2612d8cd/planning-chat/answers
-
-Note: 6 static requests not shown, run with "static" option to see them.

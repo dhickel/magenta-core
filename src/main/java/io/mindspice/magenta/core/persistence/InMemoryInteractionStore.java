@@ -32,9 +32,7 @@ public final class InMemoryInteractionStore implements InteractionStore {
     @Override
     @Nullable
     public QuestionPendingContext load(@NonNull String sessionId) {
-        QuestionPendingContext context = store.get(sessionId);
-        return context != null && context.state() == QuestionPendingContext.State.PENDING
-            ? context : null;
+        return store.get(sessionId);
     }
 
     @Override

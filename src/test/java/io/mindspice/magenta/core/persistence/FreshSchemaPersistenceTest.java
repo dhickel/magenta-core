@@ -1,6 +1,8 @@
 package io.mindspice.magenta.core.persistence;
 
+import io.mindspice.magenta.core.ClaimedMessage;
 import io.mindspice.magenta.core.ConversationSession;
+import io.mindspice.magenta.core.DefaultMessageQueue;
 import io.mindspice.magenta.core.MigrationRunner;
 import io.mindspice.magenta.core.PendingMessage;
 import io.mindspice.magenta.core.QuestionPendingContext;
@@ -128,7 +130,8 @@ class FreshSchemaPersistenceTest {
 
         assertTrue(restarted.answer("session", "one combined answer"));
         assertFalse(restarted.answer("session", "duplicate answer"));
-        assertNull(restarted.load("session"));
+        assertEquals(QuestionPendingContext.State.ANSWERED,
+            restarted.load("session").state());
         assertEquals(QuestionPendingContext.State.ANSWERED,
             restarted.findPersisted("session").state());
         assertEquals(1, count(restartedDataSource, "magenta_core_audit_log"));
@@ -137,10 +140,65 @@ class FreshSchemaPersistenceTest {
             "session", "turn-2", List.of("cancel me"), "model-b", Map.of());
         restarted.save("session", cancellation);
         assertTrue(restarted.cancel("session", "caller stopped waiting"));
-        assertNull(restarted.load("session"));
+        assertEquals(QuestionPendingContext.State.CANCELLED,
+            restarted.load("session").state());
         assertEquals(QuestionPendingContext.State.CANCELLED,
             restarted.findPersisted("session").state());
         assertEquals(2, count(restartedDataSource, "magenta_core_audit_log"));
+    }
+
+    @Test
+    void queueClaimsCanBeAcknowledgedAndReleasedAfterReconstruction() {
+        SQLiteDataSource dataSource = fileDataSource(tempDir.resolve("queue-restart.db"));
+        new MigrationRunner(dataSource).apply(List.of());
+
+        DefaultMessageQueue first = new DefaultMessageQueue(
+            new SqliteMessageQueueStore(dataSource));
+        first.enqueue("session", "ack me", Map.of());
+        ClaimedMessage ackClaim = first.claim("session");
+        assertNotNull(ackClaim);
+
+        DefaultMessageQueue restarted = new DefaultMessageQueue(
+            new SqliteMessageQueueStore(dataSource));
+        assertNotNull(new SqliteMessageQueueStore(dataSource)
+            .findByClaimToken(ackClaim.claimToken()));
+        restarted.ack(ackClaim.claimToken());
+        assertNull(new SqliteMessageQueueStore(dataSource)
+            .findById(ackClaim.message().messageId()));
+
+        restarted.enqueue("session", "release me", Map.of());
+        ClaimedMessage releaseClaim = restarted.claim("session");
+        assertNotNull(releaseClaim);
+        DefaultMessageQueue restartedAgain = new DefaultMessageQueue(
+            new SqliteMessageQueueStore(dataSource));
+        restartedAgain.release(releaseClaim.claimToken());
+        ClaimedMessage reclaimed = restartedAgain.claim("session");
+        assertNotNull(reclaimed);
+        assertEquals(releaseClaim.message().messageId(), reclaimed.message().messageId());
+    }
+
+    @Test
+    void staleClaimRecoveryRemainsDurableAcrossReconstruction() throws Exception {
+        SQLiteDataSource dataSource = fileDataSource(tempDir.resolve("queue-stale.db"));
+        new MigrationRunner(dataSource).apply(List.of());
+        DefaultMessageQueue first = new DefaultMessageQueue(
+            new SqliteMessageQueueStore(dataSource));
+        PendingMessage pending = first.enqueue("session", "stale", Map.of());
+        assertNotNull(first.claim("session"));
+        try (Connection connection = dataSource.getConnection(); PreparedStatement statement =
+                 connection.prepareStatement("""
+                     UPDATE magenta_core_pending_messages
+                     SET claimed_at = ? WHERE message_id = ?
+                     """)) {
+            statement.setString(1, Instant.EPOCH.toString());
+            statement.setString(2, pending.messageId());
+            statement.executeUpdate();
+        }
+
+        DefaultMessageQueue restarted = new DefaultMessageQueue(
+            new SqliteMessageQueueStore(dataSource));
+        assertEquals(1, restarted.recoverStaleClaims(java.time.Duration.ofMinutes(1)).size());
+        assertNotNull(restarted.claim("session"));
     }
 
     @Test

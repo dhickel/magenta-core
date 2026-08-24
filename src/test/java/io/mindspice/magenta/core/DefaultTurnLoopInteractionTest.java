@@ -36,7 +36,10 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -44,6 +47,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 class DefaultTurnLoopInteractionTest {
 
@@ -55,6 +59,42 @@ class DefaultTurnLoopInteractionTest {
     @AfterEach
     void closeLoops() {
         loops.forEach(DefaultTurnLoop::close);
+    }
+
+    @Test
+    void setupFailureAfterGateAcquireDoesNotLeavePhantomActiveTurn() {
+        ConversationMemory failingMemory = new ConversationMemory() {
+            @Override public List<TurnMessage> getMessages(String sessionId) {
+                throw new IllegalStateException("setup read failed");
+            }
+            @Override public void addMessages(String sessionId, List<TurnMessage> messages) { }
+            @Override public void clear(String sessionId) { }
+        };
+        DefaultTurnLoop loop = createLoop(new PromptModel(List.of(response("unused"))),
+            failingMemory, new InMemoryInteractionStore(), new RecordingAudit(),
+            new RecordingMetrics(), result -> { });
+
+        assertThrows(TurnLoopException.class,
+            () -> loop.send(TurnRequest.of("session", "hello")));
+        assertEquals(TurnGate.GateState.IDLE, loopGate(loop, "session"));
+        assertNull(activeTurnId(loop, "session"));
+    }
+
+    @Test
+    void callerSuppliedInteractionStoreIsSharedByFacadeAndEngine() {
+        SQLiteDataSource dataSource = new SQLiteDataSource();
+        dataSource.setUrl("jdbc:sqlite:" + tempDir.resolve("supplied-interactions.db"));
+        new MigrationRunner(dataSource).apply(List.of());
+        SqliteConversationMemory memory = new SqliteConversationMemory(dataSource);
+        InMemoryInteractionStore interactions = new InMemoryInteractionStore();
+        DefaultTurnLoop loop = createLoop(new PromptModel(List.of(
+            askUserResponse("same store"))), memory, interactions,
+            new RecordingAudit(), new RecordingMetrics(), result -> { });
+
+        loop.send(TurnRequest.of("session", "start"));
+        assertNotNull(interactions.load("session"));
+        assertEquals(TurnGate.GateState.AWAITING_ANSWER, loopGate(loop, "session"));
+        assertTrue(loop.cancelQuestion("session", "done"));
     }
 
     @Test
@@ -186,6 +226,166 @@ class DefaultTurnLoopInteractionTest {
     }
 
     @Test
+    void answeredClaimAfterRestartFailsClosedUntilExplicitSessionClear() {
+        SQLiteDataSource dataSource = new SQLiteDataSource();
+        dataSource.setUrl("jdbc:sqlite:" + tempDir.resolve("claimed-answer-restart.db"));
+        new MigrationRunner(dataSource).apply(List.of());
+        SqliteConversationMemory memory = new SqliteConversationMemory(dataSource);
+        SqliteInteractionStore interactions = new SqliteInteractionStore(dataSource);
+        interactions.save("claimed-session", new QuestionPendingContext(
+            "claimed-session", "old-turn", List.of("question"), "model", Map.of()));
+        assertTrue(interactions.answer("claimed-session", "durable answer"));
+        PromptModel model = new PromptModel(List.of(response("after clear")));
+        DefaultTurnLoop restarted = createLoop(model, memory, interactions,
+            new RecordingAudit(), new RecordingMetrics(), result -> { });
+
+        assertEquals(TurnDiagnostic.OutcomeKind.QUEUED,
+            restarted.send(TurnRequest.of("claimed-session", "must not overlap"))
+                .diagnostic().outcomeKind());
+        assertEquals(0, model.calls.get());
+        restarted.clearSession("claimed-session");
+        assertEquals("after clear",
+            restarted.send(TurnRequest.of("claimed-session", "safe retry")).message());
+    }
+
+    @Test
+    void durableAnswerClaimRejectsASecondLoopWhileResumeIsExecuting() throws Exception {
+        SQLiteDataSource dataSource = new SQLiteDataSource();
+        dataSource.setUrl("jdbc:sqlite:" + tempDir.resolve("answer-race.db"));
+        new MigrationRunner(dataSource).apply(List.of());
+        SqliteConversationMemory memory = new SqliteConversationMemory(dataSource);
+        SqliteInteractionStore interactions = new SqliteInteractionStore(dataSource);
+        BlockingPromptModel winnerModel = new BlockingPromptModel(List.of(
+            askUserResponse("answer once"), response("winner")), 2);
+        DefaultTurnLoop winner = createLoop(winnerModel, memory, interactions,
+            new RecordingAudit(), new RecordingMetrics(), result -> { });
+        winner.send(TurnRequest.of("race-session", "start"));
+
+        PromptModel loserModel = new PromptModel(List.of(response("duplicate")));
+        DefaultTurnLoop loser = createLoop(loserModel, memory, interactions,
+            new RecordingAudit(), new RecordingMetrics(), result -> { });
+        CompletableFuture<TurnResult> winningAnswer = CompletableFuture.supplyAsync(
+            () -> winner.answer("race-session", "first answer"));
+        assertTrue(winnerModel.entered.await(2, TimeUnit.SECONDS));
+
+        assertEquals(QuestionPendingContext.State.ANSWERED,
+            interactions.load("race-session").state());
+        assertThrows(TurnLoopException.class,
+            () -> loser.answer("race-session", "duplicate answer"));
+        assertFalse(loser.cancelQuestion("race-session", "too late"));
+        assertEquals(TurnDiagnostic.OutcomeKind.QUEUED,
+            loser.send(TurnRequest.of("race-session", "while answer runs"))
+                .diagnostic().outcomeKind());
+        assertEquals(0, loserModel.calls.get());
+
+        winnerModel.release.countDown();
+        assertEquals("winner", winningAnswer.get(2, TimeUnit.SECONDS).message());
+        assertNull(interactions.load("race-session"));
+    }
+
+    @Test
+    void observabilityCompletesBeforeTheSessionGateIsReleased() throws Exception {
+        PromptModel model = new PromptModel(List.of(response("first"), response("second")));
+        Memory memory = new Memory();
+        CountDownLatch observing = new CountDownLatch(1);
+        CountDownLatch releaseObservation = new CountDownLatch(1);
+        DefaultTurnLoop loop = createLoop(model, memory, new InMemoryInteractionStore(),
+            new RecordingAudit(), new RecordingMetrics(), result -> {
+                observing.countDown();
+                try {
+                    assertTrue(releaseObservation.await(2, TimeUnit.SECONDS));
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    throw new AssertionError(e);
+                }
+            });
+        CompletableFuture<TurnResult> first = CompletableFuture.supplyAsync(
+            () -> loop.send(TurnRequest.of("session", "first")));
+        assertTrue(observing.await(2, TimeUnit.SECONDS));
+
+        CompletableFuture.runAsync(() -> assertThrows(TurnLoopException.class,
+            () -> loop.send(TurnRequest.of("session", "second"))))
+            .get(1, TimeUnit.SECONDS);
+        assertEquals(1, model.calls.get());
+        releaseObservation.countDown();
+        assertEquals("first", first.get(2, TimeUnit.SECONDS).message());
+    }
+
+    @Test
+    void activeSendDoesNotHoldSessionMonitorAndStillRejectsASecondTurn() throws Exception {
+        BlockingPromptModel model = new BlockingPromptModel(List.of(response("done")), 1);
+        Memory memory = new Memory();
+        DefaultTurnLoop loop = createLoop(model, memory, new InMemoryInteractionStore(),
+            new RecordingAudit(), new RecordingMetrics(), result -> { });
+        CompletableFuture<TurnResult> active = CompletableFuture.supplyAsync(
+            () -> loop.send(TurnRequest.of("session", "first")));
+        assertTrue(model.entered.await(2, TimeUnit.SECONDS));
+
+        CompletableFuture<Void> rejected = CompletableFuture.runAsync(() ->
+            assertThrows(TurnLoopException.class,
+                () -> loop.send(TurnRequest.of("session", "second"))));
+        rejected.get(1, TimeUnit.SECONDS);
+
+        model.release.countDown();
+        assertEquals("done", active.get(2, TimeUnit.SECONDS).message());
+    }
+
+    @Test
+    void interruptAndClearReturnWhileModelCallIsBlockedAndCleanupWins() throws Exception {
+        BlockingPromptModel model = new BlockingPromptModel(List.of(response("late")), 1);
+        Memory memory = new Memory();
+        DefaultTurnLoop loop = createLoop(model, memory, new InMemoryInteractionStore(),
+            new RecordingAudit(), new RecordingMetrics(), result -> { });
+        CompletableFuture<TurnResult> active = CompletableFuture.supplyAsync(
+            () -> loop.send(TurnRequest.of("session", "first")));
+        assertTrue(model.entered.await(2, TimeUnit.SECONDS));
+        String turnId = activeTurnId(loop, "session");
+
+        assertTrue(loop.interrupt(turnId, "test interrupt"));
+        CompletableFuture.runAsync(() -> loop.clearSession("session"))
+            .get(1, TimeUnit.SECONDS);
+        model.release.countDown();
+        assertEquals(TurnDiagnostic.OutcomeKind.INTERRUPTED,
+            active.get(2, TimeUnit.SECONDS).diagnostic().outcomeKind());
+        assertTrue(memory.messages.isEmpty());
+        assertEquals(TurnGate.GateState.IDLE, loopGate(loop, "session"));
+    }
+
+    @Test
+    void deleteReturnsWhileModelCallIsBlockedAndPreventsLateSessionResurrection() throws Exception {
+        BlockingPromptModel model = new BlockingPromptModel(List.of(response("late")), 1);
+        Memory memory = new Memory();
+        DefaultTurnLoop loop = createLoop(model, memory, new InMemoryInteractionStore(),
+            new RecordingAudit(), new RecordingMetrics(), result -> { });
+        CompletableFuture<TurnResult> active = CompletableFuture.supplyAsync(
+            () -> loop.send(TurnRequest.of("session", "first")));
+        assertTrue(model.entered.await(2, TimeUnit.SECONDS));
+
+        CompletableFuture.runAsync(() -> loop.sessions().delete("session"))
+            .get(1, TimeUnit.SECONDS);
+        model.release.countDown();
+        active.get(2, TimeUnit.SECONDS);
+        assertNull(loop.sessions().get("session"));
+        assertTrue(memory.messages.isEmpty());
+    }
+
+    @Test
+    void closeHonorsZeroDrainWithoutWaitingForTheSessionMonitor() throws Exception {
+        BlockingPromptModel model = new BlockingPromptModel(List.of(response("late")), 1);
+        Memory memory = new Memory();
+        DefaultTurnLoop loop = createLoop(model, memory, new InMemoryInteractionStore(),
+            new RecordingAudit(), new RecordingMetrics(), result -> { },
+            new DefaultTurnExecutor(), 0);
+        CompletableFuture<TurnResult> active = CompletableFuture.supplyAsync(
+            () -> loop.send(TurnRequest.of("session", "first")));
+        assertTrue(model.entered.await(2, TimeUnit.SECONDS));
+
+        CompletableFuture.runAsync(loop::close).get(1, TimeUnit.SECONDS);
+        model.release.countDown();
+        active.handle((result, failure) -> null).get(2, TimeUnit.SECONDS);
+    }
+
+    @Test
     void streamCancellationReleasesGateAndActiveRegistration() throws Exception {
         PromptModel model = new PromptModel(List.of(response("never used"))) {
             @Override
@@ -234,11 +434,19 @@ class DefaultTurnLoopInteractionTest {
                                        InteractionStore interactions, AuditWriter audit,
                                        TurnLoopMetrics metrics,
                                        TurnLifecycleListener lifecycle) {
+        return createLoop(model, memory, interactions, audit, metrics, lifecycle,
+            new DefaultTurnExecutor(), 1);
+    }
+
+    private DefaultTurnLoop createLoop(PromptModel model, ConversationMemory memory,
+                                       InteractionStore interactions, AuditWriter audit,
+                                       TurnLoopMetrics metrics,
+                                       TurnLifecycleListener lifecycle,
+                                       TurnExecutor executor, long drainTimeoutSeconds) {
         ToolRegistry tools = new EmptyToolRegistry();
         TokenEstimator estimator = new SimpleEstimator();
         CompactionStrategy compaction = context -> new CompactionResult("summary", 0, 0);
         ContextManager manager = new ContextManager(memory, estimator, compaction, 0);
-        TurnExecutor executor = new DefaultTurnExecutor();
         ActiveTurnRegistry activeRegistry = new ConcurrentActiveTurnRegistry();
         DefaultTurnEngine engine = new DefaultTurnEngine.Builder()
             .toolExecution(tools, ToolAccessPolicy.allowAll(), new DefaultToolResultSummarizer(),
@@ -255,9 +463,22 @@ class DefaultTurnLoopInteractionTest {
             engine, new SerialTurnGate(Duration.ofSeconds(30)), new DefaultMessageQueue(new QueueStore()),
             interactions, new Sessions(), memory, activeRegistry,
             executor, tools, alias -> Set.of(ModelCapability.STREAMING,
-                ModelCapability.TOOL_CALLING), lifecycle, metrics, null, "system", "model", 1, audit);
+                ModelCapability.TOOL_CALLING), lifecycle, metrics, null, "system", "model",
+            drainTimeoutSeconds, audit);
         loops.add(loop);
         return loop;
+    }
+
+    private String activeTurnId(DefaultTurnLoop loop, String sessionId) {
+        try {
+            var field = DefaultTurnLoop.class.getDeclaredField("activeTurnIds");
+            field.setAccessible(true);
+            @SuppressWarnings("unchecked")
+            Map<String, String> active = (Map<String, String>) field.get(loop);
+            return active.get(sessionId);
+        } catch (ReflectiveOperationException e) {
+            throw new AssertionError(e);
+        }
     }
 
     private TurnGate.GateState loopGate(DefaultTurnLoop loop, String sessionId) {
@@ -305,6 +526,33 @@ class DefaultTurnLoopInteractionTest {
         @Override
         public Flux<ChatResponse> stream(Prompt prompt) {
             return Flux.just(call(prompt));
+        }
+    }
+
+    private static final class BlockingPromptModel extends PromptModel {
+        private final int blockingCall;
+        private final CountDownLatch entered = new CountDownLatch(1);
+        private final CountDownLatch release = new CountDownLatch(1);
+
+        private BlockingPromptModel(List<ChatResponse> responses, int blockingCall) {
+            super(responses);
+            this.blockingCall = blockingCall;
+        }
+
+        @Override
+        public ChatResponse call(Prompt prompt) {
+            if (calls.get() + 1 == blockingCall) {
+                entered.countDown();
+                try {
+                    if (!release.await(5, TimeUnit.SECONDS)) {
+                        throw new IllegalStateException("blocking model was not released");
+                    }
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    throw new IllegalStateException("blocking model interrupted", e);
+                }
+            }
+            return super.call(prompt);
         }
     }
 

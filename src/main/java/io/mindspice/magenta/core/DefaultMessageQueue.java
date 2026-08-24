@@ -16,10 +16,9 @@ import java.util.concurrent.ConcurrentHashMap;
 /**
  * Default {@link MessageQueue} implementation backed by a {@link MessageQueueStore}.
  *
- * <p>Maintains an in-memory map of claim tokens to message IDs so
- * {@link #ack(String)} and {@link #release(String)} can resolve the
- * underlying store row. Claim atomicity is delegated to the store's
- * {@link MessageQueueStore#claimAtomic(String, String, Instant)}.</p>
+ * <p>Claim atomicity and restart-safe token resolution are delegated to
+ * stores that support durable claim tokens. The in-memory token map remains
+ * as a compatibility fallback for existing custom stores.</p>
  */
 public final class DefaultMessageQueue implements MessageQueue {
 
@@ -78,6 +77,13 @@ public final class DefaultMessageQueue implements MessageQueue {
 
     @Override
     public void ack(@NonNull String claimToken) {
+        if (store.supportsDurableClaimTokens()) {
+            claimToMessageId.remove(claimToken);
+            if (!store.deleteByClaimToken(claimToken)) {
+                log.debug("ack on unknown/stale claim token: {}", claimToken);
+            }
+            return;
+        }
         String messageId = claimToMessageId.remove(claimToken);
         if (messageId == null) {
             log.debug("ack on unknown/stale claim token: {}", claimToken);
@@ -88,6 +94,13 @@ public final class DefaultMessageQueue implements MessageQueue {
 
     @Override
     public void release(@NonNull String claimToken) {
+        if (store.supportsDurableClaimTokens()) {
+            claimToMessageId.remove(claimToken);
+            if (!store.releaseClaimByToken(claimToken)) {
+                log.debug("release on unknown/stale claim token: {}", claimToken);
+            }
+            return;
+        }
         String messageId = claimToMessageId.remove(claimToken);
         if (messageId == null) {
             log.debug("release on unknown/stale claim token: {}", claimToken);
@@ -100,14 +113,16 @@ public final class DefaultMessageQueue implements MessageQueue {
     @NonNull
     public List<ClaimedMessage> recoverStaleClaims(@NonNull Duration staleAge) {
         Instant threshold = Instant.now().minus(staleAge);
-        List<PendingMessage> stale = store.findStaleClaims(threshold);
+        if (store.supportsDurableClaimTokens()) {
+            List<ClaimedMessage> recovered = store.releaseStaleClaims(threshold);
+            recovered.forEach(claim -> claimToMessageId.remove(claim.claimToken()));
+            return List.copyOf(recovered);
+        }
 
-        // Release each stale claim and build result list
+        List<PendingMessage> stale = store.findStaleClaims(threshold);
         List<ClaimedMessage> result = new ArrayList<>();
         for (PendingMessage msg : stale) {
-            // Release the claim so it can be claimed again
             store.releaseClaim(msg.messageId());
-            // We don't have the original claim token; create a synthetic one
             String syntheticToken = "recovered-" + UUID.randomUUID();
             result.add(new ClaimedMessage(msg, syntheticToken, Instant.now()));
         }

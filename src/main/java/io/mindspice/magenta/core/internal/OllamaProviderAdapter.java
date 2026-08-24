@@ -1,4 +1,4 @@
-package io.mindspice.magenta.core.internal.provider;
+package io.mindspice.magenta.core.internal;
 
 import io.mindspice.magenta.core.ConfigurationException;
 import io.mindspice.magenta.core.ModelConfig;
@@ -14,12 +14,12 @@ import java.time.Duration;
 import java.util.List;
 
 /** Direct Spring AI Ollama construction. */
-public final class OllamaProviderAdapter {
+final class OllamaProviderAdapter {
 
     private OllamaProviderAdapter() {
     }
 
-    public static OwnedChatModel create(
+    static OwnedChatModel create(
         ModelConfig config, ToolCallingManager toolCallingManager, Duration timeout) {
         ProviderHttpClientBuilders.ClientBuilders clients =
             ProviderHttpClientBuilders.forTimeout(timeout);
@@ -44,7 +44,7 @@ public final class OllamaProviderAdapter {
         return new OwnedChatModel(model, null);
     }
 
-    public static OllamaChatOptions options(
+    static OllamaChatOptions options(
         ModelConfig config, List<ToolCallback> toolCallbacks) {
         OllamaChatOptions.Builder builder = OllamaChatOptions.builder();
         builder.model(config.remoteModelName());

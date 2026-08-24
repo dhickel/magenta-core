@@ -23,9 +23,9 @@ import java.util.Objects;
  * <p>One active interaction is retained per session. Questions are normalized
  * into an ordered child table so a multi-question prompt cannot be collapsed
  * into a single string or reordered during a restart. Terminal answer and
- * cancellation snapshots remain in the database for audit/recovery, while
- * {@link #load(String)} exposes only an active {@code PENDING} interaction to
- * the turn state machine.</p>
+ * cancellation snapshots remain in the database for audit/recovery. Loading
+ * terminal snapshots prevents an in-flight answer/cancellation claim from
+ * being mistaken for an absent row and resurrected from memory markers.</p>
  */
 public final class SqliteInteractionStore implements InteractionStore {
 
@@ -115,16 +115,12 @@ public final class SqliteInteractionStore implements InteractionStore {
 
     @Override
     public QuestionPendingContext load(String sessionId) {
-        return find(sessionId, true);
+        return find(sessionId, false);
     }
 
-    /**
-     * Returns the persisted interaction in any lifecycle state. This is useful
-     * for recovery/audit code; the SPI-facing {@link #load(String)} method only
-     * returns a currently answerable interaction.
-     */
+    /** Returns the persisted interaction in any lifecycle state. */
     QuestionPendingContext findPersisted(String sessionId) {
-        return find(sessionId, false);
+        return load(sessionId);
     }
 
     /**

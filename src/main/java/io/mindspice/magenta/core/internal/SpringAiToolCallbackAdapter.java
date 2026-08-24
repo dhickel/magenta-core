@@ -1,4 +1,4 @@
-package io.mindspice.magenta.core.internal.provider;
+package io.mindspice.magenta.core.internal;
 
 import io.mindspice.magenta.core.ToolCallback;
 import io.mindspice.magenta.core.ToolDefinition;
@@ -6,10 +6,10 @@ import io.mindspice.magenta.core.ToolDefinition;
 import java.util.Objects;
 
 /** Adapts a provider-neutral Magenta callback at the Spring AI boundary. */
-public record SpringAiToolCallbackAdapter(ToolCallback delegate)
+record SpringAiToolCallbackAdapter(ToolCallback delegate)
     implements org.springframework.ai.tool.ToolCallback {
 
-    public SpringAiToolCallbackAdapter {
+    SpringAiToolCallbackAdapter {
         Objects.requireNonNull(delegate, "delegate");
     }
 
