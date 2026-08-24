@@ -38,7 +38,7 @@ The branch-specific single-module framework contract and `DECISION-20260824-01` 
 ## Validation
 
 - Focused cancellation, timeout, interaction, and builder lifecycle tests passed: 25 tests, 0 failures/errors.
-- `mvn clean verify` passed: 44 tests, 0 failures/errors.
+- `mvn clean verify` passed: 45 tests, 0 failures/errors.
 - `mvn help:evaluate -Dexpression=project.artifactId -DforceStdout` resolved `magenta-core`.
 - Maven dependency ban passed; no Boot application/auto-configuration, servlet, Actuator, or Micrometer adapter is present.
 - JAR manifest contains `Automatic-Module-Name: io.mindspice.magenta.core`; forbidden old package/module entries are absent.

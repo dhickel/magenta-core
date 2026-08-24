@@ -7,6 +7,7 @@ import org.slf4j.LoggerFactory;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.lang.reflect.Parameter;
+import java.lang.reflect.Type;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashSet;
@@ -269,7 +270,10 @@ public final class DefaultToolRegistry implements ToolRegistry {
                 }
                 args[i] = null;
             } else {
-                args[i] = objectMapper.convertValue(raw, parameters[i].getType());
+                Type targetType = parameters[i].getParameterizedType();
+                Object source = coerceStructuredString(raw, parameters[i].getType());
+                args[i] = objectMapper.convertValue(source,
+                    objectMapper.constructType(targetType));
             }
         }
         return args;
@@ -286,6 +290,17 @@ public final class DefaultToolRegistry implements ToolRegistry {
         throw new IllegalArgumentException("Tool parameter on "
             + method.getDeclaringClass().getName() + "#" + method.getName()
             + " must declare @ToolParam(name = ...) when compiled without -parameters");
+    }
+
+    private Object coerceStructuredString(Object raw, Class<?> targetType) {
+        if (!(raw instanceof String text) || targetType == String.class) return raw;
+        String trimmed = text.trim();
+        if (!(trimmed.startsWith("{") || trimmed.startsWith("["))) return raw;
+        try {
+            return objectMapper.readTree(trimmed);
+        } catch (Exception ignored) {
+            return raw;
+        }
     }
 
     private static String javaTypeToJsonType(Class<?> type) {

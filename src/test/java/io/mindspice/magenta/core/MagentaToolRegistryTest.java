@@ -42,6 +42,19 @@ class MagentaToolRegistryTest {
     }
 
     @Test
+    void coercesStructuredStringArgumentsWithFullGenericTypes() throws Exception {
+        DefaultToolRegistry registry = new DefaultToolRegistry(
+            new com.fasterxml.jackson.databind.ObjectMapper().findAndRegisterModules());
+        registry.registerToolBean(new StructuredTool());
+        ToolCallback callback = registry.resolveForTurn(new TurnContext(
+            new TurnRequest("session", "message", "model", List.of("join"), false,
+                java.util.Map.of()), "turn", "model")).getFirst();
+        assertEquals("ab", callback.call("{\"values\":\"[\\\"a\\\",\\\"b\\\"]\"}"));
+        assertEquals(1, new com.fasterxml.jackson.databind.ObjectMapper()
+            .findAndRegisterModules().readValue("1", Object.class));
+    }
+
+    @Test
     void rejectsDuplicateAndHonorsExplicitToolSelection() {
         DefaultToolRegistry registry = new DefaultToolRegistry();
         registry.registerToolBean(new ExampleTool());
@@ -60,6 +73,13 @@ class MagentaToolRegistryTest {
         assertThrows(ToolException.AccessDenied.class, () -> registry.resolveForTurn(
             new TurnContext(new TurnRequest("session", "message", "model", List.of("missing"),
                 false, java.util.Map.of()), "turn-2", "model")));
+    }
+
+    static final class StructuredTool {
+        @Tool(name = "join", description = "Join values")
+        public String join(@ToolParam(name = "values") List<String> values) {
+            return String.join("", values);
+        }
     }
 
     static final class ExampleTool {
