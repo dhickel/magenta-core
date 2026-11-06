@@ -148,11 +148,35 @@ public class SqliteConversationMemory implements ConversationMemory {
     private void bindMessage(PreparedStatement statement, String sessionId,
                              TurnMessage message) throws SQLException {
         Objects.requireNonNull(message, "messages must not contain null entries");
+        String role;
+        String text;
+        String toolName = null;
+        String toolCallId = null;
+        switch (message) {
+            case TurnMessage.System system -> {
+                role = "system";
+                text = system.text();
+            }
+            case TurnMessage.User user -> {
+                role = "user";
+                text = user.text();
+            }
+            case TurnMessage.Assistant assistant -> {
+                role = "assistant";
+                text = assistant.text();
+            }
+            case TurnMessage.Tool tool -> {
+                role = "tool";
+                text = tool.text();
+                toolName = tool.toolName();
+                toolCallId = tool.toolCallId();
+            }
+        }
         statement.setString(1, sessionId);
-        statement.setString(2, message.role());
-        statement.setString(3, message.text());
-        statement.setString(4, message.toolName());
-        statement.setString(5, message.toolCallId());
+        statement.setString(2, role);
+        statement.setString(3, text);
+        statement.setString(4, toolName);
+        statement.setString(5, toolCallId);
         statement.setString(6,
             PersistenceSupport.metadataToJson(objectMapper, message.metadata()));
     }
@@ -160,12 +184,22 @@ public class SqliteConversationMemory implements ConversationMemory {
     private TurnMessage rowToMessage(ResultSet resultSet) throws SQLException {
         Map<String, String> metadata = PersistenceSupport.metadataFromJson(
             objectMapper, resultSet.getString("metadata_json"));
-        return new TurnMessage(
-            resultSet.getString("role"),
-            resultSet.getString("content"),
-            resultSet.getString("tool_name"),
-            resultSet.getString("tool_call_id"),
-            metadata
-        );
+        String role = resultSet.getString("role");
+        if (role == null) {
+            throw new IllegalStateException("Persisted conversation message role is null");
+        }
+        String content = resultSet.getString("content");
+        return switch (role) {
+            case "system" -> new TurnMessage.System(content, metadata);
+            case "user" -> new TurnMessage.User(content, metadata);
+            case "assistant" -> new TurnMessage.Assistant(content, metadata);
+            case "tool" -> new TurnMessage.Tool(
+                resultSet.getString("tool_name"),
+                resultSet.getString("tool_call_id"),
+                content,
+                metadata);
+            default -> throw new IllegalStateException(
+                "Unknown persisted conversation message role: " + role);
+        };
     }
 }

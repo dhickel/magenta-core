@@ -28,16 +28,19 @@ final class ContextManager {
     private final TokenEstimator tokenEstimator;
     private final CompactionStrategy compactionStrategy;
     private final int bufferPercent;
+    private final int compactionTriggerPercent;
     private volatile ToIntFunction<String> contextLengthProvider = alias -> FALLBACK_CONTEXT_LENGTH;
 
     public ContextManager(@NonNull ConversationMemory conversationMemory,
                           @NonNull TokenEstimator tokenEstimator,
                           @NonNull CompactionStrategy compactionStrategy,
-                          int bufferPercent) {
+                          int bufferPercent,
+                          int compactionTriggerPercent) {
         this.conversationMemory = Objects.requireNonNull(conversationMemory, "conversationMemory");
         this.tokenEstimator = Objects.requireNonNull(tokenEstimator, "tokenEstimator");
         this.compactionStrategy = Objects.requireNonNull(compactionStrategy, "compactionStrategy");
         this.bufferPercent = Math.clamp(bufferPercent, 0, 50);
+        this.compactionTriggerPercent = Math.clamp(compactionTriggerPercent, 1, 99);
     }
 
     /**
@@ -90,8 +93,7 @@ final class ContextManager {
             usedTokens = saturatingAdd(usedTokens, tokenEstimator.estimateTokens(msg));
         }
         int maxTokens = contextLength(modelAlias);
-        int triggerTokens = (int) Math.round(maxTokens * 0.75d);
-        return new ContextUsage(usedTokens, triggerTokens, maxTokens);
+        return new ContextUsage(usedTokens, triggerTokens(maxTokens), maxTokens);
     }
 
     /** Delegates compaction through the configured strategy boundary. */
@@ -105,8 +107,7 @@ final class ContextManager {
         if (usage == null || contextWindow <= 0) {
             return false;
         }
-        int trigger = (int) Math.round(contextWindow * 0.75d);
-        return usage.usedTokens() >= trigger;
+        return usage.usedTokens() >= triggerTokens(contextWindow);
     }
 
     int contextLength(@NonNull String modelAlias) {
@@ -116,6 +117,10 @@ final class ContextManager {
         } catch (RuntimeException ignored) {
             return FALLBACK_CONTEXT_LENGTH;
         }
+    }
+
+    private int triggerTokens(int contextWindow) {
+        return (int) Math.round(contextWindow * (compactionTriggerPercent / 100.0d));
     }
 
     private int budgetFromContextWindow(int contextWindow) {
@@ -165,7 +170,6 @@ final class ContextManager {
 
     private boolean isPendingMarker(TurnMessage message) {
         return message != null
-            && message.metadata() != null
             && "turnloop.pending_interaction".equals(
                 message.metadata().get("turnloop.persistence_type"));
     }

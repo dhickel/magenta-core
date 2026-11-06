@@ -3,19 +3,21 @@ package io.example;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
 import io.mindspice.magenta.core.ContextUsage;
-import io.mindspice.magenta.core.EndpointType;
 import io.mindspice.magenta.core.ExecutionInfo;
+import io.mindspice.magenta.core.ToolFailureCategory;
+import io.mindspice.magenta.core.ToolResult;
 import io.mindspice.magenta.core.ExecutionOrigin;
 import io.mindspice.magenta.core.ModelConfig;
 import io.mindspice.magenta.core.NoticeKind;
 import io.mindspice.magenta.core.QueueReason;
 import io.mindspice.magenta.core.ToolActivityData;
-import io.mindspice.magenta.core.ToolActivityStatus;
 import io.mindspice.magenta.core.TurnLoop;
 import io.mindspice.magenta.core.TurnLoopBuilder;
+import io.mindspice.magenta.core.TurnMessage;
 import io.mindspice.magenta.core.TurnRequest;
 import io.mindspice.magenta.core.TurnResponse;
 import io.mindspice.magenta.core.TurnResponseRenderer;
+import io.mindspice.magenta.core.spi.InteractionStore;
 import org.sqlite.SQLiteDataSource;
 
 import javax.sql.DataSource;
@@ -27,6 +29,7 @@ import java.nio.file.Path;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
 
@@ -66,9 +69,14 @@ public final class Consumer {
 
     private static TurnLoopBuilder builder(String endpoint) {
         return TurnLoopBuilder.create()
-            .model("fixture", new ModelConfig(
-                "fixture", "fixture-model", endpoint + "/v1", "fixture-key",
-                EndpointType.OPENAI_COMPATIBLE, 4096, 0));
+            .model("fixture", ModelConfig.openAiCompatible()
+                .alias("fixture")
+                .remoteModelName("fixture-model")
+                .remoteEndpoint(endpoint + "/v1")
+                .apiKey("fixture-key")
+                .contextLength(4096)
+                .thinkLevel(0)
+                .build());
     }
 
     private static void exerciseFileBackedLoop(TurnLoop loop) {
@@ -127,8 +135,8 @@ public final class Consumer {
         String interactionId = UUID.randomUUID().toString();
         String messageId = UUID.randomUUID().toString();
         ContextUsage usage = new ContextUsage(10, 100, 4096);
-        ToolActivityData activity = new ToolActivityData(
-            "lookup", "call-1", ToolActivityStatus.COMPLETED, "one result");
+        ToolActivityData activity = new ToolActivityData.Completed(
+            "lookup", "call-1", "one result");
         ExecutionInfo direct = execution(new ExecutionOrigin.Direct(), usage, activity);
         ExecutionInfo answer = execution(new ExecutionOrigin.Answer(interactionId), usage, activity);
 
@@ -147,11 +155,94 @@ public final class Consumer {
             new TurnResponse.TimedOut(direct, "timed out"),
             new TurnResponse.QuestionsCancelled("session", interactionId,
                 SAMPLE_TIME, "cancelled"),
+            new TurnResponse.QuestionsMissing("session", interactionId),
+            new TurnResponse.QuestionsAlreadyAnswered("session", interactionId),
+            new TurnResponse.QuestionsAlreadyCancelled("session", interactionId),
             new TurnResponse.TurnCancelled(answer, "cancelled")
         );
 
         for (TurnResponse sample : samples) {
             require(!describe(sample).isBlank(), "sealed response description");
+        }
+
+        List<TurnMessage> messages = List.of(
+            new TurnMessage.System("system", Map.of()),
+            new TurnMessage.User("user", Map.of()),
+            new TurnMessage.Assistant("assistant", Map.of()),
+            new TurnMessage.Tool("lookup", "call-1", "result", Map.of()));
+        for (TurnMessage message : messages) {
+            require(!describeMessage(message).isBlank(), "sealed message description");
+        }
+
+        List<ModelConfig> modelConfigs = List.of(
+            ModelConfig.ollama()
+                .alias("ollama")
+                .remoteModelName("llama")
+                .remoteEndpoint("http://localhost:11434")
+                .contextLength(4096)
+                .thinkLevel(0)
+                .build(),
+            ModelConfig.openAiCompatible()
+                .alias("openai")
+                .remoteModelName("gpt")
+                .remoteEndpoint("http://localhost:8080/v1")
+                .apiKey("open-key")
+                .contextLength(4096)
+                .thinkLevel(0)
+                .build(),
+            ModelConfig.deepSeek()
+                .alias("deepseek")
+                .remoteModelName("deep")
+                .remoteEndpoint("https://api.deepseek.test")
+                .apiKey("deep-key")
+                .contextLength(4096)
+                .thinkLevel(0)
+                .build(),
+            ModelConfig.responses()
+                .alias("responses")
+                .remoteModelName("gpt-5-codex")
+                .remoteEndpoint("https://api.openai.test/v1")
+                .apiKey("responses-key")
+                .contextLength(4096)
+                .thinkLevel(4)
+                .reasoningEffort("high")
+                .build());
+        for (ModelConfig config : modelConfigs) {
+            require(!describeModelConfig(config).isBlank(), "sealed model configuration description");
+        }
+
+        ToolResult[] toolResults = {
+            new ToolResult.Success("tool output"),
+            new ToolResult.Failure("tool failed", ToolFailureCategory.EXECUTION_FAILED)
+        };
+        for (ToolResult result : toolResults) {
+            require(!describeToolResult(result).isBlank(), "sealed tool result description");
+        }
+
+        InteractionStore.InteractionInfo interactionInfo = new InteractionStore.InteractionInfo(
+            interactionId, "session", new TurnResponse.Questions(
+                direct, interactionId, List.of("question")), "fixture", null,
+            Map.of(), Map.of(), SAMPLE_TIME, SAMPLE_TIME);
+        InteractionStore.Interaction[] interactions = {
+            new InteractionStore.Interaction.Pending(interactionInfo),
+            new InteractionStore.Interaction.Answered(interactionInfo, List.of("answer")),
+            new InteractionStore.Interaction.Cancelled(
+                interactionInfo, SAMPLE_TIME.plusSeconds(1), "cancelled")
+        };
+        for (InteractionStore.Interaction interaction : interactions) {
+            require(!describeInteraction(interaction).isBlank(),
+                "sealed interaction description");
+        }
+
+        InteractionStore.MutationResult[] mutations = {
+            new InteractionStore.MutationResult.Applied(interactions[1]),
+            new InteractionStore.MutationResult.Missing(),
+            new InteractionStore.MutationResult.AlreadyAnswered(),
+            new InteractionStore.MutationResult.AlreadyCancelled()
+        };
+        for (InteractionStore.MutationResult mutation : mutations) {
+            require(!describeMutation(mutation).isBlank(),
+                "sealed mutation description");
         }
 
         String json = TurnResponseRenderer.json().apply(samples.get(5));
@@ -171,8 +262,64 @@ public final class Consumer {
             case TurnResponse.ContentChunk chunk -> "content:" + chunk.text();
             case TurnResponse.ThinkingChunk chunk -> "thinking:" + chunk.text();
             case TurnResponse.ToolActivity activity ->
-                "tool:" + activity.activity().toolName();
+                "tool:" + describeActivity(activity.activity());
             case TurnResponse.Notice notice -> "notice:" + notice.kind();
+        };
+    }
+
+    private static String describeToolResult(ToolResult result) {
+        return switch (result) {
+            case ToolResult.Success success -> "success:" + success.output();
+            case ToolResult.Failure failure -> "failure:" + failure.category();
+        };
+    }
+
+    private static String describeInteraction(InteractionStore.Interaction interaction) {
+        return switch (interaction) {
+            case InteractionStore.Interaction.Pending pending ->
+                "pending:" + pending.interactionId();
+            case InteractionStore.Interaction.Answered answered ->
+                "answered:" + answered.answers().size();
+            case InteractionStore.Interaction.Cancelled cancelled ->
+                "cancelled:" + cancelled.reason();
+        };
+    }
+
+    private static String describeMutation(InteractionStore.MutationResult mutation) {
+        return switch (mutation) {
+            case InteractionStore.MutationResult.Applied applied ->
+                "applied:" + describeInteraction(applied.snapshot());
+            case InteractionStore.MutationResult.Missing ignored -> "missing";
+            case InteractionStore.MutationResult.AlreadyAnswered ignored -> "answered";
+            case InteractionStore.MutationResult.AlreadyCancelled ignored -> "cancelled";
+        };
+    }
+
+    private static String describeActivity(ToolActivityData activity) {
+        return switch (activity) {
+            case ToolActivityData.Completed completed ->
+                completed.toolName() + ":completed:" + completed.summary();
+            case ToolActivityData.Failed failed ->
+                failed.toolName() + ":failed:" + failed.category();
+        };
+    }
+
+    private static String describeMessage(TurnMessage message) {
+        return switch (message) {
+            case TurnMessage.System system -> "system:" + system.text();
+            case TurnMessage.User user -> "user:" + user.text();
+            case TurnMessage.Assistant assistant -> "assistant:" + assistant.text();
+            case TurnMessage.Tool tool ->
+                "tool:" + tool.toolName() + ":" + tool.toolCallId() + ":" + tool.text();
+        };
+    }
+
+    private static String describeModelConfig(ModelConfig config) {
+        return switch (config) {
+            case ModelConfig.Ollama ollama -> "ollama:" + ollama.alias();
+            case ModelConfig.OpenAiCompatible openAi -> "openai:" + openAi.alias();
+            case ModelConfig.DeepSeek deepSeek -> "deepseek:" + deepSeek.alias();
+            case ModelConfig.Responses responses -> "responses:" + responses.alias();
         };
     }
 
@@ -187,6 +334,12 @@ public final class Consumer {
             case TurnResponse.TimedOut timedOut -> "timed_out:" + timedOut.reason();
             case TurnResponse.QuestionsCancelled cancelled ->
                 "questions_cancelled:" + cancelled.reason();
+            case TurnResponse.QuestionsMissing missing ->
+                "questions_missing:" + missing.interactionId();
+            case TurnResponse.QuestionsAlreadyAnswered answered ->
+                "questions_already_answered:" + answered.interactionId();
+            case TurnResponse.QuestionsAlreadyCancelled cancelled ->
+                "questions_already_cancelled:" + cancelled.interactionId();
             case TurnResponse.TurnCancelled cancelled ->
                 "turn_cancelled:" + cancelled.reason();
         };

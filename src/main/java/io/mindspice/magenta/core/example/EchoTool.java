@@ -6,9 +6,10 @@ import io.mindspice.magenta.core.ToolParam;
 /**
  * Simple echo tool for testing and demonstration.
  *
- * <p>Returns the input message verbatim. Not auto-registered —
- * embedding applications must instantiate and register this class
- * explicitly with a {@code ToolRegistry}.</p>
+ * <p>Returns the input message verbatim. The registry wraps this ordinary
+ * return value as {@code ToolResult.Success}. Not auto-registered — embedding
+ * applications must instantiate and register this class explicitly with a
+ * {@code ToolRegistry}.</p>
  */
 public final class EchoTool {
 

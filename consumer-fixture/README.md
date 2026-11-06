@@ -4,7 +4,9 @@
 
 The fixture:
 
-- pattern-matches every `Progress` and `Outcome` subtype, including `Message`, `Questions`, `Queued`, `Interrupted`, `TimedOut`, `QuestionsCancelled`, and `TurnCancelled`;
+- pattern-matches every `Progress` and `Outcome` subtype, including `Message`, `Questions`, `Queued`, `Interrupted`, `TimedOut`, `QuestionsCancelled`, `QuestionsMissing`, `QuestionsAlreadyAnswered`, `QuestionsAlreadyCancelled`, and `TurnCancelled`;
+- constructs and exhaustively pattern-matches all sealed `ModelConfig` provider variants;
+- constructs and exhaustively pattern-matches `ToolResult`, `InteractionStore.Interaction`, and `InteractionStore.MutationResult` variants;
 - executes direct send and cold stream calls;
 - persists and answers a durable question;
 - enqueues and drains queued work;
@@ -18,10 +20,10 @@ mvn -q package -DskipTests
 mvn -q dependency:build-classpath -Dmdep.outputFile=target/consumer-classpath.txt
 rm -rf target/consumer-fixture
 javac --release 25 \
-  -cp "target/magenta-core-0.0.1-SNAPSHOT.jar:$(cat target/consumer-classpath.txt)" \
+  -cp "target/magenta-core-0.2.0.jar:$(cat target/consumer-classpath.txt)" \
   -d target/consumer-fixture \
   consumer-fixture/src/main/java/io/example/Consumer.java
-java -cp "target/consumer-fixture:target/magenta-core-0.0.1-SNAPSHOT.jar:$(cat target/consumer-classpath.txt)" \
+java -cp "target/consumer-fixture:target/magenta-core-0.2.0.jar:$(cat target/consumer-classpath.txt)" \
   io.example.Consumer
 ```
 

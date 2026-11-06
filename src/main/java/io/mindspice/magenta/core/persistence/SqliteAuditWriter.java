@@ -2,6 +2,7 @@ package io.mindspice.magenta.core.persistence;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.mindspice.magenta.core.ContextUsage;
+import io.mindspice.magenta.core.ToolActivityData;
 import io.mindspice.magenta.core.TurnMessage;
 import io.mindspice.magenta.core.spi.AuditWriter;
 import org.slf4j.Logger;
@@ -58,13 +59,16 @@ public class SqliteAuditWriter implements AuditWriter {
     @Override
     public void recordToolExecution(String sessionId, ToolExecutionRecord record) {
         try {
+            ToolActivityData activity = record.activity();
             Map<String, Object> payload = new LinkedHashMap<>();
-            payload.put("toolName", record.toolName());
-            payload.put("toolCallId", record.toolCallId());
+            payload.put("toolName", activity.toolName());
+            payload.put("toolCallId", activity.toolCallId());
             payload.put("arguments", record.arguments());
-            payload.put("resultSummary", record.resultSummary());
-            payload.put("success", record.success());
+            payload.put("resultSummary", activity.summary());
             payload.put("durationMs", record.durationMs());
+            if (activity instanceof ToolActivityData.Failed failed) {
+                payload.put("failureCategory", failed.category().name());
+            }
             insert(sessionId, "TOOL_EXECUTION", payload);
         } catch (Exception e) {
             LOG.debug("Failed to record tool-execution audit for session {}", sessionId, e);
@@ -122,11 +126,30 @@ public class SqliteAuditWriter implements AuditWriter {
     private static Map<String, Object> messagePayload(TurnMessage message) {
         Objects.requireNonNull(message, "message");
         Map<String, Object> payload = new LinkedHashMap<>();
-        payload.put("role", message.role());
-        payload.put("text", message.text());
-        payload.put("toolName", message.toolName());
-        payload.put("toolCallId", message.toolCallId());
-        payload.put("metadata", message.metadata());
+        switch (message) {
+            case TurnMessage.System system -> {
+                payload.put("role", "system");
+                payload.put("text", system.text());
+                payload.put("metadata", system.metadata());
+            }
+            case TurnMessage.User user -> {
+                payload.put("role", "user");
+                payload.put("text", user.text());
+                payload.put("metadata", user.metadata());
+            }
+            case TurnMessage.Assistant assistant -> {
+                payload.put("role", "assistant");
+                payload.put("text", assistant.text());
+                payload.put("metadata", assistant.metadata());
+            }
+            case TurnMessage.Tool tool -> {
+                payload.put("role", "tool");
+                payload.put("text", tool.text());
+                payload.put("toolName", tool.toolName());
+                payload.put("toolCallId", tool.toolCallId());
+                payload.put("metadata", tool.metadata());
+            }
+        }
         return payload;
     }
 }

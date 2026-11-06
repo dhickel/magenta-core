@@ -1,9 +1,9 @@
 package io.mindspice.magenta.core;
 
-import io.mindspice.magenta.core.EndpointType;
 import io.mindspice.magenta.core.ModelConfig;
 import io.mindspice.magenta.core.ToolCallback;
 import io.mindspice.magenta.core.ToolDefinition;
+import io.mindspice.magenta.core.ToolResult;
 import org.junit.jupiter.api.Test;
 import org.springframework.ai.deepseek.DeepSeekChatOptions;
 import org.springframework.ai.ollama.api.OllamaChatOptions;
@@ -24,9 +24,9 @@ class DefaultModelRouterTest {
     @Test
     void providerOptionsAreTypedAndProviderNeutralToolsAreAdapted() {
         Map<String, ModelConfig> models = new LinkedHashMap<>();
-        models.put("ollama", model("ollama", EndpointType.OLLAMA, null, 2));
-        models.put("openai", model("openai", EndpointType.OPENAI_COMPATIBLE, "key", 3));
-        models.put("deepseek", model("deepseek", EndpointType.DEEPSEEK, "key", 0));
+        models.put("ollama", ollama("ollama", 2));
+        models.put("openai", openAi("openai", "key", 3));
+        models.put("deepseek", deepSeek("deepseek", "key", 0));
 
         DefaultModelRouter router = new DefaultModelRouter(models, Duration.ofSeconds(11));
         ToolCallback tool = new ToolCallback() {
@@ -36,8 +36,8 @@ class DefaultModelRouterTest {
             }
 
             @Override
-            public String call(String toolInput) {
-                return toolInput;
+            public ToolResult call(String toolInput) {
+                return new ToolResult.Success(toolInput);
             }
         };
 
@@ -70,11 +70,11 @@ class DefaultModelRouterTest {
     @Test
     void selectionUsesRequestThenSessionThenRegistrationOrderAndCopiesTheRegistry() {
         LinkedHashMap<String, ModelConfig> models = new LinkedHashMap<>();
-        models.put("first", model("first", EndpointType.OLLAMA, null, 0));
-        models.put("second", model("second", EndpointType.OLLAMA, null, 0));
+        models.put("first", ollama("first", 0));
+        models.put("second", ollama("second", 0));
 
         DefaultModelRouter router = new DefaultModelRouter(models);
-        models.put("third", model("third", EndpointType.OLLAMA, null, 0));
+        models.put("third", ollama("third", 0));
 
         assertEquals("second", router.selectModelAlias(null, "second"));
         assertEquals("first", router.selectModelAlias(null, "missing"));
@@ -86,18 +86,27 @@ class DefaultModelRouterTest {
     @Test
     void ownedOpenAiClientCanBeClosedRepeatedly() {
         DefaultModelRouter router = new DefaultModelRouter(
-            Map.of("openai", model("openai", EndpointType.OPENAI_COMPATIBLE, "key", 0)));
+            Map.of("openai", openAi("openai", "key", 0)));
         assertNotNull(router.springAiChatModel("openai"));
         assertTrue(router.supportsStreaming("openai"));
         router.closeChatModels();
         router.closeChatModels();
     }
 
-    private static ModelConfig model(
-        String alias, EndpointType endpointType, String apiKey, int thinkLevel) {
-        String endpoint = endpointType == EndpointType.OPENAI_COMPATIBLE
-            ? "http://localhost:8080/v1" : "http://localhost:11434";
-        return new ModelConfig(alias, "remote-" + alias, endpoint, apiKey,
-            endpointType, 4096, thinkLevel);
+    private static ModelConfig.Ollama ollama(String alias, int thinkLevel) {
+        return new ModelConfig.Ollama(alias, "remote-" + alias,
+            "http://localhost:11434", null, 4096, thinkLevel);
+    }
+
+    private static ModelConfig.OpenAiCompatible openAi(
+        String alias, String apiKey, int thinkLevel) {
+        return new ModelConfig.OpenAiCompatible(alias, "remote-" + alias,
+            "http://localhost:8080/v1", apiKey, 4096, thinkLevel, null);
+    }
+
+    private static ModelConfig.DeepSeek deepSeek(
+        String alias, String apiKey, int thinkLevel) {
+        return new ModelConfig.DeepSeek(alias, "remote-" + alias,
+            "http://localhost:8080/v1", apiKey, 4096, thinkLevel);
     }
 }

@@ -11,7 +11,13 @@ public sealed class TurnFailedException extends TurnLoopException
 
     public TurnFailedException(@NonNull String message,
                                @NonNull TurnFailure failure) {
-        super(ResponseValidation.nonBlank(message, "message"));
+        this(message, failure, null);
+    }
+
+    TurnFailedException(@NonNull String message,
+                        @NonNull TurnFailure failure,
+                        @Nullable Throwable cause) {
+        super(ResponseValidation.nonBlank(message, "message"), cause);
         this.failure = ResponseValidation.required(failure, "failure");
     }
 

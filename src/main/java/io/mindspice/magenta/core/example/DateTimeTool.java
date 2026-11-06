@@ -12,9 +12,10 @@ import java.time.format.DateTimeFormatter;
  *
  * <p>Returns the current date and time in ISO-8601 format.
  * Accepts an optional IANA timezone identifier; defaults to
- * UTC when the parameter is null or blank. Not auto-registered —
- * embedding applications must instantiate and register this class
- * explicitly with a {@code ToolRegistry}.</p>
+ * UTC when the parameter is null or blank. The registry wraps this ordinary
+ * return value as {@code ToolResult.Success}. Not auto-registered — embedding
+ * applications must instantiate and register this class explicitly with a
+ * {@code ToolRegistry}.</p>
  */
 public final class DateTimeTool {
 

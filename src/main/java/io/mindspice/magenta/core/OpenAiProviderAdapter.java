@@ -20,7 +20,9 @@ final class OpenAiProviderAdapter {
     }
 
     static OwnedChatModel create(
-        ModelConfig config, ToolCallingManager toolCallingManager, Duration timeout) {
+        ModelConfig.OpenAiCompatible config,
+        ToolCallingManager toolCallingManager,
+        Duration timeout) {
         OpenAiChatOptions options = options(config, List.of(), timeout);
         String apiKey = config.apiKey() != null ? config.apiKey() : "";
         OpenAIClient client = null;
@@ -55,7 +57,9 @@ final class OpenAiProviderAdapter {
     }
 
     static OpenAiChatOptions options(
-        ModelConfig config, List<ToolCallback> toolCallbacks, Duration timeout) {
+        ModelConfig.OpenAiCompatible config,
+        List<ToolCallback> toolCallbacks,
+        Duration timeout) {
         OpenAiChatOptions.Builder builder = OpenAiChatOptions.builder()
             .baseUrl(config.remoteEndpoint())
             .model(config.remoteModelName())
@@ -63,7 +67,12 @@ final class OpenAiProviderAdapter {
         if (config.apiKey() != null) {
             builder.apiKey(config.apiKey());
         }
-        applyReasoning(builder, config.effectiveThinkLevel());
+        String effortOverride = config.reasoningEffort();
+        if (effortOverride != null) {
+            builder.reasoningEffort(effortOverride);
+        } else {
+            applyReasoning(builder, config.effectiveThinkLevel());
+        }
         builder.toolCallbacks(List.copyOf(toolCallbacks));
         return builder.build();
     }

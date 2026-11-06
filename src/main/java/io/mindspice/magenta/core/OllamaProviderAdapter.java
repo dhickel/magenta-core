@@ -20,15 +20,9 @@ final class OllamaProviderAdapter {
     }
 
     static OwnedChatModel create(
-        ModelConfig config, ToolCallingManager toolCallingManager, Duration timeout) {
+        ModelConfig.Ollama config, ToolCallingManager toolCallingManager, Duration timeout) {
         ProviderHttpClientBuilders.ClientBuilders clients =
             ProviderHttpClientBuilders.forTimeout(timeout);
-        if (config.apiKey() != null) {
-            clients.restClient().defaultHeaders(headers ->
-                headers.setBearerAuth(config.apiKey()));
-            clients.webClient().defaultHeaders(headers ->
-                headers.setBearerAuth(config.apiKey()));
-        }
         OllamaApi api = OllamaApi.builder()
             .baseUrl(config.remoteEndpoint())
             .restClientBuilder(clients.restClient())
@@ -45,7 +39,7 @@ final class OllamaProviderAdapter {
     }
 
     static OllamaChatOptions options(
-        ModelConfig config, List<ToolCallback> toolCallbacks) {
+        ModelConfig.Ollama config, List<ToolCallback> toolCallbacks) {
         OllamaChatOptions.Builder builder = OllamaChatOptions.builder();
         builder.model(config.remoteModelName());
         if (config.contextLength() != null) {

@@ -71,9 +71,8 @@ public interface TurnLoop extends AutoCloseable {
      * @param sessionId session awaiting answers
      * @param interactionId exact durable interaction identifier
      * @param answers ordered answers, one per pending question
-     * @return the continuation outcome
-     * @throws InteractionStateException if the interaction is missing or already
-     *                                   consumed, answered, or cancelled
+     * @return the continuation outcome, or a typed question-rejection outcome
+     *         when the exact interaction is missing or already terminal
      * @throws IllegalArgumentException if answer cardinality or content is invalid
      */
     TurnResponse.Outcome answer(@NonNull String sessionId,
@@ -87,7 +86,9 @@ public interface TurnLoop extends AutoCloseable {
      * @param sessionId session awaiting answers
      * @param interactionId exact durable interaction identifier
      * @param answers ordered answers, one per pending question
-     * @return a cold progress-and-outcome continuation stream
+     * @return a cold progress-and-outcome continuation stream. Durable missing
+     *         or terminal submissions emit exactly one typed rejection outcome
+     *         and complete without provider execution.
      */
     Flux<TurnResponse> streamAnswer(@NonNull String sessionId,
                                     @NonNull String interactionId,
@@ -105,15 +106,14 @@ public interface TurnLoop extends AutoCloseable {
     /**
      * Consumes a pending question interaction by durable ID and records the
      * caller's cancellation reason. Already-consumed or stale interaction IDs
-     * are rejected and do not affect a newer interaction.
+     * return a typed rejection outcome and do not affect a newer interaction.
      *
      * @param sessionId session awaiting answers
      * @param interactionId exact durable interaction identifier
      * @param reason nonblank caller cancellation reason
-     * @return the typed cancellation outcome
-     * @throws InteractionStateException if the interaction is not cancellable
+     * @return the successful cancellation or typed rejection outcome
      */
-    TurnResponse.QuestionsCancelled cancelQuestions(@NonNull String sessionId,
+    TurnResponse.Outcome cancelQuestions(@NonNull String sessionId,
                                                      @NonNull String interactionId,
                                                      @NonNull String reason);
 
@@ -232,6 +232,9 @@ public interface TurnLoop extends AutoCloseable {
 
         /** Clears conversation messages for a session. */
         void clear(@NonNull String sessionId);
+
+        /** Replaces a session transcript as one logical memory operation. */
+        void replaceMessages(@NonNull String sessionId, @NonNull List<TurnMessage> messages);
 
         /** Computes current context usage for a session. */
         ContextUsage contextUsage(@NonNull String sessionId);

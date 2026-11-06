@@ -1,4 +1,4 @@
--- Fresh Magenta Core response-protocol schema.
+-- Fresh Magenta Core sealed-ADT schema for the combined framework API.
 -- Historical magenta_core_* databases are incompatible and are rejected by
 -- MigrationRunner before this script can create anything. Historical
 -- turnloop_* tables are intentionally not referenced.
@@ -44,7 +44,15 @@ CREATE TABLE IF NOT EXISTS magenta_core_conversation_memory (
     tool_name TEXT,
     tool_call_id TEXT,
     metadata_json TEXT,
-    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    CHECK (
+        (role = 'tool'
+            AND tool_name IS NOT NULL
+            AND length(trim(tool_name)) > 0
+            AND tool_call_id IS NOT NULL
+            AND length(trim(tool_call_id)) > 0)
+        OR (role <> 'tool' AND tool_name IS NULL AND tool_call_id IS NULL)
+    )
 );
 CREATE INDEX IF NOT EXISTS idx_magenta_core_memory_session
     ON magenta_core_conversation_memory(session_id, id);
@@ -168,7 +176,12 @@ CREATE TABLE IF NOT EXISTS magenta_core_interaction_tool_activities (
     tool_name TEXT NOT NULL CHECK (length(trim(tool_name)) > 0),
     tool_call_id TEXT NOT NULL CHECK (length(trim(tool_call_id)) > 0),
     status TEXT NOT NULL CHECK (status IN ('COMPLETED', 'FAILED')),
-    summary TEXT NOT NULL,
+    failure_category TEXT CHECK (failure_category IN (
+        'NOT_FOUND', 'ACCESS_DENIED', 'INVALID_ARGUMENTS',
+        'EXECUTION_FAILED', 'LOOP_EXCEEDED')),
+    summary TEXT NOT NULL CHECK (length(trim(summary)) > 0),
+    CHECK ((status = 'FAILED' AND failure_category IS NOT NULL)
+        OR (status = 'COMPLETED' AND failure_category IS NULL)),
     PRIMARY KEY (interaction_id, activity_index)
 );
 CREATE INDEX IF NOT EXISTS idx_magenta_core_interaction_activities_order

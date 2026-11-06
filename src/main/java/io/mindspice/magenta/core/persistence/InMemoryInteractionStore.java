@@ -1,6 +1,5 @@
 package io.mindspice.magenta.core.persistence;
 
-import io.mindspice.magenta.core.InteractionState;
 import io.mindspice.magenta.core.spi.InteractionStore;
 
 import java.time.Instant;
@@ -27,7 +26,7 @@ public final class InMemoryInteractionStore implements InteractionStore {
             throw new IllegalStateException(
                 "Interaction id already exists: " + interaction.interactionId());
         }
-        if (interaction.state() == InteractionState.PENDING
+        if (interaction instanceof Interaction.Pending
             && pending(interaction.sessionId()).isPresent()) {
             throw new IllegalStateException(
                 "A pending interaction already exists for session " + interaction.sessionId());
@@ -40,7 +39,7 @@ public final class InMemoryInteractionStore implements InteractionStore {
         requireText(sessionId, "sessionId");
         return interactions.values().stream()
             .filter(interaction -> sessionId.equals(interaction.sessionId()))
-            .filter(interaction -> interaction.state() == InteractionState.PENDING)
+            .filter(Interaction.Pending.class::isInstance)
             .max(Comparator.comparing(Interaction::createdAt)
                 .thenComparing(Interaction::interactionId));
     }
@@ -61,17 +60,25 @@ public final class InMemoryInteractionStore implements InteractionStore {
         requireText(sessionId, "sessionId");
         requireText(interactionId, "interactionId");
         Objects.requireNonNull(orderedAnswers, "orderedAnswers");
-        Interaction interaction = interactions.get(interactionId);
-        if (interaction == null || !sessionId.equals(interaction.sessionId())) {
-            return new MutationResult(false, latestState(sessionId));
+        Interaction interaction = exact(sessionId, interactionId);
+        if (interaction == null) {
+            return new MutationResult.Missing();
         }
-        if (interaction.state() != InteractionState.PENDING) {
-            return new MutationResult(false, interaction.state());
+        if (interaction instanceof Interaction.Answered) {
+            return new MutationResult.AlreadyAnswered();
         }
-        validateAnswers(interaction.questions().questions(), orderedAnswers);
-        Interaction answered = interaction.answered(List.copyOf(orderedAnswers), Instant.now());
+        if (interaction instanceof Interaction.Cancelled) {
+            return new MutationResult.AlreadyCancelled();
+        }
+
+        Interaction.Pending pending = (Interaction.Pending) interaction;
+        validateAnswers(pending.questions().questions(), orderedAnswers);
+        Instant answeredAt = Instant.now();
+        InteractionStore.InteractionInfo info = updated(pending.info(), answeredAt);
+        Interaction.Answered answered = new Interaction.Answered(
+            info, List.copyOf(orderedAnswers));
         interactions.put(interactionId, answered);
-        return new MutationResult(true, InteractionState.ANSWERED);
+        return new MutationResult.Applied(answered);
     }
 
     @Override
@@ -81,15 +88,24 @@ public final class InMemoryInteractionStore implements InteractionStore {
         requireText(sessionId, "sessionId");
         requireText(interactionId, "interactionId");
         requireText(reason, "reason");
-        Interaction interaction = interactions.get(interactionId);
-        if (interaction == null || !sessionId.equals(interaction.sessionId())) {
-            return new MutationResult(false, latestState(sessionId));
+        Interaction interaction = exact(sessionId, interactionId);
+        if (interaction == null) {
+            return new MutationResult.Missing();
         }
-        if (interaction.state() != InteractionState.PENDING) {
-            return new MutationResult(false, interaction.state());
+        if (interaction instanceof Interaction.Answered) {
+            return new MutationResult.AlreadyAnswered();
         }
-        interactions.put(interactionId, interaction.cancelled(reason, Instant.now()));
-        return new MutationResult(true, InteractionState.CANCELLED);
+        if (interaction instanceof Interaction.Cancelled) {
+            return new MutationResult.AlreadyCancelled();
+        }
+
+        Interaction.Pending pending = (Interaction.Pending) interaction;
+        Instant cancelledAt = Instant.now();
+        InteractionStore.InteractionInfo info = updated(pending.info(), cancelledAt);
+        Interaction.Cancelled cancelled = new Interaction.Cancelled(
+            info, cancelledAt, reason);
+        interactions.put(interactionId, cancelled);
+        return new MutationResult.Applied(cancelled);
     }
 
     @Override
@@ -109,13 +125,18 @@ public final class InMemoryInteractionStore implements InteractionStore {
             interaction -> sessionId.equals(interaction.sessionId()));
     }
 
-    private InteractionState latestState(String sessionId) {
-        return interactions.values().stream()
-            .filter(interaction -> sessionId.equals(interaction.sessionId()))
-            .max(Comparator.comparing(Interaction::createdAt)
-                .thenComparing(Interaction::interactionId))
-            .map(Interaction::state)
-            .orElse(InteractionState.MISSING);
+    private Interaction exact(String sessionId, String interactionId) {
+        Interaction interaction = interactions.get(interactionId);
+        return interaction != null && sessionId.equals(interaction.sessionId())
+            ? interaction : null;
+    }
+
+    private static InteractionStore.InteractionInfo updated(
+        InteractionStore.InteractionInfo info, Instant updatedAt) {
+        return new InteractionStore.InteractionInfo(
+            info.interactionId(), info.sessionId(), info.questions(), info.model(),
+            info.explicitToolNames(), info.metadata(), info.continuationMetadata(),
+            info.createdAt(), updatedAt);
     }
 
     private static void validateAnswers(List<String> questions, List<String> answers) {

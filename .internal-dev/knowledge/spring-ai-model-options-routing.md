@@ -25,3 +25,7 @@ Endpoint-polymorphic model and options routing in Spring AI 2.0
 # Open Questions
 - Should provider-specific router helpers be package-private to enforce the boundary?
 - Should a future Anthropic endpoint use its dedicated Spring AI provider once a concrete user workflow requires it?
+
+## Branch-Specific Framework ADT Contract (2026-08-24)
+
+On `refactor/turn-response-protocol-20260824`, the current framework source of truth is `ModelConfig` with sealed `Ollama`, `OpenAiCompatible`, and `DeepSeek` variants. `EndpointType` is removed. `DefaultModelRouter` and the provider adapters pattern-match the closed configuration family; provider-specific Spring AI types remain internal. All variants retain common optional context/thinking fields, while constructors enforce provider-specific API-key and thinking constraints. ModelConfig JSON includes API keys for complete round trips, but `toString`, framework diagnostics, and validation errors redact secrets. The current implementation uses `DefaultModelRouter`, not the historical product `ChatModelRouter` name above.

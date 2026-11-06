@@ -27,6 +27,12 @@ import java.util.List;
     @JsonSubTypes.Type(value = TurnResponse.TimedOut.class, name = "timed_out"),
     @JsonSubTypes.Type(value = TurnResponse.QuestionsCancelled.class,
         name = "questions_cancelled"),
+    @JsonSubTypes.Type(value = TurnResponse.QuestionsMissing.class,
+        name = "questions_missing"),
+    @JsonSubTypes.Type(value = TurnResponse.QuestionsAlreadyAnswered.class,
+        name = "questions_already_answered"),
+    @JsonSubTypes.Type(value = TurnResponse.QuestionsAlreadyCancelled.class,
+        name = "questions_already_cancelled"),
     @JsonSubTypes.Type(value = TurnResponse.TurnCancelled.class,
         name = "turn_cancelled")
 })
@@ -66,13 +72,22 @@ public sealed interface TurnResponse permits TurnResponse.Progress, TurnResponse
         @JsonSubTypes.Type(value = TurnResponse.TimedOut.class, name = "timed_out"),
         @JsonSubTypes.Type(value = TurnResponse.QuestionsCancelled.class,
             name = "questions_cancelled"),
+        @JsonSubTypes.Type(value = TurnResponse.QuestionsMissing.class,
+            name = "questions_missing"),
+        @JsonSubTypes.Type(value = TurnResponse.QuestionsAlreadyAnswered.class,
+            name = "questions_already_answered"),
+        @JsonSubTypes.Type(value = TurnResponse.QuestionsAlreadyCancelled.class,
+            name = "questions_already_cancelled"),
         @JsonSubTypes.Type(value = TurnResponse.TurnCancelled.class,
             name = "turn_cancelled")
     })
     sealed interface Outcome extends TurnResponse
         permits TurnResponse.Message, TurnResponse.Questions, TurnResponse.Queued,
                 TurnResponse.Interrupted, TurnResponse.TimedOut,
-                TurnResponse.QuestionsCancelled, TurnResponse.TurnCancelled {
+                TurnResponse.QuestionsCancelled, TurnResponse.QuestionsMissing,
+                TurnResponse.QuestionsAlreadyAnswered,
+                TurnResponse.QuestionsAlreadyCancelled,
+                TurnResponse.TurnCancelled {
     }
 
     /** Announces the execution correlation and initial execution facts. */
@@ -230,6 +245,39 @@ public sealed interface TurnResponse permits TurnResponse.Progress, TurnResponse
             interactionId = ResponseValidation.nonBlank(interactionId, "interactionId");
             cancelledAt = ResponseValidation.timestamp(cancelledAt, "cancelledAt");
             reason = ResponseValidation.nonBlank(reason, "reason");
+        }
+    }
+
+    /** A question submission whose exact interaction id was not found. */
+    record QuestionsMissing(
+        @NonNull String sessionId,
+        @NonNull String interactionId
+    ) implements Outcome {
+        public QuestionsMissing {
+            sessionId = ResponseValidation.nonBlank(sessionId, "sessionId");
+            interactionId = ResponseValidation.nonBlank(interactionId, "interactionId");
+        }
+    }
+
+    /** A question submission rejected because the exact interaction was answered. */
+    record QuestionsAlreadyAnswered(
+        @NonNull String sessionId,
+        @NonNull String interactionId
+    ) implements Outcome {
+        public QuestionsAlreadyAnswered {
+            sessionId = ResponseValidation.nonBlank(sessionId, "sessionId");
+            interactionId = ResponseValidation.nonBlank(interactionId, "interactionId");
+        }
+    }
+
+    /** A question submission rejected because the exact interaction was cancelled. */
+    record QuestionsAlreadyCancelled(
+        @NonNull String sessionId,
+        @NonNull String interactionId
+    ) implements Outcome {
+        public QuestionsAlreadyCancelled {
+            sessionId = ResponseValidation.nonBlank(sessionId, "sessionId");
+            interactionId = ResponseValidation.nonBlank(interactionId, "interactionId");
         }
     }
 

@@ -2,26 +2,27 @@
 
 ## Topic
 
-Alpha documentation folder structure and update governance.
+Documentation structure, currency, and update governance for the transport-neutral library branch.
 
 ## Source References
 
-- `.internal-dev/plans/alpha-docs-and-entity-selectors/01-documentation-foundation.md`
 - `docs/AGENTS.md`
 - `docs/README.md`
+- `.internal-dev/changelogs/2026-08-24-diataxis-documentation.md`
 
 ## Key Takeaways
 
-- `docs/README.md` is the alpha documentation entry point.
-- `docs/end-user/00-index.md` owns operator-facing usage docs.
-- `docs/technical/00-index.md` owns contributor-facing architecture, service, persistence, frontend, security, and operations docs.
-- `docs/api/00-index.md` owns route, payload, streaming, and integration contracts.
-- `docs/maestro/` remains older Maestro design/planning material and is not the alpha docs entry point.
+- `docs/` uses the Diátaxis structure: `tutorials/`, `how-to/`, `reference/`, and `explanation/`, indexed by `docs/README.md`.
+- The former `docs/api/`, `docs/technical/`, and `docs/end-user/` trees are deleted; do not add pages there or link to them.
+- Documentation is part of the change, not a follow-up: a public signature, builder option, provider variant, schema, or behavior change updates the affected pages and `README.md` in the same change.
+- Reference pages own exact API, configuration, protocol, and schema facts; tutorials carry `<!-- tutorial-compile: Name.java -->` markers so their complete programs compile against the built JAR.
+- Dependency versions and JAR filenames in examples track `pom.xml`; a version bump updates the README, tutorial commands, and consumer-fixture commands.
+- Validation after documentation changes: `mvn clean verify`, tutorial program compilation, relative-link and anchor checking, and a stale-symbol scan.
 
 ## Engine Relevance
 
-Agents implementing future Magenta features should update relevant docs as part of the same change: end-user docs for behavior changes, technical docs for internals/config/schema/API/service changes, and API docs for route or payload changes.
+Agents implementing Magenta Core changes must treat stale examples, removed symbols, outdated variant or option lists, and mismatched artifact versions as defects and repair them while working in the area.
 
 ## Open Questions
 
-- Later documentation phases still need code-verified details for each placeholder page.
+- Markdown link checking and tutorial compilation are still repository-scripted rather than Maven- or CI-enforced.

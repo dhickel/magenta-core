@@ -23,7 +23,7 @@ import java.util.concurrent.ConcurrentHashMap;
  *
  * <h3>ask_user framework tool</h3>
  * The {@code ask_user} tool is auto-registered as a framework-internal tool
- * in the constructor. Its {@link ToolCallback#call(String)} returns a simple
+ * in the constructor. Its {@link ToolCallback#call(String)} returns a typed
  * JSON acknowledgement. The actual suspension logic lives in the engine,
  * which intercepts the tool call by name before invoking the callback.
  * This design keeps the registry free of application interaction coupling;
@@ -62,11 +62,13 @@ public final class DefaultToolRegistry implements ToolRegistry {
             }
 
             @Override
-            public String call(String toolInput) {
+            public ToolResult call(String toolInput) {
                 // The engine intercepts ask_user by name before calling this callback.
                 // This is a safety net; the actual suspension is engine-owned.
-                logger.debug("ask_user callback invoked directly (engine bypass): input={}", toolInput);
-                return "{\"acknowledged\":true,\"question\":\"" + escapeJson(toolInput) + "\"}";
+                logger.debug("ask_user callback invoked directly (engine bypass)");
+                return new ToolResult.Success(
+                    "{\"acknowledged\":true,\"question\":\""
+                        + escapeJson(toolInput) + "\"}");
             }
 
             private String escapeJson(String s) {
@@ -117,18 +119,18 @@ public final class DefaultToolRegistry implements ToolRegistry {
                 }
 
                 @Override
-                public String call(String toolInput) {
+                public ToolResult call(String toolInput) {
                     try {
                         Object[] args = resolveArguments(method, toolInput);
                         Object result = method.invoke(bean, args);
-                        return result == null ? "" : result.toString();
+                        return result instanceof ToolResult typed
+                            ? typed
+                            : new ToolResult.Success(result == null ? "" : result.toString());
                     } catch (InvocationTargetException e) {
                         Throwable cause = e.getCause() != null ? e.getCause() : e;
-                        throw new ToolException.ExecutionFailed(name, "",
-                            "Tool execution failed: " + cause.getMessage(), cause);
-                    } catch (Exception e) {
-                        throw new ToolException.ExecutionFailed(name, "",
-                            "Tool execution failed: " + e.getMessage(), e);
+                        return ToolResultSupport.fromThrowable(cause, name);
+                    } catch (Throwable failure) {
+                        return ToolResultSupport.fromThrowable(failure, name);
                     }
                 }
             };
@@ -250,33 +252,40 @@ public final class DefaultToolRegistry implements ToolRegistry {
             return new Object[0];
         }
 
-        // Use the configured shared ObjectMapper so consumer modules and coercion rules apply.
-        @SuppressWarnings("unchecked")
-        Map<String, Object> inputMap = objectMapper.readValue(toolInput, Map.class);
+        try {
+            // Use the configured shared ObjectMapper so consumer modules and coercion rules apply.
+            @SuppressWarnings("unchecked")
+            Map<String, Object> inputMap = objectMapper.readValue(toolInput, Map.class);
 
-        Object[] args = new Object[parameters.length];
-        for (int i = 0; i < parameters.length; i++) {
-            String paramName = resolveParameterName(method, parameters[i]);
-            Object raw = inputMap.get(paramName);
+            Object[] args = new Object[parameters.length];
+            for (int i = 0; i < parameters.length; i++) {
+                String paramName = resolveParameterName(method, parameters[i]);
+                Object raw = inputMap.get(paramName);
 
-            if (raw == null) {
-                ToolParam toolParam = parameters[i].getAnnotation(ToolParam.class);
-                if (toolParam != null && toolParam.required()) {
-                    throw new ToolException.ArgumentCoercionFailed(
-                        method.getDeclaringClass().getSimpleName(),
-                        "",
-                        "Missing required parameter '" + paramName + "'"
-                    );
+                if (raw == null) {
+                    ToolParam toolParam = parameters[i].getAnnotation(ToolParam.class);
+                    if (toolParam != null && toolParam.required()) {
+                        throw new ToolException.ArgumentCoercionFailed(
+                            method.getDeclaringClass().getSimpleName(),
+                            "",
+                            "Missing required parameter '" + paramName + "'"
+                        );
+                    }
+                    args[i] = null;
+                } else {
+                    Type targetType = parameters[i].getParameterizedType();
+                    Object source = coerceStructuredString(raw, parameters[i].getType());
+                    args[i] = objectMapper.convertValue(source,
+                        objectMapper.constructType(targetType));
                 }
-                args[i] = null;
-            } else {
-                Type targetType = parameters[i].getParameterizedType();
-                Object source = coerceStructuredString(raw, parameters[i].getType());
-                args[i] = objectMapper.convertValue(source,
-                    objectMapper.constructType(targetType));
             }
+            return args;
+        } catch (ToolException failure) {
+            throw failure;
+        } catch (Exception failure) {
+            throw new ToolException.ArgumentCoercionFailed(
+                method.getDeclaringClass().getSimpleName(), "", "Invalid tool arguments");
         }
-        return args;
     }
 
     private static String resolveParameterName(Method method, Parameter parameter) {

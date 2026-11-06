@@ -22,8 +22,8 @@ class TurnResponseProtocolTest {
 
     private static final Instant TIME = Instant.parse("2026-08-24T13:49:27Z");
     private static final ContextUsage USAGE = new ContextUsage(10, 100, 4096);
-    private static final ToolActivityData ACTIVITY = new ToolActivityData(
-        "lookup", "call-1", ToolActivityStatus.COMPLETED, "found one result");
+    private static final ToolActivityData ACTIVITY = new ToolActivityData.Completed(
+        "lookup", "call-1", "found one result");
 
     @Test
     void sealedFamiliesEnumerateEveryProgressAndOutcomeSubtype() {
@@ -44,8 +44,39 @@ class TurnResponseProtocolTest {
                 TurnResponse.Interrupted.class,
                 TurnResponse.TimedOut.class,
                 TurnResponse.QuestionsCancelled.class,
+                TurnResponse.QuestionsMissing.class,
+                TurnResponse.QuestionsAlreadyAnswered.class,
+                TurnResponse.QuestionsAlreadyCancelled.class,
                 TurnResponse.TurnCancelled.class),
             Set.of(TurnResponse.Outcome.class.getPermittedSubclasses()));
+    }
+
+    @Test
+    void toolResultsAndActivitiesAreClosedAndTagged() throws Exception {
+        assertTrue(ToolResult.class.isSealed());
+        assertEquals(Set.of(ToolResult.Success.class, ToolResult.Failure.class),
+            Set.of(ToolResult.class.getPermittedSubclasses()));
+        assertTrue(ToolActivityData.class.isSealed());
+        assertEquals(Set.of(ToolActivityData.Completed.class, ToolActivityData.Failed.class),
+            Set.of(ToolActivityData.class.getPermittedSubclasses()));
+
+        ObjectMapper mapper = new ObjectMapper().findAndRegisterModules();
+        List<Object> values = List.of(
+            new ToolResult.Success(""),
+            new ToolResult.Failure("not found", ToolFailureCategory.NOT_FOUND),
+            new ToolActivityData.Completed("lookup", "call-1", "done"),
+            new ToolActivityData.Failed("lookup", "call-2", "denied",
+                ToolFailureCategory.ACCESS_DENIED));
+        List<String> tags = List.of("success", "failure", "completed", "failed");
+        for (int index = 0; index < values.size(); index++) {
+            String json = mapper.writeValueAsString(values.get(index));
+            assertEquals(tags.get(index), mapper.readTree(json).get("type").asText());
+        }
+
+        assertThrows(IllegalArgumentException.class,
+            () -> new ToolResult.Failure(" ", ToolFailureCategory.EXECUTION_FAILED));
+        assertThrows(IllegalArgumentException.class,
+            () -> new ToolActivityData.Completed("lookup", "call-1", " "));
     }
 
     @Test
@@ -75,12 +106,16 @@ class TurnResponseProtocolTest {
             new TurnResponse.Interrupted(execution, "interrupted"),
             new TurnResponse.TimedOut(execution, "timed out"),
             new TurnResponse.QuestionsCancelled("session", interactionId, TIME, "cancelled"),
+            new TurnResponse.QuestionsMissing("session", interactionId),
+            new TurnResponse.QuestionsAlreadyAnswered("session", interactionId),
+            new TurnResponse.QuestionsAlreadyCancelled("session", interactionId),
             new TurnResponse.TurnCancelled(execution, "cancelled")
         );
         List<String> tags = List.of(
             "started", "content_chunk", "thinking_chunk", "tool_activity", "notice",
             "message", "questions", "queued", "interrupted", "timed_out",
-            "questions_cancelled", "turn_cancelled");
+            "questions_cancelled", "questions_missing", "questions_already_answered",
+            "questions_already_cancelled", "turn_cancelled");
         ObjectMapper mapper = new ObjectMapper().findAndRegisterModules();
 
         for (int index = 0; index < responses.size(); index++) {
@@ -103,6 +138,12 @@ class TurnResponseProtocolTest {
             () -> new TurnResponse.Queued("session", "message", TIME, null));
         assertThrows(IllegalArgumentException.class,
             () -> new TurnResponse.QuestionsCancelled("session", "interaction", TIME, " "));
+        assertThrows(IllegalArgumentException.class,
+            () -> new TurnResponse.QuestionsMissing(" ", "interaction"));
+        assertThrows(NullPointerException.class,
+            () -> new TurnResponse.QuestionsAlreadyAnswered("session", null));
+        assertThrows(IllegalArgumentException.class,
+            () -> new TurnResponse.QuestionsAlreadyCancelled("session", " "));
         assertThrows(IllegalArgumentException.class,
             () -> new ExecutionInfo("session", "turn", new ExecutionOrigin.Direct(),
                 TIME.plusSeconds(1), TIME, USAGE, List.of()));

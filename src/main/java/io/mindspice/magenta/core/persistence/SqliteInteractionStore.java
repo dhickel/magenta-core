@@ -4,9 +4,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import io.mindspice.magenta.core.ContextUsage;
 import io.mindspice.magenta.core.ExecutionInfo;
 import io.mindspice.magenta.core.ExecutionOrigin;
-import io.mindspice.magenta.core.InteractionState;
 import io.mindspice.magenta.core.ToolActivityData;
-import io.mindspice.magenta.core.ToolActivityStatus;
+import io.mindspice.magenta.core.ToolFailureCategory;
 import io.mindspice.magenta.core.TurnResponse;
 import io.mindspice.magenta.core.spi.InteractionStore;
 import org.slf4j.Logger;
@@ -57,6 +56,27 @@ public final class SqliteInteractionStore implements InteractionStore {
             PersistenceSupport.transaction(dataSource, connection -> {
                 PersistenceSupport.ensureSession(connection, interaction.sessionId());
                 OriginFacts origin = originFacts(interaction.questions().execution().origin());
+                String state;
+                List<String> answers;
+                String cancellationReason = null;
+                Instant cancelledAt = null;
+                switch (interaction) {
+                    case Interaction.Pending ignored -> {
+                        state = "PENDING";
+                        answers = List.of();
+                    }
+                    case Interaction.Answered answered -> {
+                        state = "ANSWERED";
+                        answers = answered.answers();
+                    }
+                    case Interaction.Cancelled cancelled -> {
+                        state = "CANCELLED";
+                        answers = List.of();
+                        cancellationReason = cancelled.reason();
+                        cancelledAt = cancelled.cancelledAt();
+                    }
+                }
+                InteractionStore.InteractionInfo info = interaction.info();
                 try (PreparedStatement statement = connection.prepareStatement("""
                     INSERT INTO magenta_core_interactions
                         (interaction_id, session_id, turn_id, model,
@@ -67,39 +87,39 @@ public final class SqliteInteractionStore implements InteractionStore {
                          cancellation_reason, created_at, updated_at, cancelled_at)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """)) {
-                    statement.setString(1, interaction.interactionId());
-                    statement.setString(2, interaction.sessionId());
-                    statement.setString(3, interaction.questions().execution().turnId());
-                    statement.setString(4, interaction.model());
+                    statement.setString(1, info.interactionId());
+                    statement.setString(2, info.sessionId());
+                    statement.setString(3, info.questions().execution().turnId());
+                    statement.setString(4, info.model());
                     statement.setString(5, PersistenceSupport.stringListToJson(
-                        objectMapper, interaction.explicitToolNames()));
+                        objectMapper, info.explicitToolNames()));
                     statement.setString(6, PersistenceSupport.toJson(
-                        objectMapper, interaction.metadata()));
+                        objectMapper, info.metadata()));
                     statement.setString(7, PersistenceSupport.toJson(
-                        objectMapper, interaction.continuationMetadata()));
+                        objectMapper, info.continuationMetadata()));
                     statement.setString(8, origin.type());
                     statement.setString(9, origin.interactionId());
                     statement.setString(10, origin.messageId());
                     statement.setString(11, PersistenceSupport.timestamp(
-                        interaction.questions().execution().startedAt()));
+                        info.questions().execution().startedAt()));
                     statement.setString(12, PersistenceSupport.timestamp(
-                        interaction.questions().execution().completedAt()));
-                    ContextUsage usage = interaction.questions().execution().finalContextUsage();
+                        info.questions().execution().completedAt()));
+                    ContextUsage usage = info.questions().execution().finalContextUsage();
                     statement.setInt(13, usage.usedTokens());
                     statement.setInt(14, usage.triggerTokens());
                     statement.setInt(15, usage.maxTokens());
-                    statement.setString(16, interaction.state().name());
-                    statement.setString(17, interaction.cancellationReason());
-                    statement.setString(18, PersistenceSupport.timestamp(interaction.createdAt()));
-                    statement.setString(19, PersistenceSupport.timestamp(interaction.updatedAt()));
-                    statement.setString(20, interaction.cancelledAt() == null
-                        ? null : PersistenceSupport.timestamp(interaction.cancelledAt()));
+                    statement.setString(16, state);
+                    statement.setString(17, cancellationReason);
+                    statement.setString(18, PersistenceSupport.timestamp(info.createdAt()));
+                    statement.setString(19, PersistenceSupport.timestamp(info.updatedAt()));
+                    statement.setString(20, cancelledAt == null
+                        ? null : PersistenceSupport.timestamp(cancelledAt));
                     statement.executeUpdate();
                 }
 
                 insertQuestions(connection, interaction);
                 insertActivities(connection, interaction);
-                insertAnswers(connection, interaction.interactionId(), interaction.answers());
+                insertAnswers(connection, interaction.interactionId(), answers);
                 return null;
             });
         } catch (RuntimeException e) {
@@ -168,14 +188,16 @@ public final class SqliteInteractionStore implements InteractionStore {
                     WHERE session_id = ? AND interaction_id = ?
                     """.formatted(BASE_COLUMNS), sessionId, interactionId);
                 if (row == null) {
-                    return new MutationResult(false, latestState(connection, sessionId));
+                    return new MutationResult.Missing();
                 }
-                if (row.state() != InteractionState.PENDING) {
-                    return new MutationResult(false, row.state());
+                Interaction current = toInteraction(connection, row);
+                MutationResult terminal = terminalResult(current);
+                if (terminal != null) {
+                    return terminal;
                 }
 
-                List<String> questions = readQuestions(connection, interactionId);
-                validateAnswers(questions, orderedAnswers);
+                Interaction.Pending pending = (Interaction.Pending) current;
+                validateAnswers(pending.questions().questions(), orderedAnswers);
                 Instant updatedAt = Instant.now();
                 try (PreparedStatement update = connection.prepareStatement("""
                     UPDATE magenta_core_interactions
@@ -187,14 +209,16 @@ public final class SqliteInteractionStore implements InteractionStore {
                     update.setString(2, sessionId);
                     update.setString(3, interactionId);
                     if (update.executeUpdate() != 1) {
-                        return new MutationResult(false,
-                            stateForTargetOrLatest(connection, sessionId, interactionId));
+                        return mutationAfterCas(connection, sessionId, interactionId);
                     }
                 }
-                insertAnswers(connection, interactionId, List.copyOf(orderedAnswers));
+                List<String> answers = List.copyOf(orderedAnswers);
+                insertAnswers(connection, interactionId, answers);
                 writeLifecycleAudit(connection, sessionId, "INTERACTION_ANSWERED",
                     Map.of("interactionId", interactionId));
-                return new MutationResult(true, InteractionState.ANSWERED);
+                Interaction.Answered answered = new Interaction.Answered(
+                    updated(pending.info(), updatedAt), answers);
+                return new MutationResult.Applied(answered);
             });
         } catch (IllegalArgumentException e) {
             throw e;
@@ -219,12 +243,15 @@ public final class SqliteInteractionStore implements InteractionStore {
                     WHERE session_id = ? AND interaction_id = ?
                     """.formatted(BASE_COLUMNS), sessionId, interactionId);
                 if (row == null) {
-                    return new MutationResult(false, latestState(connection, sessionId));
+                    return new MutationResult.Missing();
                 }
-                if (row.state() != InteractionState.PENDING) {
-                    return new MutationResult(false, row.state());
+                Interaction current = toInteraction(connection, row);
+                MutationResult terminal = terminalResult(current);
+                if (terminal != null) {
+                    return terminal;
                 }
 
+                Interaction.Pending pending = (Interaction.Pending) current;
                 Instant cancelledAt = Instant.now();
                 try (PreparedStatement update = connection.prepareStatement("""
                     UPDATE magenta_core_interactions
@@ -238,13 +265,14 @@ public final class SqliteInteractionStore implements InteractionStore {
                     update.setString(4, sessionId);
                     update.setString(5, interactionId);
                     if (update.executeUpdate() != 1) {
-                        return new MutationResult(false,
-                            stateForTargetOrLatest(connection, sessionId, interactionId));
+                        return mutationAfterCas(connection, sessionId, interactionId);
                     }
                 }
                 writeLifecycleAudit(connection, sessionId, "INTERACTION_CANCELLED",
                     Map.of("interactionId", interactionId, "reason", reason));
-                return new MutationResult(true, InteractionState.CANCELLED);
+                Interaction.Cancelled cancelled = new Interaction.Cancelled(
+                    updated(pending.info(), cancelledAt), cancelledAt, reason);
+                return new MutationResult.Applied(cancelled);
             });
         } catch (RuntimeException e) {
             LOG.error("Failed to cancel interaction {} for session {}", interactionId, sessionId, e);
@@ -341,8 +369,9 @@ public final class SqliteInteractionStore implements InteractionStore {
         throws SQLException {
         try (PreparedStatement statement = connection.prepareStatement("""
             INSERT INTO magenta_core_interaction_tool_activities
-                (interaction_id, activity_index, tool_name, tool_call_id, status, summary)
-            VALUES (?, ?, ?, ?, ?, ?)
+                (interaction_id, activity_index, tool_name, tool_call_id, status,
+                 failure_category, summary)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
             """)) {
             List<ToolActivityData> activities =
                 interaction.questions().execution().toolActivities();
@@ -352,8 +381,18 @@ public final class SqliteInteractionStore implements InteractionStore {
                 statement.setInt(2, index);
                 statement.setString(3, activity.toolName());
                 statement.setString(4, activity.toolCallId());
-                statement.setString(5, activity.status().name());
-                statement.setString(6, activity.summary());
+                String status;
+                String failureCategory = null;
+                switch (activity) {
+                    case ToolActivityData.Completed ignored -> status = "COMPLETED";
+                    case ToolActivityData.Failed failed -> {
+                        status = "FAILED";
+                        failureCategory = failed.category().name();
+                    }
+                }
+                statement.setString(5, status);
+                statement.setString(6, failureCategory);
+                statement.setString(7, activity.summary());
                 statement.addBatch();
             }
             statement.executeBatch();
@@ -389,20 +428,62 @@ public final class SqliteInteractionStore implements InteractionStore {
             readActivities(connection, row.interactionId()));
         TurnResponse.Questions questions = new TurnResponse.Questions(
             execution, row.interactionId(), readQuestions(connection, row.interactionId()));
-        return new Interaction(
+        InteractionStore.InteractionInfo info = new InteractionStore.InteractionInfo(
             row.interactionId(), row.sessionId(), questions, row.model(),
             PersistenceSupport.stringListFromJson(
                 objectMapper, row.explicitToolNamesJson()),
             PersistenceSupport.metadataFromJson(objectMapper, row.metadataJson()),
             PersistenceSupport.metadataFromJson(objectMapper, row.continuationJson()),
-            readAnswers(connection, row.interactionId()), row.state(), row.createdAt(),
-            row.updatedAt(), row.cancelledAt(), row.cancellationReason());
+            row.createdAt(), row.updatedAt());
+        List<String> answers = readAnswers(connection, row.interactionId());
+        return switch (row.state()) {
+            case "PENDING" -> {
+                if (!answers.isEmpty() || row.cancelledAt() != null
+                    || row.cancellationReason() != null) {
+                    throw new SQLException(
+                        "Persisted pending interaction contains terminal facts: "
+                            + row.interactionId());
+                }
+                yield new Interaction.Pending(info);
+            }
+            case "ANSWERED" -> {
+                if (row.cancelledAt() != null || row.cancellationReason() != null) {
+                    throw new SQLException(
+                        "Persisted answered interaction contains cancellation facts: "
+                            + row.interactionId());
+                }
+                try {
+                    yield new Interaction.Answered(info, answers);
+                } catch (IllegalArgumentException e) {
+                    throw new SQLException(
+                        "Persisted answered interaction has invalid ordered answers: "
+                            + row.interactionId(), e);
+                }
+            }
+            case "CANCELLED" -> {
+                if (!answers.isEmpty()) {
+                    throw new SQLException(
+                        "Persisted cancelled interaction contains answers: "
+                            + row.interactionId());
+                }
+                try {
+                    yield new Interaction.Cancelled(
+                        info, row.cancelledAt(), row.cancellationReason());
+                } catch (NullPointerException | IllegalArgumentException e) {
+                    throw new SQLException(
+                        "Persisted cancelled interaction has invalid cancellation facts: "
+                            + row.interactionId(), e);
+                }
+            }
+            default -> throw new SQLException(
+                "Unknown persisted interaction state: " + row.state());
+        };
     }
 
     private List<String> readQuestions(Connection connection, String interactionId)
         throws SQLException {
         try (PreparedStatement statement = connection.prepareStatement("""
-            SELECT question_text
+            SELECT question_index, question_text
             FROM magenta_core_interaction_questions
             WHERE interaction_id = ?
             ORDER BY question_index ASC
@@ -411,7 +492,13 @@ public final class SqliteInteractionStore implements InteractionStore {
             try (ResultSet resultSet = statement.executeQuery()) {
                 List<String> questions = new ArrayList<>();
                 while (resultSet.next()) {
-                    questions.add(resultSet.getString(1));
+                    int index = resultSet.getInt("question_index");
+                    if (index != questions.size()) {
+                        throw new SQLException(
+                            "Persisted interaction question indexes are not contiguous: "
+                                + interactionId);
+                    }
+                    questions.add(resultSet.getString("question_text"));
                 }
                 if (questions.isEmpty()) {
                     throw new SQLException(
@@ -425,7 +512,7 @@ public final class SqliteInteractionStore implements InteractionStore {
     private List<String> readAnswers(Connection connection, String interactionId)
         throws SQLException {
         try (PreparedStatement statement = connection.prepareStatement("""
-            SELECT answer_text
+            SELECT answer_index, answer_text
             FROM magenta_core_interaction_answers
             WHERE interaction_id = ?
             ORDER BY answer_index ASC
@@ -434,7 +521,13 @@ public final class SqliteInteractionStore implements InteractionStore {
             try (ResultSet resultSet = statement.executeQuery()) {
                 List<String> answers = new ArrayList<>();
                 while (resultSet.next()) {
-                    answers.add(resultSet.getString(1));
+                    int index = resultSet.getInt("answer_index");
+                    if (index != answers.size()) {
+                        throw new SQLException(
+                            "Persisted interaction answer indexes are not contiguous: "
+                                + interactionId);
+                    }
+                    answers.add(resultSet.getString("answer_text"));
                 }
                 return List.copyOf(answers);
             }
@@ -444,7 +537,7 @@ public final class SqliteInteractionStore implements InteractionStore {
     private List<ToolActivityData> readActivities(Connection connection, String interactionId)
         throws SQLException {
         try (PreparedStatement statement = connection.prepareStatement("""
-            SELECT tool_name, tool_call_id, status, summary
+            SELECT activity_index, tool_name, tool_call_id, status, failure_category, summary
             FROM magenta_core_interaction_tool_activities
             WHERE interaction_id = ?
             ORDER BY activity_index ASC
@@ -453,11 +546,44 @@ public final class SqliteInteractionStore implements InteractionStore {
             try (ResultSet resultSet = statement.executeQuery()) {
                 List<ToolActivityData> activities = new ArrayList<>();
                 while (resultSet.next()) {
-                    activities.add(new ToolActivityData(
-                        resultSet.getString("tool_name"),
-                        resultSet.getString("tool_call_id"),
-                        ToolActivityStatus.valueOf(resultSet.getString("status")),
-                        resultSet.getString("summary")));
+                    int index = resultSet.getInt("activity_index");
+                    if (index != activities.size()) {
+                        throw new SQLException(
+                            "Persisted tool activity indexes are not contiguous: "
+                                + interactionId);
+                    }
+                    String toolName = resultSet.getString("tool_name");
+                    String toolCallId = resultSet.getString("tool_call_id");
+                    String summary = resultSet.getString("summary");
+                    String status = resultSet.getString("status");
+                    String failureCategory = resultSet.getString("failure_category");
+                    try {
+                        ToolActivityData activity = switch (status) {
+                            case "COMPLETED" -> {
+                                if (failureCategory != null) {
+                                    throw new SQLException(
+                                        "Completed tool activity has a failure category");
+                                }
+                                yield new ToolActivityData.Completed(
+                                    toolName, toolCallId, summary);
+                            }
+                            case "FAILED" -> {
+                                if (failureCategory == null || failureCategory.isBlank()) {
+                                    throw new SQLException(
+                                        "Failed tool activity has no failure category");
+                                }
+                                yield new ToolActivityData.Failed(
+                                    toolName, toolCallId, summary,
+                                    ToolFailureCategory.valueOf(failureCategory));
+                            }
+                            default -> throw new SQLException(
+                                "Unknown persisted tool activity status: " + status);
+                        };
+                        activities.add(activity);
+                    } catch (IllegalArgumentException e) {
+                        throw new SQLException(
+                            "Invalid persisted tool activity: " + interactionId, e);
+                    }
                 }
                 return List.copyOf(activities);
             }
@@ -495,7 +621,7 @@ public final class SqliteInteractionStore implements InteractionStore {
             resultSet.getInt("context_used_tokens"),
             resultSet.getInt("context_trigger_tokens"),
             resultSet.getInt("context_max_tokens"),
-            InteractionState.valueOf(resultSet.getString("state")),
+            resultSet.getString("state"),
             resultSet.getString("cancellation_reason"),
             PersistenceSupport.parseTimestamp(resultSet.getString("created_at")),
             PersistenceSupport.parseTimestamp(resultSet.getString("updated_at")),
@@ -503,34 +629,40 @@ public final class SqliteInteractionStore implements InteractionStore {
         );
     }
 
-    private InteractionState stateForTargetOrLatest(Connection connection,
-                                                     String sessionId,
-                                                     String interactionId)
+    private MutationResult mutationAfterCas(Connection connection,
+                                             String sessionId,
+                                             String interactionId)
         throws SQLException {
-        BaseRow target = findBase(connection, """
+        BaseRow current = findBase(connection, """
             SELECT %s
             FROM magenta_core_interactions
             WHERE session_id = ? AND interaction_id = ?
             """.formatted(BASE_COLUMNS), sessionId, interactionId);
-        return target == null ? latestState(connection, sessionId) : target.state();
+        if (current == null) {
+            return new MutationResult.Missing();
+        }
+        MutationResult result = terminalResult(toInteraction(connection, current));
+        if (result == null) {
+            throw new SQLException(
+                "Interaction CAS lost without a terminal winner: " + interactionId);
+        }
+        return result;
     }
 
-    private InteractionState latestState(Connection connection, String sessionId)
-        throws SQLException {
-        try (PreparedStatement statement = connection.prepareStatement("""
-            SELECT state
-            FROM magenta_core_interactions
-            WHERE session_id = ?
-            ORDER BY created_at DESC, interaction_id DESC
-            LIMIT 1
-            """)) {
-            statement.setString(1, sessionId);
-            try (ResultSet resultSet = statement.executeQuery()) {
-                return resultSet.next()
-                    ? InteractionState.valueOf(resultSet.getString(1))
-                    : InteractionState.MISSING;
-            }
-        }
+    private MutationResult terminalResult(Interaction interaction) {
+        return switch (interaction) {
+            case Interaction.Pending ignored -> null;
+            case Interaction.Answered ignored -> new MutationResult.AlreadyAnswered();
+            case Interaction.Cancelled ignored -> new MutationResult.AlreadyCancelled();
+        };
+    }
+
+    private static InteractionStore.InteractionInfo updated(
+        InteractionStore.InteractionInfo info, Instant updatedAt) {
+        return new InteractionStore.InteractionInfo(
+            info.interactionId(), info.sessionId(), info.questions(), info.model(),
+            info.explicitToolNames(), info.metadata(), info.continuationMetadata(),
+            info.createdAt(), updatedAt);
     }
 
     private void deleteChildren(Connection connection, String interactionId)
@@ -631,7 +763,7 @@ public final class SqliteInteractionStore implements InteractionStore {
         int contextUsedTokens,
         int contextTriggerTokens,
         int contextMaxTokens,
-        InteractionState state,
+        String state,
         String cancellationReason,
         Instant createdAt,
         Instant updatedAt,

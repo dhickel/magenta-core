@@ -3,6 +3,7 @@ package io.mindspice.magenta.core.spi;
 import io.mindspice.magenta.core.ContextUsage;
 import io.mindspice.magenta.core.NonNull;
 import io.mindspice.magenta.core.Nullable;
+import io.mindspice.magenta.core.ToolActivityData;
 import io.mindspice.magenta.core.TurnMessage;
 
 /**
@@ -26,13 +27,18 @@ public interface AuditWriter {
     // ── Nested records ──
 
     record ToolExecutionRecord(
-        @NonNull String toolName,
-        @NonNull String toolCallId,
+        @NonNull ToolActivityData activity,
         @NonNull String arguments,
-        @NonNull String resultSummary,
-        boolean success,
         long durationMs
-    ) {}
+    ) {
+        public ToolExecutionRecord {
+            java.util.Objects.requireNonNull(activity, "activity");
+            java.util.Objects.requireNonNull(arguments, "arguments");
+            if (durationMs < 0) {
+                throw new IllegalArgumentException("durationMs must not be negative");
+            }
+        }
+    }
 
     record TurnError(
         @NonNull String summary,

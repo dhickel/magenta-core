@@ -5,8 +5,8 @@ import org.junit.jupiter.api.Test;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 class MagentaToolRegistryTest {
@@ -23,10 +23,11 @@ class MagentaToolRegistryTest {
         assertEquals("{\"type\":\"object\",\"properties\":{\"message\":{\"type\":\"string\","
                 + "\"description\":\"Message\"}},\"required\":[\"message\"]}",
             registry.definitions().getFirst().inputSchema());
-        assertEquals("hello", registry.resolveForTurn(
-            new TurnContext(TurnRequest.of("session", "message"), "turn", "model"))
-            .stream().filter(callback -> "echo".equals(callback.getToolDefinition().name()))
-            .findFirst().orElseThrow().call("{\"message\":\"hello\"}"));
+        assertEquals("hello", assertInstanceOf(ToolResult.Success.class,
+            registry.resolveForTurn(
+                new TurnContext(TurnRequest.of("session", "message"), "turn", "model"))
+                .stream().filter(callback -> "echo".equals(callback.getToolDefinition().name()))
+                .findFirst().orElseThrow().call("{\"message\":\"hello\"}")).output());
     }
 
     @Test
@@ -49,9 +50,35 @@ class MagentaToolRegistryTest {
         ToolCallback callback = registry.resolveForTurn(new TurnContext(
             new TurnRequest("session", "message", "model", List.of("join"),
                 java.util.Map.of()), "turn", "model")).getFirst();
-        assertEquals("ab", callback.call("{\"values\":\"[\\\"a\\\",\\\"b\\\"]\"}"));
+        assertEquals("ab", assertInstanceOf(ToolResult.Success.class,
+            callback.call("{\"values\":\"[\\\"a\\\",\\\"b\\\"]\"}")).output());
         assertEquals(1, new com.fasterxml.jackson.databind.ObjectMapper()
             .findAndRegisterModules().readValue("1", Object.class));
+    }
+
+    @Test
+    void annotatedToolResultsAndFailuresRemainTyped() {
+        DefaultToolRegistry registry = new DefaultToolRegistry();
+        registry.registerToolBean(new TypedTool());
+        registry.registerToolBean(new ExampleTool());
+
+        List<ToolCallback> callbacks = registry.resolveForTurn(
+            new TurnContext(TurnRequest.of("session", "message"), "turn", "model"));
+        ToolResult.Failure typed = assertInstanceOf(ToolResult.Failure.class,
+            callbacks.stream().filter(callback -> "typed".equals(
+                callback.getToolDefinition().name())).findFirst().orElseThrow().call("{}"));
+        assertEquals(ToolFailureCategory.ACCESS_DENIED, typed.category());
+
+        ToolResult.Failure thrown = assertInstanceOf(ToolResult.Failure.class,
+            callbacks.stream().filter(callback -> "throws".equals(
+                callback.getToolDefinition().name())).findFirst().orElseThrow().call("{}"));
+        assertEquals(ToolFailureCategory.EXECUTION_FAILED, thrown.category());
+        assertFalse(thrown.message().contains("secret exception details"));
+
+        ToolResult.Failure invalid = assertInstanceOf(ToolResult.Failure.class,
+            callbacks.stream().filter(callback -> "echo".equals(
+                callback.getToolDefinition().name())).findFirst().orElseThrow().call("{}"));
+        assertEquals(ToolFailureCategory.INVALID_ARGUMENTS, invalid.category());
     }
 
     @Test
@@ -73,6 +100,18 @@ class MagentaToolRegistryTest {
         assertThrows(ToolException.AccessDenied.class, () -> registry.resolveForTurn(
             new TurnContext(new TurnRequest("session", "message", "model", List.of("missing"),
                 java.util.Map.of()), "turn-2", "model")));
+    }
+
+    static final class TypedTool {
+        @Tool(name = "typed")
+        public ToolResult typed() {
+            return new ToolResult.Failure("not allowed", ToolFailureCategory.ACCESS_DENIED);
+        }
+
+        @Tool(name = "throws")
+        public String throwsTool() {
+            throw new IllegalStateException("secret exception details");
+        }
     }
 
     static final class StructuredTool {

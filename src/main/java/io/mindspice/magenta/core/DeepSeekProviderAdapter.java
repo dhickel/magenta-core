@@ -20,7 +20,7 @@ final class DeepSeekProviderAdapter {
     }
 
     static OwnedChatModel create(
-        ModelConfig config, ToolCallingManager toolCallingManager, Duration timeout) {
+        ModelConfig.DeepSeek config, ToolCallingManager toolCallingManager, Duration timeout) {
         ProviderHttpClientBuilders.ClientBuilders clients =
             ProviderHttpClientBuilders.forTimeout(timeout);
         DeepSeekApi api = DeepSeekApi.builder()
@@ -39,7 +39,7 @@ final class DeepSeekProviderAdapter {
     }
 
     static DeepSeekChatOptions options(
-        ModelConfig config, List<ToolCallback> toolCallbacks) {
+        ModelConfig.DeepSeek config, List<ToolCallback> toolCallbacks) {
         if (config.effectiveThinkLevel() > 0) {
             // Spring AI 2.0.0 exposes typed reasoning content on responses but
             // no request-side thinking/reasoning option. Do not silently drop a

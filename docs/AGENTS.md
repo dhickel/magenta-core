@@ -1,33 +1,30 @@
-# Documentation Guide
+# Documentation guide
 
-This guide governs files under `docs/`.
+This guide governs `docs/`.
 
-## Source-Of-Truth Policy
+## Source of truth
 
-- Documentation is user-visible intended truth.
-- Code remains the logical source of truth.
-- If documentation and code diverge, record the mismatch in the current task output and create or update the appropriate `.internal-dev` artifact: bugs for defects, specifications for intended contract drift, or plans/reviews for scoped follow-up.
+Code and tests define observed behavior. Repository specifications define intended behavior. Documentation must describe only the current transport-neutral Java library. If these sources conflict, report and route the drift through `.internal-dev`; do not guess.
 
-## Update Policy
+## Diátaxis structure
 
-- Any technical change updates the relevant technical docs.
-- Any user-facing behavior change updates the relevant end-user docs.
-- API or controller changes update API docs.
-- New docs must be linked from an index before the task is complete.
-- Avoid speculative future docs unless the content is explicitly marked as future-facing.
-- Do not route current documentation work to retired focus, notes, or inbox stores.
+- `tutorials/`: guided learning with prerequisites and an observable result.
+- `how-to/`: focused procedures for a concrete task.
+- `reference/`: exact public API, configuration, protocol, schema, and SPI facts.
+- `explanation/`: architecture, design rationale, and tradeoffs.
+- `README.md`: documentation index and audience routing.
 
-## Folder Contract
+Every new page must be linked from `docs/README.md` or a linked category page. Prefer relative links.
 
-- `README.md`: top-level documentation entry point and audience routing.
-- `end-user/`: operator-facing guides for using Magenta.
-- `technical/`: contributor-facing architecture, service, persistence, UI, and operations docs.
-- `api/`: route, payload, SSE, and integration contracts.
-- `maestro/`: older Maestro design/planning material; keep it intact unless a task explicitly targets it.
+## Boundaries and style
 
-## Writing Rules
-
-- Keep docs accurate, concrete, and tied to implemented behavior.
-- Prefer short task-focused pages over large mixed-purpose documents.
-- Use relative links for repo-local documentation.
-- When a section is intentionally incomplete, say what will own the content next instead of filling it with guesses.
+- Document Java 25 and the current `io.mindspice.magenta.core` API.
+- Do not document Spring Boot applications, auto-configuration, HTTP routes, UI, unsupported providers, or provider-specific types as caller API.
+- Use current sealed variants instead of role strings, discriminator switches, default switch branches, compatibility shims, or removed types.
+- Keep examples concise, explicit about prerequisites, and clear about expected outcomes.
+- Tutorials teach: each tutorial needs prerequisites, complete runnable code (or clearly delimited snippets matching current signatures), expected behavior, and links to the relevant how-to/reference pages. A complete tutorial program must compile against the built JAR; mark the fenced block with `<!-- tutorial-compile: FileName.java -->` so the validation script can extract and compile it.
+- Update reference pages when public signatures, schema, provider support, or serialized type tags change.
+- Remove stale duplication instead of preserving it as historical documentation.
+- Sequence diagrams and step-by-step flows are welcome in `explanation/` when they clarify ordering or races; keep caveats accurate.
+- After documentation changes, run `mvn clean verify`, compile the tutorial programs, and check relative links and stale symbols.
+- Keep dependency versions and JAR filenames in examples synchronized with `pom.xml`; a version bump is a documentation change.

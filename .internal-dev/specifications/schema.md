@@ -79,6 +79,10 @@ Required schema anchors: specification entry, architecture entry, service entry,
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | DRIFT-20260525-01 | `services.md` | open | Workspace controller maps some errors by exception message. | Status mapping can drift if messages change. | Deferred feature for typed domain errors. | `UNFINISHED-20260524-03` | 2026-06-23 |
 
+## Branch-Specific Framework Schema Contract (2026-08-24)
+
+The `refactor/turn-response-protocol-20260824` branch uses the clean-break identity `io.mindspice:magenta-core:sealed-adts-v1` at version 1. `schema.sql` is hashed by exact resource bytes. A matching identity is reusable only when all required framework tables, columns, indexes, and discriminator/check/foreign-key definitions are structurally present; prior, mismatched, empty, malformed, or identity-less `magenta_core_*` state is rejected before any `CREATE IF NOT EXISTS` execution and is never rewritten or deleted. Historical `turnloop_*` structures remain untouched. The Java persistence boundary maps tagged messages and sealed interaction snapshots/mutation outcomes onto one constrained message table and one discriminated interaction table with ordered child rows.
+
 ## No-Impact Note
 
 Use this changelog form when a change does not alter intended contracts:

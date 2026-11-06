@@ -3,6 +3,7 @@ package io.mindspice.magenta.core.persistence;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.sqlite.SQLiteDataSource;
 
 import javax.sql.DataSource;
 import java.sql.Connection;
@@ -79,6 +80,9 @@ final class PersistenceSupport {
     }
 
     static Connection open(DataSource dataSource) throws SQLException {
+        if (dataSource instanceof SQLiteDataSource sqliteDataSource) {
+            sqliteDataSource.setTransactionMode("IMMEDIATE");
+        }
         Connection connection = dataSource.getConnection();
         try {
             configureConnection(connection);

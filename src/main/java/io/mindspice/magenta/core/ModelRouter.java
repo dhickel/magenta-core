@@ -20,6 +20,10 @@ interface ModelRouter {
     @NonNull
     String remoteModelName(@NonNull String modelAlias);
 
+    /** Returns the provider credential solely for failure-message redaction. */
+    @Nullable
+    String apiKey(@NonNull String modelAlias);
+
     /** Resolves request → session → first-registration model precedence. */
     @NonNull
     String selectModelAlias(@Nullable String requestedAlias, @Nullable String sessionAlias);

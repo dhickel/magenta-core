@@ -13,6 +13,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
@@ -38,7 +39,7 @@ public final class SerialTurnGate implements TurnGate, AutoCloseable {
 
     private final Duration turnTimeout;
     private final Clock clock;
-    private final Map<String, SessionState> sessions = new ConcurrentHashMap<>();
+    private final Map<String, Session> sessions = new ConcurrentHashMap<>();
     private final ScheduledExecutorService timeoutScanner;
     private final AtomicBoolean closed = new AtomicBoolean(false);
 
@@ -64,7 +65,7 @@ public final class SerialTurnGate implements TurnGate, AutoCloseable {
             throw new IllegalArgumentException("scanInterval must be positive");
         }
         this.turnTimeout = turnTimeout;
-        this.clock = java.util.Objects.requireNonNull(clock, "clock");
+        this.clock = Objects.requireNonNull(clock, "clock");
         this.timeoutScanner = Executors.newSingleThreadScheduledExecutor(r -> {
             Thread thread = new Thread(r, "serial-turn-gate-timeout");
             thread.setDaemon(true);
@@ -95,70 +96,69 @@ public final class SerialTurnGate implements TurnGate, AutoCloseable {
         if (closed.get()) {
             return new AcquireResult.Rejected("Turn gate is closed");
         }
-        SessionState state = sessions.computeIfAbsent(sessionId, ignored -> new SessionState());
-        state.lock.lock();
+        Session session = sessions.computeIfAbsent(sessionId, ignored -> new Session());
+        session.lock.lock();
         try {
-            return switch (state.gateState) {
-                case IDLE -> {
-                    state.gateState = GateState.EXECUTING;
-                    state.lockToken = UUID.randomUUID().toString();
-                    state.startedAt = clock.instant();
-                    state.awaitingAnswer = false;
-                    state.timingOutToken = null;
-                    yield new AcquireResult.Acquired(state.lockToken);
+            return switch (session.state) {
+                case Idle ignored -> {
+                    Executing executing = newExecutingState();
+                    session.state = executing;
+                    yield new AcquireResult.Acquired(executing.lockToken());
                 }
-                case EXECUTING -> new AcquireResult.Rejected(
+                case Executing ignored -> new AcquireResult.Rejected(
                     "Session '" + sessionId + "' is already executing a turn");
-                case AWAITING_ANSWER -> {
+                case TimingOut ignored -> new AcquireResult.Rejected(
+                    "Session '" + sessionId + "' is already executing a turn");
+                case AwaitingAnswer ignored -> {
                     if (mode == TurnGateMode.ANSWER) {
-                        state.gateState = GateState.EXECUTING;
-                        state.awaitingAnswer = false;
-                        state.lockToken = UUID.randomUUID().toString();
-                        state.startedAt = clock.instant();
-                        state.timingOutToken = null;
-                        yield new AcquireResult.Acquired(state.lockToken);
+                        Executing executing = newExecutingState();
+                        session.state = executing;
+                        yield new AcquireResult.Acquired(executing.lockToken());
                     }
                     yield new AcquireResult.Rejected(
                         "Session '" + sessionId + "' is awaiting user answer");
                 }
             };
         } finally {
-            state.lock.unlock();
+            session.lock.unlock();
         }
     }
 
     @Override
     public void release(@NonNull String sessionId) {
-        SessionState state = sessions.get(sessionId);
-        if (state == null) return;
-        state.lock.lock();
+        Session session = sessions.get(sessionId);
+        if (session == null) return;
+        session.lock.lock();
         try {
-            reset(state);
+            reset(session);
         } finally {
-            state.lock.unlock();
+            session.lock.unlock();
         }
     }
 
     @Override
     public void transitionToAwaitingAnswer(@NonNull String sessionId) {
-        SessionState state = sessions.get(sessionId);
-        if (state == null) {
+        Session session = sessions.get(sessionId);
+        if (session == null) {
             logger.warn("transitionToAwaitingAnswer called for unknown session: {}", sessionId);
             return;
         }
-        state.lock.lock();
+        session.lock.lock();
         try {
-            if (state.gateState == GateState.EXECUTING) {
-                state.gateState = GateState.AWAITING_ANSWER;
-                state.awaitingAnswer = true;
-                state.startedAt = null;
-                state.timingOutToken = null;
-            } else {
-                logger.warn("transitionToAwaitingAnswer: session {} is in state {}, expected EXECUTING",
-                    sessionId, state.gateState);
+            switch (session.state) {
+                case Executing ignored -> session.state = new AwaitingAnswer();
+                case Idle ignored -> logger.warn(
+                    "transitionToAwaitingAnswer: session {} is in state {}, expected EXECUTING",
+                    sessionId, GateState.IDLE);
+                case TimingOut ignored -> logger.warn(
+                    "transitionToAwaitingAnswer: session {} is in state {}, expected EXECUTING",
+                    sessionId, GateState.EXECUTING);
+                case AwaitingAnswer ignored -> logger.warn(
+                    "transitionToAwaitingAnswer: session {} is in state {}, expected EXECUTING",
+                    sessionId, GateState.AWAITING_ANSWER);
             }
         } finally {
-            state.lock.unlock();
+            session.lock.unlock();
         }
     }
 
@@ -183,23 +183,26 @@ public final class SerialTurnGate implements TurnGate, AutoCloseable {
                 }
             }
 
-            SessionState state = sessions.get(sessionId);
-            if (state == null) continue;
+            Session session = sessions.get(sessionId);
+            if (session == null) continue;
             String token = null;
-            state.lock.lock();
+            session.lock.lock();
             try {
-                if (state.gateState == GateState.AWAITING_ANSWER) {
-                    logger.info("Drain: releasing AWAITING_ANSWER session {}", sessionId);
-                    reset(state);
-                } else if (state.gateState == GateState.EXECUTING) {
-                    token = markTimingOut(state);
+                switch (session.state) {
+                    case AwaitingAnswer ignored -> {
+                        logger.info("Drain: releasing AWAITING_ANSWER session {}", sessionId);
+                        reset(session);
+                    }
+                    case Executing ignored -> token = markTimingOut(session);
+                    case TimingOut ignored -> { }
+                    case Idle ignored -> { }
                 }
             } finally {
-                state.lock.unlock();
+                session.lock.unlock();
             }
             if (token != null) {
                 logger.info("Drain: fencing EXECUTING session {}", sessionId);
-                fenceAndRelease(sessionId, state, token);
+                fenceAndRelease(sessionId, session, token);
             }
         }
     }
@@ -207,13 +210,13 @@ public final class SerialTurnGate implements TurnGate, AutoCloseable {
     @Override
     @NonNull
     public GateState state(@NonNull String sessionId) {
-        SessionState state = sessions.get(sessionId);
-        if (state == null) return GateState.IDLE;
-        state.lock.lock();
+        Session session = sessions.get(sessionId);
+        if (session == null) return GateState.IDLE;
+        session.lock.lock();
         try {
-            return state.gateState;
+            return project(session.state);
         } finally {
-            state.lock.unlock();
+            session.lock.unlock();
         }
     }
 
@@ -229,50 +232,49 @@ public final class SerialTurnGate implements TurnGate, AutoCloseable {
         if (closed.get()) return;
         Instant now = clock.instant();
         for (String sessionId : new ArrayList<>(sessions.keySet())) {
-            SessionState state = sessions.get(sessionId);
-            if (state == null) continue;
+            Session session = sessions.get(sessionId);
+            if (session == null) continue;
             String token = null;
-            state.lock.lock();
+            session.lock.lock();
             try {
-                if (state.gateState == GateState.EXECUTING
-                    && state.startedAt != null
-                    && Duration.between(state.startedAt, now).compareTo(turnTimeout) >= 0) {
-                    token = markTimingOut(state);
+                if (session.state instanceof Executing executing
+                    && Duration.between(executing.startedAt(), now).compareTo(turnTimeout) >= 0) {
+                    token = markTimingOut(session);
                 }
             } finally {
-                state.lock.unlock();
+                session.lock.unlock();
             }
             if (token != null) {
                 logger.warn("Turn timeout for session {}: exceeded {}", sessionId, turnTimeout);
-                fenceAndRelease(sessionId, state, token);
+                fenceAndRelease(sessionId, session, token);
             }
         }
     }
 
     @Nullable
-    private String markTimingOut(SessionState state) {
-        if (state.lockToken == null || state.timingOutToken != null) return null;
-        state.timingOutToken = state.lockToken;
-        return state.lockToken;
+    private String markTimingOut(Session session) {
+        if (!(session.state instanceof Executing executing)) return null;
+        session.state = new TimingOut(executing.lockToken(), executing.startedAt());
+        return executing.lockToken();
     }
 
-    private void fenceAndRelease(String sessionId, SessionState state, String token) {
+    private void fenceAndRelease(String sessionId, Session session, String token) {
         boolean fenced = notifyTimeout(sessionId, token);
-        state.lock.lock();
+        session.lock.lock();
         try {
-            if (token.equals(state.timingOutToken)) {
-                state.timingOutToken = null;
+            if (!(session.state instanceof TimingOut timingOut)
+                || !token.equals(timingOut.lockToken())) {
+                return;
             }
-            if (fenced && state.gateState == GateState.EXECUTING
-                && token.equals(state.lockToken)) {
-                reset(state);
-            } else if (!fenced && state.gateState == GateState.EXECUTING
-                && token.equals(state.lockToken)) {
+            if (fenced) {
+                reset(session);
+            } else {
+                session.state = new Executing(timingOut.lockToken(), timingOut.startedAt());
                 logger.error("Turn timeout for session {} was not fenced; gate remains EXECUTING",
                     sessionId);
             }
         } finally {
-            state.lock.unlock();
+            session.lock.unlock();
         }
     }
 
@@ -298,20 +300,45 @@ public final class SerialTurnGate implements TurnGate, AutoCloseable {
         return fenced;
     }
 
-    private void reset(SessionState state) {
-        state.gateState = GateState.IDLE;
-        state.lockToken = null;
-        state.startedAt = null;
-        state.awaitingAnswer = false;
-        state.timingOutToken = null;
+    private Executing newExecutingState() {
+        return new Executing(UUID.randomUUID().toString(), clock.instant());
     }
 
-    private static final class SessionState {
-        private final ReentrantLock lock = new ReentrantLock();
-        private GateState gateState = GateState.IDLE;
-        private String lockToken;
-        private Instant startedAt;
-        private boolean awaitingAnswer;
-        private String timingOutToken;
+    private static GateState project(SessionState state) {
+        return switch (state) {
+            case Idle ignored -> GateState.IDLE;
+            case Executing ignored -> GateState.EXECUTING;
+            case TimingOut ignored -> GateState.EXECUTING;
+            case AwaitingAnswer ignored -> GateState.AWAITING_ANSWER;
+        };
     }
+
+    private static void reset(Session session) {
+        session.state = new Idle();
+    }
+
+    private static final class Session {
+        private final ReentrantLock lock = new ReentrantLock();
+        private SessionState state = new Idle();
+    }
+
+    sealed interface SessionState permits Idle, Executing, TimingOut, AwaitingAnswer { }
+
+    record Idle() implements SessionState { }
+
+    record Executing(String lockToken, Instant startedAt) implements SessionState {
+        Executing {
+            Objects.requireNonNull(lockToken, "lockToken");
+            Objects.requireNonNull(startedAt, "startedAt");
+        }
+    }
+
+    record TimingOut(String lockToken, Instant startedAt) implements SessionState {
+        TimingOut {
+            Objects.requireNonNull(lockToken, "lockToken");
+            Objects.requireNonNull(startedAt, "startedAt");
+        }
+    }
+
+    record AwaitingAnswer() implements SessionState { }
 }

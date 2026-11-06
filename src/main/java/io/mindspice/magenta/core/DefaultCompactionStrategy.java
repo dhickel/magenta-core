@@ -23,15 +23,13 @@ public final class DefaultCompactionStrategy implements CompactionStrategy {
         StringBuilder sb = new StringBuilder();
         sb.append("[Conversation summary — earlier messages compacted]\n");
         for (TurnMessage msg : messages) {
-            sb.append(msg.role()).append(": ");
+            sb.append(roleTag(msg)).append(": ");
             String text = msg.text();
-            if (text != null) {
-                // Truncate each message to 500 chars for the summary
-                if (text.length() > 500) {
-                    sb.append(text, 0, 500).append("...");
-                } else {
-                    sb.append(text);
-                }
+            // Truncate each message to 500 chars for the summary
+            if (text.length() > 500) {
+                sb.append(text, 0, 500).append("...");
+            } else {
+                sb.append(text);
             }
             sb.append('\n');
         }
@@ -40,5 +38,14 @@ public final class DefaultCompactionStrategy implements CompactionStrategy {
         // Rough token estimate: ~4 chars per token
         int summaryTokens = summary.length() / 4;
         return new CompactionResult(summary, messages.size(), summaryTokens);
+    }
+
+    private String roleTag(TurnMessage message) {
+        return switch (message) {
+            case TurnMessage.System ignored -> "system";
+            case TurnMessage.User ignored -> "user";
+            case TurnMessage.Assistant ignored -> "assistant";
+            case TurnMessage.Tool ignored -> "tool";
+        };
     }
 }

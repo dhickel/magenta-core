@@ -39,6 +39,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.regex.Pattern;
 
 /**
  * Internal transport-neutral turn state machine. Spring AI is confined to this
@@ -56,6 +57,11 @@ final class DefaultTurnEngine {
     private static final String CONTINUATION_FLAG = "true";
     private static final String PENDING_INTERACTION_ID = "turnloop.pending_interaction_id";
     private static final String PENDING_ANSWERS = "turnloop.pending_answers";
+    private static final int MAX_FAILURE_MESSAGE_LENGTH = 500;
+    private static final Pattern QUOTED_SECRET = Pattern.compile(
+        "(?i)([\\\"](?:capability|approval[_-]?(?:secret|token)|access[_-]?token)[\\\"]\\s*:\\s*[\\\"])[^\\\"\\r\\n]*([\\\"])");
+    private static final Pattern ASSIGNED_SECRET = Pattern.compile(
+        "(?i)(\\b(?:capability|approval[_-]?(?:secret|token)|access[_-]?token)\\b\\s*[:=]\\s*)([^\\s,;]+)");
 
     private final ToolRegistry toolRegistry;
     private final ToolAccessPolicy toolAccessPolicy;
@@ -71,7 +77,7 @@ final class DefaultTurnEngine {
     private final TurnExecutor turnExecutor;
     private final ActiveTurnRegistry activeTurnRegistry;
     private final ThinkingExtractor thinkingExtractor;
-    private final int maxToolRounds;
+    private final int maxToolIterations;
     private final int maxEmptyResponseRetries;
 
     private DefaultTurnEngine(Builder builder) {
@@ -89,7 +95,7 @@ final class DefaultTurnEngine {
         this.turnExecutor = builder.turnExecutor;
         this.activeTurnRegistry = builder.activeTurnRegistry;
         this.thinkingExtractor = builder.thinkingExtractor;
-        this.maxToolRounds = Math.max(1, builder.maxToolRounds);
+        this.maxToolIterations = Math.max(1, builder.maxToolIterations);
         this.maxEmptyResponseRetries = Math.max(0, builder.maxEmptyResponseRetries);
 
         this.contextManager.contextLengthProvider(this::configuredContextLength);
@@ -302,10 +308,22 @@ final class DefaultTurnEngine {
                         return;
                     }
                     streaming.lastResponse = response;
+                    // Provider streams commonly terminate with an empty
+                    // finish chunk after all content deltas. The turn engine
+                    // evaluates only the final chunk, so keeping an empty
+                    // chunk would look like an empty response and trigger a
+                    // repair that re-invokes the model and re-accumulates the
+                    // visible text. Track the last chunk that actually
+                    // carries content (text or tool calls) instead.
+                    if (!isEmptyResponse(response)) {
+                        streaming.lastContentResponse = response;
+                    }
                     emitResponseContent(ctx, response, sink, streaming);
                 })
                 .blockLast();
-            state.response = streaming.lastResponse;
+            state.response = streaming.lastContentResponse != null
+                ? streaming.lastContentResponse
+                : streaming.lastResponse;
             state.allVisibleText = streaming.visibleText.toString();
             state.visibleText.append(streaming.visibleText);
             state.latestThinking = streaming.thinkingText.toString();
@@ -403,6 +421,11 @@ final class DefaultTurnEngine {
             }
             return;
         }
+        if (state.toolLoopClosed && hasToolCalls(state.response)) {
+            throw failureException(ctx, state.startedAt, TurnPhase.EVALUATE,
+                TurnFailureCategory.TOOL,
+                "Model requested tools after the tool loop was aborted");
+        }
         if (completionDetector.isComplete(ctx)) {
             state.currentPhase = TurnPhase.FINALIZE;
             return;
@@ -427,19 +450,12 @@ final class DefaultTurnEngine {
             return;
         }
 
-        try {
-            state.toolLoopGuard.recordToolCalls(toolCalls.stream()
-                .map(call -> new ToolLoopGuard.ToolCallIdentity(call.name(), call.arguments()))
-                .toList());
-        } catch (ToolException.LoopExceeded e) {
-            state.toolLoopAbortReason = e.getMessage();
-            state.currentPhase = TurnPhase.REPAIR;
-            return;
-        }
-
         ctx.incrementToolRoundCount();
-        if (ctx.toolRoundCount() > maxToolRounds) {
-            state.toolLoopAbortReason = "Maximum tool rounds exceeded";
+        if (ctx.toolRoundCount() >= maxToolIterations) {
+            String reason = "Maximum tool iterations reached: " + maxToolIterations;
+            state.toolLoopClosed = true;
+            recordLoopExceeded(ctx, state, sink, toolCalls, reason);
+            state.toolLoopAbortReason = reason;
             state.currentPhase = TurnPhase.REPAIR;
             return;
         }
@@ -447,7 +463,8 @@ final class DefaultTurnEngine {
         Map<String, ToolCallback> tools = indexTools(state.activeTools);
         List<ToolResponseMessage.ToolResponse> responses = new ArrayList<>();
         List<TurnMessage> durableToolMessages = new ArrayList<>();
-        for (AssistantMessage.ToolCall call : toolCalls) {
+        for (int callIndex = 0; callIndex < toolCalls.size(); callIndex++) {
+            AssistantMessage.ToolCall call = toolCalls.get(callIndex);
             if (Thread.currentThread().isInterrupted()) {
                 flushToolState(state, responses, durableToolMessages);
                 state.wasInterrupted = true;
@@ -465,76 +482,26 @@ final class DefaultTurnEngine {
             }
 
             if ("ask_user".equals(call.name())) {
-                AssistantMessage output = state.response.getResult().getOutput();
-                appendAssistantToolMessage(state, output);
                 List<String> questions = extractQuestions(call.arguments());
                 String questionSummary = formatQuestions(questions);
-                ToolResponseMessage.ToolResponse toolResponse =
-                    new ToolResponseMessage.ToolResponse(call.id(), call.name(), questionSummary);
-                state.conversationMessages.add(ToolResponseMessage.builder()
-                    .responses(List.of(toolResponse)).build());
-                state.messagesToPersist.add(new TurnMessage(
-                    "tool", questionSummary, call.name(), call.id(), Map.of(
-                        "tool.arguments", call.arguments(),
-                        "tool.success", "true",
-                        "tool.duration_ms", "0",
-                        "tool.summary", "Questions pending")));
-                state.toolActivities.add(new ToolActivityData(
-                    call.name(), call.id(), ToolActivityStatus.COMPLETED, "Questions pending"));
-                emit(sink, new TurnResponse.ToolActivity(ctx.sessionId(), ctx.turnId(), Instant.now(),
-                    new ToolActivityData(call.name(), call.id(), ToolActivityStatus.COMPLETED,
-                        "Questions pending")));
+                ToolInvocation invocation = new ToolInvocation(
+                    call.name(), call.id(), nullToEmpty(call.arguments()),
+                    new ToolResult.Success(questionSummary), questionSummary,
+                    "Questions pending", 0L);
+                recordToolInvocation(ctx, state, sink, invocation, responses,
+                    durableToolMessages);
+                flushToolState(state, responses, durableToolMessages);
                 handleAskUser(ctx, state, questions, active);
                 return;
             }
 
-            ToolActivityStatus status;
-            String summary;
-            String resultText;
-            long started = System.nanoTime();
-            ToolCallback callback = tools.get(call.name());
-            if (callback == null) {
-                status = ToolActivityStatus.FAILED;
-                summary = "Tool not found: " + call.name();
-                resultText = summary;
-            } else {
-                try {
-                    String raw = callback.call(call.arguments());
-                    ToolResultSummarizer.SummarizeResult summarized =
-                        toolResultSummarizer.summarize(new ToolResultSummarizer.ToolExecution(
-                            call.name(), call.id(), call.arguments(), raw == null ? "" : raw));
-                    resultText = summarized.summary();
-                    summary = summarized.summary();
-                    status = ToolActivityStatus.COMPLETED;
-                } catch (Throwable failure) {
-                    resultText = "Tool execution failed";
-                    summary = resultText;
-                    status = ToolActivityStatus.FAILED;
-                }
-            }
-            long durationMs = (System.nanoTime() - started) / 1_000_000L;
-            responses.add(new ToolResponseMessage.ToolResponse(call.id(), call.name(), resultText));
-            ToolActivityData activity = new ToolActivityData(call.name(), call.id(), status, summary);
-            state.toolActivities.add(activity);
-            Map<String, String> toolMetadata = new LinkedHashMap<>();
-            toolMetadata.put("tool.arguments", call.arguments());
-            toolMetadata.put("tool.success", Boolean.toString(status == ToolActivityStatus.COMPLETED));
-            toolMetadata.put("tool.duration_ms", Long.toString(durationMs));
-            toolMetadata.put("tool.summary", summary);
-            durableToolMessages.add(new TurnMessage("tool", resultText,
-                call.name(), call.id(), toolMetadata));
-            emit(sink, new TurnResponse.ToolActivity(ctx.sessionId(), ctx.turnId(), Instant.now(),
-                activity));
-
-            try {
-                state.toolLoopGuard.recordToolResponses(new ToolLoopGuard.ToolExecutionResult(
-                    status == ToolActivityStatus.COMPLETED,
-                    call.name(), status == ToolActivityStatus.FAILED ? summary : null));
-            } catch (ToolException.LoopExceeded e) {
-                state.toolLoopAbortReason = e.getMessage();
-            }
+            ToolInvocation invocation = invokeTool(ctx, call, tools.get(call.name()));
+            recordToolInvocation(ctx, state, sink, invocation, responses, durableToolMessages);
 
             if (state.toolLoopAbortReason != null) {
+                recordLoopExceeded(ctx, state, sink,
+                    toolCalls.subList(callIndex + 1, toolCalls.size()),
+                    state.toolLoopAbortReason, responses, durableToolMessages);
                 break;
             }
         }
@@ -546,6 +513,122 @@ final class DefaultTurnEngine {
         ctx.currentContextUsage(computeUsage(ctx));
         state.currentPhase = state.toolLoopAbortReason == null
             ? TurnPhase.INVOKE_MODEL : TurnPhase.REPAIR;
+    }
+
+    private ToolInvocation invokeTool(TurnContext ctx, AssistantMessage.ToolCall call,
+                                      ToolCallback callback) {
+        long started = System.nanoTime();
+        String arguments = nullToEmpty(call.arguments());
+        ToolResult result;
+        if (callback == null) {
+            result = ToolResultSupport.notFound(call.name());
+        } else {
+            try {
+                result = ToolResultSupport.nonNull(callback.call(arguments, ctx));
+            } catch (Throwable failure) {
+                result = ToolResultSupport.fromThrowable(failure, call.name());
+            }
+        }
+
+        String summary;
+        if (result instanceof ToolResult.Success success) {
+            try {
+                ToolResultSummarizer.SummarizeResult summarized =
+                    toolResultSummarizer.summarize(new ToolResultSummarizer.ToolExecution(
+                        call.name(), call.id(), arguments, success.output()));
+                summary = summarized == null ? "Tool completed"
+                    : nonBlankOr(summarized.summary(), "Tool completed");
+            } catch (Throwable failure) {
+                result = ToolResultSupport.fromThrowable(failure, call.name());
+                summary = ((ToolResult.Failure) result).message();
+            }
+        } else {
+            summary = ((ToolResult.Failure) result).message();
+        }
+
+        String modelText = result instanceof ToolResult.Success ? summary
+            : ((ToolResult.Failure) result).message();
+        return new ToolInvocation(call.name(), call.id(), arguments, result, modelText,
+            summary, elapsedMillis(started));
+    }
+
+    private void recordLoopExceeded(TurnContext ctx, TurnLoopState state,
+                                    FluxSink<TurnResponse> sink,
+                                    List<AssistantMessage.ToolCall> calls,
+                                    String reason) {
+        List<ToolResponseMessage.ToolResponse> responses = new ArrayList<>();
+        List<TurnMessage> durableToolMessages = new ArrayList<>();
+        recordLoopExceeded(ctx, state, sink, calls, reason,
+            responses, durableToolMessages);
+        flushToolState(state, responses, durableToolMessages);
+    }
+
+    private void recordLoopExceeded(TurnContext ctx, TurnLoopState state,
+                                    FluxSink<TurnResponse> sink,
+                                    List<AssistantMessage.ToolCall> calls,
+                                    String reason,
+                                    List<ToolResponseMessage.ToolResponse> responses,
+                                    List<TurnMessage> durableToolMessages) {
+        String safeReason = nonBlankOr(reason, "Tool loop limit exceeded");
+        for (AssistantMessage.ToolCall call : calls) {
+            // The provider still needs the original arguments on its assistant
+            // call item, but an unexecuted synthetic result must not duplicate
+            // them into result or audit metadata.
+            ToolInvocation invocation = new ToolInvocation(
+                call.name(), call.id(), "",
+                new ToolResult.Failure(safeReason, ToolFailureCategory.LOOP_EXCEEDED),
+                safeReason, safeReason, 0L);
+            recordToolInvocation(ctx, state, sink, invocation,
+                responses, durableToolMessages, false);
+        }
+    }
+
+    private void recordToolInvocation(TurnContext ctx, TurnLoopState state,
+                                      FluxSink<TurnResponse> sink,
+                                      ToolInvocation invocation,
+                                      List<ToolResponseMessage.ToolResponse> responses,
+                                      List<TurnMessage> durableToolMessages) {
+        recordToolInvocation(ctx, state, sink, invocation, responses, durableToolMessages, true);
+    }
+
+    private void recordToolInvocation(TurnContext ctx, TurnLoopState state,
+                                      FluxSink<TurnResponse> sink,
+                                      ToolInvocation invocation,
+                                      List<ToolResponseMessage.ToolResponse> responses,
+                                      List<TurnMessage> durableToolMessages,
+                                      boolean enforceRepeatedErrorGuard) {
+        ToolInvocation effective = invocation;
+        try {
+            if (enforceRepeatedErrorGuard) {
+                state.toolLoopGuard.recordToolExecution(
+                    new ToolLoopGuard.ToolCallIdentity(
+                        invocation.toolName(), invocation.arguments()),
+                    new ToolLoopGuard.ToolExecutionResult(
+                        invocation.toolName(), invocation.result()));
+            }
+        } catch (ToolException.LoopExceeded failure) {
+            state.toolLoopClosed = true;
+            state.toolLoopAbortReason = failure.getMessage();
+            effective = invocation.loopExceeded(failure.getMessage());
+        }
+
+        ToolActivityData activity = effective.activity();
+        responses.add(new ToolResponseMessage.ToolResponse(
+            effective.toolCallId(), effective.toolName(), effective.modelText()));
+        state.toolActivities.add(activity);
+        durableToolMessages.add(new TurnMessage.Tool(
+            effective.toolName(), effective.toolCallId(), effective.modelText(),
+            effective.metadata()));
+        emit(sink, new TurnResponse.ToolActivity(ctx.sessionId(), ctx.turnId(), Instant.now(),
+            activity));
+    }
+
+    private long elapsedMillis(long startedNanos) {
+        return Math.max(0, (System.nanoTime() - startedNanos) / 1_000_000L);
+    }
+
+    private static String nonBlankOr(String value, String fallback) {
+        return value == null || value.isBlank() ? fallback : value;
     }
 
     private void flushToolState(TurnLoopState state,
@@ -577,10 +660,11 @@ final class DefaultTurnEngine {
 
         List<TurnMessage> repairs = repairStrategy.repair(ctx, reason);
         if (repairs == null || repairs.isEmpty()) {
-            repairs = List.of(TurnMessage.system(
+            repairs = List.of(new TurnMessage.System(
                 reason == RepairStrategy.RepairReason.TOOL_LOOP_EXCEEDED
                     ? "Tool loop guard triggered. Continue without further tool calls."
-                    : "Continue with a concise user-visible answer or an appropriate tool call."));
+                    : "Continue with a concise user-visible answer or an appropriate tool call.",
+                Map.of()));
         }
         for (TurnMessage repair : repairs) {
             TurnMessage durable = withMetadata(repair, Map.of(
@@ -594,8 +678,9 @@ final class DefaultTurnEngine {
             reason == RepairStrategy.RepairReason.TOOL_LOOP_EXCEEDED
                 ? "Tool loop guard triggered" : "Turn repair applied"));
         state.toolLoopAbortReason = null;
+        List<ToolCallback> repairTools = state.toolLoopClosed ? List.of() : state.activeTools;
         state.prompt = new Prompt(buildPromptMessages(state.systemPromptText,
-            state.conversationMessages), modelRouter.toolCallingOptions(ctx.model(), state.activeTools));
+            state.conversationMessages), modelRouter.toolCallingOptions(ctx.model(), repairTools));
         state.currentPhase = TurnPhase.INVOKE_MODEL;
     }
 
@@ -617,7 +702,8 @@ final class DefaultTurnEngine {
 
         if (state.wasInterrupted) {
             state.messagesToPersist.add(withMetadata(
-                TurnMessage.system("Turn interrupted: " + nullToEmpty(state.interruptReason)),
+                new TurnMessage.System(
+                    "Turn interrupted: " + nullToEmpty(state.interruptReason), Map.of()),
                 Map.of("turnloop.persistence_type", "interrupted")));
         }
         if (!persistState(state, ctx.sessionId(), active)) {
@@ -663,11 +749,11 @@ final class DefaultTurnEngine {
             outcome = new TurnResponse.Message(execution, text);
         }
 
+        if (!state.suspended) {
+            triggerAsyncCompaction(ctx, finalUsage, active, sink);
+        }
         if (!sink.isCancelled()) {
             emit(sink, outcome);
-        }
-        if (!state.suspended) {
-            triggerAsyncCompaction(ctx, finalUsage, active);
         }
         state.currentPhase = TurnPhase.DONE;
         if (!sink.isCancelled()) {
@@ -706,10 +792,10 @@ final class DefaultTurnEngine {
             finalUsage, List.copyOf(state.toolActivities));
         TurnResponse.Questions questionOutcome = new TurnResponse.Questions(
             execution, interactionId, ordered);
-        InteractionStore.Interaction pending = new InteractionStore.Interaction(
+        InteractionStore.InteractionInfo info = new InteractionStore.InteractionInfo(
             interactionId, ctx.sessionId(), questionOutcome, ctx.model(),
-            ctx.request().toolNames(), ctx.request().metadata(), continuation,
-            List.of(), InteractionState.PENDING, now, now, null, null);
+            ctx.request().toolNames(), ctx.request().metadata(), continuation, now, now);
+        InteractionStore.Interaction pending = new InteractionStore.Interaction.Pending(info);
 
         boolean saved;
         try {
@@ -752,7 +838,8 @@ final class DefaultTurnEngine {
     }
 
     private void triggerAsyncCompaction(TurnContext ctx, ContextUsage usage,
-                                        ActiveTurnRegistry.ActiveTurn active) {
+                                        ActiveTurnRegistry.ActiveTurn active,
+                                        FluxSink<TurnResponse> sink) {
         if (usage == null || !contextManager.needsCompaction(usage, configuredContextLength(ctx.model()))) {
             return;
         }
@@ -765,12 +852,20 @@ final class DefaultTurnEngine {
             CompactionResult result = toolCompaction(messages, count, usage, ctx.sessionId());
             if (result == null || result.summary().isBlank()) return;
             TurnMessage summary = withMetadata(
-                TurnMessage.system(result.summary()), Map.of("type", "compaction_summary"));
+                new TurnMessage.System(result.summary(), Map.of()),
+                Map.of("type", "compaction_summary"));
             List<TurnMessage> replacement = new ArrayList<>(messages.size() - count + 1);
             replacement.add(summary);
             replacement.addAll(messages.subList(count, messages.size()));
-            active.runIfActive(() -> conversationMemory.replaceMessages(
-                ctx.sessionId(), List.copyOf(replacement)));
+            active.runIfActive(() -> {
+                conversationMemory.replaceMessages(ctx.sessionId(), List.copyOf(replacement));
+                if (!sink.isCancelled()) {
+                    emit(sink, new TurnResponse.Notice(
+                        ctx.sessionId(), ctx.turnId(), Instant.now(), NoticeKind.COMPACTION,
+                        NoticeKind.COMPACTION.defaultMessage()
+                            + " (compacted " + count + " messages)"));
+                }
+            });
         } catch (Throwable failure) {
             log.warn("Compaction failed for session {}", ctx.sessionId());
         }
@@ -852,11 +947,11 @@ final class DefaultTurnEngine {
         metadata.put("turnloop.pending_tool_names", writeJson(
             pending.explicitToolNames() == null ? List.of() : pending.explicitToolNames()));
         metadata.put("turnloop.pending_metadata", writeJson(pending.continuationMetadata()));
-        return new TurnMessage("system", "[Magenta interaction pending]", null, null, metadata);
+        return new TurnMessage.System("[Magenta interaction pending]", metadata);
     }
 
     private boolean isPendingMarker(TurnMessage message) {
-        return message != null && message.metadata() != null
+        return message != null
             && PENDING_TYPE.equals(message.metadata().get("turnloop.persistence_type"));
     }
 
@@ -883,11 +978,11 @@ final class DefaultTurnEngine {
             now, now, computeUsage(ctx), List.of());
         TurnResponse.Questions outcome = new TurnResponse.Questions(
             execution, interactionId, questions);
-        return new InteractionStore.Interaction(
+        InteractionStore.InteractionInfo info = new InteractionStore.InteractionInfo(
             interactionId, ctx.sessionId(), outcome, model,
             readJsonList(metadata.get("turnloop.pending_tool_names")),
-            originalMetadata, originalMetadata, List.of(), InteractionState.PENDING,
-            now, now, null, null);
+            originalMetadata, originalMetadata, now, now);
+        return new InteractionStore.Interaction.Pending(info);
     }
 
     private TurnMessage questionAnswerMessage(InteractionStore.Interaction pending,
@@ -915,14 +1010,14 @@ final class DefaultTurnEngine {
         metadata.put("turnloop.pending_turn_id", pending.questions().execution().turnId());
         metadata.put("turnloop.answer_turn_id", ctx.turnId());
         metadata.put(PENDING_INTERACTION_ID, pending.interactionId());
-        return new TurnMessage("system", text.toString(), null, null, metadata);
+        return new TurnMessage.System(text.toString(), metadata);
     }
 
     private TurnMessage currentUserMessage(TurnContext ctx) {
         Map<String, String> metadata = new LinkedHashMap<>();
         metadata.put("turnloop.persistence_type", "user_message");
         metadata.put("turnloop.turn_id", ctx.turnId());
-        return new TurnMessage("user", ctx.request().message(), null, null, metadata);
+        return new TurnMessage.User(ctx.request().message(), metadata);
     }
 
     private TurnMessage assistantMessage(String text, String thinking) {
@@ -931,7 +1026,7 @@ final class DefaultTurnEngine {
         if (thinking != null && !thinking.isBlank()) {
             metadata.put("thinking", thinking);
         }
-        return new TurnMessage("assistant", text, null, null, metadata);
+        return new TurnMessage.Assistant(text, metadata);
     }
 
     private void appendAssistantToolMessage(TurnLoopState state, AssistantMessage output) {
@@ -940,24 +1035,45 @@ final class DefaultTurnEngine {
         }
         Map<String, String> metadata = new LinkedHashMap<>();
         metadata.put("turnloop.persistence_type", "assistant_tool_activity");
-        List<String> calls = output.getToolCalls() == null ? List.of()
-            : output.getToolCalls().stream()
-                .map(call -> call.name() + ":" + call.arguments()).toList();
-        metadata.put("tool_calls", writeJson(calls));
+        List<AssistantMessage.ToolCall> calls = output.getToolCalls() == null
+            ? List.of() : output.getToolCalls();
+        if (!calls.isEmpty()) {
+            List<Map<String, String>> records = calls.stream()
+                .map(call -> Map.of(
+                    "id", nullToEmpty(call.id()),
+                    "name", nullToEmpty(call.name()),
+                    "arguments", nullToEmpty(call.arguments())))
+                .toList();
+            metadata.put("tool_calls", writeJson(records));
+        }
         if (state.latestThinking != null && !state.latestThinking.isBlank()) {
             metadata.put("thinking", state.latestThinking);
         }
-        state.messagesToPersist.add(new TurnMessage(
-            "assistant", nullToEmpty(output.getText()), null, null, metadata));
+        String text = nullToEmpty(output.getText());
+        state.messagesToPersist.add(new TurnMessage.Assistant(text, metadata));
+        // Feed the assistant tool-call message back into the live prompt so
+        // the provider sees the function_call items that the tool responses
+        // reference. Without it the next model invocation is rejected
+        // ("No tool call found for tool output with call_id ...").
+        AssistantMessage.Builder live = AssistantMessage.builder().content(text);
+        if (!calls.isEmpty()) {
+            live.toolCalls(calls);
+        }
+        state.conversationMessages.add(live.build());
         state.lastResponsePersisted = true;
     }
 
     private TurnMessage withMetadata(TurnMessage message, Map<String, String> additions) {
-        Map<String, String> metadata = new LinkedHashMap<>();
-        if (message.metadata() != null) metadata.putAll(message.metadata());
+        Map<String, String> metadata = new LinkedHashMap<>(message.metadata());
         metadata.putAll(additions);
-        return new TurnMessage(message.role(), message.text(), message.toolName(),
-            message.toolCallId(), metadata);
+        return switch (message) {
+            case TurnMessage.System system -> new TurnMessage.System(system.text(), metadata);
+            case TurnMessage.User user -> new TurnMessage.User(user.text(), metadata);
+            case TurnMessage.Assistant assistant ->
+                new TurnMessage.Assistant(assistant.text(), metadata);
+            case TurnMessage.Tool tool -> new TurnMessage.Tool(
+                tool.toolName(), tool.toolCallId(), tool.text(), metadata);
+        };
     }
 
     private ContextUsage computeUsage(TurnContext ctx) {
@@ -992,19 +1108,28 @@ final class DefaultTurnEngine {
             return turnFailed;
         }
         TurnFailureCategory category = failureCategory(cause, phase);
-        return failureException(ctx, startedAt, phase, category, safeFailureMessage(category));
+        return failureException(ctx, startedAt, phase, category,
+            safeFailureMessage(ctx, category, cause), cause);
     }
 
     private TurnFailedException failureException(TurnContext ctx, Instant startedAt,
                                                   TurnPhase phase,
                                                   TurnFailureCategory category,
                                                   String message) {
+        return failureException(ctx, startedAt, phase, category, message, null);
+    }
+
+    private TurnFailedException failureException(TurnContext ctx, Instant startedAt,
+                                                  TurnPhase phase,
+                                                  TurnFailureCategory category,
+                                                  String message,
+                                                  Throwable cause) {
         Instant failedAt = atOrAfter(startedAt);
         String safeMessage = ResponseValidation.nonBlank(message, "message");
         TurnFailure failure = new TurnFailure(
             ctx.sessionId(), ctx.turnId(), executionOrigin(ctx), phase,
             category, startedAt, failedAt, safeMessage);
-        return new TurnFailedException(safeMessage, failure);
+        return new TurnFailedException(safeMessage, failure, cause);
     }
 
     private TurnFailureCategory failureCategory(Throwable failure, TurnPhase phase) {
@@ -1025,7 +1150,52 @@ final class DefaultTurnEngine {
         };
     }
 
-    private String safeFailureMessage(TurnFailureCategory category) {
+    String safeFailureMessage(TurnContext ctx, TurnFailureCategory category,
+                              Throwable failure) {
+        String message = causeMessage(failure);
+        if (message == null) {
+            return genericFailureMessage(category);
+        }
+        String apiKey = null;
+        try {
+            apiKey = modelRouter.apiKey(ctx.model());
+        } catch (RuntimeException ignored) {
+            // Failure reporting must not mask the original execution error.
+        }
+        if (apiKey != null && !apiKey.isBlank()) {
+            message = message.replace(apiKey, "[REDACTED]");
+        }
+        message = QUOTED_SECRET.matcher(message).replaceAll("$1[REDACTED]$2");
+        message = ASSIGNED_SECRET.matcher(message).replaceAll("$1[REDACTED]");
+        message = stripControls(message).trim();
+        if (message.isBlank()) {
+            return genericFailureMessage(category);
+        }
+        return message.length() <= MAX_FAILURE_MESSAGE_LENGTH
+            ? message
+            : message.substring(0, MAX_FAILURE_MESSAGE_LENGTH - 3) + "...";
+    }
+
+    private String causeMessage(Throwable failure) {
+        Throwable current = unwrap(failure);
+        for (int depth = 0; current != null && depth < 8; depth++) {
+            String message = current.getMessage();
+            if (message != null && !message.isBlank()) {
+                return message;
+            }
+            current = current.getCause();
+        }
+        return null;
+    }
+
+    private String stripControls(String value) {
+        StringBuilder safe = new StringBuilder(value.length());
+        value.codePoints().filter(codePoint -> !Character.isISOControl(codePoint))
+            .forEach(safe::appendCodePoint);
+        return safe.toString();
+    }
+
+    private String genericFailureMessage(TurnFailureCategory category) {
         return switch (category) {
             case MODEL -> "Model execution failed";
             case TOOL -> "Tool execution failed";
@@ -1039,7 +1209,6 @@ final class DefaultTurnEngine {
     private boolean isSpecializedFailure(Throwable failure) {
         return failure instanceof ConfigurationException
             || failure instanceof ConversationNotFoundException
-            || failure instanceof InteractionStateException
             || failure instanceof TurnLoopBusyException;
     }
 
@@ -1073,15 +1242,62 @@ final class DefaultTurnEngine {
     // ── conversion and parsing ──
 
     static Message turnMessageToSpring(TurnMessage message) {
-        return switch (message.role()) {
-            case "system" -> new org.springframework.ai.chat.messages.SystemMessage(message.text());
-            case "assistant" -> new AssistantMessage(message.text());
-            case "tool" -> ToolResponseMessage.builder()
+        return switch (message) {
+            case TurnMessage.System system ->
+                org.springframework.ai.chat.messages.SystemMessage.builder()
+                    .text(system.text())
+                    .metadata(springMetadata(system.metadata()))
+                    .build();
+            case TurnMessage.User user ->
+                org.springframework.ai.chat.messages.UserMessage.builder()
+                    .text(user.text())
+                    .metadata(springMetadata(user.metadata()))
+                    .build();
+            case TurnMessage.Assistant assistant ->
+                AssistantMessage.builder()
+                    .content(assistant.text())
+                    .properties(springMetadata(assistant.metadata()))
+                    .toolCalls(toolCallsFromMetadata(assistant.metadata()))
+                    .build();
+            case TurnMessage.Tool tool -> ToolResponseMessage.builder()
                 .responses(List.of(new ToolResponseMessage.ToolResponse(
-                    nullToEmpty(message.toolCallId()), nullToEmpty(message.toolName()), message.text())))
+                    tool.toolCallId(), tool.toolName(), tool.text())))
+                .metadata(springMetadata(tool.metadata()))
                 .build();
-            default -> new org.springframework.ai.chat.messages.UserMessage(message.text());
         };
+    }
+
+    private static List<AssistantMessage.ToolCall> toolCallsFromMetadata(
+        Map<String, String> metadata) {
+        String json = metadata.get("tool_calls");
+        if (json == null || json.isBlank()) {
+            return List.of();
+        }
+        try {
+            List<Map<String, Object>> records =
+                CODEC.readValue(json, new com.fasterxml.jackson.core.type.TypeReference<>() {
+                });
+            List<AssistantMessage.ToolCall> calls = new ArrayList<>(records.size());
+            for (Map<String, Object> record : records) {
+                calls.add(new AssistantMessage.ToolCall(
+                    String.valueOf(record.getOrDefault("id", "")),
+                    "function",
+                    String.valueOf(record.getOrDefault("name", "")),
+                    String.valueOf(record.getOrDefault("arguments", ""))));
+            }
+            return List.copyOf(calls);
+        } catch (Exception ignored) {
+            // Legacy "name:arguments" string lists cannot be replayed as
+            // provider function_call items (no call ids); drop them rather
+            // than emit an invalid pairing.
+            return List.of();
+        }
+    }
+
+    private static Map<String, Object> springMetadata(Map<String, String> metadata) {
+        Map<String, Object> converted = new LinkedHashMap<>();
+        metadata.forEach(converted::put);
+        return Map.copyOf(converted);
     }
 
     private List<Message> turnMessagesToSpring(List<TurnMessage> messages) {
@@ -1134,7 +1350,10 @@ final class DefaultTurnEngine {
                     + "\"anyOf\":[{\"required\":[\"questions\"]},{\"required\":[\"question\"]}]}" );
             normalized.add(new ToolCallback() {
                 @Override public ToolDefinition getToolDefinition() { return definition; }
-                @Override public String call(String input) { return tool.call(input); }
+                @Override public ToolResult call(String input) { return tool.call(input); }
+                @Override public ToolResult call(String input, TurnContext context) {
+                    return tool.call(input, context);
+                }
             });
         }
         return List.copyOf(normalized);
@@ -1313,8 +1532,61 @@ final class DefaultTurnEngine {
 
     private static final class StreamingResponse {
         private ChatResponse lastResponse;
+        private ChatResponse lastContentResponse;
         private final StringBuilder visibleText = new StringBuilder();
         private final StringBuilder thinkingText = new StringBuilder();
+    }
+
+    /** One normalized typed outcome and its controlled downstream projections. */
+    private record ToolInvocation(
+        @NonNull String toolName,
+        @NonNull String toolCallId,
+        @NonNull String arguments,
+        @NonNull ToolResult result,
+        @NonNull String modelText,
+        @NonNull String summary,
+        long durationMs
+    ) {
+        private ToolInvocation {
+            toolName = ResponseValidation.nonBlank(toolName, "toolName");
+            toolCallId = ResponseValidation.nonBlank(toolCallId, "toolCallId");
+            arguments = ResponseValidation.required(arguments, "arguments");
+            result = ResponseValidation.required(result, "result");
+            modelText = ResponseValidation.required(modelText, "modelText");
+            summary = ResponseValidation.nonBlank(summary, "summary");
+            if (durationMs < 0) {
+                throw new IllegalArgumentException("durationMs must not be negative");
+            }
+        }
+
+        private ToolInvocation loopExceeded(String message) {
+            String safeMessage = nonBlankOr(message, "Tool loop limit exceeded");
+            ToolResult failure = new ToolResult.Failure(
+                safeMessage, ToolFailureCategory.LOOP_EXCEEDED);
+            return new ToolInvocation(toolName, toolCallId, arguments, failure,
+                safeMessage, safeMessage, durationMs);
+        }
+
+        private ToolActivityData activity() {
+            return switch (result) {
+                case ToolResult.Success ignored ->
+                    new ToolActivityData.Completed(toolName, toolCallId, summary);
+                case ToolResult.Failure failure ->
+                    new ToolActivityData.Failed(toolName, toolCallId, summary,
+                        failure.category());
+            };
+        }
+
+        private Map<String, String> metadata() {
+            Map<String, String> metadata = new LinkedHashMap<>();
+            metadata.put("tool.arguments", arguments);
+            metadata.put("tool.duration_ms", Long.toString(durationMs));
+            metadata.put("tool.summary", summary);
+            if (result instanceof ToolResult.Failure failure) {
+                metadata.put("tool.failure_category", failure.category().name());
+            }
+            return Map.copyOf(metadata);
+        }
     }
 
     private static final class TurnLoopState {
@@ -1336,6 +1608,7 @@ final class DefaultTurnEngine {
         private String interruptReason;
         private TurnPhase currentPhase = TurnPhase.PREPARE;
         private int emptyResponseRetries;
+        private boolean toolLoopClosed;
         private boolean wasInterrupted;
         private boolean suspended;
         private boolean lastResponsePersisted;
@@ -1375,7 +1648,7 @@ final class DefaultTurnEngine {
         TurnExecutor turnExecutor;
         ActiveTurnRegistry activeTurnRegistry;
         ThinkingExtractor thinkingExtractor;
-        int maxToolRounds = 10;
+        int maxToolIterations = 10;
         int maxEmptyResponseRetries = 2;
 
         public Builder toolExecution(ToolRegistry registry, ToolAccessPolicy policy,
@@ -1425,9 +1698,9 @@ final class DefaultTurnEngine {
             return this;
         }
 
-        public Builder config(int maxToolRounds, int maxEmptyResponseRetries,
+        public Builder config(int maxToolIterations, int maxEmptyResponseRetries,
                              java.time.Duration ignoredTimeout) {
-            this.maxToolRounds = maxToolRounds;
+            this.maxToolIterations = maxToolIterations;
             this.maxEmptyResponseRetries = maxEmptyResponseRetries;
             return this;
         }

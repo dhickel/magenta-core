@@ -11,7 +11,10 @@ import org.springframework.ai.chat.messages.ToolResponseMessage;
 import org.springframework.ai.chat.messages.UserMessage;
 
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.Objects;
 
 /**
  * Bridges the framework {@link ConversationMemory} SPI to Spring AI's
@@ -64,34 +67,68 @@ class SpringAiConversationMemoryAdapter implements ChatMemory {
 
     // ── TurnMessage → Spring AI Message ──
 
-    private static Message toSpringAiMessage(TurnMessage tm) {
-        return switch (tm.role()) {
-            case "user" -> new UserMessage(tm.text());
-            case "assistant" -> new AssistantMessage(tm.text());
-            case "system" -> new SystemMessage(tm.text());
-            case "tool" -> ToolResponseMessage.builder()
-                .responses(List.of(new ToolResponseMessage.ToolResponse(
-                    tm.toolCallId(), tm.toolName(), tm.text())))
+    private static Message toSpringAiMessage(TurnMessage message) {
+        return switch (message) {
+            case TurnMessage.User user -> UserMessage.builder()
+                .text(user.text())
+                .metadata(springMetadata(user.metadata()))
                 .build();
-            default -> new UserMessage(tm.text()); // fallback
+            case TurnMessage.Assistant assistant -> AssistantMessage.builder()
+                .content(assistant.text())
+                .properties(springMetadata(assistant.metadata()))
+                .build();
+            case TurnMessage.System system -> SystemMessage.builder()
+                .text(system.text())
+                .metadata(springMetadata(system.metadata()))
+                .build();
+            case TurnMessage.Tool tool -> ToolResponseMessage.builder()
+                .responses(List.of(new ToolResponseMessage.ToolResponse(
+                    tool.toolCallId(), tool.toolName(), tool.text())))
+                .metadata(springMetadata(tool.metadata()))
+                .build();
         };
+    }
+
+    private static Map<String, Object> springMetadata(Map<String, String> metadata) {
+        Map<String, Object> converted = new LinkedHashMap<>();
+        metadata.forEach(converted::put);
+        return Map.copyOf(converted);
     }
 
     // ── Spring AI Message → TurnMessage ──
 
-    private static void fromSpringAiMessage(Message msg, List<TurnMessage> sink) {
-        MessageType type = msg.getMessageType();
+    private static void fromSpringAiMessage(Message message, List<TurnMessage> sink) {
+        Objects.requireNonNull(message, "message");
+        MessageType type = Objects.requireNonNull(message.getMessageType(), "messageType");
+        Map<String, String> metadata = turnMetadata(message);
         switch (type) {
-            case USER -> sink.add(TurnMessage.user(msg.getText()));
-            case ASSISTANT -> sink.add(TurnMessage.assistant(msg.getText()));
-            case SYSTEM -> sink.add(TurnMessage.system(msg.getText()));
+            case USER -> sink.add(new TurnMessage.User(message.getText(), metadata));
+            case ASSISTANT -> sink.add(new TurnMessage.Assistant(message.getText(), metadata));
+            case SYSTEM -> sink.add(new TurnMessage.System(message.getText(), metadata));
             case TOOL -> {
-                if (msg instanceof ToolResponseMessage trm) {
-                    for (ToolResponseMessage.ToolResponse tr : trm.getResponses()) {
-                        sink.add(TurnMessage.tool(tr.name(), tr.id(), tr.responseData()));
-                    }
+                if (!(message instanceof ToolResponseMessage toolMessage)) {
+                    throw new IllegalArgumentException(
+                        "TOOL message must be a ToolResponseMessage");
+                }
+                for (ToolResponseMessage.ToolResponse response : toolMessage.getResponses()) {
+                    sink.add(new TurnMessage.Tool(
+                        response.name(), response.id(), response.responseData(), metadata));
                 }
             }
         }
+    }
+
+    private static Map<String, String> turnMetadata(Message message) {
+        Map<String, String> metadata = new LinkedHashMap<>();
+        if (message.getMetadata() != null) {
+            message.getMetadata().forEach((key, value) -> {
+                if (key != null && value != null
+                    && !org.springframework.ai.chat.messages.AbstractMessage.MESSAGE_TYPE
+                        .equals(key)) {
+                    metadata.put(key, String.valueOf(value));
+                }
+            });
+        }
+        return Map.copyOf(metadata);
     }
 }

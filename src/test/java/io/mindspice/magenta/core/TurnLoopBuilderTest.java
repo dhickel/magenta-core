@@ -23,7 +23,7 @@ class TurnLoopBuilderTest {
 
     @Test
     void requiresExactlyOneStorageSource() {
-        ModelConfig model = model("first", EndpointType.OLLAMA);
+        ModelConfig model = model("first");
 
         ConfigurationException missing = assertThrows(ConfigurationException.class,
             () -> TurnLoopBuilder.create().model("first", model).build());
@@ -42,7 +42,7 @@ class TurnLoopBuilderTest {
     @Test
     void dataRootCreatesDurableDatabaseAndFrameworkSchema() throws Exception {
         TurnLoop loop = TurnLoopBuilder.create()
-            .model("first", model("first", EndpointType.OLLAMA))
+            .model("first", model("first"))
             .dataRoot(tempDir)
             .modelTimeout(Duration.ofSeconds(7))
             .build();
@@ -71,7 +71,7 @@ class TurnLoopBuilderTest {
         Files.writeString(file, "not a directory");
         ConfigurationException exception = assertThrows(ConfigurationException.class,
             () -> TurnLoopBuilder.create()
-                .model("first", model("first", EndpointType.OLLAMA))
+                .model("first", model("first"))
                 .dataRoot(file)
                 .build());
         assertEquals("invalid_data_root", exception.details().get("error"));
@@ -80,7 +80,7 @@ class TurnLoopBuilderTest {
     @Test
     void explicitDataSourceIsAcceptedWithoutADataRoot() {
         TurnLoop loop = TurnLoopBuilder.create()
-            .model("first", model("first", EndpointType.OPENAI_COMPATIBLE))
+            .model("first", openAiModel("first"))
             .dataSource(sqliteDataSource(tempDir.resolve("explicit.db")))
             .build();
         loop.close();
@@ -89,7 +89,7 @@ class TurnLoopBuilderTest {
     @Test
     void closeStopsOnlyTheDefaultOwnedTurnGateScanner() throws Exception {
         TurnLoop ownedLoop = TurnLoopBuilder.create()
-            .model("first", model("first", EndpointType.OLLAMA))
+            .model("first", model("first"))
             .dataSource(sqliteDataSource(tempDir.resolve("owned-gate.db")))
             .build();
         SerialTurnGate ownedGate = serialGateOf(ownedLoop);
@@ -99,7 +99,7 @@ class TurnLoopBuilderTest {
         SerialTurnGate suppliedGate = new SerialTurnGate(Duration.ofMinutes(1));
         try {
             TurnLoop suppliedLoop = TurnLoopBuilder.create()
-                .model("first", model("first", EndpointType.OLLAMA))
+                .model("first", model("first"))
                 .dataSource(sqliteDataSource(tempDir.resolve("supplied-gate.db")))
                 .turnGate(suppliedGate)
                 .build();
@@ -111,8 +111,48 @@ class TurnLoopBuilderTest {
     }
 
     @Test
+    void compactionTriggerDefaultsAndClamps() throws Exception {
+        TurnLoopBuilder builder = TurnLoopBuilder.create();
+        assertEquals(75, compactionTriggerPercentOf(builder));
+        assertEquals(1, compactionTriggerPercentOf(builder.compactionTriggerPercent(0)));
+        assertEquals(99, compactionTriggerPercentOf(builder.compactionTriggerPercent(100)));
+        assertEquals(50, compactionTriggerPercentOf(builder.compactionTriggerPercent(50)));
+    }
+
+    @Test
+    void toolLoopLimitsHaveConservativeDefaultsValidateAndWireIntoTheEngine()
+            throws Exception {
+        TurnLoopBuilder defaults = TurnLoopBuilder.create();
+        assertEquals(5, intField(defaults, "repeatedErroredToolCallLimit"));
+        assertEquals(10, intField(defaults, "maxToolIterations"));
+
+        ConfigurationException repeated = assertThrows(ConfigurationException.class,
+            () -> TurnLoopBuilder.create().repeatedErroredToolCallLimit(0));
+        assertEquals("invalid_repeated_errored_tool_call_limit",
+            repeated.details().get("error"));
+        ConfigurationException iterations = assertThrows(ConfigurationException.class,
+            () -> TurnLoopBuilder.create().maxToolIterations(0));
+        assertEquals("invalid_max_tool_iterations", iterations.details().get("error"));
+
+        TurnLoop loop = TurnLoopBuilder.create()
+            .model("first", model("first"))
+            .dataSource(sqliteDataSource(tempDir.resolve("tool-loop-limits.db")))
+            .repeatedErroredToolCallLimit(8)
+            .maxToolIterations(100)
+            .build();
+        try {
+            DefaultTurnEngine engine = engineOf(loop);
+            assertEquals(100, intField(engine, "maxToolIterations"));
+            ToolLoopGuard guard = (ToolLoopGuard) field(engine, "toolLoopGuard");
+            assertEquals(8, guard.repeatedErroredToolCallLimit());
+        } finally {
+            loop.close();
+        }
+    }
+
+    @Test
     void validatesAliasesAndModelConfiguration() {
-        ModelConfig valid = model("first", EndpointType.OLLAMA);
+        ModelConfig valid = model("first");
 
         assertThrows(ConfigurationException.class,
             () -> TurnLoopBuilder.create().model(" ", valid));
@@ -120,38 +160,60 @@ class TurnLoopBuilderTest {
             () -> TurnLoopBuilder.create()
                 .model("first", valid)
                 .model("first", valid));
-        assertThrows(ConfigurationException.class,
-            () -> TurnLoopBuilder.create()
-                .model("first", new ModelConfig("first", "", "http://localhost:11434",
-                    null, EndpointType.OLLAMA, 4096, 0))
-                .dataRoot(tempDir)
-                .build());
-        assertThrows(ConfigurationException.class,
-            () -> TurnLoopBuilder.create()
-                .model("first", new ModelConfig("first", "model", "not-a-url",
-                    null, EndpointType.OLLAMA, 4096, 0))
-                .dataRoot(tempDir)
-                .build());
+        assertThrows(IllegalArgumentException.class,
+            () -> new ModelConfig.Ollama(
+                "first", "", "http://localhost:11434", null, 4096, 0));
+        assertThrows(IllegalArgumentException.class,
+            () -> new ModelConfig.Ollama(
+                "first", "model", "not-a-url", null, 4096, 0));
     }
 
     @Test
-    void rejectsUnsupportedDeepSeekRequestThinkingInsteadOfDroppingIt() {
-        ConfigurationException exception = assertThrows(ConfigurationException.class,
-            () -> TurnLoopBuilder.create()
-                .model("deepseek", model("deepseek", EndpointType.DEEPSEEK, 3))
-                .dataRoot(tempDir)
-                .build());
-        assertEquals("unsupported_provider_option", exception.details().get("error"));
+    void rejectsUnsupportedDeepSeekRequestThinkingAtConstruction() {
+        assertThrows(IllegalArgumentException.class,
+            () -> new ModelConfig.DeepSeek(
+                "deepseek", "remote-model", "http://localhost:11434",
+                "secret", 4096, 3));
     }
 
-    private static ModelConfig model(String alias, EndpointType endpointType) {
-        return model(alias, endpointType, 0);
+    private static ModelConfig model(String alias) {
+        return ModelConfig.ollama()
+            .alias(alias)
+            .remoteModelName("remote-model")
+            .remoteEndpoint("http://localhost:11434")
+            .contextLength(4096)
+            .thinkLevel(0)
+            .build();
     }
 
-    private static ModelConfig model(String alias, EndpointType endpointType, int thinkLevel) {
-        return new ModelConfig(alias, "remote-model", "http://localhost:11434",
-            endpointType == EndpointType.DEEPSEEK ? "secret" : null,
-            endpointType, 4096, thinkLevel);
+    private static ModelConfig openAiModel(String alias) {
+        return ModelConfig.openAiCompatible()
+            .alias(alias)
+            .remoteModelName("remote-model")
+            .remoteEndpoint("http://localhost:11434")
+            .contextLength(4096)
+            .thinkLevel(0)
+            .build();
+    }
+
+    private static int compactionTriggerPercentOf(TurnLoopBuilder builder) throws Exception {
+        return intField(builder, "compactionTriggerPercent");
+    }
+
+    private static DefaultTurnEngine engineOf(TurnLoop loop) throws Exception {
+        return (DefaultTurnEngine) field(loop, "engine");
+    }
+
+    private static int intField(Object target, String name) throws Exception {
+        var field = target.getClass().getDeclaredField(name);
+        field.setAccessible(true);
+        return field.getInt(target);
+    }
+
+    private static Object field(Object target, String name) throws Exception {
+        var field = target.getClass().getDeclaredField(name);
+        field.setAccessible(true);
+        return field.get(target);
     }
 
     private static SerialTurnGate serialGateOf(TurnLoop loop) throws Exception {

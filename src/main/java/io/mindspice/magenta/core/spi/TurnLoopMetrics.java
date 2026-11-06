@@ -1,6 +1,7 @@
 package io.mindspice.magenta.core.spi;
 
 import io.mindspice.magenta.core.NonNull;
+import io.mindspice.magenta.core.ToolActivityData;
 
 /**
  * Observability metrics for the turn loop engine.
@@ -11,7 +12,7 @@ public interface TurnLoopMetrics {
                             @NonNull String outcome,
                             long durationMs);
 
-    void recordToolCall(@NonNull String toolName, @NonNull String status);
+    void recordToolCall(@NonNull ToolActivityData activity);
 
     void setActiveTurns(long count);
 

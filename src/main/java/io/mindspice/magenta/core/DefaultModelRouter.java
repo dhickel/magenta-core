@@ -105,6 +105,12 @@ final class DefaultModelRouter implements ModelRouter {
     }
 
     @Override
+    @Nullable
+    public String apiKey(@NonNull String modelAlias) {
+        return requireConfig(modelAlias).apiKey();
+    }
+
+    @Override
     @NonNull
     public String selectModelAlias(@Nullable String requestedAlias,
                                    @Nullable String sessionAlias) {
@@ -176,23 +182,29 @@ final class DefaultModelRouter implements ModelRouter {
 
     private OwnedChatModel buildModel(String alias) {
         ModelConfig config = requireConfig(alias);
-        return switch (config.endpointType()) {
-            case OLLAMA -> OllamaProviderAdapter.create(
-                config, toolCallingManager, requestTimeout);
-            case OPENAI_COMPATIBLE -> OpenAiProviderAdapter.create(
-                config, toolCallingManager, requestTimeout);
-            case DEEPSEEK -> DeepSeekProviderAdapter.create(
-                config, toolCallingManager, requestTimeout);
+        return switch (config) {
+            case ModelConfig.Ollama ollama -> OllamaProviderAdapter.create(
+                ollama, toolCallingManager, requestTimeout);
+            case ModelConfig.OpenAiCompatible openAiCompatible ->
+                OpenAiProviderAdapter.create(
+                    openAiCompatible, toolCallingManager, requestTimeout);
+            case ModelConfig.DeepSeek deepSeek -> DeepSeekProviderAdapter.create(
+                deepSeek, toolCallingManager, requestTimeout);
+            case ModelConfig.Responses responses -> ResponsesProviderAdapter.create(
+                responses, toolCallingManager, requestTimeout);
         };
     }
 
     private ToolCallingChatOptions providerOptions(
         ModelConfig config, List<org.springframework.ai.tool.ToolCallback> tools) {
-        return switch (config.endpointType()) {
-            case OLLAMA -> OllamaProviderAdapter.options(config, tools);
-            case OPENAI_COMPATIBLE -> OpenAiProviderAdapter.options(
-                config, tools, requestTimeout);
-            case DEEPSEEK -> DeepSeekProviderAdapter.options(config, tools);
+        return switch (config) {
+            case ModelConfig.Ollama ollama -> OllamaProviderAdapter.options(ollama, tools);
+            case ModelConfig.OpenAiCompatible openAiCompatible ->
+                OpenAiProviderAdapter.options(openAiCompatible, tools, requestTimeout);
+            case ModelConfig.DeepSeek deepSeek -> DeepSeekProviderAdapter.options(
+                deepSeek, tools);
+            case ModelConfig.Responses responses -> ResponsesProviderAdapter.options(
+                responses, tools);
         };
     }
 

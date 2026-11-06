@@ -38,7 +38,6 @@ import org.slf4j.LoggerFactory;
 import org.sqlite.SQLiteDataSource;
 
 import javax.sql.DataSource;
-import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
@@ -71,6 +70,9 @@ public final class TurnLoopBuilder {
     private static final Pattern MODEL_ALIAS =
         Pattern.compile("[A-Za-z0-9][A-Za-z0-9._-]{0,127}");
     private static final Duration DEFAULT_MODEL_TIMEOUT = Duration.ofSeconds(360);
+    private static final int DEFAULT_COMPACTION_TRIGGER_PERCENT = 75;
+    private static final int DEFAULT_REPEATED_ERRORED_TOOL_CALL_LIMIT = 5;
+    private static final int DEFAULT_MAX_TOOL_ITERATIONS = 10;
     private static final String DATABASE_FILE_NAME = "magenta-core.db";
 
     private final Map<String, ModelConfig> modelConfigs = new LinkedHashMap<>();
@@ -100,6 +102,9 @@ public final class TurnLoopBuilder {
     private Duration modelTimeout = DEFAULT_MODEL_TIMEOUT;
     private Duration queueClaimLease = SqliteMessageQueueStore.DEFAULT_CLAIM_LEASE;
     private long drainTimeoutSeconds = 30;
+    private int compactionTriggerPercent = DEFAULT_COMPACTION_TRIGGER_PERCENT;
+    private int repeatedErroredToolCallLimit = DEFAULT_REPEATED_ERRORED_TOOL_CALL_LIMIT;
+    private int maxToolIterations = DEFAULT_MAX_TOOL_ITERATIONS;
 
     /** Creates an empty builder with no implicit storage source. */
     public TurnLoopBuilder() {
@@ -198,6 +203,15 @@ public final class TurnLoopBuilder {
         return this;
     }
 
+    /**
+     * Sets the percentage of the model context window that triggers post-turn
+     * compaction. Values are clamped to the inclusive range 1–99.
+     */
+    public TurnLoopBuilder compactionTriggerPercent(int percent) {
+        this.compactionTriggerPercent = Math.clamp(percent, 1, 99);
+        return this;
+    }
+
     public TurnLoopBuilder completionDetector(@NonNull CompletionDetector detector) {
         this.completionDetector = Objects.requireNonNull(detector, "detector");
         return this;
@@ -252,6 +266,38 @@ public final class TurnLoopBuilder {
 
     public TurnLoopBuilder objectMapper(@NonNull ObjectMapper objectMapper) {
         this.objectMapper = Objects.requireNonNull(objectMapper, "objectMapper");
+        return this;
+    }
+
+    /**
+     * Sets the consecutive repeated-error threshold for one canonical tool
+     * call. The configured Nth identical call-and-error failure aborts tool
+     * execution for that turn; successes and different calls or errors reset
+     * or restart the streak.
+     */
+    public TurnLoopBuilder repeatedErroredToolCallLimit(int limit) {
+        if (limit < 1) {
+            throw configuration(
+                "repeatedErroredToolCallLimit must be at least 1",
+                Map.of("error", "invalid_repeated_errored_tool_call_limit"));
+        }
+        this.repeatedErroredToolCallLimit = limit;
+        return this;
+    }
+
+    /**
+     * Sets the maximum tool-bearing model iterations in one assistant turn.
+     * Iterations before the limit may execute tools; reaching the limit
+     * without a final assistant response aborts before executing that
+     * iteration's tool calls.
+     */
+    public TurnLoopBuilder maxToolIterations(int maxToolIterations) {
+        if (maxToolIterations < 1) {
+            throw configuration(
+                "maxToolIterations must be at least 1",
+                Map.of("error", "invalid_max_tool_iterations"));
+        }
+        this.maxToolIterations = maxToolIterations;
         return this;
     }
 
@@ -344,18 +390,21 @@ public final class TurnLoopBuilder {
         ActiveTurnRegistry activeTurnRegistry = new ConcurrentActiveTurnRegistry();
         ModelRouter router = new DefaultModelRouter(registeredModels, modelTimeout);
 
-        ContextManager ctxManager = new ContextManager(cMemory, tEstimator, cStrategy, 10);
+        ContextManager ctxManager = new ContextManager(
+            cMemory, tEstimator, cStrategy, 10, compactionTriggerPercent);
         DefaultPromptAssembler assembler = new DefaultPromptAssembler(
             defaultSystemPrompt, List.copyOf(promptContributors));
 
         DefaultTurnEngine engine = new DefaultTurnEngine.Builder()
-            .toolExecution(registry, accessPolicy, summarizer, new ToolLoopGuard())
+            .toolExecution(registry, accessPolicy, summarizer,
+                new ToolLoopGuard(repeatedErroredToolCallLimit))
             .contextAssembly(cMemory, tEstimator, cStrategy)
             .contextManager(ctxManager)
             .promptAssembler(assembler)
             .responseRepair(cDetector, rStrategy)
             .interactionStore(iStore)
             .infrastructure(router, executor, activeTurnRegistry, tExtractor)
+            .config(maxToolIterations, 2, modelTimeout)
             .build();
 
         String defaultModel = registeredModels.keySet().iterator().next();
@@ -411,73 +460,9 @@ public final class TurnLoopBuilder {
                 "Model configuration for alias '" + alias + "' must not be null",
                 Map.of("error", "model_config_missing", "alias", alias));
         }
-        if (config.alias() == null || config.alias().isBlank()) {
-            throw configuration(
-                "ModelConfig alias must not be blank",
-                Map.of("error", "invalid_model_alias", "alias", alias));
-        }
+        // ModelConfig variants validate their own endpoint/provider options.
+        // The builder remains responsible for the registration alias contract.
         validateAlias(config.alias(), "modelConfig.alias");
-        if (config.remoteModelName() == null || config.remoteModelName().isBlank()
-            || containsControlCharacter(config.remoteModelName())) {
-            throw configuration(
-                "Remote model name for alias '" + alias + "' must be a non-blank name",
-                Map.of("error", "invalid_remote_model", "alias", alias));
-        }
-        if (config.remoteEndpoint() == null || config.remoteEndpoint().isBlank()) {
-            throw configuration(
-                "Remote endpoint for alias '" + alias + "' must not be blank",
-                Map.of("error", "invalid_remote_endpoint", "alias", alias));
-        }
-        validateEndpoint(alias, config.remoteEndpoint());
-        if (config.endpointType() == null) {
-            throw configuration(
-                "Endpoint type for alias '" + alias + "' must not be null",
-                Map.of("error", "invalid_endpoint_type", "alias", alias));
-        }
-        if (config.apiKey() != null && config.apiKey().isBlank()) {
-            throw configuration(
-                "API key for alias '" + alias + "' must be null or non-blank",
-                Map.of("error", "invalid_api_key", "alias", alias));
-        }
-        if (config.endpointType() == EndpointType.DEEPSEEK
-            && (config.apiKey() == null || config.apiKey().isBlank())) {
-            throw configuration(
-                "DeepSeek requires a non-blank API key for alias '" + alias + "'",
-                Map.of("error", "deepseek_api_key_missing", "alias", alias));
-        }
-        if (config.contextLength() != null && config.contextLength() <= 0) {
-            throw configuration(
-                "Context length for alias '" + alias + "' must be greater than zero",
-                Map.of("error", "invalid_context_length", "alias", alias));
-        }
-        if (config.thinkLevel() != null && (config.thinkLevel() < 0 || config.thinkLevel() > 4)) {
-            throw configuration(
-                "Think level for alias '" + alias + "' must be between 0 and 4",
-                Map.of("error", "invalid_think_level", "alias", alias));
-        }
-        if (config.endpointType() == EndpointType.DEEPSEEK
-            && config.effectiveThinkLevel() > 0) {
-            throw configuration(
-                "DeepSeek thinking/reasoning levels are not exposed by the pinned Spring AI 2.0.0 API",
-                Map.of("error", "unsupported_provider_option", "provider", "DEEPSEEK",
-                    "option", "thinkLevel", "alias", alias));
-        }
-    }
-
-    private void validateEndpoint(String alias, String endpoint) {
-        try {
-            URI uri = URI.create(endpoint);
-            String scheme = uri.getScheme();
-            if (!uri.isAbsolute() || scheme == null
-                || !(scheme.equalsIgnoreCase("http") || scheme.equalsIgnoreCase("https"))
-                || uri.getHost() == null) {
-                throw new IllegalArgumentException("endpoint must be an absolute HTTP(S) URL");
-            }
-        } catch (IllegalArgumentException e) {
-            throw configuration(
-                "Remote endpoint for alias '" + alias + "' is invalid: " + messageOf(e),
-                Map.of("error", "invalid_remote_endpoint", "alias", alias));
-        }
     }
 
     private DataSource resolveStorage() {
@@ -568,10 +553,6 @@ public final class TurnLoopBuilder {
                 Map.of("error", "invalid_model_alias", "field", field,
                     "alias", String.valueOf(alias)));
         }
-    }
-
-    private static boolean containsControlCharacter(String value) {
-        return value.chars().anyMatch(Character::isISOControl);
     }
 
     private static <T> T resolveDefault(T value, String name, Supplier<T> defaultSupplier) {
